@@ -8077,7 +8077,7 @@ impl Workspace {
         position: DockPosition,
         dock: &Entity<Dock>,
         window: &mut Window,
-        cx: &mut App,
+        cx: &mut Context<Self>,
     ) -> Option<Stateful<Div>> {
         if self.zoomed_position == Some(position) {
             return None;
@@ -8103,9 +8103,79 @@ impl Workspace {
         };
         let dock_is_open = dock.read(cx).is_open();
         let a11y_active = window.is_a11y_active();
+        let left_title_bar = if position == DockPosition::Left {
+            self.titlebar_item.clone().map(|item| {
+                div()
+                    .id("titlebar-region")
+                    .track_focus(&self.titlebar_focus_handle)
+                    .tab_group()
+                    .role(gpui::Role::Toolbar)
+                    .aria_label("Title bar")
+                    .on_key_down(cx.listener(
+                        |workspace, event: &gpui::KeyDownEvent, window, cx| {
+                            if event.keystroke.modifiers.modified() {
+                                return;
+                            }
+                            match event.keystroke.key.as_str() {
+                                "right" => {
+                                    workspace.move_titlebar_item_focus(true, window, cx);
+                                    cx.stop_propagation();
+                                }
+                                "left" => {
+                                    workspace.move_titlebar_item_focus(false, window, cx);
+                                    cx.stop_propagation();
+                                }
+                                _ => {}
+                            }
+                        },
+                    ))
+                    .w_full()
+                    .flex_none()
+                    .child(item)
+                    .into_any_element()
+            })
+        } else {
+            None
+        };
+        let dock_status = if self.status_bar_visible(cx) {
+            match position {
+                DockPosition::Left => Some(
+                    self.status_bar
+                        .update(cx, |status_bar, cx| status_bar.render_left_section(cx)),
+                ),
+                DockPosition::Right => Some(
+                    self.status_bar
+                        .update(cx, |status_bar, cx| status_bar.render_right_section(cx)),
+                ),
+                DockPosition::Bottom => None,
+            }
+        } else {
+            None
+        };
+        let dock_content = if matches!(position, DockPosition::Left | DockPosition::Right) {
+            div()
+                .flex()
+                .flex_col()
+                .size_full()
+                .children(left_title_bar)
+                .child(div().flex_1().min_h_0().child(dock.clone()))
+                .children(dock_status)
+                .into_any_element()
+        } else {
+            dock.clone().into_any_element()
+        };
 
         let mut container = div()
             .id(dock_element_id)
+            .when(position != DockPosition::Bottom, |this| {
+                this.m_1()
+                    .rounded_lg()
+                    .border_1()
+                    .border_color(cx.theme().colors().border)
+                    .bg(cx.theme().colors().panel_background)
+                    .overflow_hidden()
+            })
+            .when(position == DockPosition::Bottom, |this| this.m_1())
             .when(dock_is_open, |this| {
                 this.role(gpui::Role::Complementary)
                     .aria_label(dock_label)
@@ -8114,9 +8184,13 @@ impl Workspace {
                     })
             })
             .flex()
+            .when(
+                matches!(position, DockPosition::Left | DockPosition::Right),
+                |this| this.flex_col(),
+            )
             .overflow_hidden()
             .flex_none()
-            .child(dock.clone())
+            .child(dock_content)
             .children(leader_border);
 
         // Apply sizing only when the dock is open. When closed the dock is still
@@ -8323,6 +8397,7 @@ impl Workspace {
                 this.track_focus(&self.region_focus_handles.editor)
             })
             .size_full()
+            .p_1()
             .child(self.center.render(
                 self.zoomed.as_ref(),
                 self.maximized_pane.as_ref(),
@@ -9052,42 +9127,6 @@ impl Render for Workspace {
             .items_start()
             .text_color(colors.text)
             .overflow_hidden()
-            // Expose the title bar as an ARIA toolbar so region navigation
-            // (FocusNextPart) can reach the top bar's controls and assistive
-            // technology announces it as a toolbar. The contained controls form
-            // a tab group: region navigation lands on the first control (per
-            // the ARIA toolbar pattern), Tab steps through them, and arrow keys
-            // move between them once focus is inside.
-            .when_some(self.titlebar_item.clone(), |this, item| {
-                this.child(
-                    div()
-                        .id("titlebar-region")
-                        .track_focus(&self.titlebar_focus_handle)
-                        .tab_group()
-                        .role(gpui::Role::Toolbar)
-                        .aria_label("Title bar")
-                        .on_key_down(cx.listener(
-                            |workspace, event: &gpui::KeyDownEvent, window, cx| {
-                                if event.keystroke.modifiers.modified() {
-                                    return;
-                                }
-                                match event.keystroke.key.as_str() {
-                                    "right" => {
-                                        workspace.move_titlebar_item_focus(true, window, cx);
-                                        cx.stop_propagation();
-                                    }
-                                    "left" => {
-                                        workspace.move_titlebar_item_focus(false, window, cx);
-                                        cx.stop_propagation();
-                                    }
-                                    _ => {}
-                                }
-                            },
-                        ))
-                        .w_full()
-                        .child(item),
-                )
-            })
             .on_modifiers_changed(move |_, _, cx| {
                 for &id in &notification_entities {
                     cx.notify(id);
@@ -9110,9 +9149,6 @@ impl Render for Workspace {
                             .flex()
                             .flex_col()
                             .overflow_hidden()
-                            .border_t_1()
-                            .border_b_1()
-                            .border_color(colors.border)
                             .child({
                                 let this = cx.entity();
                                 canvas(
@@ -9455,9 +9491,6 @@ impl Render for Workspace {
                             }))
                             .children(self.render_notifications(window, cx)),
                     )
-                    .when(self.status_bar_visible(cx), |parent| {
-                        parent.child(self.status_bar.clone())
-                    })
                     .child(self.toast_layer.clone()),
             )
     }

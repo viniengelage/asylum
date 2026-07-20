@@ -20,6 +20,7 @@ use std::sync::Arc;
 use ui::prelude::*;
 
 pub const HANDLE_HITBOX_SIZE: f32 = 4.0;
+const PANE_CARD_GAP: f32 = 8.0;
 const HORIZONTAL_MIN_SIZE: f32 = 80.;
 const VERTICAL_MIN_SIZE: f32 = 100.;
 
@@ -569,13 +570,12 @@ impl Member {
                 let pane = div()
                     .relative()
                     .size_full()
-                    .when(is_maximized, |this| {
-                        this.bg(cx.theme().colors().background)
-                            .border_1()
-                            .border_color(cx.theme().colors().border)
-                            .shadow_lg()
-                            .overflow_hidden()
-                    })
+                    .rounded_lg()
+                    .border_1()
+                    .border_color(cx.theme().colors().border)
+                    .bg(cx.theme().colors().editor_background)
+                    .overflow_hidden()
+                    .when(is_maximized, |this| this.shadow_lg())
                     .child(
                         AnyView::from(pane.clone())
                             .cached(StyleRefinement::default().v_flex().size_full()),
@@ -594,13 +594,7 @@ impl Member {
                     .children(decoration.status_box);
 
                 PaneRenderResult {
-                    element: div()
-                        .relative()
-                        .flex_1()
-                        .size_full()
-                        .when(is_maximized, |this| this.p_2())
-                        .child(pane)
-                        .into_any(),
+                    element: div().relative().flex_1().size_full().child(pane).into_any(),
                     contains_active_pane: is_active,
                     #[cfg(any(test, feature = "test-support"))]
                     decorated_pane_ix: None,
@@ -1156,9 +1150,7 @@ mod element {
 
     use crate::WorkspaceSettings;
 
-    use super::{HANDLE_HITBOX_SIZE, HORIZONTAL_MIN_SIZE, VERTICAL_MIN_SIZE};
-
-    const DIVIDER_SIZE: f32 = 1.0;
+    use super::{HANDLE_HITBOX_SIZE, HORIZONTAL_MIN_SIZE, PANE_CARD_GAP, VERTICAL_MIN_SIZE};
 
     pub(super) fn pane_axis(
         axis: Axis,
@@ -1207,7 +1199,6 @@ mod element {
 
     struct PaneAxisHandleLayout {
         hitbox: Hitbox,
-        divider_bounds: Bounds<Pixels>,
     }
 
     impl PaneAxisElement {
@@ -1331,18 +1322,11 @@ mod element {
                 }),
                 size: pane_bounds
                     .size
-                    .apply_along(axis, |_| px(HANDLE_HITBOX_SIZE)),
-            };
-            let divider_bounds = Bounds {
-                origin: pane_bounds
-                    .origin
-                    .apply_along(axis, |origin| origin + pane_bounds.size.along(axis)),
-                size: pane_bounds.size.apply_along(axis, |_| px(DIVIDER_SIZE)),
+                    .apply_along(axis, |_| px(HANDLE_HITBOX_SIZE + PANE_CARD_GAP)),
             };
 
             PaneAxisHandleLayout {
                 hitbox: window.insert_hitbox(handle_bounds, HitboxBehavior::BlockMouse),
-                divider_bounds,
             }
         }
     }
@@ -1406,9 +1390,13 @@ mod element {
             debug_assert!(flex_values_in_bounds(flexes.as_slice()));
 
             let total_flex = len as f32;
+            let card_gap = px(PANE_CARD_GAP);
+            let gap_count = len.saturating_sub(1);
+            let total_gap = card_gap * gap_count as f32;
+            let available_size = Pixels::max(bounds.size.along(self.axis) - total_gap, px(0.0));
 
             let mut origin = bounds.origin;
-            let space_per_flex = bounds.size.along(self.axis) / total_flex;
+            let space_per_flex = available_size / total_flex;
 
             let mut bounding_boxes = self.bounding_boxes.lock();
             bounding_boxes.clear();
@@ -1434,7 +1422,9 @@ mod element {
                 child.layout_as_root(child_size.into(), window, cx);
                 child.prepaint_at(origin, window, cx);
 
-                origin = origin.apply_along(self.axis, |val| val + child_size.along(self.axis));
+                origin = origin.apply_along(self.axis, |val| {
+                    val + child_size.along(self.axis) + card_gap
+                });
 
                 let is_leaf_pane = self.is_leaf_pane_mask.get(ix).copied().unwrap_or(true);
 
@@ -1489,20 +1479,24 @@ mod element {
                 .active_pane_modifiers
                 .border_size
                 .and_then(|val| (val >= 0.).then_some(val));
+            let available_size = bounds.size.apply_along(self.axis, |size| {
+                Pixels::max(
+                    size - px(PANE_CARD_GAP) * layout.children.len().saturating_sub(1) as f32,
+                    px(0.0),
+                )
+            });
 
             for (ix, child) in &mut layout.children.iter_mut().enumerate() {
                 if overlay_opacity.is_some() || overlay_border.is_some() {
-                    // the overlay has to be painted in origin+1px with size width-1px
-                    // in order to accommodate the divider between panels
                     let overlay_bounds = Bounds {
-                        origin: child
-                            .bounds
-                            .origin
-                            .apply_along(Axis::Horizontal, |val| val + px(1.)),
-                        size: child
-                            .bounds
-                            .size
-                            .apply_along(Axis::Horizontal, |val| val - px(1.)),
+                        origin: Point::new(
+                            child.bounds.origin.x + px(1.0),
+                            child.bounds.origin.y + px(1.0),
+                        ),
+                        size: Size {
+                            width: Pixels::max(child.bounds.size.width - px(2.0), px(0.0)),
+                            height: Pixels::max(child.bounds.size.height - px(2.0), px(0.0)),
+                        },
                     };
 
                     if overlay_opacity.is_some()
@@ -1543,11 +1537,6 @@ mod element {
                         window.set_cursor_style(cursor_style, &handle.hitbox);
                     }
 
-                    window.paint_quad(gpui::fill(
-                        handle.divider_bounds,
-                        cx.theme().colors().pane_group_border,
-                    ));
-
                     window.on_mouse_event({
                         let dragged_handle = layout.dragged_handle.clone();
                         let flexes = self.flexes.clone();
@@ -1584,7 +1573,7 @@ mod element {
                                     ix,
                                     axis,
                                     child_bounds.origin,
-                                    bounds.size,
+                                    available_size,
                                     workspace.clone(),
                                     window,
                                     cx,

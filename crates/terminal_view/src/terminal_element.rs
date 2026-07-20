@@ -1,12 +1,12 @@
 use editor::{CursorLayout, EditorSettings, HighlightedRange, HighlightedRangeLine};
 use gpui::{
-    AbsoluteLength, AnyElement, App, AvailableSpace, Bounds, ContentMask, Context, DispatchPhase,
-    Element, ElementId, Entity, FocusHandle, Font, FontFeatures, FontStyle, FontWeight,
-    GlobalElementId, HighlightStyle, Hitbox, Hsla, InputHandler, InteractiveElement, Interactivity,
-    IntoElement, LayoutId, Length, ModifiersChangedEvent, MouseButton, MouseMoveEvent, Pixels,
-    Point as GpuiPoint, StatefulInteractiveElement, StrikethroughStyle, Styled, TextRun, TextStyle,
-    UTF16Selection, UnderlineStyle, WeakEntity, WhiteSpace, Window, div, fill, point, px, relative,
-    size,
+    AbsoluteLength, AnyElement, App, AvailableSpace, Bounds, ContentMask, Context, Corners,
+    DispatchPhase, Element, ElementId, Entity, FocusHandle, Font, FontFeatures, FontStyle,
+    FontWeight, GlobalElementId, HighlightStyle, Hitbox, Hsla, InputHandler, InteractiveElement,
+    Interactivity, IntoElement, LayoutId, Length, ModifiersChangedEvent, MouseButton,
+    MouseMoveEvent, Pixels, Point as GpuiPoint, StatefulInteractiveElement, StrikethroughStyle,
+    Styled, TextRun, TextStyle, UTF16Selection, UnderlineStyle, WeakEntity, WhiteSpace, Window,
+    div, fill, point, px, relative, size,
 };
 use itertools::Itertools;
 use language::CursorShape as EditorCursorShape;
@@ -1339,7 +1339,11 @@ impl Element for TerminalElement {
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
             let scroll_top = self.terminal_view.read(cx).scroll_top;
 
-            window.paint_quad(fill(bounds, layout.background_color));
+            window.paint_quad(fill(bounds, layout.background_color).corner_radii(Corners {
+                bottom_left: px(8.0),
+                bottom_right: px(8.0),
+                ..Corners::default()
+            }));
             let origin = layout.dimensions.bounds.origin - GpuiPoint::new(px(0.), scroll_top);
             let scale_factor = window.scale_factor();
             let snap_px = |value: Pixels| {

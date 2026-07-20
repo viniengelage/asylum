@@ -4314,6 +4314,8 @@ impl Render for Pane {
             .track_focus(&self.focus_handle(cx))
             .size_full()
             .flex_none()
+            .rounded_lg()
+            .bg(cx.theme().colors().editor_background)
             .overflow_hidden()
             .on_action(cx.listener(|pane, split: &SplitLeft, window, cx| {
                 pane.split(SplitDirection::Left, split.mode, window, cx)

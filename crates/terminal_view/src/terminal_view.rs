@@ -1343,6 +1343,8 @@ impl Render for TerminalView {
             .id("terminal-view")
             .size_full()
             .relative()
+            .rounded_lg()
+            .overflow_hidden()
             .track_focus(&self.focus_handle(cx))
             .key_context(self.dispatch_context(cx))
             .on_action(cx.listener(TerminalView::send_text))
@@ -1393,6 +1395,8 @@ impl Render for TerminalView {
                 div()
                     .id("terminal-view-container")
                     .size_full()
+                    .rounded_b_lg()
+                    .overflow_hidden()
                     .bg(cx.theme().colors().editor_background)
                     .child(TerminalElement::new(
                         terminal_handle,

@@ -6444,6 +6444,8 @@ impl Render for AgentPanel {
             .relative()
             .size_full()
             .justify_between()
+            .rounded_lg()
+            .overflow_hidden()
             .bg(cx.theme().colors().panel_background)
             .on_action(cx.listener(|this, action: &NewThread, window, cx| {
                 this.new_thread(action, window, cx);

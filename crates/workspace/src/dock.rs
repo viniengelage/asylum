@@ -8,17 +8,17 @@ use client::proto;
 use db::kvp::KeyValueStore;
 
 use gpui::{
-    Action, Anchor, AnyView, App, Axis, Context, Entity, EntityId, EventEmitter, FocusHandle,
-    Focusable, IntoElement, KeyContext, MouseButton, MouseDownEvent, MouseUpEvent, ParentElement,
-    Render, SharedString, StyleRefinement, Styled, Subscription, WeakEntity, Window, deferred, div,
-    px,
+    Action, Anchor, AnyView, App, Axis, ClickEvent, Context, Entity, EntityId, EventEmitter,
+    FocusHandle, Focusable, IntoElement, KeyContext, MouseButton, MouseDownEvent, MouseUpEvent,
+    ParentElement, Render, SharedString, StyleRefinement, Styled, Subscription, WeakEntity, Window,
+    deferred, div, px,
 };
 use serde::{Deserialize, Serialize};
 use settings::{Settings, SettingsStore, TerminalDockPosition};
 use std::sync::Arc;
 use ui::{
-    ContextMenu, CountBadge, Divider, DividerColor, IconButton, Tooltip, prelude::*,
-    right_click_menu,
+    ContextMenu, CountBadge, Divider, DividerColor, Icon, IconButton, IconSize, Tooltip,
+    prelude::*, right_click_menu,
 };
 use util::ResultExt as _;
 
@@ -351,6 +351,18 @@ struct PanelEntry {
     panel: Arc<dyn PanelHandle>,
     size_state: PanelSizeState,
     _subscriptions: [Subscription; 3],
+}
+
+#[derive(Clone)]
+struct DraggedDockTab {
+    source_position: DockPosition,
+    panel_id: EntityId,
+}
+
+impl Render for DraggedDockTab {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        gpui::Empty
+    }
 }
 
 pub struct PanelButtons {
@@ -830,6 +842,178 @@ impl Dock {
         }
     }
 
+    fn reorder_panel(
+        &mut self,
+        panel_id: EntityId,
+        target_index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(source_index) = self
+            .panel_entries
+            .iter()
+            .position(|entry| entry.panel.panel_id() == panel_id)
+        else {
+            return;
+        };
+
+        if source_index == target_index {
+            return;
+        }
+
+        let active_panel_id = self.active_panel().map(|panel| panel.panel_id());
+        let entry = self.panel_entries.remove(source_index);
+        let destination_index = if source_index < target_index {
+            target_index.min(self.panel_entries.len())
+        } else {
+            target_index
+        };
+        self.panel_entries.insert(destination_index, entry);
+        self.active_panel_index = active_panel_id.and_then(|panel_id| {
+            self.panel_entries
+                .iter()
+                .position(|entry| entry.panel.panel_id() == panel_id)
+        });
+
+        self.workspace
+            .update(cx, |workspace, cx| {
+                workspace.serialize_workspace(window, cx)
+            })
+            .log_err();
+        cx.notify();
+    }
+
+    fn render_right_dock_tabs(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let active_panel_index = self.active_panel_index;
+        let is_open = self.is_open;
+        let position = self.position;
+        let enabled_panel_count = self
+            .panel_entries
+            .iter()
+            .filter(|entry| entry.panel.enabled(cx))
+            .count();
+        let first_enabled_panel_index = self
+            .panel_entries
+            .iter()
+            .position(|entry| entry.panel.enabled(cx));
+
+        if enabled_panel_count < 2 {
+            return h_flex().id("right-dock-tabs");
+        }
+
+        h_flex()
+            .id("right-dock-tabs")
+            .h(px(32.0))
+            .rounded_t_lg()
+            .bg(cx.theme().colors().panel_background)
+            .flex_none()
+            .overflow_hidden()
+            .border_b_1()
+            .border_color(cx.theme().colors().border)
+            .children(
+                self.panel_entries
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, entry)| {
+                        if !entry.panel.enabled(cx) {
+                            return None;
+                        }
+
+                        let icon = entry.panel.icon(window, cx);
+                        let panel_id = entry.panel.panel_id();
+                        let label = entry
+                            .panel
+                            .persistent_name()
+                            .strip_suffix("Panel")
+                            .unwrap_or_else(|| entry.panel.persistent_name());
+                        let is_active = is_open && active_panel_index == Some(index);
+
+                        Some(
+                            h_flex()
+                                .id(("right-dock-tab", index))
+                                .h_full()
+                                .px_2()
+                                .gap_1()
+                                .min_w_0()
+                                .cursor_pointer()
+                                .text_sm()
+                                .when(is_active, |this| {
+                                    this.bg(cx.theme().colors().tab_active_background)
+                                        .when(first_enabled_panel_index == Some(index), |this| {
+                                            this.rounded_tl_lg()
+                                        })
+                                        .border_b_2()
+                                        .border_color(cx.theme().colors().border)
+                                        .text_color(cx.theme().colors().text)
+                                })
+                                .when(!is_active, |this| {
+                                    this.text_color(cx.theme().colors().text_muted)
+                                })
+                                .children(icon.map(|icon| Icon::new(icon).size(IconSize::Small)))
+                                .child(div().truncate().child(label))
+                                .on_click(cx.listener(move |dock, _: &ClickEvent, window, cx| {
+                                    dock.set_open(true, window, cx);
+                                    dock.activate_panel(index, window, cx);
+                                    if let Some(panel) = dock.active_panel() {
+                                        window.focus(&panel.panel_focus_handle(cx), cx);
+                                    }
+                                }))
+                                .on_drag(
+                                    DraggedDockTab {
+                                        source_position: position,
+                                        panel_id,
+                                    },
+                                    |tab, _, _, cx| cx.new(|_| tab.clone()),
+                                )
+                                .drag_over::<DraggedDockTab>(move |tab, dragged, _, cx| {
+                                    if dragged.source_position == DockPosition::Right
+                                        && dragged.panel_id != panel_id
+                                    {
+                                        tab.bg(cx.theme().colors().drop_target_background)
+                                            .border_color(cx.theme().colors().drop_target_border)
+                                            .border_b_2()
+                                    } else {
+                                        tab
+                                    }
+                                })
+                                .on_drop(cx.listener(
+                                    move |dock, dragged: &DraggedDockTab, window, cx| {
+                                        if dragged.source_position == DockPosition::Right {
+                                            dock.reorder_panel(dragged.panel_id, index, window, cx);
+                                        }
+                                    },
+                                )),
+                        )
+                    }),
+            )
+            .child(
+                div()
+                    .id("right-dock-tabs-end")
+                    .h_full()
+                    .min_w_4()
+                    .flex_1()
+                    .drag_over::<DraggedDockTab>(|target, dragged, _, cx| {
+                        if dragged.source_position == DockPosition::Right {
+                            target.bg(cx.theme().colors().drop_target_background)
+                        } else {
+                            target
+                        }
+                    })
+                    .on_drop(
+                        cx.listener(move |dock, dragged: &DraggedDockTab, window, cx| {
+                            if dragged.source_position == DockPosition::Right {
+                                let target_index = dock.panel_entries.len().saturating_sub(1);
+                                dock.reorder_panel(dragged.panel_id, target_index, window, cx);
+                            }
+                        }),
+                    ),
+            )
+    }
+
     pub fn visible_panel(&self) -> Option<&Arc<dyn PanelHandle>> {
         let entry = self.visible_entry()?;
         Some(&entry.panel)
@@ -1090,8 +1274,13 @@ impl Dock {
 }
 
 impl Render for Dock {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let dispatch_context = Self::dispatch_context();
+        let right_dock_tabs = if self.position == DockPosition::Right {
+            Some(self.render_right_dock_tabs(window, cx).into_any_element())
+        } else {
+            None
+        };
         if let Some(entry) = self.visible_entry() {
             let position = self.position;
             let create_resize_handle = || {
@@ -1159,22 +1348,22 @@ impl Render for Dock {
                 .track_focus(&self.focus_handle(cx))
                 .focus_follows_mouse(self.focus_follows_mouse, cx)
                 .flex()
-                .bg(cx.theme().colors().panel_background)
-                .border_color(cx.theme().colors().border)
+                .rounded_lg()
+                .when(self.position() != DockPosition::Bottom, |this| {
+                    this.bg(cx.theme().colors().panel_background)
+                })
                 .overflow_hidden()
-                .map(|this| match self.position().axis() {
+                .map(|this| match self.position() {
                     // Width and height are always set on the workspace wrapper in
                     // render_dock, so fill whatever space the wrapper provides.
-                    Axis::Horizontal => this.w_full().h_full().flex_row(),
-                    Axis::Vertical => this.h_full().w_full().flex_col(),
+                    DockPosition::Left => this.w_full().h_full().flex_row(),
+                    DockPosition::Right | DockPosition::Bottom => this.w_full().h_full().flex_col(),
                 })
-                .map(|this| match self.position() {
-                    DockPosition::Left => this.border_r_1(),
-                    DockPosition::Right => this.border_l_1(),
-                    DockPosition::Bottom => this.border_t_1(),
-                })
+                .children(right_dock_tabs)
                 .child(
                     div()
+                        .flex_1()
+                        .min_h_0()
                         .map(|this| match self.position().axis() {
                             Axis::Horizontal => this.w_full().h_full(),
                             Axis::Vertical => this.h_full().w_full(),

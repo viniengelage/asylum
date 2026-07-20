@@ -4887,11 +4887,23 @@ impl EditorElement {
         window.paint_layer(layout.hitbox.bounds, |window| {
             let scroll_top = layout.position_map.scroll_position.y;
             let gutter_bg = cx.theme().colors().editor_gutter_background;
-            window.paint_quad(fill(layout.gutter_hitbox.bounds, gutter_bg));
-            window.paint_quad(fill(
-                layout.position_map.text_hitbox.bounds,
-                self.style.background,
-            ));
+            let card_corner_radius = px(8.0);
+            window.paint_quad(
+                fill(layout.gutter_hitbox.bounds, gutter_bg).corner_radii(Corners {
+                    bottom_left: card_corner_radius,
+                    ..Corners::default()
+                }),
+            );
+            window.paint_quad(
+                fill(
+                    layout.position_map.text_hitbox.bounds,
+                    self.style.background,
+                )
+                .corner_radii(Corners {
+                    bottom_right: card_corner_radius,
+                    ..Corners::default()
+                }),
+            );
 
             if matches!(
                 layout.mode,

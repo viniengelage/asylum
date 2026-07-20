@@ -187,6 +187,29 @@ impl Render for StatusBar {
 }
 
 impl StatusBar {
+    pub(crate) fn render_left_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let sidebar = SidebarStatus::query(&self.multi_workspace, cx);
+        h_flex()
+            .w_full()
+            .p_1()
+            .border_t_1()
+            .border_color(cx.theme().colors().border)
+            .child(self.render_left_tools(&sidebar, cx))
+            .into_any_element()
+    }
+
+    pub(crate) fn render_right_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let sidebar = SidebarStatus::query(&self.multi_workspace, cx);
+        h_flex()
+            .w_full()
+            .justify_end()
+            .p_1()
+            .border_t_1()
+            .border_color(cx.theme().colors().border)
+            .child(self.render_right_tools(&sidebar, cx))
+            .into_any_element()
+    }
+
     fn render_left_tools(
         &self,
         sidebar: &SidebarStatus,
@@ -201,7 +224,15 @@ impl StatusBar {
                 |this| this.child(self.render_sidebar_toggle(sidebar, cx)),
             )
             .children(self.left_items.iter().enumerate().map(|(index, item)| {
-                render_hideable_item("status-bar-left", index, item.as_ref(), cx)
+                h_flex()
+                    .min_w(px(24.0))
+                    .justify_center()
+                    .child(render_hideable_item(
+                        "status-bar-left",
+                        index,
+                        item.as_ref(),
+                        cx,
+                    ))
             }))
     }
 

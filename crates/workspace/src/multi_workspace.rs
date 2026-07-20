@@ -4,7 +4,7 @@ use fs::Fs;
 use gpui::{
     AnyView, App, Context, DragMoveEvent, Entity, EntityId, EventEmitter, FocusHandle, Focusable,
     ManagedView, MouseButton, Pixels, Render, Subscription, Task, TaskExt, WeakEntity, Window,
-    WindowId, actions, deferred, px,
+    WindowId, actions, deferred, point, px,
 };
 pub use project::ProjectGroupKey;
 use project::{DisableAiSettings, Project};
@@ -2104,6 +2104,9 @@ impl MultiWorkspace {
 
 impl Render for MultiWorkspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        #[cfg(target_os = "macos")]
+        window.set_traffic_light_position(point(px(24.0), px(23.0)));
+
         let multi_workspace_enabled = self.multi_workspace_enabled(cx);
         let sidebar_side = self.sidebar_side(cx);
         let sidebar_on_right = sidebar_side == SidebarSide::Right;
@@ -2266,16 +2269,23 @@ impl Render for MultiWorkspace {
                         ))
                     },
                 )
-                .children(left_sidebar)
                 .child(
-                    div()
-                        .flex()
-                        .flex_1()
+                    h_flex()
                         .size_full()
-                        .overflow_hidden()
-                        .child(self.workspace().clone()),
+                        .p_2()
+                        .gap_2()
+                        .bg(cx.theme().colors().background)
+                        .children(left_sidebar)
+                        .child(
+                            div()
+                                .flex()
+                                .flex_1()
+                                .size_full()
+                                .overflow_hidden()
+                                .child(self.workspace().clone()),
+                        )
+                        .children(right_sidebar),
                 )
-                .children(right_sidebar)
                 .child(self.workspace().read(cx).modal_layer.clone())
                 .children(self.sidebar_overlay.as_ref().map(|view| {
                     deferred(div().absolute().size_full().inset_0().occlude().child(
