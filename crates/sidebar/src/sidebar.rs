@@ -7779,6 +7779,15 @@ impl Sidebar {
                                 })),
                         )
                         .child(
+                            IconButton::new("paste-ios", IconName::Copy)
+                                .icon_size(IconSize::Medium)
+                                .tooltip(Tooltip::text("Colar (Cmd+V)"))
+                                .disabled(toolbar_disabled)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.paste_to_ios_simulator(cx);
+                                })),
+                        )
+                        .child(
                             IconButton::new("screenshot-ios", IconName::Image)
                                 .icon_size(IconSize::Medium)
                                 .tooltip(Tooltip::text("Screenshot"))
@@ -9032,6 +9041,25 @@ impl Sidebar {
         self.with_android_sdk_manager(cx, |manager, cx| {
             manager.send_keyevent(82, cx); // KEYCODE_MENU opens Expo dev menu / reload
         });
+    }
+
+    fn paste_to_ios_simulator(&mut self, cx: &mut Context<Self>) {
+        let Some(udid) = self.selected_ios_device_udid.clone() else {
+            return;
+        };
+        cx.spawn(async move |_, _| {
+            // Sync host clipboard to simulator, then trigger paste
+            let _ = smol::process::Command::new("xcrun")
+                .args(["simctl", "pbsync", "host", &udid])
+                .output()
+                .await;
+            let _ = smol::process::Command::new("xcrun")
+                .args(["simctl", "keyevent", &udid, "paste"])
+                .output()
+                .await;
+            anyhow::Ok(())
+        })
+        .detach_and_log_err(cx);
     }
 
     fn return_ios_simulator_to_home(
