@@ -282,6 +282,9 @@
     "enabled": false,
     "debounce_ms": 250,
   },
+  // List of panel names to hide from the right dock tab bar.
+  // Example: ["CollabPanel", "OutlinePanel"]
+  "hidden_right_dock_panels": [],
   // Determines how snippets are sorted relative to other completion items.
   //
   // 1. Place snippets at the top of the completion list:

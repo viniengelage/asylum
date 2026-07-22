@@ -17,9 +17,36 @@ use thiserror::Error;
 
 pub mod batches;
 pub mod completion;
+pub mod oauth;
 
 pub const ANTHROPIC_API_URL: &str = "https://api.anthropic.com";
+
+/// Apply the correct authentication header to a request builder.
+/// OAuth tokens (from Claude Pro/Max subscription) use `Authorization: Bearer`,
+/// while standard API keys use `X-Api-Key`.
+pub(crate) fn apply_auth_header(
+    builder: http::request::Builder,
+    api_key: &str,
+) -> http::request::Builder {
+    let trimmed = api_key.trim();
+    // Standard Anthropic API keys start with "sk-ant-api" and use X-Api-Key.
+    // Everything else (OAuth tokens, setup-token tokens) uses Bearer.
+    if trimmed.starts_with("sk-ant-api") {
+        builder.header("X-Api-Key", trimmed)
+    } else {
+        builder.header("Authorization", format!("Bearer {trimmed}"))
+    }
+}
 pub const FAST_MODE_BETA_HEADER: &str = "fast-mode-2026-02-01";
+
+/// Beta header required for OAuth subscription tokens (Claude Pro/Max/Team).
+pub const OAUTH_BETA_HEADER: &str = "oauth-2025-04-20";
+
+/// Returns `true` when the credential is an OAuth bearer token rather than a
+/// standard Anthropic API key (`sk-ant-api…`).
+pub fn is_oauth_token(api_key: &str) -> bool {
+    !api_key.trim().starts_with("sk-ant-api")
+}
 
 pub fn supports_fast_mode(model_id: &str) -> bool {
     matches!(
@@ -272,16 +299,23 @@ pub async fn list_models(
     client: &dyn HttpClient,
     api_url: &str,
     api_key: &str,
+    using_oauth: bool,
     extra_headers: &CustomHeaders,
 ) -> Result<Vec<Model>> {
     let uri = format!("{api_url}/v1/models?limit=1000");
 
-    let request = HttpRequest::builder()
+    let mut builder = HttpRequest::builder()
         .method(Method::GET)
         .uri(uri)
         .header("Anthropic-Version", "2023-06-01")
-        .header("X-Api-Key", api_key.trim())
-        .header("Accept", "application/json")
+        .header("Accept", "application/json");
+    if using_oauth {
+        builder = builder
+            .header("Anthropic-Beta", OAUTH_BETA_HEADER)
+            .header("x-app", "cli")
+            .header("User-Agent", "claude-cli/2.1.77 (external, zed)");
+    }
+    let request = apply_auth_header(builder, api_key)
         .extra_headers(extra_headers)
         .body(AsyncBody::default())
         .context("failed to build Anthropic models list request")?;
@@ -325,6 +359,7 @@ pub async fn non_streaming_completion(
     beta_headers: Option<String>,
     extra_headers: &CustomHeaders,
 ) -> Result<Response, AnthropicError> {
+    let request = inject_billing_header(request, api_key);
     let (mut response, rate_limits) = send_request(
         client,
         api_url,
@@ -359,12 +394,27 @@ async fn send_request(
 ) -> Result<(http::Response<AsyncBody>, RateLimitInfo), AnthropicError> {
     let uri = format!("{api_url}/v1/messages");
 
-    let mut request_builder = HttpRequest::builder()
+    let using_oauth = is_oauth_token(api_key);
+    log::info!(
+        "Anthropic: POST {} (auth={}, beta={:?})",
+        uri,
+        if using_oauth { "bearer" } else { "api-key" },
+        beta_headers.as_deref().unwrap_or("none"),
+    );
+
+    let mut base_builder = HttpRequest::builder()
         .method(Method::POST)
         .uri(uri)
         .header("Anthropic-Version", "2023-06-01")
-        .header("X-Api-Key", api_key.trim())
         .header("Content-Type", "application/json");
+
+    if using_oauth {
+        base_builder = base_builder
+            .header("x-app", "cli")
+            .header("User-Agent", "claude-cli/2.1.77 (external, zed)");
+    }
+
+    let mut request_builder = apply_auth_header(base_builder, api_key);
 
     if let Some(beta_headers) = beta_headers {
         request_builder = request_builder.header("Anthropic-Beta", beta_headers);
@@ -391,6 +441,8 @@ async fn handle_error_response(
     mut response: http::Response<AsyncBody>,
     rate_limits: RateLimitInfo,
 ) -> AnthropicError {
+    log::error!("Anthropic: API error response status={}", response.status());
+
     if response.status().as_u16() == 529 {
         return AnthropicError::ServerOverloaded {
             retry_after: rate_limits.retry_after,
@@ -411,6 +463,8 @@ async fn handle_error_response(
     if let Err(err) = read_result {
         return err;
     }
+
+    log::error!("Anthropic: API error body: {body}");
 
     match serde_json::from_str::<Event>(&body) {
         Ok(Event::Error { error }) => AnthropicError::ApiError(error),
@@ -507,6 +561,42 @@ fn get_header<'a>(key: &str, headers: &'a HeaderMap) -> anyhow::Result<&'a str> 
         .to_str()?)
 }
 
+const BILLING_HEADER_TEXT: &str =
+    "x-anthropic-billing-header: cc_version=2.1.77.e19; cc_entrypoint=sdk-cli; cch=d51e0;";
+
+/// Prepend the billing header to the system prompt when using OAuth tokens.
+/// The Anthropic API requires this for subscription tokens to access paid models.
+fn inject_billing_header(mut request: Request, api_key: &str) -> Request {
+    if !is_oauth_token(api_key) {
+        return request;
+    }
+
+    let billing_block = RequestContent::Text {
+        text: BILLING_HEADER_TEXT.to_string(),
+        cache_control: None,
+    };
+
+    match &mut request.system {
+        Some(StringOrContents::Content(blocks)) => {
+            blocks.insert(0, billing_block);
+        }
+        Some(StringOrContents::String(existing)) => {
+            request.system = Some(StringOrContents::Content(vec![
+                billing_block,
+                RequestContent::Text {
+                    text: std::mem::take(existing),
+                    cache_control: None,
+                },
+            ]));
+        }
+        None => {
+            request.system = Some(StringOrContents::Content(vec![billing_block]));
+        }
+    }
+
+    request
+}
+
 pub async fn stream_completion_with_rate_limit_info(
     client: &dyn HttpClient,
     api_url: &str,
@@ -522,7 +612,7 @@ pub async fn stream_completion_with_rate_limit_info(
     AnthropicError,
 > {
     let request = StreamingRequest {
-        base: request,
+        base: inject_billing_header(request, api_key),
         stream: true,
     };
 

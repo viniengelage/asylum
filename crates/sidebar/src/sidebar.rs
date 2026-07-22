@@ -22,15 +22,21 @@ use agent_ui::{
     ThreadTitleRegenerationResult, channels_with_threads, import_threads_from_other_channels,
 };
 use agent_ui::{MessageEditorEvent, StateChange, thread_worktree_archive};
+use android_sdk::{AndroidSdkManager, AndroidSdkState};
+use anyhow::Context as _;
 use chrono::{DateTime, Utc};
 use editor::Editor;
 use feature_flags::{
     AgentThreadWorktreeLabel, AgentThreadWorktreeLabelFlag, FeatureFlag, FeatureFlagAppExt as _,
 };
+use fs::Fs;
+
 use gpui::{
-    Action as _, AnyElement, App, ClickEvent, Context, Decorations, DismissEvent, Entity, EntityId,
-    FocusHandle, Focusable, KeyContext, ListState, Modifiers, Pixels, Render, SharedString, Task,
-    TaskExt, WeakEntity, Window, WindowBackgroundAppearance, WindowHandle, linear_color_stop,
+    Action as _, AnyElement, App, Bounds, ClickEvent, Context, DismissEvent, Entity, EntityId,
+    FocusHandle, Focusable, KeyContext, ListState, Modifiers, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, ObjectFit, Pixels, Point, Render, SharedString,
+    StyledImage as _, Task, TaskExt,
+    WeakEntity, Window, WindowBackgroundAppearance, WindowHandle, canvas, img, linear_color_stop,
     linear_gradient, list, prelude::*, px,
 };
 use itertools::Itertools;
@@ -52,21 +58,29 @@ use std::mem;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
-use theme::{ActiveTheme, CLIENT_SIDE_DECORATION_ROUNDING};
+use std::time::Duration;
+use task::{
+    HideStrategy, RevealStrategy, RevealTarget, SaveStrategy, Shell, SpawnInTerminal, TaskId,
+};
+
+use theme::ActiveTheme;
 use ui::{
-    AgentThreadStatus, CommonAnimationExt, ContextMenu, ContextMenuEntry, Divider, GradientFade,
-    HighlightedLabel, KeyBinding, PopoverMenu, PopoverMenuHandle, ProjectEmptyState, ScrollAxes,
-    Scrollbars, Tab, ThreadItem, ThreadItemWorktreeInfo, TintColor, Tooltip, WithScrollbar,
-    prelude::*, render_modifiers, right_click_menu,
+    AgentThreadStatus, CommonAnimationExt, ContextMenu, ContextMenuEntry, Divider, DropdownMenu,
+    DropdownStyle, GradientFade, HighlightedLabel, IconPosition, KeyBinding, PopoverMenu,
+    PopoverMenuHandle, ProjectEmptyState, ScrollAxes, Scrollbars, Tab, TabPosition, ThreadItem,
+    ThreadItemWorktreeInfo, TintColor, Tooltip, WithScrollbar, prelude::*, render_modifiers,
+    right_click_menu,
 };
 use unicode_segmentation::UnicodeSegmentation as _;
 use util::ResultExt as _;
 use util::path_list::PathList;
 use workspace::{
     CloseWindow, FocusWorkspaceSidebar, MultiWorkspace, MultiWorkspaceEvent, NextProject,
-    NextThread, Open, OpenMode, PreviousProject, PreviousThread, ProjectGroupKey, SaveIntent,
-    Sidebar as WorkspaceSidebar, SidebarSide, Toast, ToggleWorkspaceSidebar, Workspace,
-    notifications::NotificationId, sidebar_side_context_menu,
+    NextThread, Open, OpenDevices, OpenMode, PreviousProject, PreviousThread, ProjectGroupKey,
+    SaveIntent, Sidebar as WorkspaceSidebar, SidebarSide, Toast, ToggleWorkspaceSidebar, Workspace,
+    dock::{DockPosition, Panel, PanelEvent, PanelSizeState},
+    notifications::NotificationId,
+    sidebar_side_context_menu,
 };
 
 use git_ui::worktree_service::{RemoteBranchName, worktree_create_targets};
@@ -111,6 +125,45 @@ enum SerializedSidebarView {
     ThreadList,
     #[serde(alias = "Archive")]
     History,
+    Devices,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum DevicePlatform {
+    Android,
+    #[default]
+    Ios,
+}
+
+/// An in-progress pointer gesture on the Android emulator screen. When the
+/// emulator's gRPC touch channel is available, down/move/up events are
+/// forwarded as they happen; otherwise the gesture is resolved into an adb
+/// tap or swipe on mouse-up.
+struct AndroidPointerDown {
+    down_position: Point<Pixels>,
+    last_position: Point<Pixels>,
+    started_at: std::time::Instant,
+    via_grpc_touch: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct IosSimulatorDevice {
+    name: String,
+    udid: String,
+    state: String,
+}
+
+#[derive(Deserialize)]
+struct SimctlDeviceList {
+    devices: HashMap<String, Vec<IosSimulatorDevice>>,
+}
+
+fn ios_simulator_label(device: &IosSimulatorDevice) -> String {
+    let state = match device.state.as_str() {
+        "Booted" => "Inicializado",
+        state => state,
+    };
+    format!("{} ({state})", device.name)
 }
 
 #[derive(Clone, Copy)]
@@ -132,6 +185,7 @@ enum SidebarView {
     #[default]
     ThreadList,
     Archive(Entity<ThreadsArchiveView>),
+    Devices,
 }
 
 enum ArchiveWorktreeOutcome {
@@ -805,6 +859,21 @@ pub struct Sidebar {
     /// its interaction time.
     draft_kinds: HashMap<ThreadId, DraftKind>,
     view: SidebarView,
+    devices_only: bool,
+    device_platform: DevicePlatform,
+    android_sdk_manager: Option<Entity<AndroidSdkManager>>,
+    android_screen_bounds: Option<Bounds<Pixels>>,
+    android_pointer_down: Option<AndroidPointerDown>,
+    android_current_rendered_frame: Option<Arc<gpui::RenderImage>>,
+    android_previous_rendered_frame: Option<Arc<gpui::RenderImage>>,
+    ios_devices: Vec<IosSimulatorDevice>,
+    selected_ios_device_udid: Option<String>,
+    ios_native_subview_id: Option<u64>,
+    ios_native_subview_udid: Option<String>,
+    ios_simulator_bounds: Option<Bounds<Pixels>>,
+    ios_simulator_error: Option<SharedString>,
+    ios_failed_device_udid: Option<String>,
+    ios_device_discovery_task: Option<Task<()>>,
     restoring_tasks: HashMap<agent_ui::ThreadId, Task<()>>,
     recent_projects_popover_handle: PopoverMenuHandle<SidebarRecentProjects>,
     project_header_menu_handles: HashMap<usize, PopoverMenuHandle<ContextMenu>>,
@@ -943,6 +1012,21 @@ impl Sidebar {
             live_thread_statuses: HashMap::new(),
             draft_kinds: HashMap::new(),
             view: SidebarView::default(),
+            devices_only: false,
+            device_platform: DevicePlatform::default(),
+            android_sdk_manager: None,
+            android_screen_bounds: None,
+            android_pointer_down: None,
+            android_current_rendered_frame: None,
+            android_previous_rendered_frame: None,
+            ios_devices: Vec::new(),
+            selected_ios_device_udid: None,
+            ios_native_subview_id: None,
+            ios_native_subview_udid: None,
+            ios_simulator_bounds: None,
+            ios_simulator_error: None,
+            ios_failed_device_udid: None,
+            ios_device_discovery_task: None,
             restoring_tasks: HashMap::new(),
             recent_projects_popover_handle: PopoverMenuHandle::default(),
             project_header_menu_handles: HashMap::new(),
@@ -955,6 +1039,18 @@ impl Sidebar {
             import_banners_use_verbose_labels: None,
             cross_channel_import_channels: Vec::new(),
         }
+    }
+
+    pub fn new_devices(
+        multi_workspace: Entity<MultiWorkspace>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut sidebar = Self::new(multi_workspace, window, cx);
+        sidebar.width = px(420.0);
+        sidebar.devices_only = true;
+        sidebar.view = SidebarView::Devices;
+        sidebar
     }
 
     fn serialize(&mut self, cx: &mut Context<Self>) {
@@ -1264,7 +1360,11 @@ impl Sidebar {
         let workspace = workspace.downgrade();
         for dock in docks {
             let workspace = workspace.clone();
-            cx.observe(&dock, move |this, _dock, cx| {
+            cx.observe(&dock, move |this, dock, cx| {
+                if dock.read(cx).panel::<Sidebar>().is_some() {
+                    return;
+                }
+
                 let Some(workspace) = workspace.upgrade() else {
                     return;
                 };
@@ -7620,33 +7720,196 @@ impl Sidebar {
 
     fn render_sidebar_bottom_bar(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let is_archive = matches!(self.view, SidebarView::Archive(..));
+        let is_devices = matches!(self.view, SidebarView::Devices);
         let on_right = self.side(cx) == SidebarSide::Right;
 
-        h_flex()
-            .p_1()
-            .gap_1()
-            .when(on_right, |this| this.flex_row_reverse())
-            .border_t_1()
-            .border_color(cx.theme().colors().border)
-            .child(self.render_sidebar_toggle_button(cx))
-            .child(
-                IconButton::new("history", IconName::Clock)
-                    .icon_size(IconSize::Small)
-                    .toggle_state(is_archive)
-                    .tooltip(move |_, cx| {
-                        let label = if is_archive {
-                            "Hide Thread History"
-                        } else {
-                            "Show Thread History"
-                        };
-                        Tooltip::for_action(label, &ToggleThreadHistory, cx)
-                    })
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.toggle_archive(&ToggleThreadHistory, window, cx);
-                    })),
-            )
-            .child(div().flex_1())
-            .child(self.render_recent_projects_button(cx))
+        v_flex()
+            .when(is_devices && self.device_platform == DevicePlatform::Ios, |this| {
+                let toolbar_disabled = self.ios_device_discovery_task.is_some()
+                    || self.selected_ios_device_udid.is_none();
+                this.child(
+                    h_flex()
+                        .p_1()
+                        .gap_1()
+                        .justify_center()
+                        .border_t_1()
+                        .border_color(cx.theme().colors().border)
+                        .child(
+                            IconButton::new("open-installed-ios-app", IconName::ArrowUpRight)
+                                .icon_size(IconSize::Medium)
+                                .tooltip(Tooltip::text("Abrir app iOS instalado"))
+                                .disabled(toolbar_disabled)
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    if let Some(workspace) = this.active_workspace(cx) {
+                                        this.launch_installed_expo_ios(&workspace, window, cx);
+                                    }
+                                })),
+                        )
+                        .child(
+                            IconButton::new("ios-home", IconName::Screen)
+                                .icon_size(IconSize::Medium)
+                                .tooltip(Tooltip::text("Home"))
+                                .disabled(toolbar_disabled)
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    if let Some(workspace) = this.active_workspace(cx) {
+                                        this.return_ios_simulator_to_home(&workspace, window, cx);
+                                    }
+                                })),
+                        )
+                        .child(
+                            IconButton::new("build-ios-app", IconName::ToolHammer)
+                                .icon_size(IconSize::Medium)
+                                .tooltip(Tooltip::text("Compilar app iOS"))
+                                .disabled(toolbar_disabled)
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    if let Some(workspace) = this.active_workspace(cx) {
+                                        this.build_expo_ios(&workspace, window, cx);
+                                    }
+                                })),
+                        )
+                        .child(
+                            IconButton::new("start-expo-ios", IconName::PlayFilled)
+                                .icon_size(IconSize::Medium)
+                                .tooltip(Tooltip::text("Iniciar Expo"))
+                                .disabled(toolbar_disabled)
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    if let Some(workspace) = this.active_workspace(cx) {
+                                        this.start_expo_ios(&workspace, window, cx);
+                                    }
+                                })),
+                        )
+                        .child(
+                            IconButton::new("screenshot-ios", IconName::Image)
+                                .icon_size(IconSize::Medium)
+                                .tooltip(Tooltip::text("Screenshot"))
+                                .disabled(toolbar_disabled)
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    if let Some(workspace) = this.active_workspace(cx) {
+                                        this.screenshot_ios_simulator(&workspace, window, cx);
+                                    }
+                                })),
+                        ),
+                )
+            })
+            .when(is_devices && self.device_platform == DevicePlatform::Android, |this| {
+                let emulator_running = self
+                    .android_sdk_manager
+                    .as_ref()
+                    .map(|m| matches!(m.read(cx).state(), AndroidSdkState::EmulatorRunning { .. }))
+                    .unwrap_or(false);
+                this.child(
+                    h_flex()
+                        .p_1()
+                        .gap_1()
+                        .justify_center()
+                        .border_t_1()
+                        .border_color(cx.theme().colors().border)
+                        .child(
+                            IconButton::new("android-back", IconName::ArrowLeft)
+                                .icon_size(IconSize::Medium)
+                                .tooltip(Tooltip::text("Voltar"))
+                                .disabled(!emulator_running)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.with_android_sdk_manager(cx, |manager, cx| {
+                                        manager.send_keyevent(4, cx)
+                                    });
+                                })),
+                        )
+                        .child(
+                            IconButton::new("android-home", IconName::Circle)
+                                .icon_size(IconSize::Medium)
+                                .tooltip(Tooltip::text("Home"))
+                                .disabled(!emulator_running)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.with_android_sdk_manager(cx, |manager, cx| {
+                                        manager.send_keyevent(3, cx)
+                                    });
+                                })),
+                        )
+                        .child(
+                            IconButton::new("android-recents", IconName::Stop)
+                                .icon_size(IconSize::Medium)
+                                .tooltip(Tooltip::text("Apps recentes"))
+                                .disabled(!emulator_running)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.with_android_sdk_manager(cx, |manager, cx| {
+                                        manager.send_keyevent(187, cx)
+                                    });
+                                })),
+                        )
+                        .child(
+                            IconButton::new("android-stop", IconName::Power)
+                                .icon_size(IconSize::Medium)
+                                .tooltip(Tooltip::text("Parar emulador"))
+                                .disabled(!emulator_running)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.with_android_sdk_manager(cx, |manager, cx| {
+                                        manager.stop_emulator(cx)
+                                    });
+                                })),
+                        )
+                        .child(
+                            IconButton::new("build-android-app", IconName::ToolHammer)
+                                .icon_size(IconSize::Medium)
+                                .tooltip(Tooltip::text("Compilar app Android"))
+                                .disabled(!emulator_running)
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    if let Some(workspace) = this.active_workspace(cx) {
+                                        this.build_expo_android(&workspace, window, cx);
+                                    }
+                                })),
+                        )
+                        .child(
+                            IconButton::new("start-expo-android", IconName::PlayFilled)
+                                .icon_size(IconSize::Medium)
+                                .tooltip(Tooltip::text("Iniciar Expo"))
+                                .disabled(!emulator_running)
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    if let Some(workspace) = this.active_workspace(cx) {
+                                        this.start_expo_android(&workspace, window, cx);
+                                    }
+                                })),
+                        )
+                        .child(
+                            IconButton::new("reload-android", IconName::ArrowCircle)
+                                .icon_size(IconSize::Medium)
+                                .tooltip(Tooltip::text("Reload / Dev Menu"))
+                                .disabled(!emulator_running)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.reload_android_app(cx);
+                                })),
+                        ),
+                )
+            })
+            .when(!self.devices_only, |this| {
+                this.child(
+                    h_flex()
+                        .p_1()
+                        .gap_1()
+                        .when(on_right, |this| this.flex_row_reverse())
+                        .border_t_1()
+                        .border_color(cx.theme().colors().border)
+                        .child(self.render_sidebar_toggle_button(cx))
+                        .child(
+                            IconButton::new("history", IconName::Clock)
+                                .icon_size(IconSize::Small)
+                                .toggle_state(is_archive)
+                                .tooltip(move |_, cx| {
+                                    let label = if is_archive {
+                                        "Hide Thread History"
+                                    } else {
+                                        "Show Thread History"
+                                    };
+                                    Tooltip::for_action(label, &ToggleThreadHistory, cx)
+                                })
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.toggle_archive(&ToggleThreadHistory, window, cx);
+                                })),
+                        )
+                        .child(div().flex_1())
+                        .child(self.render_recent_projects_button(cx)),
+                )
+            })
     }
 
     fn active_workspace(&self, cx: &App) -> Option<Entity<Workspace>> {
@@ -7801,14 +8064,1239 @@ impl Sidebar {
         cx: &mut Context<Self>,
     ) {
         match &self.view {
-            SidebarView::ThreadList => {
-                self.show_archive(window, cx);
-            }
             SidebarView::Archive(_) => self.show_thread_list(window, cx),
+            SidebarView::ThreadList | SidebarView::Devices => self.show_archive(window, cx),
         }
     }
 
+    fn show_devices_view(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.view = SidebarView::Devices;
+        self._subscriptions.clear();
+        self.refresh_ios_devices(window, cx);
+        self.focus_handle.focus(window, cx);
+        self.serialize(cx);
+        cx.notify();
+    }
+
+    #[cfg(target_os = "macos")]
+    fn refresh_ios_devices(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.ios_device_discovery_task.is_some() {
+            return;
+        }
+
+        let this = cx.weak_entity();
+        self.ios_device_discovery_task = Some(window.spawn(cx, async move |cx| {
+            let devices = cx.background_spawn(discover_or_boot_ios_simulator()).await;
+
+            this.update_in(cx, |this, window, cx| {
+                this.ios_device_discovery_task = None;
+                match devices {
+                    Ok(devices) => {
+                        let selected_device_is_available = this
+                            .selected_ios_device_udid
+                            .as_ref()
+                            .is_some_and(|udid| devices.iter().any(|device| &device.udid == udid));
+                        if !selected_device_is_available {
+                            this.remove_ios_simulator_view(window);
+                            this.selected_ios_device_udid =
+                                devices.first().map(|device| device.udid.clone());
+                        }
+                        this.ios_devices = devices;
+                        this.ios_simulator_error = None;
+                        this.ios_failed_device_udid = None;
+                    }
+                    Err(error) => {
+                        this.ios_simulator_error =
+                            Some(format!("Não foi possível encontrar simuladores iOS inicializados: {error:#}").into());
+                    }
+                }
+                cx.notify();
+            })
+            .log_err();
+        }));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn refresh_ios_devices(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {}
+
+    fn select_ios_device(&mut self, udid: String, window: &mut Window, cx: &mut Context<Self>) {
+        if self.selected_ios_device_udid.as_deref() == Some(udid.as_str()) {
+            return;
+        }
+
+        self.remove_ios_simulator_view(window);
+        self.selected_ios_device_udid = Some(udid);
+        self.ios_simulator_error = None;
+        self.ios_failed_device_udid = None;
+        cx.notify();
+    }
+
+    /// Hides the simulator's native view without destroying it. Reconnecting
+    /// SimulatorKit to the same device in the same process does not reliably
+    /// produce frames again, so views are kept alive and re-shown by
+    /// `sync_ios_simulator_view` instead of being recreated.
+    fn hide_ios_simulator_view(&mut self, window: &mut Window) {
+        #[cfg(target_os = "macos")]
+        if let Some(subview_id) = self.ios_native_subview_id {
+            window.set_native_subview_hidden(subview_id, true);
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        let _ = window;
+    }
+
+    fn remove_ios_simulator_view(&mut self, window: &mut Window) {
+        #[cfg(target_os = "macos")]
+        if let Some(subview_id) = self.ios_native_subview_id.take() {
+            window.remove_native_subview(subview_id);
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        let _ = window;
+
+        self.ios_native_subview_id = None;
+        self.ios_native_subview_udid = None;
+        self.ios_simulator_bounds = None;
+    }
+
+    #[cfg(target_os = "macos")]
+    fn sync_ios_simulator_view(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(udid) = self.selected_ios_device_udid.clone() else {
+            self.remove_ios_simulator_view(window);
+            return;
+        };
+
+        if self.ios_native_subview_udid.as_deref() == Some(udid.as_str()) {
+            if let Some(subview_id) = self.ios_native_subview_id {
+                window.set_native_subview_hidden(subview_id, false);
+                if self.ios_simulator_bounds.as_ref() != Some(&bounds) {
+                    window.resize_simulator_display_view(subview_id, bounds);
+                    self.ios_simulator_bounds = Some(bounds);
+                }
+            }
+            return;
+        }
+
+        if self.ios_failed_device_udid.as_deref() == Some(udid.as_str()) {
+            return;
+        }
+
+        self.remove_ios_simulator_view(window);
+        match window.create_simulator_display_view(&udid, bounds.size) {
+            Ok(display_view) => match unsafe { window.add_native_subview(display_view, bounds) } {
+                Some(subview_id) => {
+                    self.ios_native_subview_id = Some(subview_id);
+                    self.ios_native_subview_udid = Some(udid);
+                    window.resize_simulator_display_view(subview_id, bounds);
+                    self.ios_simulator_bounds = Some(bounds);
+                    self.ios_simulator_error = None;
+                    self.ios_failed_device_udid = None;
+                }
+                None => {
+                    self.ios_simulator_error =
+                        Some("GPUI could not mount the native SimulatorKit view.".into());
+                    self.ios_failed_device_udid = Some(udid);
+                    cx.notify();
+                }
+            },
+            Err(error) => {
+                self.ios_simulator_error =
+                    Some(format!("Could not open the iOS simulator: {error:#}").into());
+                self.ios_failed_device_udid = Some(udid);
+                cx.notify();
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn render_ios_simulator(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let selected_label = self
+            .selected_ios_device_udid
+            .as_ref()
+            .and_then(|udid| self.ios_devices.iter().find(|device| &device.udid == udid))
+            .map(ios_simulator_label)
+            .unwrap_or_else(|| "Selecione um simulador iOS inicializado".to_owned());
+        let devices = self.ios_devices.clone();
+        let selected_udid = self.selected_ios_device_udid.clone();
+        let sidebar = cx.weak_entity();
+        let device_menu = ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
+            for device in devices {
+                let is_selected = selected_udid.as_deref() == Some(device.udid.as_str());
+                let label = ios_simulator_label(&device);
+                let udid = device.udid;
+                let sidebar = sidebar.clone();
+                menu = menu.toggleable_entry(
+                    label,
+                    is_selected,
+                    IconPosition::Start,
+                    None,
+                    move |window, cx| {
+                        sidebar
+                            .update(cx, |this, cx| {
+                                this.select_ios_device(udid.clone(), window, cx);
+                            })
+                            .log_err();
+                    },
+                );
+            }
+            menu
+        });
+        let is_discovering_devices = self.ios_device_discovery_task.is_some();
+        let has_devices = !self.ios_devices.is_empty();
+        let error = self.ios_simulator_error.clone();
+        let selected_device = self.selected_ios_device_udid.clone();
+        let sidebar = cx.weak_entity();
+
+        v_flex()
+            .flex_1()
+            .min_h_0()
+            .child(
+                h_flex()
+                    .w_full()
+                    .gap_2()
+                    .p_2()
+                    .child(
+                        DropdownMenu::new("ios-simulator-selector", selected_label, device_menu)
+                            .style(DropdownStyle::Subtle)
+                            .full_width(true)
+                            .disabled(is_discovering_devices || !has_devices),
+                    )
+                    .child(
+                        IconButton::new("refresh-ios-simulators", IconName::RotateCw)
+                            .icon_size(IconSize::Small)
+                            .aria_label("Atualizar simuladores iOS")
+                            .tooltip(Tooltip::text("Atualizar simuladores iOS"))
+                            .disabled(is_discovering_devices)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.refresh_ios_devices(window, cx);
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .cursor_default()
+                    .child(
+                        v_flex()
+                            .size_full()
+                            .items_center()
+                            .justify_center()
+                            .gap_2()
+                            .p_4()
+                            .when_some(error, |this, error| {
+                                this.child(
+                                    Label::new(error).size(LabelSize::Small).color(Color::Error),
+                                )
+                            })
+                            .when(is_discovering_devices, |this| {
+                                this.child(
+                                    Icon::new(IconName::ArrowCircle)
+                                        .size(IconSize::XLarge)
+                                        .color(Color::Muted)
+                                        .with_rotate_animation(2),
+                                )
+                                .child(Label::new("Inicializando simulador iOS..."))
+                                .child(
+                                    Label::new(
+                                        "Aguarde enquanto o dispositivo padrão é preparado.",
+                                    )
+                                    .size(LabelSize::Small)
+                                    .color(Color::Muted),
+                                )
+                            })
+                            .when(!is_discovering_devices && !has_devices, |this| {
+                                this.child(Icon::new(IconName::Screen).size(IconSize::XLarge))
+                                    .child(Label::new("Nenhum simulador iOS disponível"))
+                                    .child(
+                                        Label::new(
+                                            "Não foi possível inicializar um simulador iOS.",
+                                        )
+                                        .size(LabelSize::Small)
+                                        .color(Color::Muted),
+                                    )
+                            })
+                            .when(has_devices && selected_device.is_none(), |this| {
+                                this.child(Label::new(
+                                    "Selecione um simulador iOS para abri-lo aqui.",
+                                ))
+                            }),
+                    )
+                    .child(
+                        canvas(
+                            move |bounds, window, cx| {
+                                window.defer(cx, move |window, cx| {
+                                    sidebar
+                                        .update(cx, |this, cx| {
+                                            this.sync_ios_simulator_view(bounds, window, cx);
+                                        })
+                                        .log_err();
+                                });
+                            },
+                            |_, _, _, _| {},
+                        )
+                        // Without an explicit inset, an absolutely positioned
+                        // element keeps its static position, which is below the
+                        // full-height sibling above.
+                        .absolute()
+                        .inset_0()
+                        .size_full(),
+                    ),
+            )
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn render_ios_simulator(
+        &self,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        v_flex()
+            .flex_1()
+            .items_center()
+            .justify_center()
+            .gap_2()
+            .p_4()
+            .child(Icon::new(IconName::Screen).size(IconSize::XLarge))
+            .child(Label::new(
+                "O simulador iOS integrado está disponível apenas no macOS.",
+            ))
+    }
+
+    fn ensure_android_sdk_manager(&mut self, cx: &mut Context<Self>) {
+        if let Some(manager) = self.android_sdk_manager.as_ref() {
+            manager.update(cx, |manager, cx| manager.refresh(cx));
+            return;
+        }
+        let manager = cx.new(AndroidSdkManager::new);
+        self._subscriptions
+            .push(cx.observe(&manager, |_, _, cx| cx.notify()));
+        self.android_sdk_manager = Some(manager);
+    }
+
+    fn with_android_sdk_manager(
+        &mut self,
+        cx: &mut Context<Self>,
+        update: impl FnOnce(&mut AndroidSdkManager, &mut Context<AndroidSdkManager>),
+    ) {
+        if let Some(manager) = self.android_sdk_manager.clone() {
+            manager.update(cx, update);
+        }
+    }
+
+    /// Forwards a touch event to the emulator's low-latency gRPC input
+    /// channel, returning false when it is unavailable and the caller should
+    /// use the adb tap/swipe fallback instead.
+    fn android_send_grpc_touch(&mut self, x: u32, y: u32, pressed: bool, cx: &mut App) -> bool {
+        let Some(manager) = self.android_sdk_manager.clone() else {
+            return false;
+        };
+        manager.update(cx, |manager, _| manager.send_touch(x, y, pressed))
+    }
+
+    /// Maps a window position to Android device-pixel coordinates, taking the
+    /// aspect-fit letterboxing of the streamed screen into account. Returns
+    /// `None` when the position is outside the displayed screen.
+    fn android_device_point(&self, position: Point<Pixels>, cx: &App) -> Option<(u32, u32)> {
+        let bounds = self.android_screen_bounds?;
+        let manager = self.android_sdk_manager.as_ref()?;
+        let (screen_width, screen_height) = manager.read(cx).screen_size()?;
+        if screen_width == 0 || screen_height == 0 {
+            return None;
+        }
+
+        let container_width = f32::from(bounds.size.width);
+        let container_height = f32::from(bounds.size.height);
+        let scale = (container_width / screen_width as f32)
+            .min(container_height / screen_height as f32);
+        if scale <= 0. {
+            return None;
+        }
+        let displayed_width = screen_width as f32 * scale;
+        let displayed_height = screen_height as f32 * scale;
+        let origin_x = f32::from(bounds.origin.x) + (container_width - displayed_width) / 2.;
+        let origin_y = f32::from(bounds.origin.y) + (container_height - displayed_height) / 2.;
+
+        let x = (f32::from(position.x) - origin_x) / scale;
+        let y = (f32::from(position.y) - origin_y) / scale;
+        if x < 0. || y < 0. || x >= screen_width as f32 || y >= screen_height as f32 {
+            return None;
+        }
+        Some((x as u32, y as u32))
+    }
+
+    /// Retires Android screen frames from the window's sprite atlas once they
+    /// are two renders old. Dropping a frame's texture any earlier races the
+    /// Metal renderer, which panics if the last-painted scene still references
+    /// the freed atlas texture (same pattern as `RemoteVideoTrackView`).
+    fn track_android_rendered_frame(&mut self, window: &mut Window, cx: &App) {
+        let latest_frame = self
+            .android_sdk_manager
+            .as_ref()
+            .and_then(|manager| manager.read(cx).screen_frame().cloned());
+        match latest_frame {
+            Some(latest_frame) => {
+                if self
+                    .android_current_rendered_frame
+                    .as_ref()
+                    .is_some_and(|frame| frame.id == latest_frame.id)
+                {
+                    return;
+                }
+                if let Some(previous) = self.android_previous_rendered_frame.take()
+                    && previous.id != latest_frame.id
+                {
+                    window.drop_image(previous).log_err();
+                }
+                self.android_previous_rendered_frame = self.android_current_rendered_frame.take();
+                self.android_current_rendered_frame = Some(latest_frame);
+            }
+            None => {
+                if let Some(previous) = self.android_previous_rendered_frame.take() {
+                    window.drop_image(previous).log_err();
+                }
+                self.android_previous_rendered_frame = self.android_current_rendered_frame.take();
+            }
+        }
+    }
+
+    fn render_android_emulator_screen(&self, cx: &mut Context<Self>) -> Div {
+        let (frame, screen_size) = self
+            .android_sdk_manager
+            .as_ref()
+            .map(|manager| {
+                let manager = manager.read(cx);
+                (manager.screen_frame().cloned(), manager.screen_size())
+            })
+            .unwrap_or((None, None));
+
+
+        v_flex()
+            .flex_1()
+            .min_h_0()
+            .child(
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .map(|this| match frame {
+                        Some(frame) if screen_size.is_some() => this
+                            .child(
+                                img(frame)
+                                    .object_fit(ObjectFit::Contain)
+                                    .size_full()
+                                    .absolute(),
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                                    let Some((x, y)) =
+                                        this.android_device_point(event.position, cx)
+                                    else {
+                                        return;
+                                    };
+                                    let via_grpc_touch =
+                                        this.android_send_grpc_touch(x, y, true, cx);
+                                    this.android_pointer_down = Some(AndroidPointerDown {
+                                        down_position: event.position,
+                                        last_position: event.position,
+                                        started_at: std::time::Instant::now(),
+                                        via_grpc_touch,
+                                    });
+                                }),
+                            )
+                            .on_mouse_move(cx.listener(
+                                |this, event: &MouseMoveEvent, _, cx| {
+                                    let Some(pointer) = &this.android_pointer_down else {
+                                        return;
+                                    };
+                                    if !pointer.via_grpc_touch {
+                                        return;
+                                    }
+                                    if event.pressed_button != Some(MouseButton::Left) {
+                                        // The button was released outside the
+                                        // screen area; end the touch at the last
+                                        // point we forwarded.
+                                        let last_position = pointer.last_position;
+                                        this.android_pointer_down = None;
+                                        if let Some((x, y)) =
+                                            this.android_device_point(last_position, cx)
+                                        {
+                                            this.android_send_grpc_touch(x, y, false, cx);
+                                        }
+                                        return;
+                                    }
+                                    if let Some((x, y)) =
+                                        this.android_device_point(event.position, cx)
+                                    {
+                                        this.android_send_grpc_touch(x, y, true, cx);
+                                        if let Some(pointer) = &mut this.android_pointer_down {
+                                            pointer.last_position = event.position;
+                                        }
+                                    }
+                                },
+                            ))
+                            .on_mouse_up(
+                                MouseButton::Left,
+                                cx.listener(|this, event: &MouseUpEvent, _, cx| {
+                                    let Some(pointer) = this.android_pointer_down.take()
+                                    else {
+                                        return;
+                                    };
+                                    if pointer.via_grpc_touch {
+                                        let position = this
+                                            .android_device_point(event.position, cx)
+                                            .or_else(|| {
+                                                this.android_device_point(
+                                                    pointer.last_position,
+                                                    cx,
+                                                )
+                                            });
+                                        if let Some((x, y)) = position {
+                                            this.android_send_grpc_touch(x, y, false, cx);
+                                        }
+                                        return;
+                                    }
+                                    let Some(from) =
+                                        this.android_device_point(pointer.down_position, cx)
+                                    else {
+                                        return;
+                                    };
+                                    let Some(to) = this.android_device_point(event.position, cx)
+                                    else {
+                                        return;
+                                    };
+                                    let dragged_distance = (f32::from(
+                                        event.position.x - pointer.down_position.x,
+                                    ))
+                                    .hypot(f32::from(event.position.y - pointer.down_position.y));
+                                    this.with_android_sdk_manager(cx, |manager, cx| {
+                                        if dragged_distance < 4. {
+                                            manager.send_tap(from.0, from.1, cx);
+                                        } else {
+                                            let duration = pointer
+                                                .started_at
+                                                .elapsed()
+                                                .clamp(
+                                                    Duration::from_millis(50),
+                                                    Duration::from_millis(800),
+                                                );
+                                            manager.send_swipe(from, to, duration, cx);
+                                        }
+                                    });
+                                }),
+                            ),
+                        _ => this.child(
+                            v_flex()
+                                .size_full()
+                                .items_center()
+                                .justify_center()
+                                .gap_2()
+                                .child(
+                                    Icon::new(IconName::ArrowCircle)
+                                        .size(IconSize::XLarge)
+                                        .color(Color::Muted)
+                                        .with_rotate_animation(2),
+                                )
+                                .child(Label::new("Conectando à tela do emulador…")),
+                        ),
+                    })
+                    .child(
+                        canvas(
+                            {
+                                let sidebar = cx.weak_entity();
+                                move |bounds, _, cx| {
+                                    sidebar
+                                        .update(cx, |this, _| {
+                                            this.android_screen_bounds = Some(bounds);
+                                        })
+                                        .log_err();
+                                }
+                            },
+                            |_, _, _, _| {},
+                        )
+                        .absolute()
+                        .inset_0()
+                        .size_full(),
+                    ),
+            )
+    }
+
+    fn render_android_devices(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let state = self
+            .android_sdk_manager
+            .as_ref()
+            .map(|manager| manager.read(cx).state().clone())
+            .unwrap_or(AndroidSdkState::Unknown);
+
+        let spinner = || {
+            Icon::new(IconName::ArrowCircle)
+                .size(IconSize::XLarge)
+                .color(Color::Muted)
+                .with_rotate_animation(2)
+        };
+        let base = v_flex()
+            .flex_1()
+            .min_h_0()
+            .items_center()
+            .justify_center()
+            .gap_2()
+            .p_4();
+
+        match state {
+            AndroidSdkState::Unknown => base
+                .child(spinner())
+                .child(Label::new("Verificando o Android SDK…")),
+            AndroidSdkState::NotInstalled => base
+                .child(Icon::new(IconName::Screen).size(IconSize::XLarge))
+                .child(Label::new("Emulador Android não instalado"))
+                .child(
+                    Label::new(
+                        "O Zed pode baixar o JDK e o Android SDK e criar um dispositivo virtual automaticamente.",
+                    )
+                    .size(LabelSize::Small)
+                    .color(Color::Muted),
+                )
+                .child(
+                    Button::new("install-android-sdk", "Instalar Android SDK")
+                        .style(ButtonStyle::Filled)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.with_android_sdk_manager(cx, |manager, cx| manager.install(cx));
+                        })),
+                ),
+            AndroidSdkState::Installing(step) => {
+                let progress = step.progress.map(|(downloaded, total)| {
+                    let downloaded_mb = downloaded / (1024 * 1024);
+                    if total > 0 {
+                        format!("{downloaded_mb} MB de {} MB", total / (1024 * 1024))
+                    } else {
+                        format!("{downloaded_mb} MB baixados")
+                    }
+                });
+                base.child(spinner())
+                    .child(Label::new(step.label))
+                    .when_some(progress, |this, progress| {
+                        this.child(
+                            Label::new(progress)
+                                .size(LabelSize::Small)
+                                .color(Color::Muted),
+                        )
+                    })
+            }
+            AndroidSdkState::Installed => base
+                .child(Icon::new(IconName::Screen).size(IconSize::XLarge))
+                .child(Label::new("Android SDK instalado"))
+                .child(
+                    Label::new("Falta criar o dispositivo virtual para usar o emulador.")
+                        .size(LabelSize::Small)
+                        .color(Color::Muted),
+                )
+                .child(
+                    Button::new("create-android-avd", "Criar dispositivo virtual")
+                        .style(ButtonStyle::Filled)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.with_android_sdk_manager(cx, |manager, cx| manager.create_avd(cx));
+                        })),
+                ),
+            AndroidSdkState::AvdReady => base
+                .child(Icon::new(IconName::Screen).size(IconSize::XLarge))
+                .child(Label::new("Dispositivo virtual pronto"))
+                .child(
+                    Button::new("boot-android-emulator", "Iniciar emulador")
+                        .style(ButtonStyle::Filled)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.with_android_sdk_manager(cx, |manager, cx| {
+                                manager.boot_emulator(cx)
+                            });
+                        })),
+                ),
+            AndroidSdkState::EmulatorBooting => base
+                .child(spinner())
+                .child(Label::new("Iniciando o emulador Android…"))
+                .child(
+                    Label::new("Isso pode levar alguns minutos na primeira inicialização.")
+                        .size(LabelSize::Small)
+                        .color(Color::Muted),
+                ),
+            AndroidSdkState::EmulatorRunning { .. } => self.render_android_emulator_screen(cx),
+            AndroidSdkState::Failed(message) => base
+                .child(
+                    Label::new(message)
+                        .size(LabelSize::Small)
+                        .color(Color::Error),
+                )
+                .child(
+                    Button::new("retry-android-sdk", "Tentar novamente").on_click(cx.listener(
+                        |this, _, _, cx| {
+                            this.with_android_sdk_manager(cx, |manager, cx| manager.refresh(cx));
+                        },
+                    )),
+                ),
+        }
+    }
+
+    fn render_devices_view(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let is_android = self.device_platform == DevicePlatform::Android;
+
+        v_flex()
+            .flex_1()
+            .min_h_0()
+            .overflow_hidden()
+            .child(
+                h_flex()
+                    .id("device-platform-tabs")
+                    .w_full()
+                    .flex_shrink_0()
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .id("device-tab-android")
+                            .flex_1()
+                            .min_w_0()
+                            .cursor_pointer()
+                            .child(
+                                Tab::new("device-tab-android-tab")
+                                    .position(TabPosition::First)
+                                    .toggle_state(is_android)
+                                    .start_slot::<AnyElement>(Some(
+                                        Icon::new(IconName::Screen)
+                                            .size(IconSize::Small)
+                                            .when(!is_android, |i| i.color(Color::Muted))
+                                            .into_any_element(),
+                                    ))
+                                    .child("Android"),
+                            )
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.hide_ios_simulator_view(window);
+                                this.device_platform = DevicePlatform::Android;
+                                this.ensure_android_sdk_manager(cx);
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        div()
+                            .id("device-tab-ios")
+                            .flex_1()
+                            .min_w_0()
+                            .cursor_pointer()
+                            .child(
+                                Tab::new("device-tab-ios-tab")
+                                    .position(TabPosition::Last)
+                                    .toggle_state(!is_android)
+                                    .start_slot::<AnyElement>(Some(
+                                        Icon::new(IconName::Screen)
+                                            .size(IconSize::Small)
+                                            .when(is_android, |i| i.color(Color::Muted))
+                                            .into_any_element(),
+                                    ))
+                                    .child("iOS"),
+                            )
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.device_platform = DevicePlatform::Ios;
+                                this.refresh_ios_devices(window, cx);
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .when(is_android, |this| {
+                        this.child(self.render_android_devices(cx))
+                    })
+                    .when(!is_android, |this| {
+                        this.child(self.render_ios_simulator(window, cx))
+                    }),
+            )
+    }
+
+    fn spawn_ios_terminal_task(
+        &mut self,
+        workspace: &Entity<Workspace>,
+        task_name: &str,
+        label: &str,
+        command: &str,
+        arguments: Vec<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let project = workspace.read(cx).project().clone();
+        if !project.read(cx).is_local() {
+            self.ios_simulator_error =
+                Some("Os comandos do simulador iOS exigem um projeto local.".into());
+            cx.notify();
+            return;
+        }
+        let Some(project_directory) = project
+            .read(cx)
+            .active_project_directory(cx)
+            .map(|path| path.to_path_buf())
+        else {
+            self.ios_simulator_error =
+                Some("Não foi possível determinar a pasta do projeto ativo.".into());
+            cx.notify();
+            return;
+        };
+
+        let command_label = std::iter::once(command)
+            .chain(arguments.iter().map(String::as_str))
+            .join(" ");
+        let task = SpawnInTerminal {
+            id: TaskId(format!("ios-{task_name}-{}", project_directory.display())),
+            full_label: label.to_owned(),
+            label: label.to_owned(),
+            command: Some(command.to_owned()),
+            args: arguments,
+            command_label,
+            cwd: Some(project_directory),
+            env: HashMap::default(),
+            use_new_terminal: true,
+            allow_concurrent_runs: false,
+            reveal: RevealStrategy::Always,
+            reveal_target: RevealTarget::Dock,
+            hide: HideStrategy::Never,
+            shell: Shell::System,
+            show_summary: true,
+            show_command: true,
+            show_rerun: true,
+            save: SaveStrategy::None,
+        };
+
+        workspace.update(cx, |workspace, cx| {
+            workspace.spawn_in_terminal(task, window, cx).detach();
+        });
+        self.ios_simulator_error = None;
+        cx.notify();
+    }
+
+    fn build_expo_ios(
+        &mut self,
+        workspace: &Entity<Workspace>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(udid) = self.selected_ios_device_udid.clone() else {
+            self.ios_simulator_error =
+                Some("Selecione primeiro um simulador iOS inicializado.".into());
+            cx.notify();
+            return;
+        };
+
+        self.spawn_ios_terminal_task(
+            workspace,
+            "build",
+            "Compilar app iOS",
+            "yarn",
+            vec!["ios".to_owned(), "--device".to_owned(), udid],
+            window,
+            cx,
+        );
+    }
+
+    fn start_expo_ios(
+        &mut self,
+        workspace: &Entity<Workspace>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.selected_ios_device_udid.is_none() {
+            self.ios_simulator_error =
+                Some("Selecione primeiro um simulador iOS inicializado.".into());
+            cx.notify();
+            return;
+        }
+
+        self.spawn_ios_terminal_task(
+            workspace,
+            "start",
+            "Iniciar Expo no iOS",
+            "yarn",
+            vec!["expo".to_owned(), "start".to_owned()],
+            window,
+            cx,
+        );
+
+        let workspace = workspace.clone();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_secs(3)).await;
+            this.update_in(cx, |this, window, cx| {
+                this.launch_installed_expo_ios(&workspace, window, cx);
+            })
+        })
+        .detach_and_log_err(cx);
+    }
+
+    fn spawn_terminal_task(
+        &mut self,
+        workspace: &Entity<Workspace>,
+        platform: &str,
+        task_name: &str,
+        label: &str,
+        command: &str,
+        arguments: Vec<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let project = workspace.read(cx).project().clone();
+        if !project.read(cx).is_local() {
+            return;
+        }
+        let Some(project_directory) = project
+            .read(cx)
+            .active_project_directory(cx)
+            .map(|path| path.to_path_buf())
+        else {
+            return;
+        };
+
+        let command_label = std::iter::once(command)
+            .chain(arguments.iter().map(String::as_str))
+            .join(" ");
+        let task = SpawnInTerminal {
+            id: TaskId(format!("{platform}-{task_name}-{}", project_directory.display())),
+            full_label: label.to_owned(),
+            label: label.to_owned(),
+            command: Some(command.to_owned()),
+            args: arguments,
+            command_label,
+            cwd: Some(project_directory),
+            env: HashMap::default(),
+            use_new_terminal: true,
+            allow_concurrent_runs: false,
+            reveal: RevealStrategy::Always,
+            reveal_target: RevealTarget::Dock,
+            hide: HideStrategy::Never,
+            shell: Shell::System,
+            show_summary: true,
+            show_command: true,
+            show_rerun: true,
+            save: SaveStrategy::None,
+        };
+
+        workspace.update(cx, |workspace, cx| {
+            workspace.spawn_in_terminal(task, window, cx).detach();
+        });
+    }
+
+    fn build_expo_android(
+        &mut self,
+        workspace: &Entity<Workspace>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.spawn_terminal_task(
+            workspace,
+            "android",
+            "build",
+            "Compilar app Android",
+            "yarn",
+            vec!["android".to_owned()],
+            window,
+            cx,
+        );
+    }
+
+    fn start_expo_android(
+        &mut self,
+        workspace: &Entity<Workspace>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.spawn_terminal_task(
+            workspace,
+            "android",
+            "start",
+            "Iniciar Expo no Android",
+            "yarn",
+            vec!["expo".to_owned(), "start".to_owned(), "--android".to_owned()],
+            window,
+            cx,
+        );
+    }
+
+    fn reload_android_app(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        self.with_android_sdk_manager(cx, |manager, cx| {
+            manager.send_keyevent(82, cx); // KEYCODE_MENU opens Expo dev menu / reload
+        });
+    }
+
+    fn return_ios_simulator_to_home(
+        &mut self,
+        workspace: &Entity<Workspace>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(udid) = self.selected_ios_device_udid.clone() else {
+            self.ios_simulator_error =
+                Some("Selecione primeiro um simulador iOS inicializado.".into());
+            cx.notify();
+            return;
+        };
+        let project = workspace.read(cx).project().clone();
+        let Some(project_directory) = project
+            .read(cx)
+            .active_project_directory(cx)
+            .map(|path| path.to_path_buf())
+        else {
+            self.ios_simulator_error =
+                Some("Não foi possível determinar a pasta do projeto ativo.".into());
+            cx.notify();
+            return;
+        };
+        let fs = project.read(cx).fs().clone();
+        let this = cx.weak_entity();
+        let workspace = workspace.clone();
+
+        window
+            .spawn(cx, async move |cx| {
+                let result = async {
+                    let bundle_identifier =
+                        resolve_expo_bundle_identifier(fs, project_directory).await?;
+                    let output = smol::process::Command::new("xcrun")
+                        .args(["simctl", "terminate", &udid, &bundle_identifier])
+                        .output()
+                        .await
+                        .context("failed to return the iOS simulator to its Home screen")?;
+                    anyhow::ensure!(
+                        output.status.success(),
+                        "xcrun simctl terminate failed: {}",
+                        String::from_utf8_lossy(&output.stderr).trim()
+                    );
+                    anyhow::Ok(bundle_identifier)
+                }
+                .await;
+
+                this.update_in(cx, |this, _window, cx| match result {
+                    Ok(bundle_identifier) => {
+                        this.ios_simulator_error = None;
+                        workspace.update(cx, |workspace, cx| {
+                            struct ReturnIosSimulatorHomeSuccessToast;
+                            workspace.show_toast(
+                                Toast::new(
+                                    NotificationId::unique::<ReturnIosSimulatorHomeSuccessToast>(),
+                                    format!("{bundle_identifier} fechado no simulador iOS"),
+                                )
+                                .autohide(),
+                                cx,
+                            );
+                        });
+                        cx.notify();
+                    }
+                    Err(error) => {
+                        let message = format!(
+                            "Não foi possível retornar o simulador iOS à tela inicial: {error:#}"
+                        );
+                        this.ios_simulator_error = Some(message.clone().into());
+                        workspace.update(cx, |workspace, cx| {
+                            struct ReturnIosSimulatorHomeErrorToast;
+                            workspace.show_toast(
+                                Toast::new(
+                                    NotificationId::unique::<ReturnIosSimulatorHomeErrorToast>(),
+                                    message,
+                                )
+                                .autohide(),
+                                cx,
+                            );
+                        });
+                        cx.notify();
+                    }
+                })
+                .log_err();
+            })
+            .detach();
+    }
+
+    fn launch_installed_expo_ios(
+        &mut self,
+        workspace: &Entity<Workspace>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(udid) = self.selected_ios_device_udid.clone() else {
+            self.ios_simulator_error =
+                Some("Selecione primeiro um simulador iOS inicializado.".into());
+            cx.notify();
+            return;
+        };
+        let project = workspace.read(cx).project().clone();
+        let Some(project_directory) = project
+            .read(cx)
+            .active_project_directory(cx)
+            .map(|path| path.to_path_buf())
+        else {
+            return;
+        };
+        let fs = project.read(cx).fs().clone();
+        let this = cx.weak_entity();
+        let workspace = workspace.clone();
+
+        window
+            .spawn(cx, async move |cx| {
+                let result = async {
+                    let bundle_identifier =
+                        resolve_expo_bundle_identifier(fs, project_directory).await?;
+                    // Terminate is best-effort — the app may not be running.
+                    let _ = smol::process::Command::new("xcrun")
+                        .args(["simctl", "terminate", &udid, &bundle_identifier])
+                        .output()
+                        .await;
+                    cx.background_executor()
+                        .timer(Duration::from_millis(500))
+                        .await;
+                    let output = smol::process::Command::new("xcrun")
+                        .args(["simctl", "launch", &udid, &bundle_identifier])
+                        .output()
+                        .await
+                        .context("failed to launch the installed iOS app")?;
+                    anyhow::ensure!(
+                        output.status.success(),
+                        "xcrun simctl launch failed: {}",
+                        String::from_utf8_lossy(&output.stderr).trim()
+                    );
+                    anyhow::Ok(bundle_identifier)
+                }
+                .await;
+
+                this.update_in(cx, |this, _window, cx| match result {
+                    Ok(bundle_identifier) => {
+                        this.ios_simulator_error = None;
+                        workspace.update(cx, |workspace, cx| {
+                            struct LaunchInstalledIosAppSuccessToast;
+                            workspace.show_toast(
+                                Toast::new(
+                                    NotificationId::unique::<LaunchInstalledIosAppSuccessToast>(),
+                                    format!("{bundle_identifier} aberto no simulador iOS"),
+                                )
+                                .autohide(),
+                                cx,
+                            );
+                        });
+                        cx.notify();
+                    }
+                    Err(error) => {
+                        let message =
+                            format!("Não foi possível abrir o app iOS instalado: {error:#}");
+                        this.ios_simulator_error = Some(message.clone().into());
+                        workspace.update(cx, |workspace, cx| {
+                            struct LaunchInstalledIosAppErrorToast;
+                            workspace.show_toast(
+                                Toast::new(
+                                    NotificationId::unique::<LaunchInstalledIosAppErrorToast>(),
+                                    message,
+                                )
+                                .autohide(),
+                                cx,
+                            );
+                        });
+                        cx.notify();
+                    }
+                })
+                .log_err();
+            })
+            .detach();
+    }
+
+    fn screenshot_ios_simulator(
+        &mut self,
+        workspace: &Entity<Workspace>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(udid) = self.selected_ios_device_udid.clone() else {
+            self.ios_simulator_error =
+                Some("Selecione primeiro um simulador iOS inicializado.".into());
+            cx.notify();
+            return;
+        };
+        let workspace = workspace.clone();
+        let this = cx.weak_entity();
+
+        window
+            .spawn(cx, async move |cx| {
+                let tmp_path = std::env::temp_dir().join("zed_simulator_screenshot.png");
+
+                let screenshot_result = smol::process::Command::new("xcrun")
+                    .args([
+                        "simctl",
+                        "io",
+                        &udid,
+                        "screenshot",
+                        &tmp_path.to_string_lossy(),
+                    ])
+                    .output()
+                    .await;
+
+                let result = match screenshot_result {
+                    Ok(output) if output.status.success() => {
+                        let copy_result = smol::process::Command::new("osascript")
+                            .args([
+                                "-e",
+                                &format!(
+                                    "set the clipboard to (read (POSIX file \"{}\") as «class PNGf»)",
+                                    tmp_path.to_string_lossy()
+                                ),
+                            ])
+                            .output()
+                            .await;
+                        match copy_result {
+                            Ok(o) if o.status.success() => Ok(()),
+                            Ok(o) => Err(anyhow::anyhow!(
+                                "Falha ao copiar para clipboard: {}",
+                                String::from_utf8_lossy(&o.stderr).trim()
+                            )),
+                            Err(e) => Err(anyhow::anyhow!("Falha ao copiar para clipboard: {e:#}")),
+                        }
+                    }
+                    Ok(output) => Err(anyhow::anyhow!(
+                        "xcrun simctl screenshot failed: {}",
+                        String::from_utf8_lossy(&output.stderr).trim()
+                    )),
+                    Err(e) => Err(anyhow::anyhow!("Falha ao tirar screenshot: {e:#}")),
+                };
+
+                this.update_in(cx, |this, _window, cx| match result {
+                    Ok(()) => {
+                        this.ios_simulator_error = None;
+                        workspace.update(cx, |workspace, cx| {
+                            struct ScreenshotIosSuccessToast;
+                            workspace.show_toast(
+                                Toast::new(
+                                    NotificationId::unique::<ScreenshotIosSuccessToast>(),
+                                    "Screenshot copiado para a área de transferência",
+                                )
+                                .autohide(),
+                                cx,
+                            );
+                        });
+                        cx.notify();
+                    }
+                    Err(error) => {
+                        this.ios_simulator_error =
+                            Some(format!("{error:#}").into());
+                        cx.notify();
+                    }
+                })
+                .log_err();
+            })
+            .detach();
+    }
+
     fn show_archive(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.hide_ios_simulator_view(window);
         let side = match self.side(cx) {
             SidebarSide::Left => "left",
             SidebarSide::Right => "right",
@@ -7878,12 +9366,145 @@ impl Sidebar {
     }
 
     fn show_thread_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.hide_ios_simulator_view(window);
         self.view = SidebarView::ThreadList;
         self._subscriptions.clear();
         let handle = self.filter_editor.read(cx).focus_handle(cx);
         handle.focus(window, cx);
         self.serialize(cx);
         cx.notify();
+    }
+}
+
+#[cfg(target_os = "macos")]
+async fn discover_or_boot_ios_simulator() -> anyhow::Result<Vec<IosSimulatorDevice>> {
+    let output = smol::process::Command::new("xcrun")
+        .args(["simctl", "list", "devices", "available", "--json"])
+        .output()
+        .await
+        .context("failed to run xcrun simctl")?;
+    anyhow::ensure!(
+        output.status.success(),
+        "xcrun simctl failed: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+
+    let devices: SimctlDeviceList = serde_json::from_slice(&output.stdout)
+        .context("xcrun simctl returned invalid device data")?;
+    let mut available_devices: Vec<_> = devices
+        .devices
+        .into_iter()
+        .filter(|(runtime, _)| runtime.contains("SimRuntime.iOS"))
+        .flat_map(|(_, devices)| devices)
+        .collect();
+    available_devices.sort_by(|left, right| left.name.cmp(&right.name));
+
+    let booted_devices: Vec<_> = available_devices
+        .iter()
+        .filter(|device| device.state == "Booted")
+        .cloned()
+        .collect();
+    if !booted_devices.is_empty() {
+        return Ok(booted_devices);
+    }
+
+    let device = available_devices
+        .iter()
+        .find(|device| device.name == "iPhone 16e")
+        .or_else(|| {
+            available_devices
+                .iter()
+                .find(|device| device.name.starts_with("iPhone"))
+        })
+        .or_else(|| available_devices.first())
+        .context("no available iOS simulators were found")?;
+    let output = smol::process::Command::new("xcrun")
+        .args(["simctl", "boot", &device.udid])
+        .output()
+        .await
+        .context("failed to boot the default iOS simulator")?;
+    anyhow::ensure!(
+        output.status.success() || String::from_utf8_lossy(&output.stderr).contains("Booted"),
+        "xcrun simctl boot failed: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    let output = smol::process::Command::new("xcrun")
+        .args(["simctl", "bootstatus", &device.udid, "-b"])
+        .output()
+        .await
+        .context("failed while waiting for the iOS simulator to boot")?;
+    anyhow::ensure!(
+        output.status.success(),
+        "xcrun simctl bootstatus failed: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+
+    Ok(vec![IosSimulatorDevice {
+        name: device.name.clone(),
+        udid: device.udid.clone(),
+        state: "Booted".to_owned(),
+    }])
+}
+
+fn expo_bundle_identifier(app_config: &serde_json::Value) -> anyhow::Result<String> {
+    let expo_config = app_config.get("expo").unwrap_or(app_config);
+    expo_config
+        .pointer("/ios/bundleIdentifier")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .context("Expo app configuration is missing ios.bundleIdentifier")
+}
+
+async fn resolve_expo_bundle_identifier(
+    fs: Arc<dyn Fs>,
+    project_directory: PathBuf,
+) -> anyhow::Result<String> {
+    let app_config_typescript_path = project_directory.join("app.config.ts");
+    let app_config_javascript_path = project_directory.join("app.config.js");
+    let app_json_path = project_directory.join("app.json");
+    let (app_config_path, is_json_config) = if fs.is_file(&app_config_typescript_path).await {
+        (app_config_typescript_path, false)
+    } else if fs.is_file(&app_config_javascript_path).await {
+        (app_config_javascript_path, false)
+    } else if fs.is_file(&app_json_path).await {
+        (app_json_path, true)
+    } else {
+        anyhow::bail!(
+            "não foi possível encontrar app.config.ts, app.config.js ou app.json em {}",
+            project_directory.display()
+        );
+    };
+
+    if is_json_config {
+        let app_config = fs
+            .load(&app_config_path)
+            .await
+            .with_context(|| format!("não foi possível ler {}", app_config_path.display()))?;
+        let app_config: serde_json::Value =
+            serde_json::from_str(&app_config).context("não foi possível analisar o app.json")?;
+        expo_bundle_identifier(&app_config)
+    } else {
+        let expo_cli_path = project_directory.join("node_modules/.bin/expo");
+        anyhow::ensure!(
+            fs.is_file(&expo_cli_path).await,
+            "não foi possível encontrar o Expo CLI local em {}; instale as dependências do projeto primeiro",
+            expo_cli_path.display()
+        );
+        let output = smol::process::Command::new(&expo_cli_path)
+            .current_dir(&project_directory)
+            .args(["config", "--json"])
+            .output()
+            .await
+            .with_context(|| format!("não foi possível avaliar {}", app_config_path.display()))?;
+        anyhow::ensure!(
+            output.status.success(),
+            "o Expo não conseguiu avaliar {}: {}",
+            app_config_path.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+        let app_config: serde_json::Value = serde_json::from_slice(&output.stdout)
+            .context("o Expo retornou uma configuração JSON inválida")?;
+        expo_bundle_identifier(&app_config)
     }
 }
 
@@ -7965,6 +9586,16 @@ impl WorkspaceSidebar for Sidebar {
         matches!(self.view, SidebarView::ThreadList)
     }
 
+    fn show_devices(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.devices_only {
+            self.show_devices_view(window, cx);
+        }
+    }
+
+    fn on_close(&mut self, window: &mut Window, _cx: &mut Context<Self>) {
+        self.hide_ios_simulator_view(window);
+    }
+
     fn side(&self, cx: &App) -> SidebarSide {
         AgentSettings::get_global(cx).sidebar_side()
     }
@@ -7997,6 +9628,7 @@ impl WorkspaceSidebar for Sidebar {
             active_view: match self.view {
                 SidebarView::ThreadList => SerializedSidebarView::ThreadList,
                 SidebarView::Archive(_) => SerializedSidebarView::History,
+                SidebarView::Devices => SerializedSidebarView::Devices,
             },
         };
         serde_json::to_string(&serialized).ok()
@@ -8012,10 +9644,19 @@ impl WorkspaceSidebar for Sidebar {
             if let Some(width) = serialized.width {
                 self.width = px(width).clamp(MIN_WIDTH, MAX_WIDTH);
             }
-            if serialized.active_view == SerializedSidebarView::History {
-                cx.defer_in(window, |this, window, cx| {
-                    this.show_archive(window, cx);
-                });
+            match serialized.active_view {
+                SerializedSidebarView::History => {
+                    cx.defer_in(window, |this, window, cx| {
+                        this.show_archive(window, cx);
+                    });
+                }
+                SerializedSidebarView::Devices if self.devices_only => {
+                    self.show_devices_view(window, cx)
+                }
+                SerializedSidebarView::Devices => {
+                    self.view = SidebarView::ThreadList;
+                }
+                SerializedSidebarView::ThreadList => {}
             }
         }
         cx.notify();
@@ -8023,6 +9664,106 @@ impl WorkspaceSidebar for Sidebar {
 }
 
 impl gpui::EventEmitter<workspace::SidebarEvent> for Sidebar {}
+impl gpui::EventEmitter<PanelEvent> for Sidebar {}
+
+impl Panel for Sidebar {
+    fn persistent_name() -> &'static str {
+        "DevicesPanel"
+    }
+
+    fn panel_key() -> &'static str {
+        "devices_panel"
+    }
+
+    fn position(&self, _window: &Window, cx: &App) -> DockPosition {
+        if self.devices_only {
+            DockPosition::Devices
+        } else {
+            match AgentSettings::get_global(cx).sidebar_side() {
+                SidebarSide::Left => DockPosition::Left,
+                SidebarSide::Right => DockPosition::Right,
+            }
+        }
+    }
+
+    fn position_is_valid(&self, position: DockPosition) -> bool {
+        if self.devices_only {
+            position == DockPosition::Devices
+        } else {
+            matches!(position, DockPosition::Left | DockPosition::Right)
+        }
+    }
+
+    fn set_position(
+        &mut self,
+        position: DockPosition,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.devices_only {
+            return;
+        }
+
+        let side = match position {
+            DockPosition::Left => settings::SidebarDockPosition::Left,
+            DockPosition::Bottom | DockPosition::Devices | DockPosition::Right => {
+                settings::SidebarDockPosition::Right
+            }
+        };
+        let fs = <dyn Fs>::global(cx);
+        settings::update_settings_file(fs, cx, move |settings, _cx| {
+            settings
+                .agent
+                .get_or_insert_default()
+                .set_sidebar_side(side);
+        });
+    }
+
+    fn default_size(&self, _window: &Window, _cx: &App) -> Pixels {
+        if self.devices_only {
+            px(420.0)
+        } else {
+            DEFAULT_WIDTH
+        }
+    }
+
+    fn min_size(&self, _window: &Window, _cx: &App) -> Option<Pixels> {
+        Some(MIN_WIDTH)
+    }
+
+    fn initial_size_state(&self, _window: &Window, _cx: &App) -> PanelSizeState {
+        PanelSizeState {
+            size: Some(self.width),
+            flex: None,
+        }
+    }
+
+    fn set_active(&mut self, active: bool, window: &mut Window, _cx: &mut Context<Self>) {
+        if !active {
+            self.hide_ios_simulator_view(window);
+        }
+    }
+
+    fn icon(&self, _window: &Window, _cx: &App) -> Option<IconName> {
+        self.devices_only.then_some(IconName::Screen)
+    }
+
+    fn icon_tooltip(&self, _window: &Window, _cx: &App) -> Option<&'static str> {
+        self.devices_only.then_some("Devices")
+    }
+
+    fn toggle_action(&self) -> Box<dyn gpui::Action> {
+        Box::new(OpenDevices)
+    }
+
+    fn activation_priority(&self) -> u32 {
+        4
+    }
+
+    fn enabled(&self, cx: &App) -> bool {
+        AgentSettings::get_global(cx).enabled(cx)
+    }
+}
 
 impl Focusable for Sidebar {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
@@ -8032,14 +9773,11 @@ impl Focusable for Sidebar {
 
 impl Render for Sidebar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let _titlebar_height = ui::utils::platform_title_bar_height(window);
         let ui_font = theme_settings::setup_ui_font(window, cx);
+        self.track_android_rendered_frame(window, cx);
         let sticky_header = self.render_sticky_header(window, cx);
 
         let color = cx.theme().colors();
-        let bg = color
-            .title_bar_background
-            .blend(color.panel_background.opacity(0.25));
 
         let no_open_projects = !self.contents.has_open_projects;
         let no_search_results = self.contents.entries.is_empty();
@@ -8076,52 +9814,9 @@ impl Render for Sidebar {
                 this.recent_projects_popover_handle.toggle(window, cx);
             }))
             .font(ui_font)
-            .map(|el| {
-                let on_left = self.side(cx) == SidebarSide::Left;
-                match window.window_decorations() {
-                    Decorations::Server => el.h_full().w(self.width),
-                    // With client-side decorations the sidebar owns the window
-                    // corners on its side, so round them like the title bar and
-                    // status bar do. The sidebar is stretched 1px outwards over
-                    // the window border on untiled edges (with compensating
-                    // padding) so its rounded background lines up exactly with
-                    // the window shape, avoiding a transparent gap in the
-                    // rounded corners.
-                    Decorations::Client { tiling, .. } => el
-                        .absolute()
-                        .top(if tiling.top { px(0.) } else { px(-1.) })
-                        .bottom(if tiling.bottom { px(0.) } else { px(-1.) })
-                        .when(!tiling.top, |el| el.pt_px())
-                        .when(!tiling.bottom, |el| el.pb_px())
-                        .map(|el| {
-                            if on_left {
-                                el.right(px(0.))
-                                    .left(if tiling.left { px(0.) } else { px(-1.) })
-                                    .when(!tiling.left, |el| el.pl(px(1.)))
-                            } else {
-                                el.left(px(0.))
-                                    .right(if tiling.right { px(0.) } else { px(-1.) })
-                                    .when(!tiling.right, |el| el.pr(px(1.)))
-                            }
-                        })
-                        .when(on_left && !(tiling.top || tiling.left), |el| {
-                            el.rounded_tl(CLIENT_SIDE_DECORATION_ROUNDING)
-                        })
-                        .when(on_left && !(tiling.bottom || tiling.left), |el| {
-                            el.rounded_bl(CLIENT_SIDE_DECORATION_ROUNDING)
-                        })
-                        .when(!on_left && !(tiling.top || tiling.right), |el| {
-                            el.rounded_tr(CLIENT_SIDE_DECORATION_ROUNDING)
-                        })
-                        .when(!on_left && !(tiling.bottom || tiling.right), |el| {
-                            el.rounded_br(CLIENT_SIDE_DECORATION_ROUNDING)
-                        }),
-                }
-            })
-            .bg(bg)
-            .when(self.side(cx) == SidebarSide::Left, |el| el.border_r_1())
-            .when(self.side(cx) == SidebarSide::Right, |el| el.border_l_1())
-            .border_color(color.border)
+            .size_full()
+            .overflow_hidden()
+            .bg(color.panel_background)
             .map(|this| match &self.view {
                 SidebarView::ThreadList => this
                     .child(self.render_sidebar_header(no_open_projects, window, cx))
@@ -8156,8 +9851,13 @@ impl Render for Sidebar {
                         }
                     }),
                 SidebarView::Archive(archive_view) => this.child(archive_view.clone()),
+                SidebarView::Devices => this.child(self.render_devices_view(window, cx)),
             })
             .map(|this| {
+                if matches!(self.view, SidebarView::Devices) {
+                    return this;
+                }
+
                 let show_acp = self.should_render_acp_import_onboarding(cx);
                 let show_cross_channel = self.should_render_cross_channel_import_onboarding(cx);
 

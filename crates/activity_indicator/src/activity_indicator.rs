@@ -3,8 +3,8 @@ use editor::Editor;
 use extension_host::{ExtensionOperation, ExtensionStore};
 use futures::StreamExt;
 use gpui::{
-    App, Context, Entity, EventEmitter, InteractiveElement as _, ParentElement as _, Render,
-    SharedString, Styled, Window, actions,
+    App, Context, Entity, EventEmitter, InteractiveElement as _, ParentElement as _, Pixels,
+    Render, SharedString, Styled, Window, actions, px,
 };
 use language::{
     BinaryStatus, LanguageRegistry, LanguageServerId, LanguageServerName,
@@ -644,6 +644,7 @@ impl ActivityIndicator {
 impl EventEmitter<Event> for ActivityIndicator {}
 
 const MAX_MESSAGE_LEN: usize = 50;
+const ACTIVITY_INDICATOR_WIDTH: Pixels = px(200.0);
 
 impl Render for ActivityIndicator {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -671,6 +672,8 @@ impl Render for ActivityIndicator {
                         }
                     })
                     .label_size(LabelSize::Small)
+                    .width(ACTIVITY_INDICATOR_WIDTH)
+                    .truncate(true)
                     .tab_index(0isize)
                     .map(|this| match content.icon {
                         ActivityIcon::LoadingSpinner => this.loading(true),

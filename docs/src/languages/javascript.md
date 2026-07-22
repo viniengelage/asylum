@@ -54,6 +54,41 @@ Configure formatting in Settings ({#kb zed::OpenSettings}) under Languages > Jav
 }
 ```
 
+## React Native and Expo debugging
+
+Zed includes the `React Native / Expo` debug adapter for attaching to a Hermes runtime exposed by Metro. It uses the same Debug Adapter Protocol server as the built-in JavaScript debugger and supports breakpoints, stepping, variables, and Metro source maps.
+
+On macOS, the iOS device sidebar provides an **Iniciar Expo e depurar o app iOS** button. It starts Expo, opens the installed app in the selected embedded iOS Simulator, then attaches the debugger to Metro's Hermes Inspector on port `8081`.
+
+The app must use Hermes, which is the default JavaScript engine for Expo. Metro must be reachable from Zed; the adapter discovers the connected Hermes target through Metro's `/json/list` endpoint and reconnects after Fast Refresh by default.
+
+To attach manually to an existing Metro instance, add this to `.zed/debug.json`:
+
+```json [debug]
+[
+  {
+    "label": "Attach Expo Hermes",
+    "adapter": "React Native / Expo",
+    "request": "attach",
+    "address": "127.0.0.1",
+    "port": 8081
+  }
+]
+```
+
+When more than one app is connected to Metro, provide the exact Inspector WebSocket returned by `http://127.0.0.1:8081/json/list`:
+
+```json [debug]
+[
+  {
+    "label": "Attach Expo Hermes",
+    "adapter": "React Native / Expo",
+    "request": "attach",
+    "websocketAddress": "ws://127.0.0.1:8081/inspector/debug?device=0&page=2"
+  }
+]
+```
+
 ## JSX
 
 Zed supports JSX syntax highlighting out of the box.

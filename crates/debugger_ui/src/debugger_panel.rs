@@ -1482,8 +1482,8 @@ impl Panel for DebugPanel {
         DebuggerSettings::get_global(cx).dock.into()
     }
 
-    fn position_is_valid(&self, _: DockPosition) -> bool {
-        true
+    fn position_is_valid(&self, position: DockPosition) -> bool {
+        position != DockPosition::Devices
     }
 
     fn set_position(
@@ -1740,7 +1740,17 @@ impl Render for DebugPanel {
             })
             .map(|this| {
                 if let Some(active_session) = self.active_session.clone() {
-                    this.child(active_session)
+                    this.child(
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .mx_3()
+                            .mb_3()
+                            .border_1()
+                            .border_color(cx.theme().colors().border)
+                            .overflow_hidden()
+                            .child(active_session),
+                    )
                 } else {
                     let docked_to_bottom = self.position(window, cx) == DockPosition::Bottom;
 
@@ -1857,32 +1867,42 @@ impl Render for DebugPanel {
                         });
 
                     this.child(
-                        v_flex()
-                            .size_full()
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .mx_3()
+                            .mb_3()
+                            .border_1()
+                            .border_color(cx.theme().colors().border)
                             .overflow_hidden()
-                            .gap_1()
-                            .items_center()
-                            .justify_center()
-                            .map(|this| {
-                                if docked_to_bottom {
-                                    this.child(
-                                        h_flex()
-                                            .size_full()
-                                            .child(breakpoint_list)
-                                            .child(Divider::vertical().h_full())
-                                            .child(welcome_experience)
-                                            .child(Divider::vertical().h_full()),
-                                    )
-                                } else {
-                                    this.child(
-                                        v_flex()
-                                            .size_full()
-                                            .child(welcome_experience)
-                                            .child(Divider::horizontal())
-                                            .child(breakpoint_list),
-                                    )
-                                }
-                            }),
+                            .child(
+                                v_flex()
+                                    .size_full()
+                                    .overflow_hidden()
+                                    .gap_1()
+                                    .items_center()
+                                    .justify_center()
+                                    .map(|this| {
+                                        if docked_to_bottom {
+                                            this.child(
+                                                h_flex()
+                                                    .size_full()
+                                                    .child(breakpoint_list)
+                                                    .child(Divider::vertical().h_full())
+                                                    .child(welcome_experience)
+                                                    .child(Divider::vertical().h_full()),
+                                            )
+                                        } else {
+                                            this.child(
+                                                v_flex()
+                                                    .size_full()
+                                                    .child(welcome_experience)
+                                                    .child(Divider::horizontal())
+                                                    .child(breakpoint_list),
+                                            )
+                                        }
+                                    }),
+                            ),
                     )
                 }
             })

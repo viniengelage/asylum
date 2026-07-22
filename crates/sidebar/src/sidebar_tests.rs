@@ -231,8 +231,8 @@ fn setup_sidebar_closed(
     let multi_workspace = multi_workspace.clone();
     let sidebar =
         cx.update(|window, cx| cx.new(|cx| Sidebar::new(multi_workspace.clone(), window, cx)));
-    multi_workspace.update(cx, |mw, cx| {
-        mw.register_sidebar(sidebar.clone(), cx);
+    multi_workspace.update_in(cx, |mw, window, cx| {
+        mw.register_sidebar(sidebar.clone(), window, cx);
     });
     cx.run_until_parked();
     sidebar

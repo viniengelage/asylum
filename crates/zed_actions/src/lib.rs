@@ -75,6 +75,10 @@ actions!(
         OpenStatusPage,
         /// Opens the Zed merch store.
         GetMerch,
+        /// Sign in with Claude Pro/Max subscription (OAuth).
+        ClaudeOAuthSignIn,
+        /// Sign out of Claude Pro/Max subscription (OAuth).
+        ClaudeOAuthSignOut,
         /// Opens the telemetry log.
         OpenTelemetryLog,
         /// Opens the performance profiler.

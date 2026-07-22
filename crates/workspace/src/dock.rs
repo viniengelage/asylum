@@ -17,8 +17,8 @@ use serde::{Deserialize, Serialize};
 use settings::{Settings, SettingsStore, TerminalDockPosition};
 use std::sync::Arc;
 use ui::{
-    ContextMenu, CountBadge, Divider, DividerColor, Icon, IconButton, IconSize, Tooltip,
-    prelude::*, right_click_menu,
+    ContextMenu, CountBadge, Divider, DividerColor, Icon, IconButton, IconSize, Tab, TabPosition,
+    Tooltip, prelude::*, right_click_menu,
 };
 use util::ResultExt as _;
 
@@ -129,13 +129,14 @@ pub trait PanelHandle: Send + Sync {
         let next_position = [
             DockPosition::Left,
             DockPosition::Bottom,
+            DockPosition::Devices,
             DockPosition::Right,
         ]
         .into_iter()
         .filter(|position| self.position_is_valid(*position, cx))
         .skip_while(|valid_position| *valid_position != current_position)
         .nth(1)
-        .unwrap_or(DockPosition::Left);
+        .unwrap_or(current_position);
 
         self.set_position(next_position, window, cx);
     }
@@ -290,6 +291,7 @@ impl Focusable for Dock {
 pub enum DockPosition {
     Left,
     Bottom,
+    Devices,
     Right,
 }
 
@@ -308,7 +310,8 @@ impl Into<settings::DockPosition> for DockPosition {
         match self {
             Self::Left => settings::DockPosition::Left,
             Self::Bottom => settings::DockPosition::Bottom,
-            Self::Right => settings::DockPosition::Right,
+            // Devices is an internal-only position and has no user-settings equivalent.
+            Self::Devices | Self::Right => settings::DockPosition::Right,
         }
     }
 }
@@ -328,13 +331,14 @@ impl DockPosition {
         match self {
             Self::Left => "Left",
             Self::Bottom => "Bottom",
+            Self::Devices => "Devices",
             Self::Right => "Right",
         }
     }
 
     pub fn axis(&self) -> Axis {
         match self {
-            Self::Left | Self::Right => Axis::Horizontal,
+            Self::Left | Self::Devices | Self::Right => Axis::Horizontal,
             Self::Bottom => Axis::Vertical,
         }
     }
@@ -615,6 +619,7 @@ impl Dock {
                         match new_position {
                             DockPosition::Left => &workspace.left_dock,
                             DockPosition::Bottom => &workspace.bottom_dock,
+                            DockPosition::Devices => &workspace.devices_dock,
                             DockPosition::Right => &workspace.right_dock,
                         }
                         .clone()
@@ -829,11 +834,27 @@ impl Dock {
 
     pub fn activate_panel(&mut self, panel_ix: usize, window: &mut Window, cx: &mut Context<Self>) {
         if Some(panel_ix) != self.active_panel_index {
+            // For the right dock, preserve the current width when switching tabs.
+            let previous_size = if self.position == DockPosition::Right {
+                self.active_panel_entry()
+                    .and_then(|entry| entry.size_state.size)
+            } else {
+                None
+            };
+
             if let Some(active_panel) = self.active_panel_entry() {
                 active_panel.panel.set_active(false, window, cx);
             }
 
             self.active_panel_index = Some(panel_ix);
+
+            // Apply the previous panel's width to the new panel.
+            if let Some(size) = previous_size {
+                if let Some(entry) = self.panel_entries.get_mut(panel_ix) {
+                    entry.size_state.size = Some(size);
+                }
+            }
+
             if let Some(active_panel) = self.active_panel_entry() {
                 active_panel.panel.set_active(true, window, cx);
             }
@@ -891,127 +912,115 @@ impl Dock {
         let active_panel_index = self.active_panel_index;
         let is_open = self.is_open;
         let position = self.position;
-        let enabled_panel_count = self
-            .panel_entries
-            .iter()
-            .filter(|entry| entry.panel.enabled(cx))
-            .count();
-        let first_enabled_panel_index = self
-            .panel_entries
-            .iter()
-            .position(|entry| entry.panel.enabled(cx));
+        let hidden_panels = &WorkspaceSettings::get_global(cx).hidden_right_dock_panels;
 
-        if enabled_panel_count < 2 {
+        let visible_entries: Vec<(usize, &PanelEntry)> = self
+            .panel_entries
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| {
+                if !entry.panel.enabled(cx) {
+                    return false;
+                }
+                let name = entry.panel.persistent_name().replace(' ', "");
+                !hidden_panels
+                    .iter()
+                    .any(|h| h.replace(' ', "").eq_ignore_ascii_case(&name))
+            })
+            .collect();
+
+        if visible_entries.len() < 2 {
             return h_flex().id("right-dock-tabs");
         }
 
+        let visible_count = visible_entries.len();
+
         h_flex()
             .id("right-dock-tabs")
-            .h(px(32.0))
-            .rounded_t_lg()
-            .bg(cx.theme().colors().panel_background)
-            .flex_none()
+            .w_full()
+            .flex_shrink_0()
             .overflow_hidden()
-            .border_b_1()
-            .border_color(cx.theme().colors().border)
-            .children(
-                self.panel_entries
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(index, entry)| {
-                        if !entry.panel.enabled(cx) {
-                            return None;
-                        }
+            .children(visible_entries.into_iter().enumerate().map(
+                |(visible_index, (panel_index, entry))| {
+                    let icon = entry.panel.icon(window, cx);
+                    let panel_id = entry.panel.panel_id();
+                    let label = entry
+                        .panel
+                        .persistent_name()
+                        .strip_suffix("Panel")
+                        .unwrap_or_else(|| entry.panel.persistent_name());
+                    let is_active = is_open && active_panel_index == Some(panel_index);
 
-                        let icon = entry.panel.icon(window, cx);
-                        let panel_id = entry.panel.panel_id();
-                        let label = entry
-                            .panel
-                            .persistent_name()
-                            .strip_suffix("Panel")
-                            .unwrap_or_else(|| entry.panel.persistent_name());
-                        let is_active = is_open && active_panel_index == Some(index);
+                    let tab_position = if visible_index == 0 {
+                        TabPosition::First
+                    } else if visible_index == visible_count - 1 {
+                        TabPosition::Last
+                    } else if is_active {
+                        TabPosition::Middle(std::cmp::Ordering::Equal)
+                    } else {
+                        let active_visible_index = visible_index;
+                        let _ = active_visible_index;
+                        TabPosition::Middle(std::cmp::Ordering::Greater)
+                    };
 
-                        Some(
-                            h_flex()
-                                .id(("right-dock-tab", index))
-                                .h_full()
-                                .px_2()
-                                .gap_1()
-                                .min_w_0()
-                                .cursor_pointer()
-                                .text_sm()
-                                .when(is_active, |this| {
-                                    this.bg(cx.theme().colors().tab_active_background)
-                                        .when(first_enabled_panel_index == Some(index), |this| {
-                                            this.rounded_tl_lg()
-                                        })
-                                        .border_b_2()
-                                        .border_color(cx.theme().colors().border)
-                                        .text_color(cx.theme().colors().text)
-                                })
-                                .when(!is_active, |this| {
-                                    this.text_color(cx.theme().colors().text_muted)
-                                })
-                                .children(icon.map(|icon| Icon::new(icon).size(IconSize::Small)))
-                                .child(div().truncate().child(label))
-                                .on_click(cx.listener(move |dock, _: &ClickEvent, window, cx| {
-                                    dock.set_open(true, window, cx);
-                                    dock.activate_panel(index, window, cx);
-                                    if let Some(panel) = dock.active_panel() {
-                                        window.focus(&panel.panel_focus_handle(cx), cx);
-                                    }
+                    div()
+                        .id(("right-dock-tab-wrap", panel_index))
+                        .flex_1()
+                        .min_w_0()
+                        .cursor_pointer()
+                        .child(
+                            Tab::new(("right-dock-tab", panel_index))
+                                .position(tab_position)
+                                .toggle_state(is_active)
+                                .start_slot::<AnyElement>(icon.map(|icon| {
+                                    Icon::new(icon)
+                                        .size(IconSize::Small)
+                                        .when(!is_active, |i| i.color(Color::Muted))
+                                        .into_any_element()
                                 }))
-                                .on_drag(
-                                    DraggedDockTab {
-                                        source_position: position,
-                                        panel_id,
-                                    },
-                                    |tab, _, _, cx| cx.new(|_| tab.clone()),
-                                )
-                                .drag_over::<DraggedDockTab>(move |tab, dragged, _, cx| {
-                                    if dragged.source_position == DockPosition::Right
-                                        && dragged.panel_id != panel_id
-                                    {
-                                        tab.bg(cx.theme().colors().drop_target_background)
-                                            .border_color(cx.theme().colors().drop_target_border)
-                                            .border_b_2()
-                                    } else {
-                                        tab
-                                    }
-                                })
-                                .on_drop(cx.listener(
-                                    move |dock, dragged: &DraggedDockTab, window, cx| {
-                                        if dragged.source_position == DockPosition::Right {
-                                            dock.reorder_panel(dragged.panel_id, index, window, cx);
-                                        }
-                                    },
-                                )),
+                                .child(div().truncate().child(label)),
                         )
-                    }),
-            )
-            .child(
-                div()
-                    .id("right-dock-tabs-end")
-                    .h_full()
-                    .min_w_4()
-                    .flex_1()
-                    .drag_over::<DraggedDockTab>(|target, dragged, _, cx| {
-                        if dragged.source_position == DockPosition::Right {
-                            target.bg(cx.theme().colors().drop_target_background)
-                        } else {
-                            target
-                        }
-                    })
-                    .on_drop(
-                        cx.listener(move |dock, dragged: &DraggedDockTab, window, cx| {
-                            if dragged.source_position == DockPosition::Right {
-                                let target_index = dock.panel_entries.len().saturating_sub(1);
-                                dock.reorder_panel(dragged.panel_id, target_index, window, cx);
+                        .on_click(cx.listener(
+                            move |dock, _: &ClickEvent, window, cx| {
+                                dock.set_open(true, window, cx);
+                                dock.activate_panel(panel_index, window, cx);
+                                if let Some(panel) = dock.active_panel() {
+                                    window.focus(&panel.panel_focus_handle(cx), cx);
+                                }
+                            },
+                        ))
+                        .on_drag(
+                            DraggedDockTab {
+                                source_position: position,
+                                panel_id,
+                            },
+                            |tab, _, _, cx| cx.new(|_| tab.clone()),
+                        )
+                        .drag_over::<DraggedDockTab>(move |tab, dragged, _, cx| {
+                            if dragged.source_position == DockPosition::Right
+                                && dragged.panel_id != panel_id
+                            {
+                                tab.bg(cx.theme().colors().drop_target_background)
+                                    .border_color(cx.theme().colors().drop_target_border)
+                                    .border_b_2()
+                            } else {
+                                tab
                             }
-                        }),
-                    ),
-            )
+                        })
+                        .on_drop(cx.listener(
+                            move |dock, dragged: &DraggedDockTab, window, cx| {
+                                if dragged.source_position == DockPosition::Right {
+                                    dock.reorder_panel(
+                                        dragged.panel_id,
+                                        panel_index,
+                                        window,
+                                        cx,
+                                    );
+                                }
+                            },
+                        ))
+                },
+            ))
     }
 
     pub fn visible_panel(&self) -> Option<&Arc<dyn PanelHandle>> {
@@ -1219,6 +1228,7 @@ impl Dock {
         match self.position {
             DockPosition::Left => crate::ToggleLeftDock.boxed_clone(),
             DockPosition::Bottom => crate::ToggleBottomDock.boxed_clone(),
+            DockPosition::Devices => crate::ToggleDevicesDock.boxed_clone(),
             DockPosition::Right => crate::ToggleRightDock.boxed_clone(),
         }
     }
@@ -1330,7 +1340,7 @@ impl Render for Dock {
                             .h(RESIZE_HANDLE_SIZE)
                             .cursor_row_resize(),
                     ),
-                    DockPosition::Right => deferred(
+                    DockPosition::Devices | DockPosition::Right => deferred(
                         handle
                             .absolute()
                             .top(px(0.))
@@ -1357,7 +1367,9 @@ impl Render for Dock {
                     // Width and height are always set on the workspace wrapper in
                     // render_dock, so fill whatever space the wrapper provides.
                     DockPosition::Left => this.w_full().h_full().flex_row(),
-                    DockPosition::Right | DockPosition::Bottom => this.w_full().h_full().flex_col(),
+                    DockPosition::Devices | DockPosition::Right | DockPosition::Bottom => {
+                        this.w_full().h_full().flex_col()
+                    }
                 })
                 .children(right_dock_tabs)
                 .child(
@@ -1407,7 +1419,9 @@ impl Render for PanelButtons {
 
         let (menu_anchor, menu_attach) = match dock.position {
             DockPosition::Left => (Anchor::BottomLeft, Anchor::TopLeft),
-            DockPosition::Bottom | DockPosition::Right => (Anchor::BottomRight, Anchor::TopRight),
+            DockPosition::Bottom | DockPosition::Devices | DockPosition::Right => {
+                (Anchor::BottomRight, Anchor::TopRight)
+            }
         };
 
         let dock_entity = self.dock.clone();
@@ -1452,10 +1466,11 @@ impl Render for PanelButtons {
                 Some(
                     right_click_menu(name)
                         .menu(move |window, cx| {
-                            const POSITIONS: [DockPosition; 3] = [
+                            const POSITIONS: [DockPosition; 4] = [
                                 DockPosition::Left,
                                 DockPosition::Right,
                                 DockPosition::Bottom,
+                                DockPosition::Devices,
                             ];
 
                             let panel_hide = panel.hide_button_setting(cx);
@@ -1574,7 +1589,7 @@ impl Render for PanelButtons {
             })
             .collect();
 
-        if dock_position == DockPosition::Right {
+        if matches!(dock_position, DockPosition::Devices | DockPosition::Right) {
             buttons.reverse();
         }
 
@@ -1584,8 +1599,10 @@ impl Render for PanelButtons {
             .gap_1()
             .when(
                 has_buttons
-                    && (dock.position == DockPosition::Bottom
-                        || dock.position == DockPosition::Right),
+                    && matches!(
+                        dock.position,
+                        DockPosition::Bottom | DockPosition::Devices | DockPosition::Right
+                    ),
                 |this| this.child(Divider::vertical().color(DividerColor::Border)),
             )
             .children(buttons)

@@ -41,6 +41,7 @@
   "lsp": {
     "rust-analyzer": {
       "initialization_options": {
+        "checkOnSave": false,
         "procMacro": {
           "processes": 4,
         },

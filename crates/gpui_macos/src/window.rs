@@ -61,6 +61,7 @@ use raw_window_handle as rwh;
 use smallvec::SmallVec;
 use std::{
     cell::Cell,
+    collections::HashMap,
     ffi::{CStr, c_void},
     mem,
     ops::Range,
@@ -493,6 +494,8 @@ struct MacWindowState {
     background_executor: BackgroundExecutor,
     native_window: id,
     native_view: NonNull<Object>,
+    native_subviews: HashMap<u64, NativeHostedView>,
+    next_native_subview_id: u64,
     blurred_view: Option<id>,
     background_appearance: WindowBackgroundAppearance,
     cursor_style: CursorStyle,
@@ -738,6 +741,25 @@ impl MacWindowState {
         get_scale_factor(self.native_window)
     }
 
+    fn native_subview_screen_rect(&self, bounds: Bounds<Pixels>) -> NSRect {
+        let content_height = self.content_size().height;
+        // AppKit uses bottom-left origin (y increases upward), while GPUI uses
+        // top-left origin (y increases downward). Convert by subtracting both
+        // the GPUI y offset and the view height from the content height.
+        let view_rect = NSRect::new(
+            NSPoint::new(
+                bounds.origin.x.to_f64(),
+                (content_height - bounds.origin.y - bounds.size.height).to_f64(),
+            ),
+            NSSize::new(bounds.size.width.to_f64(), bounds.size.height.to_f64()),
+        );
+        unsafe {
+            let window_rect: NSRect =
+                msg_send![self.native_view.as_ptr(), convertRect: view_rect toView: nil];
+            msg_send![self.native_window, convertRectToScreen: window_rect]
+        }
+    }
+
     fn window_bounds(&self) -> WindowBounds {
         if self.is_fullscreen() {
             WindowBounds::Fullscreen(self.fullscreen_restore_bounds)
@@ -749,9 +771,184 @@ impl MacWindowState {
 
 unsafe impl Send for MacWindowState {}
 
+/// A native view hosted in a borderless child window attached to the GPUI
+/// window, so that its Core Animation traffic and input events stay
+/// independent from GPUI's Metal presentation and event handling.
+struct NativeHostedView {
+    child_window: id,
+    view: id,
+}
+
+unsafe impl Send for NativeHostedView {}
+
+fn native_host_window_class() -> *const Class {
+    static REGISTER: std::sync::Once = std::sync::Once::new();
+    static mut CLASS: *const Class = ptr::null();
+    unsafe {
+        REGISTER.call_once(|| {
+            let mut decl = ClassDecl::new("GPUINativeHostWindow", class!(NSWindow)).unwrap();
+            // Borderless windows refuse key status by default, which would
+            // keep keyboard input away from the hosted view.
+            decl.add_method(
+                sel!(canBecomeKeyWindow),
+                native_host_window_can_become_key as extern "C" fn(&Object, Sel) -> BOOL,
+            );
+            decl.add_method(
+                sel!(canBecomeMainWindow),
+                native_host_window_cannot_become_main as extern "C" fn(&Object, Sel) -> BOOL,
+            );
+            CLASS = decl.register();
+        });
+        CLASS
+    }
+}
+
+extern "C" fn native_host_window_can_become_key(_: &Object, _: Sel) -> BOOL {
+    YES
+}
+
+extern "C" fn native_host_window_cannot_become_main(_: &Object, _: Sel) -> BOOL {
+    NO
+}
+
+/// Detaches and closes a child window created by `add_native_subview`.
+/// NSWindow defaults to `releasedWhenClosed`, so `close` balances the
+/// ownership reference taken by `alloc`/`init`.
+unsafe fn close_native_host_window(parent_window: id, child_window: id) {
+    unsafe {
+        let _: () = msg_send![parent_window, removeChildWindow: child_window];
+        let _: () = msg_send![child_window, close];
+    }
+}
+
 pub(crate) struct MacWindow(Arc<Mutex<MacWindowState>>);
 
 impl MacWindow {
+    /// Hosts the native view in a borderless child window instead of a
+    /// subview of GPUI's content view. This keeps the view's Core Animation
+    /// commits (for example SimulatorKit's ~60fps remote layer) out of the
+    /// transaction that presents GPUI's Metal layer, and routes mouse and
+    /// keyboard events directly to the hosted view without passing through
+    /// GPUI's event handling.
+    pub(crate) fn add_native_subview(&self, subview: id, bounds: Bounds<Pixels>) -> u64 {
+        let mut state = self.0.lock();
+        let subview_id = state.next_native_subview_id;
+        state.next_native_subview_id += 1;
+        let screen_rect = state.native_subview_screen_rect(bounds);
+        let child_window = unsafe {
+            let child_window: id = msg_send![native_host_window_class(), alloc];
+            let child_window: id = msg_send![
+                child_window,
+                initWithContentRect: screen_rect
+                styleMask: NSWindowStyleMask::NSBorderlessWindowMask
+                backing: NSBackingStoreBuffered
+                defer: NO
+            ];
+            let _: () = msg_send![child_window, setOpaque: NO];
+            let background_color: id = msg_send![class!(NSColor), clearColor];
+            let _: () = msg_send![child_window, setBackgroundColor: background_color];
+            let _: () = msg_send![child_window, setHasShadow: NO];
+            let _: () = msg_send![child_window, setAcceptsMouseMovedEvents: YES];
+
+            let container: id = msg_send![class!(NSView), alloc];
+            let container: id = msg_send![
+                container,
+                initWithFrame: NSRect::new(NSPoint::new(0., 0.), screen_rect.size)
+            ];
+            let _: () = msg_send![container, addSubview: subview];
+            let _: () = msg_send![child_window, setContentView: container];
+            let _: () = msg_send![container, release];
+            // `init` gives the caller one ownership reference; the container
+            // retains its subview. Balance that reference so closing the child
+            // window tears the hosted view down.
+            let _: () = msg_send![subview, release];
+
+            // Route keyboard input to the hosted view when the child window
+            // becomes key (for example, when the user clicks the simulator).
+            let _: () = msg_send![child_window, setInitialFirstResponder: subview];
+            let _: () = msg_send![child_window, makeFirstResponder: subview];
+
+            let _: () = msg_send![
+                state.native_window,
+                addChildWindow: child_window
+                ordered: NSWindowOrderingMode::NSWindowAbove
+            ];
+            child_window
+        };
+        state.native_subviews.insert(
+            subview_id,
+            NativeHostedView {
+                child_window,
+                view: subview,
+            },
+        );
+        subview_id
+    }
+
+    pub(crate) fn update_native_subview_bounds(&self, subview_id: u64, bounds: Bounds<Pixels>) {
+        let state = self.0.lock();
+        if let Some(hosted) = state.native_subviews.get(&subview_id) {
+            let screen_rect = state.native_subview_screen_rect(bounds);
+            unsafe {
+                let _: () = msg_send![hosted.child_window, setFrame: screen_rect display: YES];
+            }
+        }
+    }
+
+    pub(crate) fn resize_simulator_display_view(&self, subview_id: u64, bounds: Bounds<Pixels>) {
+        let (child_window, view, screen_rect) = {
+            let state = self.0.lock();
+            let Some(hosted) = state.native_subviews.get(&subview_id) else {
+                return;
+            };
+            (
+                hosted.child_window,
+                hosted.view,
+                state.native_subview_screen_rect(bounds),
+            )
+        };
+        unsafe {
+            let _: () = msg_send![child_window, setFrame: screen_rect display: YES];
+        }
+        crate::simulator_kit::resize_sim_display_view(view, bounds.size);
+        crate::simulator_kit::fit_sim_display_view(view, bounds.size);
+    }
+
+    pub(crate) fn remove_native_subview(&self, subview_id: u64) {
+        let mut state = self.0.lock();
+        if let Some(hosted) = state.native_subviews.remove(&subview_id) {
+            unsafe {
+                close_native_host_window(state.native_window, hosted.child_window);
+            }
+        }
+    }
+
+    /// Hides or shows the child window hosting a native view without closing
+    /// it, so the hosted view (for example a SimulatorKit display connection)
+    /// stays alive and can be shown again later.
+    pub(crate) fn set_native_subview_hidden(&self, subview_id: u64, hidden: bool) {
+        let state = self.0.lock();
+        let Some(hosted) = state.native_subviews.get(&subview_id) else {
+            return;
+        };
+        unsafe {
+            let is_visible: BOOL = msg_send![hosted.child_window, isVisible];
+            if hidden {
+                if is_visible == YES {
+                    let _: () =
+                        msg_send![state.native_window, removeChildWindow: hosted.child_window];
+                    let _: () = msg_send![hosted.child_window, orderOut: nil];
+                }
+            } else if is_visible == NO {
+                let _: () = msg_send![
+                    state.native_window,
+                    addChildWindow: hosted.child_window
+                    ordered: NSWindowOrderingMode::NSWindowAbove
+                ];
+            }
+        }
+    }
+
     pub fn open(
         handle: AnyWindowHandle,
         WindowParams {
@@ -888,6 +1085,8 @@ impl MacWindow {
                 background_executor,
                 native_window,
                 native_view: NonNull::new_unchecked(native_view),
+                native_subviews: HashMap::new(),
+                next_native_subview_id: 0,
                 blurred_view: None,
                 background_appearance: WindowBackgroundAppearance::Opaque,
                 cursor_style: CursorStyle::Arrow,
@@ -1177,6 +1376,12 @@ impl Drop for MacWindow {
             this.native_window.setDelegate_(nil);
         }
         this.input_handler.take();
+        let native_window = this.native_window;
+        for (_, hosted) in this.native_subviews.drain() {
+            unsafe {
+                close_native_host_window(native_window, hosted.child_window);
+            }
+        }
         this.foreground_executor
             .spawn(async move {
                 unsafe {
@@ -1296,6 +1501,46 @@ impl PlatformWindow for MacWindow {
         let mut state = self.0.lock();
         state.traffic_light_position = Some(position);
         state.move_traffic_light();
+    }
+
+    fn add_native_subview(&self, subview: *mut c_void, bounds: Bounds<Pixels>) -> Option<u64> {
+        let subview = NonNull::new(subview.cast::<Object>())?.as_ptr();
+        Some(MacWindow::add_native_subview(self, subview, bounds))
+    }
+
+    fn update_native_subview_bounds(&self, subview_id: u64, bounds: Bounds<Pixels>) {
+        MacWindow::update_native_subview_bounds(self, subview_id, bounds);
+    }
+
+    fn resize_simulator_display_view(&self, subview_id: u64, bounds: Bounds<Pixels>) {
+        MacWindow::resize_simulator_display_view(self, subview_id, bounds);
+    }
+
+    fn remove_native_subview(&self, subview_id: u64) {
+        MacWindow::remove_native_subview(self, subview_id);
+    }
+
+    fn set_native_subview_hidden(&self, subview_id: u64, hidden: bool) {
+        MacWindow::set_native_subview_hidden(self, subview_id, hidden);
+    }
+
+    fn simulator_kit_display_view_class(&self) -> Option<*const c_void> {
+        crate::simulator_kit::sim_display_view_class()
+            .ok()
+            .map(|class| class as *const Class as *const c_void)
+    }
+
+    fn simulator_device_for_udid(&self, udid: &str) -> anyhow::Result<*mut c_void> {
+        crate::core_simulator::sim_device_for_udid(udid).map(|device| device.cast())
+    }
+
+    fn create_simulator_display_view(
+        &self,
+        udid: &str,
+        size: Size<Pixels>,
+    ) -> anyhow::Result<*mut c_void> {
+        let device = crate::core_simulator::sim_device_for_udid(udid)?;
+        crate::simulator_kit::create_sim_display_view(device, size).map(|view| view.cast())
     }
 
     fn scale_factor(&self) -> f32 {

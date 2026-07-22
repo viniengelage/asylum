@@ -22,6 +22,7 @@ agent.workspace = true
 agent-client-protocol.workspace = true
 agent_settings.workspace = true
 agent_ui = { workspace = true, features = ["audio"] }
+android_sdk.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 editor.workspace = true
@@ -43,6 +44,8 @@ remote_connection.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 settings.workspace = true
+smol.workspace = true
+task.workspace = true
 telemetry.workspace = true
 theme.workspace = true
 theme_settings.workspace = true

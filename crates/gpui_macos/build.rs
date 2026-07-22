@@ -21,6 +21,7 @@ mod macos_build {
         emit_stitched_shaders(&header_path);
         #[cfg(not(feature = "runtime_shaders"))]
         compile_metal_shaders(&header_path);
+        compile_simulator_kit_bridge();
     }
 
     fn generate_shader_bindings() -> PathBuf {
@@ -118,6 +119,68 @@ mod macos_build {
         let shader_path = PathBuf::from(shader_source_path);
         stitch_header(header_path, &shader_path).unwrap();
         println!("cargo:rerun-if-changed={}", &shader_source_path);
+    }
+
+    fn compile_simulator_kit_bridge() {
+        use std::process::{self, Command};
+
+        const SIMULATOR_KIT_FRAMEWORK_DIRECTORY: &str =
+            "/Applications/Xcode.app/Contents/SharedFrameworks";
+        const SIMULATOR_KIT_BRIDGE_SOURCE: &str = "./src/simulator_kit_bridge.swift";
+
+        let output_directory = PathBuf::from(env::var("OUT_DIR").unwrap());
+        let object_path = output_directory.join("simulator_kit_bridge.o");
+        let library_path = output_directory.join("libsimulator_kit_bridge.a");
+
+        println!("cargo:rerun-if-changed={SIMULATOR_KIT_BRIDGE_SOURCE}");
+        let output = Command::new("xcrun")
+            .args([
+                "--sdk",
+                "macosx",
+                "swiftc",
+                "-target",
+                "arm64-apple-macos14.0",
+                "-F",
+                SIMULATOR_KIT_FRAMEWORK_DIRECTORY,
+                "-parse-as-library",
+                "-c",
+                SIMULATOR_KIT_BRIDGE_SOURCE,
+                "-o",
+            ])
+            .arg(&object_path)
+            .output()
+            .unwrap();
+
+        if !output.status.success() {
+            println!(
+                "cargo::error=SimulatorKit bridge compilation failed:\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            process::exit(1);
+        }
+
+        let output = Command::new("xcrun")
+            .args(["libtool", "-static", "-o"])
+            .arg(&library_path)
+            .arg(&object_path)
+            .output()
+            .unwrap();
+
+        if !output.status.success() {
+            println!(
+                "cargo::error=SimulatorKit bridge archive creation failed:\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            process::exit(1);
+        }
+
+        println!(
+            "cargo:rustc-link-search=native={}",
+            output_directory.display()
+        );
+        println!("cargo:rustc-link-search=framework={SIMULATOR_KIT_FRAMEWORK_DIRECTORY}");
+        println!("cargo:rustc-link-lib=static=simulator_kit_bridge");
+        println!("cargo:rustc-link-lib=framework=SimulatorKit");
     }
 
     #[cfg(not(feature = "runtime_shaders"))]

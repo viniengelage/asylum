@@ -74,12 +74,12 @@ pub async fn create_batch(
 ) -> Result<MessageBatch, AnthropicError> {
     let uri = format!("{api_url}/v1/messages/batches");
 
-    let request_builder = HttpRequest::builder()
+    let base = HttpRequest::builder()
         .method(Method::POST)
         .uri(uri)
         .header("Anthropic-Version", "2023-06-01")
-        .header("X-Api-Key", api_key.trim())
         .header("Content-Type", "application/json");
+    let request_builder = super::apply_auth_header(base, api_key);
 
     let serialized_request =
         serde_json::to_string(&request).map_err(AnthropicError::SerializeRequest)?;
@@ -116,11 +116,11 @@ pub async fn retrieve_batch(
 ) -> Result<MessageBatch, AnthropicError> {
     let uri = format!("{api_url}/v1/messages/batches/{message_batch_id}");
 
-    let request_builder = HttpRequest::builder()
+    let base = HttpRequest::builder()
         .method(Method::GET)
         .uri(uri)
-        .header("Anthropic-Version", "2023-06-01")
-        .header("X-Api-Key", api_key.trim());
+        .header("Anthropic-Version", "2023-06-01");
+    let request_builder = super::apply_auth_header(base, api_key);
 
     let http_request = request_builder
         .body(AsyncBody::default())
@@ -155,11 +155,11 @@ pub async fn retrieve_batch_results(
 ) -> Result<Vec<BatchIndividualResponse>, AnthropicError> {
     let uri = format!("{api_url}/v1/messages/batches/{message_batch_id}/results");
 
-    let request_builder = HttpRequest::builder()
+    let base = HttpRequest::builder()
         .method(Method::GET)
         .uri(uri)
-        .header("Anthropic-Version", "2023-06-01")
-        .header("X-Api-Key", api_key.trim());
+        .header("Anthropic-Version", "2023-06-01");
+    let request_builder = super::apply_auth_header(base, api_key);
 
     let http_request = request_builder
         .body(AsyncBody::default())

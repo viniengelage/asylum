@@ -451,6 +451,22 @@ pub fn debug_adapters_dir() -> &'static PathBuf {
     DEBUG_ADAPTERS_DIR.get_or_init(|| data_dir().join("debug_adapters"))
 }
 
+/// Returns the path to the Android SDK/JDK/AVD directory managed by Zed.
+///
+/// Android SDK tooling does not support installation paths containing spaces
+/// (sdkmanager's launcher script splits its classpath on them), so on macOS
+/// this must not live under the data directory ("Application Support").
+pub fn android_dir() -> &'static PathBuf {
+    static ANDROID_DIR: OnceLock<PathBuf> = OnceLock::new();
+    ANDROID_DIR.get_or_init(|| {
+        if cfg!(target_os = "macos") {
+            home_dir().join("Library/Android/zed")
+        } else {
+            data_dir().join("android")
+        }
+    })
+}
+
 /// Returns the path to the external agents directory
 ///
 /// This is where agent servers are downloaded to

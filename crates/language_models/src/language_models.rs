@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use ::settings::{Settings, SettingsStore};
+use anyhow::Result;
 use client::{Client, UserStore};
 use collections::{HashMap, HashSet};
 use credentials_provider::CredentialsProvider;
@@ -341,6 +342,47 @@ fn register_language_model_providers(
         )),
         cx,
     );
+}
+
+// ---------------------------------------------------------------------------
+// Claude OAuth sign-in (Pro/Max subscription)
+// ---------------------------------------------------------------------------
+
+/// Start the Claude OAuth PKCE flow: stores the PKCE verifier in the
+/// provider state and returns the authorization URL to open in a browser.
+/// After the user completes auth, they paste the resulting code into the
+/// Anthropic API key field — the provider detects the pending verifier and
+/// performs the token exchange automatically.
+pub fn claude_start_oauth_flow(cx: &mut App) -> Result<String> {
+    let handle = AnthropicLanguageModelProvider::global(cx)?;
+    handle.start_oauth_flow(cx)
+}
+
+/// Store a bearer token for the Anthropic provider (e.g. from
+/// `claude setup-token`). The token will be sent as `Authorization: Bearer`
+/// instead of `X-Api-Key`.
+pub fn claude_set_bearer_token(token: String, cx: &mut App) -> gpui::Task<Result<()>> {
+    let handle = match AnthropicLanguageModelProvider::global(cx) {
+        Ok(h) => h,
+        Err(error) => return gpui::Task::ready(Err(error)),
+    };
+    handle.set_bearer_token(token, cx)
+}
+
+/// Sign out of Claude OAuth for the Anthropic provider.
+pub fn claude_oauth_sign_out(cx: &mut App) -> gpui::Task<Result<()>> {
+    let handle = match AnthropicLanguageModelProvider::global(cx) {
+        Ok(h) => h,
+        Err(error) => return gpui::Task::ready(Err(error)),
+    };
+    handle.oauth_sign_out(cx)
+}
+
+/// Whether the Anthropic provider is currently authenticated via OAuth.
+pub fn is_claude_oauth_authenticated(cx: &App) -> bool {
+    AnthropicLanguageModelProvider::global_read(cx)
+        .map(|h| h.is_oauth_authenticated(cx))
+        .unwrap_or(false)
 }
 
 #[cfg(test)]

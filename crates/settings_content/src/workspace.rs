@@ -139,6 +139,9 @@ pub struct WorkspaceSettingsContent {
     /// Whether the focused panel follows the mouse location
     /// Default: false
     pub focus_follows_mouse: Option<FocusFollowsMouse>,
+    /// List of panel names to hide from the right dock tab bar.
+    /// Example: `["CollabPanel", "OutlinePanel"]`
+    pub hidden_right_dock_panels: Option<Vec<String>>,
 }
 
 #[with_fallible_options]

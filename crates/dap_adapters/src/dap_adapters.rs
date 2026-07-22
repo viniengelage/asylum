@@ -3,6 +3,7 @@ mod gdb;
 mod go;
 mod javascript;
 mod python;
+mod react_native;
 
 #[cfg(test)]
 use std::path::PathBuf;
@@ -23,6 +24,7 @@ use go::GoDebugAdapter;
 use gpui::{App, BorrowAppContext};
 use javascript::JsDebugAdapter;
 use python::PythonDebugAdapter;
+use react_native::ReactNativeExpoDebugAdapter;
 use serde_json::json;
 use task::{DebugScenario, ZedDebugConfig};
 
@@ -31,6 +33,7 @@ pub fn init(cx: &mut App) {
         registry.add_adapter(Arc::from(CodeLldbDebugAdapter::default()));
         registry.add_adapter(Arc::from(PythonDebugAdapter::default()));
         registry.add_adapter(Arc::from(JsDebugAdapter::default()));
+        registry.add_adapter(Arc::from(ReactNativeExpoDebugAdapter::default()));
         registry.add_adapter(Arc::from(GoDebugAdapter::default()));
         registry.add_adapter(Arc::from(GdbDebugAdapter));
 

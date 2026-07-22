@@ -31,6 +31,9 @@ fn main() {
 
         // Seems to be required to enable Swift concurrency
         println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
+        println!(
+            "cargo:rustc-link-arg=-Wl,-rpath,/Applications/Xcode.app/Contents/SharedFrameworks"
+        );
 
         // Register exported Objective-C selectors, protocols, etc
         println!("cargo:rustc-link-arg=-Wl,-ObjC");

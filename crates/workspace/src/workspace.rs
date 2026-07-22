@@ -31,8 +31,8 @@ mod workspace_settings;
 
 pub use dock::Panel;
 pub use multi_workspace::{
-    CloseWorkspaceSidebar, DraggedSidebar, FocusWorkspaceSidebar, MoveProjectToNewWindow,
-    MultiWorkspace, MultiWorkspaceEvent, NewThread, NextProject, NextThread, PreviousProject,
+    CloseWorkspaceSidebar, FocusWorkspaceSidebar, MoveProjectToNewWindow, MultiWorkspace,
+    MultiWorkspaceEvent, NewThread, NextProject, NextThread, OpenDevices, PreviousProject,
     PreviousThread, ProjectGroup, ProjectGroupKey, SerializedProjectGroupState, Sidebar,
     SidebarEvent, SidebarHandle, SidebarRenderState, SidebarSide, ToggleWorkspaceSidebar,
     sidebar_side_context_menu,
@@ -329,6 +329,8 @@ actions!(
         SuppressNotification,
         /// Toggles the bottom dock.
         ToggleBottomDock,
+        /// Toggles the Devices dock.
+        ToggleDevicesDock,
         /// Toggles centered layout mode.
         ToggleCenteredLayout,
         /// Toggles edit prediction feature globally for all files.
@@ -1366,7 +1368,7 @@ struct DispatchingKeystrokes {
 /// Collects everything project-related for a certain window opened.
 /// In some way, is a counterpart of a window, as the [`WindowHandle`] could be downcast into `Workspace`.
 ///
-/// A `Workspace` usually consists of 1 or more projects, a central pane group, 3 docks and a status bar.
+/// A `Workspace` usually consists of 1 or more projects, a central pane group, four docks and a status bar.
 /// The `Workspace` owns everybody's state and serves as a default, "global context",
 /// that can be used to register a global action to be triggered from any place in the window.
 pub struct Workspace {
@@ -1379,6 +1381,7 @@ pub struct Workspace {
     center: PaneGroup,
     left_dock: Entity<Dock>,
     bottom_dock: Entity<Dock>,
+    devices_dock: Entity<Dock>,
     right_dock: Entity<Dock>,
     panes: Vec<Entity<Pane>>,
     panes_by_item: HashMap<EntityId, WeakEntity<Pane>>,
@@ -1743,9 +1746,11 @@ impl Workspace {
 
         let left_dock = Dock::new(DockPosition::Left, modal_layer.clone(), window, cx);
         let bottom_dock = Dock::new(DockPosition::Bottom, modal_layer.clone(), window, cx);
+        let devices_dock = Dock::new(DockPosition::Devices, modal_layer.clone(), window, cx);
         let right_dock = Dock::new(DockPosition::Right, modal_layer.clone(), window, cx);
         let left_dock_buttons = cx.new(|cx| PanelButtons::new(left_dock.clone(), cx));
         let bottom_dock_buttons = cx.new(|cx| PanelButtons::new(bottom_dock.clone(), cx));
+        let devices_dock_buttons = cx.new(|cx| PanelButtons::new(devices_dock.clone(), cx));
         let right_dock_buttons = cx.new(|cx| PanelButtons::new(right_dock.clone(), cx));
         let multi_workspace = window
             .root::<MultiWorkspace>()
@@ -1755,6 +1760,7 @@ impl Workspace {
             let mut status_bar =
                 StatusBar::new(&center_pane.clone(), multi_workspace.clone(), window, cx);
             status_bar.add_left_item(left_dock_buttons, window, cx);
+            status_bar.add_right_item(devices_dock_buttons, window, cx);
             status_bar.add_right_item(right_dock_buttons, window, cx);
             status_bar.add_right_item(bottom_dock_buttons, window, cx);
             status_bar
@@ -1848,6 +1854,7 @@ impl Workspace {
             suppressed_notifications: HashSet::default(),
             left_dock,
             bottom_dock,
+            devices_dock,
             right_dock,
             _panels_task: None,
             project: project.clone(),
@@ -2207,12 +2214,21 @@ impl Workspace {
         self.serialize_workspace(window, cx);
     }
 
+    pub fn devices_dock(&self) -> &Entity<Dock> {
+        &self.devices_dock
+    }
+
     pub fn right_dock(&self) -> &Entity<Dock> {
         &self.right_dock
     }
 
-    pub fn all_docks(&self) -> [&Entity<Dock>; 3] {
-        [&self.left_dock, &self.bottom_dock, &self.right_dock]
+    pub fn all_docks(&self) -> [&Entity<Dock>; 4] {
+        [
+            &self.left_dock,
+            &self.bottom_dock,
+            &self.devices_dock,
+            &self.right_dock,
+        ]
     }
 
     pub fn capture_dock_state(&self, _window: &Window, cx: &App) -> DockStructure {
@@ -2281,8 +2297,9 @@ impl Workspace {
     pub fn focused_dock_position(&self, window: &Window, cx: &App) -> Option<DockPosition> {
         [
             (DockPosition::Left, &self.left_dock),
-            (DockPosition::Right, &self.right_dock),
             (DockPosition::Bottom, &self.bottom_dock),
+            (DockPosition::Devices, &self.devices_dock),
+            (DockPosition::Right, &self.right_dock),
         ]
         .into_iter()
         .find(|(_, dock)| {
@@ -2347,6 +2364,7 @@ impl Workspace {
         match position {
             DockPosition::Left => &self.left_dock,
             DockPosition::Bottom => &self.bottom_dock,
+            DockPosition::Devices => &self.devices_dock,
             DockPosition::Right => &self.right_dock,
         }
     }
@@ -2521,7 +2539,7 @@ impl Workspace {
         let opposite_position = match position {
             DockPosition::Left => DockPosition::Right,
             DockPosition::Right => DockPosition::Left,
-            DockPosition::Bottom => return None,
+            DockPosition::Bottom | DockPosition::Devices => return None,
         };
 
         let opposite_dock = self.dock_at_position(opposite_position).read(cx);
@@ -2594,7 +2612,12 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        for dock in [&self.left_dock, &self.bottom_dock, &self.right_dock] {
+        for dock in [
+            &self.left_dock,
+            &self.bottom_dock,
+            &self.devices_dock,
+            &self.right_dock,
+        ] {
             dock.update(cx, |dock, cx| dock.remove_panel(panel, window, cx));
         }
     }
@@ -5499,6 +5522,7 @@ impl Workspace {
             match dock.position() {
                 DockPosition::Left => self.resize_left_dock(panel_size + amount, window, cx),
                 DockPosition::Bottom => self.resize_bottom_dock(panel_size + amount, window, cx),
+                DockPosition::Devices => self.resize_devices_dock(panel_size + amount, window, cx),
                 DockPosition::Right => self.resize_right_dock(panel_size + amount, window, cx),
             }
         } else {
@@ -7626,6 +7650,11 @@ impl Workspace {
                 },
             ))
             .on_action(cx.listener(
+                |workspace: &mut Workspace, _: &ToggleDevicesDock, window, cx| {
+                    workspace.toggle_dock(DockPosition::Devices, window, cx);
+                },
+            ))
+            .on_action(cx.listener(
                 |workspace: &mut Workspace, _: &ToggleBottomDock, window, cx| {
                     workspace.toggle_dock(DockPosition::Bottom, window, cx);
                 },
@@ -8083,11 +8112,16 @@ impl Workspace {
             return None;
         }
 
-        let leader_border = dock.read(cx).active_panel().and_then(|panel| {
-            let pane = panel.pane(cx)?;
-            let follower_states = &self.follower_states;
-            leader_border_for_pane(follower_states, &pane, window, cx)
-        });
+        let dock_is_open = dock.read(cx).is_open();
+        let leader_border = if dock_is_open {
+            dock.read(cx).active_panel().and_then(|panel| {
+                let pane = panel.pane(cx)?;
+                let follower_states = &self.follower_states;
+                leader_border_for_pane(follower_states, &pane, window, cx)
+            })
+        } else {
+            None
+        };
 
         // Expose each open dock as a landmark region so assistive technology
         // can navigate to it, and so region navigation announces it. While a
@@ -8098,10 +8132,10 @@ impl Workspace {
         // hitbox or intercepts mouse focus for other users.
         let (dock_element_id, dock_label) = match position {
             DockPosition::Left => ("left-dock", "Left dock"),
-            DockPosition::Right => ("right-dock", "Right dock"),
             DockPosition::Bottom => ("bottom-dock", "Bottom dock"),
+            DockPosition::Devices => ("devices-dock", "Devices dock"),
+            DockPosition::Right => ("right-dock", "Right dock"),
         };
-        let dock_is_open = dock.read(cx).is_open();
         let a11y_active = window.is_a11y_active();
         let left_title_bar = if position == DockPosition::Left {
             self.titlebar_item.clone().map(|item| {
@@ -8137,29 +8171,16 @@ impl Workspace {
         } else {
             None
         };
-        let dock_status = if self.status_bar_visible(cx) {
-            match position {
-                DockPosition::Left => Some(
-                    self.status_bar
-                        .update(cx, |status_bar, cx| status_bar.render_left_section(cx)),
-                ),
-                DockPosition::Right => Some(
-                    self.status_bar
-                        .update(cx, |status_bar, cx| status_bar.render_right_section(cx)),
-                ),
-                DockPosition::Bottom => None,
-            }
-        } else {
-            None
-        };
-        let dock_content = if matches!(position, DockPosition::Left | DockPosition::Right) {
+        let dock_content = if matches!(
+            position,
+            DockPosition::Left | DockPosition::Devices | DockPosition::Right
+        ) {
             div()
                 .flex()
                 .flex_col()
                 .size_full()
                 .children(left_title_bar)
                 .child(div().flex_1().min_h_0().child(dock.clone()))
-                .children(dock_status)
                 .into_any_element()
         } else {
             dock.clone().into_any_element()
@@ -8167,7 +8188,7 @@ impl Workspace {
 
         let mut container = div()
             .id(dock_element_id)
-            .when(position != DockPosition::Bottom, |this| {
+            .when(position == DockPosition::Left, |this| {
                 this.m_1()
                     .rounded_lg()
                     .border_1()
@@ -8175,7 +8196,26 @@ impl Workspace {
                     .bg(cx.theme().colors().panel_background)
                     .overflow_hidden()
             })
-            .when(position == DockPosition::Bottom, |this| this.m_1())
+            .when(
+                matches!(position, DockPosition::Devices | DockPosition::Right)
+                    && dock_is_open,
+                |this| {
+                    this.m_1()
+                        .rounded_lg()
+                        .border_1()
+                        .border_color(cx.theme().colors().border)
+                        .bg(cx.theme().colors().panel_background)
+                        .overflow_hidden()
+                },
+            )
+            .when(position == DockPosition::Bottom && dock_is_open, |this| {
+                this.mx_1()
+                    .rounded_lg()
+                    .border_1()
+                    .border_color(cx.theme().colors().border)
+                    .bg(cx.theme().colors().panel_background)
+                    .overflow_hidden()
+            })
             .when(dock_is_open, |this| {
                 this.role(gpui::Role::Complementary)
                     .aria_label(dock_label)
@@ -8185,7 +8225,10 @@ impl Workspace {
             })
             .flex()
             .when(
-                matches!(position, DockPosition::Left | DockPosition::Right),
+                matches!(
+                    position,
+                    DockPosition::Left | DockPosition::Devices | DockPosition::Right
+                ),
                 |this| this.flex_col(),
             )
             .overflow_hidden()
@@ -8483,8 +8526,9 @@ impl Workspace {
     ) {
         match dock_pos {
             DockPosition::Left => self.resize_left_dock(new_size, window, cx),
-            DockPosition::Right => self.resize_right_dock(new_size, window, cx),
             DockPosition::Bottom => self.resize_bottom_dock(new_size, window, cx),
+            DockPosition::Devices => self.resize_devices_dock(new_size, window, cx),
+            DockPosition::Right => self.resize_right_dock(new_size, window, cx),
         }
     }
 
@@ -8492,14 +8536,11 @@ impl Workspace {
         let workspace_width = self.bounds.size.width;
         let mut size = new_size.min(workspace_width - RESIZE_HANDLE_SIZE);
 
-        self.right_dock.read_with(cx, |right_dock, cx| {
-            let right_dock_size = right_dock
-                .stored_active_panel_size(window, cx)
-                .unwrap_or(Pixels::ZERO);
-            if right_dock_size + size > workspace_width {
-                size = workspace_width - right_dock_size
-            }
-        });
+        let devices_dock_size = self.dock_width(&self.devices_dock, window, cx);
+        let right_dock_size = self.dock_width(&self.right_dock, window, cx);
+        if devices_dock_size + right_dock_size + size > workspace_width {
+            size = workspace_width - devices_dock_size - right_dock_size;
+        }
 
         let flex_grow = self.dock_flex_for_size(DockPosition::Left, size, window, cx);
         self.left_dock.update(cx, |left_dock, cx| {
@@ -8514,17 +8555,23 @@ impl Workspace {
         });
     }
 
+    fn resize_devices_dock(&mut self, new_size: Pixels, window: &mut Window, cx: &mut App) {
+        let workspace_width = self.bounds.size.width;
+        let right_dock_size = self.dock_width(&self.right_dock, window, cx);
+        let left_dock_size = self.dock_width(&self.left_dock, window, cx);
+        let size =
+            new_size.min(workspace_width - left_dock_size - right_dock_size - RESIZE_HANDLE_SIZE);
+        self.devices_dock.update(cx, |devices_dock, cx| {
+            devices_dock.resize_active_panel(Some(size.max(RESIZE_HANDLE_SIZE)), None, window, cx);
+        });
+    }
+
     fn resize_right_dock(&mut self, new_size: Pixels, window: &mut Window, cx: &mut App) {
         let workspace_width = self.bounds.size.width;
-        let mut size = new_size.min(workspace_width - RESIZE_HANDLE_SIZE);
-        self.left_dock.read_with(cx, |left_dock, cx| {
-            let left_dock_size = left_dock
-                .stored_active_panel_size(window, cx)
-                .unwrap_or(Pixels::ZERO);
-            if left_dock_size + size > workspace_width {
-                size = workspace_width - left_dock_size
-            }
-        });
+        let left_dock_size = self.dock_width(&self.left_dock, window, cx);
+        let devices_dock_size = self.dock_width(&self.devices_dock, window, cx);
+        let size =
+            new_size.min(workspace_width - left_dock_size - devices_dock_size - RESIZE_HANDLE_SIZE);
         let flex_grow = self.dock_flex_for_size(DockPosition::Right, size, window, cx);
         self.right_dock.update(cx, |right_dock, cx| {
             if WorkspaceSettings::get_global(cx)
@@ -8536,6 +8583,15 @@ impl Workspace {
                 right_dock.resize_active_panel(Some(size), flex_grow, window, cx);
             }
         });
+    }
+
+    fn dock_width(&self, dock: &Entity<Dock>, window: &Window, cx: &App) -> Pixels {
+        dock.read_with(cx, |dock, cx| {
+            dock.is_open()
+                .then(|| dock.stored_active_panel_size(window, cx))
+                .flatten()
+                .unwrap_or(Pixels::ZERO)
+        })
     }
 
     fn resize_bottom_dock(&mut self, new_size: Pixels, window: &mut Window, cx: &mut App) {
@@ -8943,8 +8999,9 @@ impl FocusablePart {
 /// assistive technology would fall back to announcing the whole window.
 struct RegionFocusHandles {
     left_dock: FocusHandle,
-    right_dock: FocusHandle,
     bottom_dock: FocusHandle,
+    devices_dock: FocusHandle,
+    right_dock: FocusHandle,
     editor: FocusHandle,
 }
 
@@ -8952,8 +9009,9 @@ impl RegionFocusHandles {
     fn new(cx: &mut App) -> Self {
         Self {
             left_dock: cx.focus_handle(),
-            right_dock: cx.focus_handle(),
             bottom_dock: cx.focus_handle(),
+            devices_dock: cx.focus_handle(),
+            right_dock: cx.focus_handle(),
             editor: cx.focus_handle(),
         }
     }
@@ -8961,8 +9019,9 @@ impl RegionFocusHandles {
     fn dock(&self, position: DockPosition) -> &FocusHandle {
         match position {
             DockPosition::Left => &self.left_dock,
-            DockPosition::Right => &self.right_dock,
             DockPosition::Bottom => &self.bottom_dock,
+            DockPosition::Devices => &self.devices_dock,
+            DockPosition::Right => &self.right_dock,
         }
     }
 }
@@ -9105,8 +9164,6 @@ impl Render for Workspace {
             .iter()
             .map(|(_, notification)| notification.entity_id())
             .collect::<Vec<_>>();
-        let bottom_dock_layout = WorkspaceSettings::get_global(cx).bottom_dock_layout;
-
         let pane_render_context = PaneRenderContext {
             follower_states: &self.follower_states,
             active_call: self.active_call(),
@@ -9166,6 +9223,14 @@ impl Render for Workspace {
                                                     )
                                                 });
 
+                                                this.devices_dock.update(cx, |dock, cx| {
+                                                    dock.clamp_panel_size(
+                                                        bounds.size.width,
+                                                        window,
+                                                        cx,
+                                                    )
+                                                });
+
                                                 this.right_dock.update(cx, |dock, cx| {
                                                     dock.clamp_panel_size(
                                                         bounds.size.width,
@@ -9207,6 +9272,20 @@ impl Render for Workspace {
                                                         cx,
                                                     );
                                                 }
+                                                DockPosition::Devices => {
+                                                    let right_dock_width = workspace.dock_width(
+                                                        &workspace.right_dock,
+                                                        window,
+                                                        cx,
+                                                    );
+                                                    workspace.resize_devices_dock(
+                                                        workspace.bounds.right()
+                                                            - right_dock_width
+                                                            - e.event.position.x,
+                                                        window,
+                                                        cx,
+                                                    );
+                                                }
                                                 DockPosition::Right => {
                                                     workspace.resize_right_dock(
                                                         workspace.bounds.right()
@@ -9229,243 +9308,65 @@ impl Render for Workspace {
                                     },
                                 ))
                             })
-                            .child({
-                                match bottom_dock_layout {
-                                    BottomDockLayout::Full => div()
-                                        .flex()
-                                        .flex_col()
-                                        .h_full()
-                                        .child(
-                                            div()
-                                                .flex()
-                                                .flex_row()
-                                                .flex_1()
-                                                .overflow_hidden()
-                                                .children(self.render_dock(
-                                                    DockPosition::Left,
-                                                    &self.left_dock,
-                                                    window,
-                                                    cx,
-                                                ))
-                                                .child(
-                                                    div()
-                                                        .flex()
-                                                        .flex_col()
-                                                        .flex_1()
-                                                        .overflow_hidden()
-                                                        .child(
-                                                            h_flex()
-                                                                .flex_1()
-                                                                .when_some(paddings.0, |this, p| {
-                                                                    this.child(p.border_r_1())
-                                                                })
-                                                                .child(self.render_center(
-                                                                    &pane_render_context,
-                                                                    window,
-                                                                    cx,
-                                                                ))
-                                                                .when_some(
-                                                                    paddings.1,
-                                                                    |this, p| {
-                                                                        this.child(p.border_l_1())
-                                                                    },
-                                                                ),
-                                                        ),
-                                                )
-                                                .children(self.render_dock(
-                                                    DockPosition::Right,
-                                                    &self.right_dock,
-                                                    window,
-                                                    cx,
-                                                )),
-                                        )
-                                        .child(div().w_full().children(self.render_dock(
-                                            DockPosition::Bottom,
-                                            &self.bottom_dock,
-                                            window,
-                                            cx,
-                                        ))),
-
-                                    BottomDockLayout::LeftAligned => div()
-                                        .flex()
-                                        .flex_row()
-                                        .h_full()
-                                        .child(
-                                            div()
-                                                .flex()
-                                                .flex_col()
-                                                .flex_1()
-                                                .h_full()
-                                                .child(
-                                                    div()
-                                                        .flex()
-                                                        .flex_row()
-                                                        .flex_1()
-                                                        .children(self.render_dock(
-                                                            DockPosition::Left,
-                                                            &self.left_dock,
-                                                            window,
-                                                            cx,
-                                                        ))
-                                                        .child(
-                                                            div()
-                                                                .flex()
-                                                                .flex_col()
-                                                                .flex_1()
-                                                                .overflow_hidden()
-                                                                .child(
-                                                                    h_flex()
-                                                                        .flex_1()
-                                                                        .when_some(
-                                                                            paddings.0,
-                                                                            |this, p| {
-                                                                                this.child(
-                                                                                    p.border_r_1(),
-                                                                                )
-                                                                            },
-                                                                        )
-                                                                        .child(self.render_center(
-                                                                            &pane_render_context,
-                                                                            window,
-                                                                            cx,
-                                                                        ))
-                                                                        .when_some(
-                                                                            paddings.1,
-                                                                            |this, p| {
-                                                                                this.child(
-                                                                                    p.border_l_1(),
-                                                                                )
-                                                                            },
-                                                                        ),
-                                                                ),
-                                                        ),
-                                                )
-                                                .child(div().w_full().children(self.render_dock(
-                                                    DockPosition::Bottom,
-                                                    &self.bottom_dock,
-                                                    window,
-                                                    cx,
-                                                ))),
-                                        )
-                                        .children(self.render_dock(
-                                            DockPosition::Right,
-                                            &self.right_dock,
-                                            window,
-                                            cx,
-                                        )),
-                                    BottomDockLayout::RightAligned => div()
-                                        .flex()
-                                        .flex_row()
-                                        .h_full()
-                                        .children(self.render_dock(
-                                            DockPosition::Left,
-                                            &self.left_dock,
-                                            window,
-                                            cx,
-                                        ))
-                                        .child(
-                                            div()
-                                                .flex()
-                                                .flex_col()
-                                                .flex_1()
-                                                .h_full()
-                                                .child(
-                                                    div()
-                                                        .flex()
-                                                        .flex_row()
-                                                        .flex_1()
-                                                        .child(
-                                                            div()
-                                                                .flex()
-                                                                .flex_col()
-                                                                .flex_1()
-                                                                .overflow_hidden()
-                                                                .child(
-                                                                    h_flex()
-                                                                        .flex_1()
-                                                                        .when_some(
-                                                                            paddings.0,
-                                                                            |this, p| {
-                                                                                this.child(
-                                                                                    p.border_r_1(),
-                                                                                )
-                                                                            },
-                                                                        )
-                                                                        .child(self.render_center(
-                                                                            &pane_render_context,
-                                                                            window,
-                                                                            cx,
-                                                                        ))
-                                                                        .when_some(
-                                                                            paddings.1,
-                                                                            |this, p| {
-                                                                                this.child(
-                                                                                    p.border_l_1(),
-                                                                                )
-                                                                            },
-                                                                        ),
-                                                                ),
-                                                        )
-                                                        .children(self.render_dock(
-                                                            DockPosition::Right,
-                                                            &self.right_dock,
-                                                            window,
-                                                            cx,
-                                                        )),
-                                                )
-                                                .child(div().w_full().children(self.render_dock(
-                                                    DockPosition::Bottom,
-                                                    &self.bottom_dock,
-                                                    window,
-                                                    cx,
-                                                ))),
-                                        ),
-                                    BottomDockLayout::Contained => div()
-                                        .flex()
-                                        .flex_row()
-                                        .h_full()
-                                        .children(self.render_dock(
-                                            DockPosition::Left,
-                                            &self.left_dock,
-                                            window,
-                                            cx,
-                                        ))
-                                        .child(
-                                            div()
-                                                .flex()
-                                                .flex_col()
-                                                .flex_1()
-                                                .overflow_hidden()
-                                                .child(
-                                                    h_flex()
-                                                        .flex_1()
-                                                        .when_some(paddings.0, |this, p| {
-                                                            this.child(p.border_r_1())
-                                                        })
-                                                        .child(self.render_center(
-                                                            &pane_render_context,
-                                                            window,
-                                                            cx,
-                                                        ))
-                                                        .when_some(paddings.1, |this, p| {
-                                                            this.child(p.border_l_1())
-                                                        }),
-                                                )
-                                                .children(self.render_dock(
-                                                    DockPosition::Bottom,
-                                                    &self.bottom_dock,
-                                                    window,
-                                                    cx,
-                                                )),
-                                        )
-                                        .children(self.render_dock(
-                                            DockPosition::Right,
-                                            &self.right_dock,
-                                            window,
-                                            cx,
-                                        )),
-                                }
-                            })
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_row()
+                                    .h_full()
+                                    .children(self.render_dock(
+                                        DockPosition::Left,
+                                        &self.left_dock,
+                                        window,
+                                        cx,
+                                    ))
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .flex_col()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .min_h_0()
+                                            .gap_0p5()
+                                            .child(
+                                                h_flex()
+                                                    .flex_1()
+                                                    .min_h_0()
+                                                    .overflow_hidden()
+                                                    .when_some(paddings.0, |this, padding| {
+                                                        this.child(padding.border_r_1())
+                                                    })
+                                                    .child(self.render_center(
+                                                        &pane_render_context,
+                                                        window,
+                                                        cx,
+                                                    ))
+                                                    .when_some(paddings.1, |this, padding| {
+                                                        this.child(padding.border_l_1())
+                                                    }),
+                                            )
+                                            .children(self.render_dock(
+                                                DockPosition::Bottom,
+                                                &self.bottom_dock,
+                                                window,
+                                                cx,
+                                            ))
+                                            .when(self.status_bar_visible(cx), |this| {
+                                                this.child(self.status_bar.clone())
+                                            }),
+                                    )
+                                    .children(self.render_dock(
+                                        DockPosition::Devices,
+                                        &self.devices_dock,
+                                        window,
+                                        cx,
+                                    ))
+                                    .children(self.render_dock(
+                                        DockPosition::Right,
+                                        &self.right_dock,
+                                        window,
+                                        cx,
+                                    )),
+                            )
                             .children(self.zoomed.as_ref().and_then(|view| {
                                 let zoomed_view = view.upgrade()?;
                                 let div = div()
@@ -9484,7 +9385,9 @@ impl Render for Workspace {
 
                                 Some(match self.zoomed_position {
                                     Some(DockPosition::Left) => div.right_2().border_r_1(),
-                                    Some(DockPosition::Right) => div.left_2().border_l_1(),
+                                    Some(DockPosition::Devices) | Some(DockPosition::Right) => {
+                                        div.left_2().border_l_1()
+                                    }
                                     Some(DockPosition::Bottom) => div.top_2().border_t_1(),
                                     None => div.top_2().bottom_2().left_2().right_2().border_1(),
                                 })
@@ -11645,7 +11548,7 @@ fn load_legacy_panel_size(
     let state = serde_json::from_str::<LegacyPanelState>(&json).log_err()?;
     let size = match dock_position {
         DockPosition::Bottom => state.height,
-        DockPosition::Left | DockPosition::Right => state.width,
+        DockPosition::Left | DockPosition::Devices | DockPosition::Right => state.width,
     }?;
 
     cx.background_spawn(async move { kvp.delete_kvp(legacy_key).await })

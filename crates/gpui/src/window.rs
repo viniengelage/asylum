@@ -6204,6 +6204,59 @@ impl AnyWindowHandle {
     }
 }
 
+#[cfg(target_os = "macos")]
+impl Window {
+    /// Mounts an owned native AppKit subview in this window at the provided GPUI bounds.
+    ///
+    /// On success, ownership is transferred to the platform host. Removing the subview releases it.
+    pub unsafe fn add_native_subview(
+        &self,
+        subview: *mut std::ffi::c_void,
+        bounds: Bounds<Pixels>,
+    ) -> Option<u64> {
+        self.platform_window.add_native_subview(subview, bounds)
+    }
+
+    /// Updates a native AppKit subview previously mounted with [`Self::add_native_subview`].
+    pub fn update_native_subview_bounds(&self, subview_id: u64, bounds: Bounds<Pixels>) {
+        self.platform_window
+            .update_native_subview_bounds(subview_id, bounds);
+    }
+
+    /// Resizes a mounted SimulatorKit display view to fit the available space.
+    pub fn resize_simulator_display_view(&self, subview_id: u64, bounds: Bounds<Pixels>) {
+        self.platform_window
+            .resize_simulator_display_view(subview_id, bounds);
+    }
+
+    /// Removes a native AppKit subview previously mounted with [`Self::add_native_subview`].
+    pub fn remove_native_subview(&self, subview_id: u64) {
+        self.platform_window.remove_native_subview(subview_id);
+    }
+
+    /// Hides or shows a native AppKit subview previously mounted with
+    /// [`Self::add_native_subview`], keeping it alive for later reuse.
+    pub fn set_native_subview_hidden(&self, subview_id: u64, hidden: bool) {
+        self.platform_window
+            .set_native_subview_hidden(subview_id, hidden);
+    }
+
+    /// Resolves a CoreSimulator device by its UDID using the Xcode installation on this Mac.
+    pub fn simulator_device_for_udid(&self, udid: &str) -> anyhow::Result<*mut std::ffi::c_void> {
+        self.platform_window.simulator_device_for_udid(udid)
+    }
+
+    /// Creates a native SimulatorKit display view connected to the device with this UDID.
+    pub fn create_simulator_display_view(
+        &self,
+        udid: &str,
+        size: Size<Pixels>,
+    ) -> anyhow::Result<*mut std::ffi::c_void> {
+        self.platform_window
+            .create_simulator_display_view(udid, size)
+    }
+}
+
 impl HasWindowHandle for Window {
     fn window_handle(&self) -> Result<raw_window_handle::WindowHandle<'_>, HandleError> {
         self.platform_window.window_handle()

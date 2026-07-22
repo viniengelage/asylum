@@ -1,0 +1,28 @@
+#!/bin/bash
+# Fetches the current Claude Code session token and prints it.
+# Usage:
+#   1. Run: ./script/claude-oauth-token
+#   2. Copy the output token
+#   3. Paste it in Zed's Anthropic API key field
+#
+# The token is a Bearer token from your Claude Pro/Max/Team subscription.
+# Zed will automatically detect it's not a standard API key and use
+# Authorization: Bearer instead of X-Api-Key.
+
+set -euo pipefail
+
+if ! command -v claude &>/dev/null; then
+  echo "Error: Claude Code CLI not found. Install it first." >&2
+  exit 1
+fi
+
+TOKEN=$(claude auth token 2>/dev/null)
+
+if [ -z "$TOKEN" ]; then
+  echo "Error: Could not get token. Run 'claude auth login' first." >&2
+  exit 1
+fi
+
+echo "$TOKEN"
+echo "" >&2
+echo "Token copied to stdout. Paste it in Zed's Anthropic API key field." >&2

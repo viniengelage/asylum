@@ -1541,8 +1541,8 @@ impl Panel for TerminalPanel {
         TerminalSettings::get_global(cx).dock.into()
     }
 
-    fn position_is_valid(&self, _: DockPosition) -> bool {
-        true
+    fn position_is_valid(&self, position: DockPosition) -> bool {
+        position != DockPosition::Devices
     }
 
     fn set_position(
@@ -1555,7 +1555,7 @@ impl Panel for TerminalPanel {
             let dock = match position {
                 DockPosition::Left => TerminalDockPosition::Left,
                 DockPosition::Bottom => TerminalDockPosition::Bottom,
-                DockPosition::Right => TerminalDockPosition::Right,
+                DockPosition::Devices | DockPosition::Right => TerminalDockPosition::Right,
             };
             settings.terminal.get_or_insert_default().dock = Some(dock);
         });
@@ -1564,7 +1564,9 @@ impl Panel for TerminalPanel {
     fn default_size(&self, window: &Window, cx: &App) -> Pixels {
         let settings = TerminalSettings::get_global(cx);
         match self.position(window, cx) {
-            DockPosition::Left | DockPosition::Right => settings.default_width,
+            DockPosition::Left | DockPosition::Devices | DockPosition::Right => {
+                settings.default_width
+            }
             DockPosition::Bottom => settings.default_height,
         }
     }

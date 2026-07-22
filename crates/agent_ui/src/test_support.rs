@@ -13,7 +13,10 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use workspace::{MultiWorkspace, Sidebar as WorkspaceSidebar, SidebarEvent, SidebarSide};
+use workspace::{
+    MultiWorkspace, Sidebar as WorkspaceSidebar, SidebarEvent, SidebarSide,
+    dock::{DockPosition, Panel, PanelEvent},
+};
 
 use crate::AgentPanel;
 use crate::agent_panel;
@@ -167,6 +170,53 @@ impl TestWorkspaceSidebar {
 }
 
 impl EventEmitter<SidebarEvent> for TestWorkspaceSidebar {}
+impl EventEmitter<PanelEvent> for TestWorkspaceSidebar {}
+
+impl Panel for TestWorkspaceSidebar {
+    fn persistent_name() -> &'static str {
+        "TestWorkspaceSidebar"
+    }
+
+    fn panel_key() -> &'static str {
+        "test_workspace_sidebar"
+    }
+
+    fn position(&self, _window: &Window, _cx: &App) -> DockPosition {
+        DockPosition::Left
+    }
+
+    fn position_is_valid(&self, position: DockPosition) -> bool {
+        position == DockPosition::Left
+    }
+
+    fn set_position(
+        &mut self,
+        _position: DockPosition,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) {
+    }
+
+    fn default_size(&self, _window: &Window, _cx: &App) -> Pixels {
+        px(300.)
+    }
+
+    fn icon(&self, _window: &Window, _cx: &App) -> Option<ui::IconName> {
+        None
+    }
+
+    fn icon_tooltip(&self, _window: &Window, _cx: &App) -> Option<&'static str> {
+        None
+    }
+
+    fn toggle_action(&self) -> Box<dyn gpui::Action> {
+        Box::new(workspace::ToggleLeftDock)
+    }
+
+    fn activation_priority(&self) -> u32 {
+        4
+    }
+}
 
 impl Focusable for TestWorkspaceSidebar {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
@@ -211,7 +261,7 @@ pub fn register_test_sidebar(
             .expect("test window should have a MultiWorkspace root");
         let sidebar = cx.new(|cx| TestWorkspaceSidebar::new(threads_list_active, cx));
         multi_workspace.update(cx, |multi_workspace, cx| {
-            multi_workspace.register_sidebar(sidebar.clone(), cx);
+            multi_workspace.register_sidebar(sidebar.clone(), window, cx);
         });
         sidebar
     })

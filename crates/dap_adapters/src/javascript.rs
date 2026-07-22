@@ -16,11 +16,11 @@ pub(crate) struct JsDebugAdapter {
 }
 
 impl JsDebugAdapter {
-    const ADAPTER_NAME: &'static str = "JavaScript";
-    const ADAPTER_NPM_NAME: &'static str = "vscode-js-debug";
-    const ADAPTER_PATH: &'static str = "js-debug/src/dapDebugServer.js";
+    pub(crate) const ADAPTER_NAME: &'static str = "JavaScript";
+    pub(crate) const ADAPTER_NPM_NAME: &'static str = "vscode-js-debug";
+    pub(crate) const ADAPTER_PATH: &'static str = "js-debug/src/dapDebugServer.js";
 
-    async fn fetch_latest_adapter_version(
+    pub(crate) async fn fetch_latest_adapter_version(
         &self,
         delegate: &Arc<dyn DapDelegate>,
     ) -> Result<AdapterVersion> {

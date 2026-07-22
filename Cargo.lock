@@ -709,6 +709,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "android_sdk"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-compression",
+ "async-tar",
+ "futures 0.3.32",
+ "gpui",
+ "http_client",
+ "image",
+ "log",
+ "paths",
+ "reqwest_client",
+ "smol",
+ "util",
+ "zed-reqwest",
+]
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -789,15 +808,18 @@ name = "anthropic"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "chrono",
  "collections",
  "futures 0.3.32",
  "http_client",
  "language_model_core",
  "log",
+ "rand 0.9.4",
  "schemars 1.0.4",
  "serde",
  "serde_json",
+ "sha2",
  "strum 0.27.2",
  "thiserror 2.0.17",
 ]
@@ -17028,6 +17050,7 @@ dependencies = [
  "agent-client-protocol",
  "agent_settings",
  "agent_ui",
+ "android_sdk",
  "anyhow",
  "async-channel 2.5.0",
  "chrono",
@@ -17062,6 +17085,8 @@ dependencies = [
  "serde",
  "serde_json",
  "settings",
+ "smol",
+ "task",
  "telemetry",
  "theme",
  "theme_settings",

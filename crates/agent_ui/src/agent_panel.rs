@@ -91,8 +91,8 @@ use terminal_view::{TerminalView, terminal_panel::TerminalPanel};
 use text::OffsetRangeExt;
 use theme_settings::ThemeSettings;
 use ui::{
-    ContextMenu, ContextMenuEntry, GradientFade, IconButton, KeyBinding, PopoverMenu,
-    PopoverMenuHandle, ProjectEmptyState, Tab, Tooltip, prelude::*, utils::WithRemSize,
+    ContextMenu, ContextMenuEntry, IconButton, KeyBinding, PopoverMenu,
+    PopoverMenuHandle, ProjectEmptyState, Tooltip, prelude::*, utils::WithRemSize,
 };
 use util::ResultExt as _;
 use workspace::{
@@ -4965,13 +4965,13 @@ impl Panel for AgentPanel {
     }
 
     fn position_is_valid(&self, position: DockPosition) -> bool {
-        position != DockPosition::Bottom
+        matches!(position, DockPosition::Left | DockPosition::Right)
     }
 
     fn set_position(&mut self, position: DockPosition, _: &mut Window, cx: &mut Context<Self>) {
         let side = match position {
             DockPosition::Left => "left",
-            DockPosition::Right | DockPosition::Bottom => "right",
+            DockPosition::Bottom | DockPosition::Devices | DockPosition::Right => "right",
         };
         telemetry::event!("Agent Panel Side Changed", side = side);
         settings::update_settings_file(self.fs.clone(), cx, move |settings, _| {
@@ -4985,14 +4985,18 @@ impl Panel for AgentPanel {
     fn default_size(&self, window: &Window, cx: &App) -> Pixels {
         let settings = AgentSettings::get_global(cx);
         match self.position(window, cx) {
-            DockPosition::Left | DockPosition::Right => settings.default_width,
+            DockPosition::Left | DockPosition::Devices | DockPosition::Right => {
+                settings.default_width
+            }
             DockPosition::Bottom => settings.default_height,
         }
     }
 
     fn min_size(&self, window: &Window, cx: &App) -> Option<Pixels> {
         match self.position(window, cx) {
-            DockPosition::Left | DockPosition::Right => Some(MIN_PANEL_WIDTH),
+            DockPosition::Left | DockPosition::Devices | DockPosition::Right => {
+                Some(MIN_PANEL_WIDTH)
+            }
             DockPosition::Bottom => None,
         }
     }
@@ -5459,16 +5463,6 @@ impl AgentPanel {
             VisibleSurface::Uninitialized => Label::new("Agent").truncate().into_any_element(),
         };
 
-        let toolbar_bg = cx.theme().colors().tab_bar_background;
-        let gradient_overlay = GradientFade::new(toolbar_bg, toolbar_bg, toolbar_bg)
-            .width(px(64.0))
-            .right(px(0.0))
-            .gradient_stop(0.75);
-        // The fade gradient renders as a visible patch on transparent windows
-        // (the title already truncates).
-        let opaque_window =
-            cx.theme().window_background_appearance() == gpui::WindowBackgroundAppearance::Opaque;
-
         h_flex()
             .key_context("TitleEditor")
             .group("title_editor")
@@ -5479,8 +5473,7 @@ impl AgentPanel {
             .overflow_x_hidden()
             .child(content)
             .when(self.should_show_title_edit(window, cx), |this| {
-                this.when(opaque_window, |this| this.child(gradient_overlay))
-                    .child(
+                this.child(
                         h_flex()
                             .visible_on_hover("title_editor")
                             .absolute()
@@ -6066,12 +6059,11 @@ impl AgentPanel {
         let max_content_width = AgentSettings::get_global(cx).max_content_width;
 
         let base_container = h_flex()
-            .size_full()
+            .w_full()
             .when(
                 matches!(mode, ToolbarMode::EmptyThread | ToolbarMode::ActiveThread),
                 |this| this.when_some(max_content_width, |this, max_w| this.max_w(max_w).mx_auto()),
             )
-            .flex_none()
             .justify_between();
 
         let empty_thread_title = matches!(mode, ToolbarMode::EmptyThread).then(|| {
@@ -6112,12 +6104,10 @@ impl AgentPanel {
                 .child(
                     h_flex()
                         .relative()
-                        .h_full()
                         .flex_1()
                         .min_w_0()
                         .overflow_hidden()
-                        .gap(DynamicSpacing::Base04.rems(cx))
-                        .pl(DynamicSpacing::Base04.rems(cx))
+                        .gap(DynamicSpacing::Base08.rems(cx))
                         .child(selected_agent.into_any_element())
                         .child(match empty_thread_title {
                             Some(title) => title,
@@ -6126,10 +6116,8 @@ impl AgentPanel {
                 )
                 .child(
                     h_flex()
-                        .px_1()
-                        .h_full()
                         .flex_none()
-                        .gap_1()
+                        .gap(DynamicSpacing::Base08.rems(cx))
                         .children(sandbox_status)
                         .when(can_create_entries, |this| this.child(new_thread_menu))
                         .child(full_screen_button)
@@ -6140,12 +6128,13 @@ impl AgentPanel {
 
         h_flex()
             .id("agent-panel-toolbar")
-            .h(Tab::container_height(cx))
+            .py(DynamicSpacing::Base08.rems(cx))
+            .px(DynamicSpacing::Base08.rems(cx))
             .flex_shrink_0()
             .max_w_full()
-            .bg(cx.theme().colors().tab_bar_background)
+            .bg(cx.theme().colors().toolbar_background)
             .border_b_1()
-            .border_color(cx.theme().colors().border)
+            .border_color(cx.theme().colors().border_variant)
             .child(toolbar_content)
     }
 

@@ -854,6 +854,39 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn set_document_path(&self, _path: Option<&std::path::Path>) {}
     #[cfg(target_os = "macos")]
     fn set_traffic_light_position(&self, _position: Point<Pixels>) {}
+    #[cfg(target_os = "macos")]
+    fn add_native_subview(
+        &self,
+        _subview: *mut std::ffi::c_void,
+        _bounds: Bounds<Pixels>,
+    ) -> Option<u64> {
+        None
+    }
+    #[cfg(target_os = "macos")]
+    fn update_native_subview_bounds(&self, _subview_id: u64, _bounds: Bounds<Pixels>) {}
+    #[cfg(target_os = "macos")]
+    fn resize_simulator_display_view(&self, _subview_id: u64, _bounds: Bounds<Pixels>) {}
+
+    #[cfg(target_os = "macos")]
+    fn remove_native_subview(&self, _subview_id: u64) {}
+    #[cfg(target_os = "macos")]
+    fn set_native_subview_hidden(&self, _subview_id: u64, _hidden: bool) {}
+    #[cfg(target_os = "macos")]
+    fn simulator_kit_display_view_class(&self) -> Option<*const std::ffi::c_void> {
+        None
+    }
+    #[cfg(target_os = "macos")]
+    fn simulator_device_for_udid(&self, _udid: &str) -> anyhow::Result<*mut std::ffi::c_void> {
+        anyhow::bail!("CoreSimulator is not available on this platform")
+    }
+    #[cfg(target_os = "macos")]
+    fn create_simulator_display_view(
+        &self,
+        _udid: &str,
+        _size: Size<Pixels>,
+    ) -> anyhow::Result<*mut std::ffi::c_void> {
+        anyhow::bail!("SimulatorKit is not available on this platform")
+    }
     fn show_character_palette(&self) {}
     fn titlebar_double_click(&self) {}
     fn on_move_tab_to_new_window(&self, _callback: Box<dyn FnMut()>) {}

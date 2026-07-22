@@ -41,6 +41,9 @@ pub struct WorkspaceSettings {
     pub zoomed_padding: bool,
     pub window_decorations: settings::WindowDecorations,
     pub focus_follows_mouse: FocusFollowsMouse,
+    /// List of panel names to hide from the right dock tab bar.
+    /// Example: `["CollabPanel", "OutlinePanel"]`
+    pub hidden_right_dock_panels: Vec<String>,
 }
 
 #[derive(Copy, Clone, Deserialize)]
@@ -142,6 +145,10 @@ impl Settings for WorkspaceSettings {
                         .unwrap_or(250),
                 ),
             },
+            hidden_right_dock_panels: workspace
+                .hidden_right_dock_panels
+                .clone()
+                .unwrap_or_default(),
         }
     }
 }

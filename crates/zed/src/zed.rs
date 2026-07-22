@@ -104,8 +104,9 @@ use workspace::{
 };
 use workspace::{Pane, notifications::DetachAndPromptErr};
 use zed_actions::{
-    About, GetMerch, OpenAccountSettings, OpenBrowser, OpenDocs, OpenProjectTasks,
-    OpenServerSettings, OpenSettingsFile, OpenStatusPage, OpenZedUrl, Quit,
+    About, ClaudeOAuthSignIn, ClaudeOAuthSignOut, GetMerch, OpenAccountSettings, OpenBrowser,
+    OpenDocs, OpenProjectTasks, OpenServerSettings, OpenSettingsFile, OpenStatusPage, OpenZedUrl,
+    Quit,
 };
 
 const DOCS_URL: &str = "https://zed.dev/docs/";
@@ -534,8 +535,11 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
                 .update(cx, |_, window, cx| {
                     let sidebar =
                         cx.new(|cx| Sidebar::new(multi_workspace_handle.clone(), window, cx));
+                    let devices_sidebar = cx
+                        .new(|cx| Sidebar::new_devices(multi_workspace_handle.clone(), window, cx));
                     multi_workspace_handle.update(cx, |multi_workspace, cx| {
-                        multi_workspace.register_sidebar(sidebar, cx);
+                        multi_workspace.register_sidebar(sidebar, window, cx);
+                        multi_workspace.register_devices_sidebar(devices_sidebar, window, cx);
                     });
                 })
                 .ok();
@@ -913,6 +917,100 @@ fn register_actions(
         .register_action(|_, _: &OpenDocs, _, cx| cx.open_url(DOCS_URL))
         .register_action(|_, _: &OpenStatusPage, _, cx| cx.open_url(STATUS_URL))
         .register_action(|_, _: &GetMerch, _, cx| cx.open_url(MERCH_URL))
+        .register_action(
+            |workspace: &mut Workspace,
+             _: &ClaudeOAuthSignIn,
+             _window: &mut Window,
+             cx: &mut Context<Workspace>| {
+                struct ClaudeOAuthToast;
+
+                // If the clipboard contains a bearer token, use it directly.
+                let clipboard_token = cx
+                    .read_from_clipboard()
+                    .and_then(|item| item.text())
+                    .map(|t| t.trim().to_string())
+                    .filter(|t| !t.is_empty());
+
+                if let Some(token) = clipboard_token {
+                    let task = language_models::claude_set_bearer_token(token, cx);
+                    cx.spawn(async move |workspace, cx| {
+                        match task.await {
+                            Ok(()) => {
+                                workspace.update(cx, |workspace, cx| {
+                                    workspace.show_toast(
+                                        Toast::new(
+                                            NotificationId::unique::<ClaudeOAuthToast>(),
+                                            "Claude subscription connected successfully.",
+                                        ),
+                                        cx,
+                                    );
+                                }).ok();
+                            }
+                            Err(error) => {
+                                log::error!("Claude OAuth sign-in failed: {error}");
+                                workspace.update(cx, |workspace, cx| {
+                                    workspace.show_toast(
+                                        Toast::new(
+                                            NotificationId::unique::<ClaudeOAuthToast>(),
+                                            format!("Claude sign-in failed: {error}"),
+                                        ),
+                                        cx,
+                                    );
+                                }).ok();
+                            }
+                        }
+                    }).detach();
+                    return;
+                }
+
+                // No clipboard token — start the OAuth PKCE flow via browser.
+                match language_models::claude_start_oauth_flow(cx) {
+                    Ok(url) => {
+                        cx.open_url(&url);
+                        workspace.show_toast(
+                            Toast::new(
+                                NotificationId::unique::<ClaudeOAuthToast>(),
+                                "Browser opened for Claude sign-in. After authorizing, \
+                                 copy the code from the page and paste it into the \
+                                 Anthropic API key field in settings.",
+                            ),
+                            cx,
+                        );
+                    }
+                    Err(error) => {
+                        log::error!("Claude OAuth flow failed to start: {error}");
+                        workspace.show_toast(
+                            Toast::new(
+                                NotificationId::unique::<ClaudeOAuthToast>(),
+                                format!("Claude sign-in failed: {error}"),
+                            ),
+                            cx,
+                        );
+                    }
+                }
+            },
+        )
+        .register_action(
+            |_workspace: &mut Workspace,
+             _: &ClaudeOAuthSignOut,
+             _window: &mut Window,
+             cx: &mut Context<Workspace>| {
+                struct ClaudeOAuthSignOutToast;
+                let task = language_models::claude_oauth_sign_out(cx);
+                cx.spawn(async move |workspace, cx| {
+                    task.await.log_err();
+                    workspace.update(cx, |workspace, cx| {
+                        workspace.show_toast(
+                            Toast::new(
+                                NotificationId::unique::<ClaudeOAuthSignOutToast>(),
+                                "Claude subscription disconnected.",
+                            ),
+                            cx,
+                        );
+                    }).ok();
+                }).detach();
+            },
+        )
         .register_action(
             |workspace: &mut Workspace,
              _: &input_latency_ui::DumpInputLatencyHistogram,
