@@ -32,6 +32,7 @@ unsafe extern "C" {
 
     fn zed_simulator_kit_connect(display_view: *mut c_void, device_screen: *mut c_void) -> i32;
     fn zed_simulator_kit_resize(display_view: *mut c_void, width: f64, height: f64) -> i32;
+    fn zed_simulator_kit_set_show_device_chrome(display_view: *mut c_void, show: bool);
 }
 
 pub(crate) fn sim_display_view_class() -> Result<&'static Class> {
@@ -84,6 +85,7 @@ pub(crate) fn create_sim_display_view(device: id, size: Size<Pixels>) -> Result<
             let _: () = msg_send![display_view, release];
             return Err(error);
         }
+        zed_simulator_kit_set_show_device_chrome(display_view.cast(), false);
         objc_setAssociatedObject(
             display_view,
             (&raw const DEVICE_SCREEN_ASSOCIATION_KEY).cast(),

@@ -18,6 +18,9 @@ extension NSObject {
 
     @_silgen_name("$s12SimulatorKit14SimDisplayViewC9endResizeyyFTj")
     fileprivate func endResizeSimulatorKit()
+
+    @_silgen_name("$s12SimulatorKit14SimDisplayViewC16showDeviceChromeSbvsTj")
+    fileprivate func setShowDeviceChromeSimulatorKit(_ value: Bool)
 }
 
 @_cdecl("zed_simulator_kit_connect")
@@ -49,6 +52,18 @@ public func zedSimulatorKitConnect(
 }
 
 
+
+@_cdecl("zed_simulator_kit_set_show_device_chrome")
+public func zedSimulatorKitSetShowDeviceChrome(
+    _ displayViewPointer: UnsafeMutableRawPointer?,
+    _ show: Bool
+) {
+    guard let displayViewPointer else { return }
+    let displayView = Unmanaged<NSObject>
+        .fromOpaque(displayViewPointer)
+        .takeUnretainedValue()
+    displayView.setShowDeviceChromeSimulatorKit(show)
+}
 
 /// Resize result codes shared with `simulator_kit.rs`.
 ///
