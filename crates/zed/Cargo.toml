@@ -200,6 +200,7 @@ tasks_ui.workspace = true
 telemetry.workspace = true
 telemetry_events.workspace = true
 terminal_view.workspace = true
+web_preview.workspace = true
 theme.workspace = true
 theme_settings.workspace = true
 theme_extension.workspace = true

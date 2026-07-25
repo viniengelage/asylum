@@ -11,7 +11,7 @@ use gpui::{
     Action, Anchor, AnyView, App, Axis, ClickEvent, Context, Entity, EntityId, EventEmitter,
     FocusHandle, Focusable, IntoElement, KeyContext, MouseButton, MouseDownEvent, MouseUpEvent,
     ParentElement, Render, SharedString, StyleRefinement, Styled, Subscription, WeakEntity, Window,
-    deferred, div, px,
+    deferred, div, px, relative,
 };
 use serde::{Deserialize, Serialize};
 use settings::{Settings, SettingsStore, TerminalDockPosition};
@@ -965,7 +965,7 @@ impl Dock {
 
                     div()
                         .id(("right-dock-tab-wrap", panel_index))
-                        .flex_1()
+                        .w(relative(1.0 / visible_count as f32))
                         .min_w_0()
                         .cursor_pointer()
                         .child(
@@ -978,7 +978,21 @@ impl Dock {
                                         .when(!is_active, |i| i.color(Color::Muted))
                                         .into_any_element()
                                 }))
-                                .child(div().truncate().child(label)),
+                                .child(div().flex_1().truncate().child(label))
+                                .end_slot(
+                                    IconButton::new(
+                                        ("close-dock-tab", panel_index),
+                                        ui::IconName::Close,
+                                    )
+                                    .icon_size(IconSize::XSmall)
+                                    .on_click(cx.listener(
+                                        move |dock, _, window, cx| {
+                                            if is_active {
+                                                dock.set_open(false, window, cx);
+                                            }
+                                        },
+                                    )),
+                                ),
                         )
                         .on_click(cx.listener(
                             move |dock, _: &ClickEvent, window, cx| {

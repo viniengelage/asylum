@@ -20,7 +20,9 @@ use std::sync::Arc;
 use ui::prelude::*;
 
 pub const HANDLE_HITBOX_SIZE: f32 = 4.0;
-const PANE_CARD_GAP: f32 = 8.0;
+pub(crate) fn workspace_card_gap(cx: &gpui::App) -> gpui::Pixels {
+    gpui::px(WorkspaceSettings::get_global(cx).card_gap.max(0.0))
+}
 const HORIZONTAL_MIN_SIZE: f32 = 80.;
 const VERTICAL_MIN_SIZE: f32 = 100.;
 
@@ -1150,7 +1152,7 @@ mod element {
 
     use crate::WorkspaceSettings;
 
-    use super::{HANDLE_HITBOX_SIZE, HORIZONTAL_MIN_SIZE, PANE_CARD_GAP, VERTICAL_MIN_SIZE};
+    use super::{HANDLE_HITBOX_SIZE, HORIZONTAL_MIN_SIZE, VERTICAL_MIN_SIZE, workspace_card_gap};
 
     pub(super) fn pane_axis(
         axis: Axis,
@@ -1314,15 +1316,16 @@ mod element {
             axis: Axis,
             pane_bounds: Bounds<Pixels>,
             window: &mut Window,
-            _cx: &mut App,
+            cx: &mut App,
         ) -> PaneAxisHandleLayout {
+            let card_gap = workspace_card_gap(cx);
             let handle_bounds = Bounds {
                 origin: pane_bounds.origin.apply_along(axis, |origin| {
                     origin + pane_bounds.size.along(axis) - px(HANDLE_HITBOX_SIZE / 2.)
                 }),
                 size: pane_bounds
                     .size
-                    .apply_along(axis, |_| px(HANDLE_HITBOX_SIZE + PANE_CARD_GAP)),
+                    .apply_along(axis, |_| px(HANDLE_HITBOX_SIZE) + card_gap),
             };
 
             PaneAxisHandleLayout {
@@ -1390,7 +1393,7 @@ mod element {
             debug_assert!(flex_values_in_bounds(flexes.as_slice()));
 
             let total_flex = len as f32;
-            let card_gap = px(PANE_CARD_GAP);
+            let card_gap = workspace_card_gap(cx);
             let gap_count = len.saturating_sub(1);
             let total_gap = card_gap * gap_count as f32;
             let available_size = Pixels::max(bounds.size.along(self.axis) - total_gap, px(0.0));
@@ -1481,7 +1484,7 @@ mod element {
                 .and_then(|val| (val >= 0.).then_some(val));
             let available_size = bounds.size.apply_along(self.axis, |size| {
                 Pixels::max(
-                    size - px(PANE_CARD_GAP) * layout.children.len().saturating_sub(1) as f32,
+                    size - workspace_card_gap(cx) * layout.children.len().saturating_sub(1) as f32,
                     px(0.0),
                 )
             });

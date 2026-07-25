@@ -126,6 +126,11 @@ pub struct WorkspaceSettingsContent {
     /// while zoomed left/right panels will have padding to the right/left (respectively).
     ///
     /// Default: true
+    /// Gap in pixels between pane cards (panels, editor groups).
+    /// Set to 0 for no gap.
+    ///
+    /// Default: 8.0
+    pub card_gap: Option<f32>,
     pub zoomed_padding: Option<bool>,
     /// Whether toggling a panel (e.g. with its keyboard shortcut) also closes
     /// the panel when it is already focused, instead of just moving focus back

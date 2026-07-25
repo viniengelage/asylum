@@ -1,0 +1,22 @@
+#!/bin/bash
+# Opens a URL in Zed's embedded Web Preview browser.
+# Usage: zed-browse <url>
+#   or:  echo "http://localhost:3000" | zed-browse
+#
+# This writes the URL to a known file that the Web Preview watches.
+
+BROWSE_FILE="$HOME/Library/Application Support/Zed Workstation/WebPreview/browse-request.txt"
+
+if [ -n "$1" ]; then
+    URL="$1"
+elif [ ! -t 0 ]; then
+    read -r URL
+else
+    echo "Usage: zed-browse <url>"
+    echo "   or: echo 'http://localhost:3000' | zed-browse"
+    exit 1
+fi
+
+mkdir -p "$(dirname "$BROWSE_FILE")"
+echo "$URL" > "$BROWSE_FILE"
+echo "Opening $URL in Zed Web Preview..."

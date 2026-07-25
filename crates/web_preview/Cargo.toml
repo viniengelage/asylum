@@ -1,0 +1,42 @@
+[package]
+name = "web_preview"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+license = "GPL-3.0-or-later"
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/web_preview.rs"
+doctest = false
+
+[[bin]]
+name = "web_preview_helper"
+path = "src/helper.rs"
+
+[dependencies]
+anyhow.workspace = true
+editor.workspace = true
+gpui.workspace = true
+image.workspace = true
+log.workspace = true
+language.workspace = true
+menu.workspace = true
+project.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+smallvec.workspace = true
+ui.workspace = true
+workspace.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+cef = { version = "150", default-features = false, features = ["build-util"] }
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "NSView",
+    "NSWindow",
+    "NSResponder",
+] }
+objc2-foundation = { version = "0.3", default-features = false }

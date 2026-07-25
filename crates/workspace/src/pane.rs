@@ -528,6 +528,27 @@ pub struct DraggedTab {
     pub is_active: bool,
 }
 
+#[derive(Clone)]
+pub struct DraggedPane {
+    pub pane: Entity<Pane>,
+}
+
+impl Render for DraggedPane {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let title = self
+            .pane
+            .read(cx)
+            .active_item()
+            .map(|item| item.tab_content_text(0, cx))
+            .unwrap_or_else(|| "Pane".into());
+        let ui_font = ThemeSettings::get_global(cx).ui_font.clone();
+        ui::Tab::new("dragged-pane")
+            .child(ui::Label::new(title).size(ui::LabelSize::Small))
+            .render(window, cx)
+            .font(ui_font)
+    }
+}
+
 impl EventEmitter<Event> for Pane {}
 
 pub enum Side {
@@ -3672,6 +3693,26 @@ impl Pane {
             }))
     }
 
+    fn render_pane_drag_handle(&self, cx: &mut Context<Pane>) -> impl IntoElement {
+        div()
+            .id("pane_drag_handle")
+            .absolute()
+            .top_0()
+            .left_1_2()
+            .w_16()
+            .h(px(5.))
+            .ml(gpui::rems(-2.))
+            .cursor_move()
+            .rounded_b_sm()
+            .hover(|this| this.bg(cx.theme().colors().element_hover))
+            .on_drag(
+                DraggedPane {
+                    pane: cx.entity(),
+                },
+                |dragged_pane, _, _, cx| cx.new(|_| dragged_pane.clone()),
+            )
+    }
+
     fn render_pinned_tab_bar_drop_target(&self, cx: &mut Context<Pane>) -> impl IntoElement {
         div()
             .id("pinned_tabs_border")
@@ -3937,6 +3978,58 @@ impl Pane {
                             }
                         }
                     });
+                });
+            })
+            .log_err();
+    }
+
+    pub fn handle_pane_drop(
+        &mut self,
+        dragged_pane: &DraggedPane,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let target_pane = cx.entity();
+        let split_direction = self.drag_split_direction;
+        let source_pane = dragged_pane.pane.clone();
+        self.drag_split_direction = None;
+
+        if source_pane == target_pane {
+            return;
+        }
+
+        self.workspace
+            .update(cx, |_, cx| {
+                cx.defer_in(window, move |workspace, _window, cx| {
+                    if let Some(split_direction) = split_direction {
+                        // Move all items from source pane into a new split of target
+                        let items: Vec<Box<dyn crate::ItemHandle>> = source_pane
+                            .read(cx)
+                            .items()
+                            .cloned()
+                            .collect();
+                        let new_pane = workspace.split_pane(
+                            target_pane,
+                            split_direction,
+                            _window,
+                            cx,
+                        );
+                        for item in items {
+                            crate::move_item(
+                                &source_pane,
+                                &new_pane,
+                                item.item_id(),
+                                new_pane.read(cx).items.len(),
+                                true,
+                                _window,
+                                cx,
+                            );
+                        }
+                    } else {
+                        // Swap the two panes
+                        workspace.center.swap(&source_pane, &target_pane, cx);
+                        cx.notify();
+                    }
                 });
             })
             .log_err();
@@ -4317,6 +4410,8 @@ impl Render for Pane {
             .rounded_lg()
             .bg(cx.theme().colors().editor_background)
             .overflow_hidden()
+            .relative()
+            .child(self.render_pane_drag_handle(cx))
             .on_action(cx.listener(|pane, split: &SplitLeft, window, cx| {
                 pane.split(SplitDirection::Left, split.mode, window, cx)
             }))
@@ -4483,6 +4578,7 @@ impl Render for Pane {
                     .group("")
                     .overflow_hidden()
                     .on_drag_move::<DraggedTab>(cx.listener(Self::handle_drag_move))
+                    .on_drag_move::<DraggedPane>(cx.listener(Self::handle_drag_move))
                     .on_drag_move::<DraggedSelection>(cx.listener(Self::handle_drag_move))
                     .when(is_local, |div| {
                         div.on_drag_move::<ExternalPaths>(cx.listener(Self::handle_drag_move))
@@ -4533,7 +4629,11 @@ impl Render for Pane {
                             .invisible()
                             .absolute()
                             .bg(cx.theme().colors().drop_target_background)
+                            .border_2()
+                            .border_color(cx.theme().colors().drop_target_border)
+                            .rounded_lg()
                             .group_drag_over::<DraggedTab>("", |style| style.visible())
+                            .group_drag_over::<DraggedPane>("", |style| style.visible())
                             .group_drag_over::<DraggedSelection>("", |style| style.visible())
                             .when(is_local, |div| {
                                 div.group_drag_over::<ExternalPaths>("", |style| style.visible())
@@ -4550,6 +4650,11 @@ impl Render for Pane {
                                     cx,
                                 )
                             }))
+                            .on_drop(cx.listener(
+                                move |this, dragged_pane: &DraggedPane, window, cx| {
+                                    this.handle_pane_drop(dragged_pane, window, cx)
+                                },
+                            ))
                             .on_drop(cx.listener(
                                 move |this, selection: &DraggedSelection, window, cx| {
                                     this.handle_dragged_selection_drop(selection, None, window, cx)

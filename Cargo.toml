@@ -227,6 +227,7 @@ members = [
     "crates/watch",
     "crates/web_search",
     "crates/web_search_providers",
+    "crates/web_preview",
     "crates/which_key",
     "crates/workspace",
     "crates/worktree",
@@ -493,6 +494,7 @@ which_key = { path = "crates/which_key" }
 watch = { path = "crates/watch" }
 web_search = { path = "crates/web_search" }
 web_search_providers = { path = "crates/web_search_providers" }
+web_preview = { path = "crates/web_preview" }
 workspace = { path = "crates/workspace" }
 worktree = { path = "crates/worktree" }
 x_ai = { path = "crates/x_ai" }

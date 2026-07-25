@@ -1,6 +1,7 @@
 pub mod active_file_name;
 pub mod dock;
 pub mod history_manager;
+pub mod layout_editor;
 pub mod invalid_item_view;
 pub mod item;
 mod modal_layer;
@@ -1396,6 +1397,8 @@ pub struct Workspace {
     region_focus_handles: RegionFocusHandles,
     notifications: Notifications,
     suppressed_notifications: HashSet<NotificationId>,
+    layout_editor_state: Entity<layout_editor::LayoutEditorState>,
+    layout_editor_overlay: Entity<layout_editor::LayoutEditorOverlay>,
     project: Entity<Project>,
     follower_states: HashMap<CollaboratorId, FollowerState>,
     last_leaders_by_pane: HashMap<WeakEntity<Pane>, CollaboratorId>,
@@ -1756,6 +1759,15 @@ impl Workspace {
             .root::<MultiWorkspace>()
             .flatten()
             .map(|mw| mw.downgrade());
+        let layout_editor_state = cx.new(|_| layout_editor::LayoutEditorState::default());
+        // Overlay needs workspace WeakEntity — set after construction
+        let layout_editor_overlay = cx.new(|cx| {
+            layout_editor::LayoutEditorOverlay::new(
+                layout_editor_state.clone(),
+                cx,
+            )
+        });
+
         let status_bar = cx.new(|cx| {
             let mut status_bar =
                 StatusBar::new(&center_pane.clone(), multi_workspace.clone(), window, cx);
@@ -1763,6 +1775,8 @@ impl Workspace {
             status_bar.add_right_item(devices_dock_buttons, window, cx);
             status_bar.add_right_item(right_dock_buttons, window, cx);
             status_bar.add_right_item(bottom_dock_buttons, window, cx);
+            let layout_btn = cx.new(|_| layout_editor::LayoutEditorButton::new(layout_editor_state.clone()));
+            status_bar.add_right_item(layout_btn, window, cx);
             status_bar
         });
 
@@ -1826,6 +1840,11 @@ impl Workspace {
         cx.defer_in(window, move |this, window, cx| {
             this.update_window_title(window, cx);
             this.show_initial_notifications(cx);
+            // Set workspace reference on layout editor overlay
+            let weak = this.weak_self.clone();
+            this.layout_editor_overlay.update(cx, |overlay, _| {
+                overlay.set_workspace(weak);
+            });
         });
 
         let mut center = PaneGroup::new(center_pane.clone());
@@ -1852,6 +1871,8 @@ impl Workspace {
             region_focus_handles: RegionFocusHandles::new(cx),
             notifications: Notifications::default(),
             suppressed_notifications: HashSet::default(),
+            layout_editor_state: layout_editor_state.clone(),
+            layout_editor_overlay: layout_editor_overlay.clone(),
             left_dock,
             bottom_dock,
             devices_dock,
@@ -5890,6 +5911,19 @@ impl Workspace {
         &self.panes
     }
 
+    pub fn set_center(
+        &mut self,
+        group: PaneGroup,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.center = group;
+        if let Some(first_pane) = self.center.panes().into_iter().next().cloned() {
+            self.active_pane = first_pane;
+        }
+        cx.notify();
+    }
+
     pub fn active_pane(&self) -> &Entity<Pane> {
         &self.active_pane
     }
@@ -8137,7 +8171,7 @@ impl Workspace {
             DockPosition::Right => ("right-dock", "Right dock"),
         };
         let a11y_active = window.is_a11y_active();
-        let left_title_bar = if position == DockPosition::Left {
+        let left_title_bar = if position == DockPosition::Left && dock_is_open {
             self.titlebar_item.clone().map(|item| {
                 div()
                     .id("titlebar-region")
@@ -8188,7 +8222,7 @@ impl Workspace {
 
         let mut container = div()
             .id(dock_element_id)
-            .when(position == DockPosition::Left, |this| {
+            .when(position == DockPosition::Left && dock_is_open, |this| {
                 this.m_1()
                     .rounded_lg()
                     .border_1()
@@ -8517,7 +8551,7 @@ impl Workspace {
         }
     }
 
-    fn resize_dock(
+    pub fn resize_dock(
         &mut self,
         dock_pos: DockPosition,
         new_size: Pixels,
@@ -9394,7 +9428,8 @@ impl Render for Workspace {
                             }))
                             .children(self.render_notifications(window, cx)),
                     )
-                    .child(self.toast_layer.clone()),
+                    .child(self.toast_layer.clone())
+                    .child(self.layout_editor_overlay.clone()),
             )
     }
 }

@@ -760,6 +760,7 @@ fn main() {
         });
         vim::init(cx);
         terminal_view::init(cx);
+        web_preview::init(cx);
         journal::init(app_state.clone(), cx);
         encoding_selector::init(cx);
         language_selector::init(cx);

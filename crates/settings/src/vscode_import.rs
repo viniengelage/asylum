@@ -1063,6 +1063,7 @@ impl VsCodeSettings {
                     CloseWindowWhenNoItems::KeepWindowOpen
                 }
             }),
+            card_gap: None,
             zoomed_padding: None,
             focus_follows_mouse: None,
             hidden_right_dock_panels: None,

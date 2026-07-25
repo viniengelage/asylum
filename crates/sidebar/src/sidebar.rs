@@ -867,6 +867,7 @@ pub struct Sidebar {
     android_current_rendered_frame: Option<Arc<gpui::RenderImage>>,
     android_previous_rendered_frame: Option<Arc<gpui::RenderImage>>,
     ios_devices: Vec<IosSimulatorDevice>,
+    ios_simulator_started: bool,
     selected_ios_device_udid: Option<String>,
     ios_native_subview_id: Option<u64>,
     ios_native_subview_udid: Option<String>,
@@ -1020,6 +1021,7 @@ impl Sidebar {
             android_current_rendered_frame: None,
             android_previous_rendered_frame: None,
             ios_devices: Vec::new(),
+            ios_simulator_started: false,
             selected_ios_device_udid: None,
             ios_native_subview_id: None,
             ios_native_subview_udid: None,
@@ -1511,7 +1513,7 @@ impl Sidebar {
             let agent = Agent::from(agent_id.clone());
             let icon = match agent {
                 Agent::NativeAgent => IconName::ZedAgent,
-                Agent::Custom { .. } => IconName::Terminal,
+                Agent::Custom { .. } => IconName::SquareDot,
 
                 _ => IconName::ZedAgent,
             };
@@ -7746,7 +7748,7 @@ impl Sidebar {
                                 })),
                         )
                         .child(
-                            IconButton::new("ios-home", IconName::Screen)
+                            IconButton::new("ios-home", IconName::Circle)
                                 .icon_size(IconSize::Medium)
                                 .tooltip(Tooltip::text("Home"))
                                 .disabled(toolbar_disabled)
@@ -7779,7 +7781,7 @@ impl Sidebar {
                                 })),
                         )
                         .child(
-                            IconButton::new("paste-ios", IconName::Copy)
+                            IconButton::new("paste-ios", IconName::Attach)
                                 .icon_size(IconSize::Medium)
                                 .tooltip(Tooltip::text("Colar (Cmd+V)"))
                                 .disabled(toolbar_disabled)
@@ -7796,6 +7798,15 @@ impl Sidebar {
                                     if let Some(workspace) = this.active_workspace(cx) {
                                         this.screenshot_ios_simulator(&workspace, window, cx);
                                     }
+                                })),
+                        )
+                        .child(
+                            IconButton::new("shutdown-ios-simulator", IconName::Power)
+                                .icon_size(IconSize::Medium)
+                                .tooltip(Tooltip::text("Desligar simulador"))
+                                .disabled(toolbar_disabled)
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.shutdown_ios_simulator(window, cx);
                                 })),
                         ),
                 )
@@ -7836,7 +7847,7 @@ impl Sidebar {
                                 })),
                         )
                         .child(
-                            IconButton::new("android-recents", IconName::Stop)
+                            IconButton::new("android-recents", IconName::Blocks)
                                 .icon_size(IconSize::Medium)
                                 .tooltip(Tooltip::text("Apps recentes"))
                                 .disabled(!emulator_running)
@@ -7880,7 +7891,7 @@ impl Sidebar {
                                 })),
                         )
                         .child(
-                            IconButton::new("reload-android", IconName::ArrowCircle)
+                            IconButton::new("reload-android", IconName::RotateCw)
                                 .icon_size(IconSize::Medium)
                                 .tooltip(Tooltip::text("Reload / Dev Menu"))
                                 .disabled(!emulator_running)
@@ -8081,7 +8092,9 @@ impl Sidebar {
     fn show_devices_view(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.view = SidebarView::Devices;
         self._subscriptions.clear();
-        self.refresh_ios_devices(window, cx);
+        if self.ios_simulator_started {
+            self.refresh_ios_devices(window, cx);
+        }
         self.focus_handle.focus(window, cx);
         self.serialize(cx);
         cx.notify();
@@ -8168,6 +8181,39 @@ impl Sidebar {
         self.ios_simulator_bounds = None;
     }
 
+    fn shutdown_ios_simulator(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.remove_ios_simulator_view(window);
+
+        let udids: Vec<String> = self
+            .ios_devices
+            .iter()
+            .map(|device| device.udid.clone())
+            .collect();
+
+        if !udids.is_empty() {
+            cx.background_spawn(async move {
+                for udid in udids {
+                    let output = smol::process::Command::new("xcrun")
+                        .args(["simctl", "shutdown", &udid])
+                        .output()
+                        .await;
+                    if let Err(error) = output {
+                        log::warn!("failed to shutdown iOS simulator {udid}: {error:#}");
+                    }
+                }
+            })
+            .detach();
+        }
+
+        self.ios_devices.clear();
+        self.selected_ios_device_udid = None;
+        self.ios_simulator_started = false;
+        self.ios_simulator_error = None;
+        self.ios_failed_device_udid = None;
+        self.ios_device_discovery_task = None;
+        cx.notify();
+    }
+
     #[cfg(target_os = "macos")]
     fn sync_ios_simulator_view(
         &mut self,
@@ -8227,7 +8273,36 @@ impl Sidebar {
         &self,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    ) -> AnyElement {
+        if !self.ios_simulator_started {
+            return v_flex()
+                .flex_1()
+                .min_h_0()
+                .items_center()
+                .justify_center()
+                .gap_2()
+                .p_4()
+                .child(Icon::new(IconName::Screen).size(IconSize::XLarge))
+                .child(Label::new("Simulador iOS"))
+                .child(
+                    Label::new(
+                        "Clique no botão abaixo para inicializar o simulador iOS.",
+                    )
+                    .size(LabelSize::Small)
+                    .color(Color::Muted),
+                )
+                .child(
+                    Button::new("boot-ios-simulator", "Iniciar simulador")
+                        .style(ButtonStyle::Filled)
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.ios_simulator_started = true;
+                            this.refresh_ios_devices(window, cx);
+                            cx.notify();
+                        })),
+                )
+                .into_any_element();
+        }
+
         let selected_label = self
             .selected_ios_device_udid
             .as_ref()
@@ -8362,6 +8437,7 @@ impl Sidebar {
                         .size_full(),
                     ),
             )
+            .into_any_element()
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -8369,7 +8445,7 @@ impl Sidebar {
         &self,
         _window: &mut Window,
         _cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    ) -> AnyElement {
         v_flex()
             .flex_1()
             .items_center()
@@ -8380,6 +8456,7 @@ impl Sidebar {
             .child(Label::new(
                 "O simulador iOS integrado está disponível apenas no macOS.",
             ))
+            .into_any_element()
     }
 
     fn ensure_android_sdk_manager(&mut self, cx: &mut Context<Self>) {
@@ -8812,7 +8889,9 @@ impl Sidebar {
                             )
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.device_platform = DevicePlatform::Ios;
-                                this.refresh_ios_devices(window, cx);
+                                if this.ios_simulator_started {
+                                    this.refresh_ios_devices(window, cx);
+                                }
                                 cx.notify();
                             })),
                     ),
