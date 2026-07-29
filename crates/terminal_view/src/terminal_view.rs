@@ -1438,6 +1438,10 @@ impl Render for TerminalView {
 impl Item for TerminalView {
     type Event = ItemEvent;
 
+    fn content_kind(&self, _cx: &App) -> Option<workspace::ContentKind> {
+        Some(workspace::ContentKind::terminal())
+    }
+
     fn tab_tooltip_content(&self, cx: &App) -> Option<TabTooltipContent> {
         Some(TabTooltipContent::Custom(Box::new(Tooltip::element({
             let terminal = self.terminal().read(cx);

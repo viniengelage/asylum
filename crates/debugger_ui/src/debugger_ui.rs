@@ -107,6 +107,7 @@ actions!(
 );
 
 pub fn init(cx: &mut App) {
+    workspace::register_panel_item::<debugger_panel::DebugPanel>(cx);
     workspace::FollowableViewRegistry::register::<DebugSession>(cx);
 
     cx.observe_new(|workspace: &mut Workspace, _, _| {

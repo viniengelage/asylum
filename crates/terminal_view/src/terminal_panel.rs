@@ -53,6 +53,9 @@ actions!(
 );
 
 pub fn init(cx: &mut App) {
+    // Deliberately not registered as a panel item: the terminal panel is a container,
+    // not a component, so its slot hosts `TerminalView` items directly. Wrapping it in a
+    // tab would nest its pane tree inside another pane.
     cx.observe_new(
         |workspace: &mut Workspace, _window, _: &mut Context<Workspace>| {
             workspace.register_action(TerminalPanel::new_terminal);
@@ -648,7 +651,13 @@ impl TerminalPanel {
             .active_item()
             .is_some_and(|item| item.downcast::<TerminalView>().is_some());
 
-        if center_pane_has_focus && active_center_item_is_terminal {
+        // With a declared terminal slot the panel is no longer the host: every terminal
+        // is an item routed to that slot, so this takes the item path unconditionally.
+        let has_terminal_slot = workspace
+            .pane_for_kind(&workspace::ContentKind::terminal(), cx)
+            .is_some();
+
+        if has_terminal_slot || (center_pane_has_focus && active_center_item_is_terminal) {
             let working_directory = default_working_directory(workspace, cx);
             let local = action.local;
             Self::add_center_terminal(workspace, window, cx, move |project, cx| {
@@ -771,13 +780,18 @@ impl TerminalPanel {
                 // a background terminal can finish starting up after the user has
                 // moved on, and focusing it would dismiss whatever they opened.
                 let focus_item = !workspace.has_active_modal(window, cx);
-                workspace.add_item_to_active_pane(
-                    Box::new(terminal_view),
-                    None,
+                let item = Box::new(terminal_view) as Box<dyn workspace::ItemHandle>;
+                // The layout decides where terminals live; without a declared slot this
+                // falls back to the historical "open next to the editor" behaviour.
+                if !workspace.add_item_to_kind_slot(
+                    &workspace::ContentKind::terminal(),
+                    item.boxed_clone(),
                     focus_item,
                     window,
                     cx,
-                );
+                ) {
+                    workspace.add_item_to_active_pane(item, None, focus_item, window, cx);
+                }
             })?;
             Ok(terminal.downgrade())
         })
@@ -1662,6 +1676,10 @@ impl Panel for TerminalPanel {
 
     fn pane(&self) -> Option<Entity<Pane>> {
         Some(self.active_pane.clone())
+    }
+
+    fn hosted_content_kind(&self) -> Option<workspace::ContentKind> {
+        Some(workspace::ContentKind::terminal())
     }
 
     fn activation_priority(&self) -> u32 {

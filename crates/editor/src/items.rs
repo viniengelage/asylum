@@ -627,6 +627,10 @@ fn deserialize_anchor(anchor: proto::EditorAnchor, buffer: &MultiBufferSnapshot)
 impl Item for Editor {
     type Event = EditorEvent;
 
+    fn content_kind(&self, _cx: &App) -> Option<workspace::ContentKind> {
+        Some(workspace::ContentKind::editor())
+    }
+
     fn act_as_type<'a>(
         &'a self,
         type_id: TypeId,

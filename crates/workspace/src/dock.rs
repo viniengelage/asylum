@@ -24,6 +24,7 @@ use util::ResultExt as _;
 
 pub(crate) const RESIZE_HANDLE_SIZE: Pixels = px(6.);
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PanelEvent {
     ZoomIn,
     ZoomOut,
@@ -77,6 +78,15 @@ pub trait Panel: Focusable + EventEmitter<PanelEvent> + Render + Sized {
     fn pane(&self) -> Option<Entity<Pane>> {
         None
     }
+    /// Set by panels that are *containers* rather than components: the terminal panel
+    /// hosts a pane of terminals rather than being one thing.
+    ///
+    /// Such a panel must not be wrapped in a tab — that would nest a pane tree inside a
+    /// pane. Instead its slot hosts instances of this kind directly, and the panel itself
+    /// stops being a slot occupant.
+    fn hosted_content_kind(&self) -> Option<crate::pane::ContentKind> {
+        None
+    }
     fn remote_id() -> Option<proto::PanelId> {
         None
     }
@@ -97,6 +107,9 @@ pub trait Panel: Focusable + EventEmitter<PanelEvent> + Render + Sized {
 
 pub trait PanelHandle: Send + Sync {
     fn panel_id(&self) -> EntityId;
+    /// The concrete panel type behind this handle, so callers can look a panel up by
+    /// type without downcasting every candidate.
+    fn panel_type_id(&self) -> std::any::TypeId;
     fn persistent_name(&self) -> &'static str;
     fn panel_key(&self) -> &'static str;
     fn position(&self, window: &Window, cx: &App) -> DockPosition;
@@ -107,6 +120,7 @@ pub trait PanelHandle: Send + Sync {
     fn set_active(&self, active: bool, window: &mut Window, cx: &mut App);
     fn remote_id(&self) -> Option<proto::PanelId>;
     fn pane(&self, cx: &App) -> Option<Entity<Pane>>;
+    fn hosted_content_kind(&self, cx: &App) -> Option<crate::pane::ContentKind>;
     fn default_size(&self, window: &Window, cx: &App) -> Pixels;
     fn min_size(&self, window: &Window, cx: &App) -> Option<Pixels>;
     fn initial_size_state(&self, window: &Window, cx: &App) -> PanelSizeState;
@@ -124,6 +138,19 @@ pub trait PanelHandle: Send + Sync {
     fn enabled(&self, cx: &App) -> bool;
     fn is_agent_panel(&self, cx: &App) -> bool;
     fn hide_button_setting(&self, cx: &App) -> Option<HideStatusItem>;
+    /// A short label for presenting this panel as a pane tab.
+    ///
+    /// Panels name themselves for a status bar tooltip, where "… Panel" reads naturally;
+    /// on a tab the suffix is just noise.
+    fn tab_label(&self, window: &Window, cx: &App) -> SharedString {
+        match self.icon_tooltip(window, cx) {
+            Some(tooltip) => {
+                SharedString::from(tooltip.strip_suffix(" Panel").unwrap_or(tooltip).to_owned())
+            }
+            None => SharedString::from(self.persistent_name()),
+        }
+    }
+
     fn move_to_next_position(&self, window: &mut Window, cx: &mut App) {
         let current_position = self.position(window, cx);
         let next_position = [
@@ -148,6 +175,10 @@ where
 {
     fn panel_id(&self) -> EntityId {
         Entity::entity_id(self)
+    }
+
+    fn panel_type_id(&self) -> std::any::TypeId {
+        std::any::TypeId::of::<T>()
     }
 
     fn persistent_name(&self) -> &'static str {
@@ -184,6 +215,10 @@ where
 
     fn pane(&self, cx: &App) -> Option<Entity<Pane>> {
         self.read(cx).pane()
+    }
+
+    fn hosted_content_kind(&self, cx: &App) -> Option<crate::pane::ContentKind> {
+        self.read(cx).hosted_content_kind()
     }
 
     fn remote_id(&self) -> Option<PanelId> {
@@ -501,6 +536,24 @@ impl Dock {
         self.panel_entries
             .iter()
             .find_map(|entry| entry.panel.to_any().downcast().ok())
+    }
+
+    /// The content kinds this dock's panels route to, ordered by the dock's own order.
+    ///
+    /// Lets a dock-shaped action (toggling the bottom dock, say) find the slot that now
+    /// presents the same content.
+    pub fn panel_entries_kinds(&self, cx: &App) -> Vec<crate::pane::ContentKind> {
+        self.panel_entries
+            .iter()
+            .map(|entry| {
+                entry
+                    .panel
+                    .hosted_content_kind(cx)
+                    .unwrap_or_else(|| {
+                        crate::pane::ContentKind::panel(entry.panel.persistent_name())
+                    })
+            })
+            .collect()
     }
 
     pub fn panel_index_for_type<T: Panel>(&self) -> Option<usize> {

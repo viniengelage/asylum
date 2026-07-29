@@ -3,10 +3,23 @@ use cef::*;
 use gpui::{Bounds, Pixels};
 use std::ffi::c_void;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 const REMOTE_DEBUGGING_PORT: i32 = 9223;
+
+/// Cap on the delay CEF asks us to wait before the next `do_message_loop_work()`.
+/// Matches cefclient's external pump: a pending-work floor of 30fps, because CEF
+/// does not reliably re-schedule work it has already asked for.
+const MAX_PUMP_DELAY_MS: u64 = 1000 / 30;
+/// Pump at least this often even when CEF claims to have nothing pending, so a
+/// missed `OnScheduleMessagePumpWork` cannot freeze the page indefinitely.
+const IDLE_PUMP_INTERVAL_MS: u64 = 100;
+/// Bounds on how long the caller waits between pump checks. The upper bound also
+/// bounds input latency, since queued input is only delivered on these ticks.
+const MIN_POLL_MS: u64 = 1;
+const MAX_POLL_MS: u64 = 16;
 
 // CEF in single-process mode calls isHandlingSendEvent / setHandlingSendEvent:
 // on NSApplication. Zed's GPUIApplication doesn't implement these (CrAppProtocol).
@@ -75,6 +88,62 @@ unsafe fn install_cef_app_protocol_methods() {
 }
 
 static CEF_INITIALIZED: OnceLock<Result<(), String>> = OnceLock::new();
+
+/// Set before `cef_initialize` when no helper executable is available to host the
+/// render/GPU/utility processes.
+static SINGLE_PROCESS: AtomicBool = AtomicBool::new(false);
+
+/// When the next `do_message_loop_work()` is due, in milliseconds since [`pump_epoch`].
+/// `u64::MAX` means CEF has told us it has nothing pending.
+static PUMP_DEADLINE_MS: AtomicU64 = AtomicU64::new(0);
+static LAST_PUMP_MS: AtomicU64 = AtomicU64::new(0);
+
+fn pump_epoch() -> Instant {
+    static EPOCH: OnceLock<Instant> = OnceLock::new();
+    *EPOCH.get_or_init(Instant::now)
+}
+
+fn now_ms() -> u64 {
+    pump_epoch().elapsed().as_millis() as u64
+}
+
+fn pump_due_at() -> u64 {
+    let scheduled = PUMP_DEADLINE_MS.load(Ordering::Relaxed);
+    let idle_deadline = LAST_PUMP_MS
+        .load(Ordering::Relaxed)
+        .saturating_add(IDLE_PUMP_INTERVAL_MS);
+    scheduled.min(idle_deadline)
+}
+
+/// Ask for `do_message_loop_work()` to run within `delay_ms`. Called by CEF from
+/// arbitrary threads, and by us after handing CEF work it should act on right away.
+fn schedule_pump(delay_ms: i64) {
+    let delay = delay_ms.clamp(0, MAX_PUMP_DELAY_MS as i64) as u64;
+    let deadline = now_ms().saturating_add(delay);
+    PUMP_DEADLINE_MS.fetch_min(deadline, Ordering::Relaxed);
+}
+
+/// Requests a pump on the next tick of the poll loop.
+pub fn request_pump() {
+    schedule_pump(0);
+}
+
+/// Runs CEF's pending work if any is due and returns how long to wait before
+/// checking again. Must only be called from the thread that ran `cef_initialize`.
+pub fn pump_message_loop() -> Duration {
+    if now_ms() >= pump_due_at() {
+        // Cleared before pumping: CEF calls `OnScheduleMessagePumpWork` from inside
+        // `do_message_loop_work`, and that request must survive this reset.
+        PUMP_DEADLINE_MS.store(u64::MAX, Ordering::Relaxed);
+        do_message_loop_work();
+        LAST_PUMP_MS.store(now_ms(), Ordering::Relaxed);
+    }
+
+    let wait = pump_due_at()
+        .saturating_sub(now_ms())
+        .clamp(MIN_POLL_MS, MAX_POLL_MS);
+    Duration::from_millis(wait)
+}
 
 fn ensure_cef_initialized() -> Result<()> {
     let result = CEF_INITIALIZED.get_or_init(|| match try_init_cef() {
@@ -199,6 +268,20 @@ fn try_init_cef() -> Result<()> {
         .map(|dir| dir.join("web_preview_helper"))
         .unwrap_or_default();
 
+    // Without the helper there is nowhere to put the render/GPU/utility processes, so
+    // CEF has to run everything inside Zed — where any Chromium `CHECK` kills the
+    // editor and Chromium's GPU thread would fight GPUI for a Metal device.
+    let single_process = !helper_path.is_file();
+    if single_process {
+        log::warn!(
+            "web_preview: {} not found, falling back to CEF single-process mode \
+             (a crash anywhere in Chromium will take Zed down, and pages render in \
+             software). Build it with `cargo build -p web_preview --bin web_preview_helper`.",
+            helper_path.display()
+        );
+    }
+    SINGLE_PROCESS.store(single_process, Ordering::Relaxed);
+
     // Point CEF to the framework directory so it finds icudtl.dat, pak files, etc.
     let framework_path = cef_dir.join("Chromium Embedded Framework.framework");
     let resources_path = framework_path.join("Resources");
@@ -245,7 +328,8 @@ fn try_init_cef() -> Result<()> {
     }
 
     log::info!(
-        "web_preview: CEF initialized — CDP on port {REMOTE_DEBUGGING_PORT}"
+        "web_preview: CEF initialized — CDP on port {REMOTE_DEBUGGING_PORT}, {} process mode",
+        if single_process { "single" } else { "multi" }
     );
 
     Ok(())
@@ -266,13 +350,33 @@ wrap_app! {
     impl App {
         fn on_before_command_line_processing(
             &self,
-            _process_type: Option<&CefString>,
+            process_type: Option<&CefString>,
             command_line: Option<&mut CommandLine>,
         ) {
-            if let Some(command_line) = command_line {
-                // Single process mode — all rendering happens in-process.
+            let Some(command_line) = command_line else {
+                return;
+            };
+
+            // Pages that probe for a camera (Google's voice search and Lens buttons do)
+            // reach media/capture/video/apple/video_capture_device_factory_apple.mm,
+            // which trapped on `brk` there and took the whole editor down. The fake
+            // factory keeps that file out of the request; a preview needs no camera.
+            command_line.append_switch(Some(&CefString::from(
+                "use-fake-device-for-media-stream",
+            )));
+            // macOS defaults capture buffers to GpuMemoryBuffers, which need a viz
+            // context provider we never hand them ("Bind context provider failed.").
+            command_line.append_switch(Some(&CefString::from(
+                "disable-video-capture-use-gpu-memory-buffer",
+            )));
+
+            // The switches below describe how *this* process is laid out; children
+            // inherit what they need from the browser process command line.
+            let is_browser_process = process_type.is_none_or(|type_| type_.to_string().is_empty());
+            if is_browser_process && SINGLE_PROCESS.load(Ordering::Relaxed) {
                 command_line.append_switch(Some(&CefString::from("single-process")));
-                // Disable GPU — use software rendering to avoid Metal conflicts.
+                // In-process, Chromium's GPU thread builds a second Metal device inside
+                // Zed and contends with GPUI's renderer, so fall back to software.
                 command_line.append_switch(Some(&CefString::from("disable-gpu")));
                 command_line.append_switch(Some(&CefString::from("disable-gpu-compositing")));
             }
@@ -292,8 +396,10 @@ wrap_browser_process_handler! {
             log::info!("web_preview: CEF context initialized");
         }
 
-        fn on_schedule_message_pump_work(&self, _delay_ms: i64) {
-            // Work is driven by our GPUI timer calling do_message_loop_work()
+        fn on_schedule_message_pump_work(&self, delay_ms: i64) {
+            // Called from arbitrary threads; the GPUI poll task performs the actual
+            // `do_message_loop_work()` once this deadline comes due.
+            schedule_pump(delay_ms);
         }
     }
 }
@@ -349,8 +455,9 @@ fn cef_cursor_to_gpui(cursor_type: CursorType) -> gpui::CursorStyle {
 }
 
 // CEF Client implementation
-/// BGRA pixel buffer from CEF's offscreen rendering.
-#[derive(Clone)]
+/// BGRA pixel buffer from CEF's offscreen rendering, which is the byte order
+/// `RenderImage` already wants.
+#[derive(Default)]
 pub struct FrameBuffer {
     pub pixels: Vec<u8>,
     pub width: u32,
@@ -360,6 +467,9 @@ pub struct FrameBuffer {
 pub(crate) struct WebPreviewHandler {
     state: Arc<Mutex<BrowserState>>,
     browser: Arc<Mutex<Option<Browser>>>,
+    /// A URL requested before CEF finished creating the browser, loaded by
+    /// `on_after_created`.
+    pending_url: Arc<Mutex<Option<String>>>,
     frame: Arc<Mutex<Option<FrameBuffer>>>,
     view_width: Arc<Mutex<i32>>,
     view_height: Arc<Mutex<i32>>,
@@ -371,6 +481,7 @@ impl WebPreviewHandler {
         Arc::new(Mutex::new(Self {
             state: Arc::new(Mutex::new(BrowserState::default())),
             browser: Arc::new(Mutex::new(None)),
+            pending_url: Arc::new(Mutex::new(None)),
             frame: Arc::new(Mutex::new(None)),
             view_width: Arc::new(Mutex::new(width)),
             view_height: Arc::new(Mutex::new(height)),
@@ -461,6 +572,16 @@ wrap_life_span_handler! {
             log::info!("web_preview: browser created");
             if let Some(browser) = browser.cloned() {
                 if let Ok(inner) = self.inner.lock() {
+                    let pending_url = inner
+                        .pending_url
+                        .lock()
+                        .ok()
+                        .and_then(|mut pending| pending.take());
+                    if let Some(url) = pending_url
+                        && let Some(frame) = browser.main_frame()
+                    {
+                        frame.load_url(Some(&CefString::from(url.as_str())));
+                    }
                     if let Ok(mut stored) = inner.browser.lock() {
                         *stored = Some(browser);
                     }
@@ -548,16 +669,19 @@ wrap_render_handler! {
             if buffer.is_null() || width <= 0 || height <= 0 {
                 return;
             }
-            let size = (width * height * 4) as usize;
-            let pixels = unsafe { std::slice::from_raw_parts(buffer, size) }.to_vec();
+            let size = width as usize * height as usize * 4;
+            let source = unsafe { std::slice::from_raw_parts(buffer, size) };
 
             if let Ok(inner) = self.inner.lock() {
-                if let Ok(mut frame) = inner.frame.lock() {
-                    *frame = Some(FrameBuffer {
-                        pixels,
-                        width: width as u32,
-                        height: height as u32,
-                    });
+                if let Ok(mut slot) = inner.frame.lock() {
+                    // CEF paints faster than the view consumes frames, and at retina
+                    // resolution each one is tens of megabytes; reuse the allocation of
+                    // any frame that was superseded before it could be picked up.
+                    let frame = slot.get_or_insert_with(FrameBuffer::default);
+                    frame.pixels.clear();
+                    frame.pixels.extend_from_slice(source);
+                    frame.width = width as u32;
+                    frame.height = height as u32;
                 }
             }
         }
@@ -610,10 +734,9 @@ impl CefBrowserInstance {
             None,
         );
 
-        // Pump CEF to let the browser creation complete
-        for _ in 0..10 {
-            do_message_loop_work();
-        }
+        // Creation completes on a pump. Deferring it to the poll task keeps CEF from
+        // re-entering our handlers while GPUI is still laying this element out.
+        request_pump();
 
         Ok(Self {
             handler,
@@ -631,26 +754,27 @@ impl CefBrowserInstance {
 
     /// Flush input and send to CEF. Called OUTSIDE of GPUI entity update
     /// to avoid re-entrancy with CEF's synchronous event processing.
+    /// Returns whether any input reached the browser.
     pub fn flush_queued(
         input_queue: &Arc<Mutex<Vec<QueuedInput>>>,
         handler: &Arc<Mutex<WebPreviewHandler>>,
-    ) {
+    ) -> bool {
         let events: Vec<QueuedInput> = {
-            let Ok(mut queue) = input_queue.lock() else { return };
+            let Ok(mut queue) = input_queue.lock() else { return false };
             std::mem::take(&mut *queue)
         };
 
         if events.is_empty() {
-            return;
+            return false;
         }
 
         let browser_arc = {
-            let Ok(inner) = handler.lock() else { return };
+            let Ok(inner) = handler.lock() else { return false };
             inner.browser.clone()
         };
-        let Ok(browser_guard) = browser_arc.lock() else { return };
-        let Some(browser) = browser_guard.as_ref() else { return };
-        let Some(host) = browser.host() else { return };
+        let Ok(browser_guard) = browser_arc.lock() else { return false };
+        let Some(browser) = browser_guard.as_ref() else { return false };
+        let Some(host) = browser.host() else { return false };
 
         for input in &events {
             match input {
@@ -674,6 +798,8 @@ impl CefBrowserInstance {
                 }
             }
         }
+
+        true
     }
 
     pub fn take_frame(&self) -> Option<FrameBuffer> {
@@ -682,6 +808,18 @@ impl CefBrowserInstance {
         drop(inner);
         let mut frame = frame_arc.lock().ok()?;
         frame.take()
+    }
+
+    /// Stops CEF from painting a browser nothing is showing. Offscreen rendering has no
+    /// idea the tab went to the background, so it keeps rasterizing and handing us
+    /// frames to convert and upload.
+    pub fn set_hidden(&self, hidden: bool) {
+        self.with_browser(|browser| {
+            if let Some(host) = browser.host() {
+                host.was_hidden(hidden as i32);
+            }
+        });
+        request_pump();
     }
 
     pub fn resize(&self, width: i32, height: i32) {
@@ -722,6 +860,16 @@ impl CefBrowserInstance {
         Some(state.clone())
     }
 
+    /// Reads just the cursor, so rendering doesn't clone the URL and title strings.
+    pub fn current_cursor(&self) -> Option<gpui::CursorStyle> {
+        let state_arc = {
+            let inner = self.handler.lock().ok()?;
+            inner.state.clone()
+        };
+        let state = state_arc.lock().ok()?;
+        Some(state.cursor)
+    }
+
     pub fn navigate_to(&self, url: &str) {
         let url_string = if !url.contains("://") && !url.starts_with("about:") {
             format!("https://{}", url)
@@ -729,17 +877,26 @@ impl CefBrowserInstance {
             url.to_string()
         };
 
-        self.with_browser(|browser| {
-            if let Some(frame) = browser.main_frame() {
-                let cef_url = CefString::from(url_string.as_str());
-                frame.load_url(Some(&cef_url));
-            }
-        });
+        let loaded = self
+            .with_browser(|browser| {
+                let Some(frame) = browser.main_frame() else {
+                    return false;
+                };
+                frame.load_url(Some(&CefString::from(url_string.as_str())));
+                true
+            })
+            .unwrap_or(false);
 
-        // Pump immediately to start processing the navigation
-        for _ in 0..5 {
-            do_message_loop_work();
+        if !loaded {
+            // The browser is still being created; `on_after_created` picks this up.
+            if let Ok(inner) = self.handler.lock()
+                && let Ok(mut pending) = inner.pending_url.lock()
+            {
+                *pending = Some(url_string);
+            }
         }
+
+        request_pump();
     }
 
     pub fn reload(&self) {

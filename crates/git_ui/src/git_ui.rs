@@ -81,6 +81,7 @@ pub fn get_provider_icon(name: &str) -> IconName {
 }
 
 pub fn init(cx: &mut App) {
+    workspace::register_panel_item::<git_panel::GitPanel>(cx);
     editor::set_blame_renderer(blame_ui::GitBlameRenderer, cx);
     commit_view::init(cx);
     git_graph::init(cx);

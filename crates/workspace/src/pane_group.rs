@@ -167,6 +167,54 @@ impl PaneGroup {
         }
     }
 
+    /// Hides or shows `pane` without moving it.
+    ///
+    /// The pane stays in the tree at zero flex rather than being removed, so its items,
+    /// its routed content kinds and its position all survive being hidden. Returns
+    /// `false` when there is nowhere to donate the freed space to — a pane alone in its
+    /// axis cannot collapse.
+    pub fn set_pane_collapsed(
+        &mut self,
+        pane: &Entity<Pane>,
+        collapsed: bool,
+        cx: &mut App,
+    ) -> bool {
+        match &mut self.root {
+            Member::Pane(_) => false,
+            Member::Axis(axis) => axis.set_pane_collapsed(pane, collapsed, cx),
+        }
+    }
+
+    /// Adds a pane spanning the whole edge of the group in the given direction.
+    ///
+    /// Unlike [`Self::move_to_border`] the pane does not need to already be in the
+    /// tree, which is what building a layout from scratch requires.
+    pub fn insert_pane_at_border(
+        &mut self,
+        pane: &Entity<Pane>,
+        direction: SplitDirection,
+        cx: &mut App,
+    ) {
+        if let Member::Axis(root) = &mut self.root
+            && direction.axis() == root.axis
+        {
+            let index = if direction.increasing() {
+                root.members.len()
+            } else {
+                0
+            };
+            root.insert_pane(index, pane);
+        } else {
+            let members = if direction.increasing() {
+                vec![self.root.clone(), Member::Pane(pane.clone())]
+            } else {
+                vec![Member::Pane(pane.clone()), self.root.clone()]
+            };
+            self.root = Member::Axis(PaneAxis::new(direction.axis(), members));
+        }
+        self.mark_positions(cx);
+    }
+
     /// Returns:
     /// - Ok(true) if it found and removed a pane
     /// - Ok(false) if it found but did not remove the pane
@@ -543,7 +591,10 @@ impl Member {
     ) -> PaneRenderResult {
         match self {
             Member::Pane(pane) => {
-                if zoomed == Some(&pane.downgrade().into()) {
+                // A collapsed slot renders nothing at all rather than its contents at
+                // zero size: laying out a hidden pane would still lay out whatever it
+                // holds, including native subviews that cannot be sized to nothing.
+                if zoomed == Some(&pane.downgrade().into()) || pane.read(cx).is_collapsed() {
                     return PaneRenderResult {
                         element: div().into_any(),
                         contains_active_pane: false,
@@ -616,7 +667,7 @@ impl Member {
         }
     }
 
-    fn collect_panes<'a>(&'a self, panes: &mut Vec<&'a Entity<Pane>>) {
+    pub fn collect_panes<'a>(&'a self, panes: &mut Vec<&'a Entity<Pane>>) {
         match self {
             Member::Axis(axis) => {
                 for member in &axis.members {
@@ -708,6 +759,61 @@ impl PaneAxis {
             }
         }
         false
+    }
+
+    /// See [`PaneGroup::set_pane_collapsed`].
+    ///
+    /// The flexes of an axis must always sum to its member count
+    /// (`flex_values_in_bounds`), so the collapsed member's flex is donated to its
+    /// siblings and taken back on restore.
+    fn set_pane_collapsed(
+        &mut self,
+        pane: &Entity<Pane>,
+        collapsed: bool,
+        cx: &mut App,
+    ) -> bool {
+        if let Some(index) = self.members.iter().position(|member| match member {
+            Member::Pane(candidate) => candidate == pane,
+            Member::Axis(_) => false,
+        }) {
+            if self.members.len() < 2 {
+                return false;
+            }
+
+            let mut flexes = self.flexes.lock();
+            let was_collapsed = pane.read(cx).is_collapsed();
+            if collapsed == was_collapsed {
+                return true;
+            }
+
+            if collapsed {
+                let freed = flexes[index];
+                flexes[index] = 0.;
+                distribute(&mut flexes, index, freed);
+                drop(flexes);
+                pane.update(cx, |pane, _| pane.set_collapsed_flex(Some(freed)));
+            } else {
+                let restored = pane
+                    .update(cx, |pane, _| pane.take_collapsed_flex())
+                    .unwrap_or(1.);
+                // Cannot reclaim more than the siblings currently hold, or the sum breaks.
+                let available: f32 = flexes
+                    .iter()
+                    .enumerate()
+                    .filter(|(ix, _)| *ix != index)
+                    .map(|(_, flex)| *flex)
+                    .sum();
+                let restored = restored.min(available);
+                distribute(&mut flexes, index, -restored);
+                flexes[index] = restored;
+            }
+            return true;
+        }
+
+        self.members.iter_mut().any(|member| match member {
+            Member::Axis(axis) => axis.set_pane_collapsed(pane, collapsed, cx),
+            Member::Pane(_) => false,
+        })
     }
 
     fn insert_pane(&mut self, idx: usize, new_pane: &Entity<Pane>) {
@@ -1394,7 +1500,10 @@ mod element {
 
             let total_flex = len as f32;
             let card_gap = workspace_card_gap(cx);
-            let gap_count = len.saturating_sub(1);
+            // A collapsed child occupies no space, so it must not claim a gap either;
+            // otherwise hiding a slot leaves a sliver where it used to be.
+            let visible_count = flexes.iter().filter(|flex| **flex > 0.).count();
+            let gap_count = visible_count.saturating_sub(1);
             let total_gap = card_gap * gap_count as f32;
             let available_size = Pixels::max(bounds.size.along(self.axis) - total_gap, px(0.0));
 
@@ -1425,8 +1534,12 @@ mod element {
                 child.layout_as_root(child_size.into(), window, cx);
                 child.prepaint_at(origin, window, cx);
 
+                // Only a visible child that still has a visible sibling after it earns a
+                // gap, so collapsed slots leave no trace in the spacing.
+                let gap_after = child_flex > 0.
+                    && flexes.iter().skip(ix + 1).any(|flex| *flex > 0.);
                 origin = origin.apply_along(self.axis, |val| {
-                    val + child_size.along(self.axis) + card_gap
+                    val + child_size.along(self.axis) + if gap_after { card_gap } else { px(0.) }
                 });
 
                 let is_leaf_pane = self.is_leaf_pane_mask.get(ix).copied().unwrap_or(true);
@@ -1606,5 +1719,34 @@ mod element {
 
     fn flex_values_in_bounds(flexes: &[f32]) -> bool {
         (flexes.iter().copied().sum::<f32>() - flexes.len() as f32).abs() < 0.001
+    }
+}
+
+/// Spreads `amount` across every flex except `skip`, in proportion to what each already
+/// holds, keeping the axis total unchanged. A negative `amount` takes space back.
+fn distribute(flexes: &mut [f32], skip: usize, amount: f32) {
+    let total: f32 = flexes
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index != skip)
+        .map(|(_, flex)| *flex)
+        .sum();
+    let others = flexes.len().saturating_sub(1);
+    if others == 0 {
+        return;
+    }
+
+    for (index, flex) in flexes.iter_mut().enumerate() {
+        if index == skip {
+            continue;
+        }
+        // Even split when the siblings hold nothing, so restoring from a fully collapsed
+        // axis still produces valid flexes instead of dividing by zero.
+        let share = if total > 0. {
+            *flex / total
+        } else {
+            1. / others as f32
+        };
+        *flex += amount * share;
     }
 }

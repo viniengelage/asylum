@@ -1051,6 +1051,11 @@ impl Domain for WorkspaceDb {
         sql!(
             ALTER TABLE bookmarks ADD COLUMN label TEXT NOT NULL DEFAULT "";
         ),
+        // Which content kinds the layout routes to a pane. Declared by the layout rather
+        // than derived from the pane's items, so an emptied slot keeps its identity.
+        sql!(
+            ALTER TABLE panes ADD COLUMN accepts_kinds TEXT NOT NULL DEFAULT "";
+        ),
     ];
 
     // Allow recovering from bad migration that was initially shipped to nightly
@@ -1062,6 +1067,25 @@ impl Domain for WorkspaceDb {
 }
 
 db::static_connection!(WorkspaceDb, []);
+
+/// Content kinds are stored as a JSON array of names, mirroring how `flexes` is stored.
+/// A blank column (the migration default, and every pre-existing row) means "no kinds".
+fn serialize_accepts_kinds(kinds: &[String]) -> String {
+    if kinds.is_empty() {
+        return String::new();
+    }
+    serde_json::to_string(kinds).unwrap_or_default()
+}
+
+fn deserialize_accepts_kinds(column: Option<String>) -> Vec<String> {
+    let Some(column) = column else {
+        return Vec::new();
+    };
+    if column.is_empty() {
+        return Vec::new();
+    }
+    serde_json::from_str(&column).log_err().unwrap_or_default()
+}
 
 impl WorkspaceDb {
     /// Returns a serialized workspace for the given worktree_roots. If the passed array
@@ -2230,11 +2254,7 @@ impl WorkspaceDb {
             .into_iter()
             .next()
             .unwrap_or_else(|| {
-                SerializedPaneGroup::Pane(SerializedPane {
-                    active: true,
-                    children: vec![],
-                    pinned_count: 0,
-                })
+                SerializedPaneGroup::Pane(SerializedPane::new(vec![], true, 0))
             }))
     }
 
@@ -2251,9 +2271,10 @@ impl WorkspaceDb {
             Option<bool>,
             Option<usize>,
             Option<String>,
+            Option<String>,
         );
         self.select_bound::<GroupKey, GroupOrPane>(sql!(
-            SELECT group_id, axis, pane_id, active, pinned_count, flexes
+            SELECT group_id, axis, pane_id, active, pinned_count, flexes, accepts_kinds
                 FROM (SELECT
                         group_id,
                         axis,
@@ -2263,7 +2284,8 @@ impl WorkspaceDb {
                         position,
                         parent_group_id,
                         workspace_id,
-                        flexes
+                        flexes,
+                        NULL as accepts_kinds
                       FROM pane_groups
                     UNION
                       SELECT
@@ -2275,14 +2297,15 @@ impl WorkspaceDb {
                         position,
                         parent_group_id,
                         panes.workspace_id as workspace_id,
-                        NULL
+                        NULL,
+                        panes.accepts_kinds as accepts_kinds
                       FROM center_panes
                       JOIN panes ON center_panes.pane_id = panes.pane_id)
                 WHERE parent_group_id IS ? AND workspace_id = ?
                 ORDER BY position
         ))?((group_id, workspace_id))?
         .into_iter()
-        .map(|(group_id, axis, pane_id, active, pinned_count, flexes)| {
+        .map(|(group_id, axis, pane_id, active, pinned_count, flexes, accepts_kinds)| {
             let maybe_pane = maybe!({ Some((pane_id?, active?, pinned_count?)) });
             if let Some((group_id, axis)) = group_id.zip(axis) {
                 let flexes = flexes
@@ -2295,19 +2318,24 @@ impl WorkspaceDb {
                     flexes,
                 })
             } else if let Some((pane_id, active, pinned_count)) = maybe_pane {
-                Ok(SerializedPaneGroup::Pane(SerializedPane::new(
+                Ok(SerializedPaneGroup::Pane(SerializedPane::with_kinds(
                     self.get_items(pane_id)?,
                     active,
                     pinned_count,
+                    deserialize_accepts_kinds(accepts_kinds),
                 )))
             } else {
                 bail!("Pane Group Child was neither a pane group or a pane");
             }
         })
-        // Filter out panes and pane groups which don't have any children or items
+        // Filter out panes and pane groups which don't have any children or items.
+        // A pane that declares content kinds is kept even when empty: it is a layout slot,
+        // and dropping it would lose the destination for its kind.
         .filter(|pane_group| match pane_group {
             Ok(SerializedPaneGroup::Group { children, .. }) => !children.is_empty(),
-            Ok(SerializedPaneGroup::Pane(pane)) => !pane.children.is_empty(),
+            Ok(SerializedPaneGroup::Pane(pane)) => {
+                !pane.children.is_empty() || !pane.accepts_kinds.is_empty()
+            }
             _ => true,
         })
         .collect::<Result<_>>()
@@ -2373,10 +2401,15 @@ impl WorkspaceDb {
         parent: Option<(GroupId, usize)>,
     ) -> Result<PaneId> {
         let pane_id = conn.select_row_bound::<_, i64>(sql!(
-            INSERT INTO panes(workspace_id, active, pinned_count)
-            VALUES (?, ?, ?)
+            INSERT INTO panes(workspace_id, active, pinned_count, accepts_kinds)
+            VALUES (?, ?, ?, ?)
             RETURNING pane_id
-        ))?((workspace_id, pane.active, pane.pinned_count))?
+        ))?((
+            workspace_id,
+            pane.active,
+            pane.pinned_count,
+            serialize_accepts_kinds(&pane.accepts_kinds),
+        ))?
         .context("Could not retrieve inserted pane_id")?;
 
         let (parent_id, order) = parent.unzip();
@@ -3369,6 +3402,55 @@ mod tests {
 
         let round_trip_workspace = db.workspace_for_roots(&["/tmp", "/tmp2"]);
         assert_eq!(workspace, round_trip_workspace.unwrap());
+    }
+
+    #[gpui::test]
+    async fn test_accepts_kinds_round_trip() {
+        zlog::init_test();
+
+        let db = WorkspaceDb::open_test_db("test_accepts_kinds_round_trip").await;
+
+        // The terminal slot is deliberately empty: the whole point of persisting the
+        // declaration is that an emptied slot keeps its identity across a restart.
+        let center_group = group(
+            Axis::Horizontal,
+            vec![
+                SerializedPaneGroup::Pane(SerializedPane::with_kinds(
+                    vec![SerializedItem::new("Editor", 1, true, false)],
+                    true,
+                    0,
+                    vec!["Editor".to_owned()],
+                )),
+                SerializedPaneGroup::Pane(SerializedPane::with_kinds(
+                    vec![],
+                    false,
+                    0,
+                    vec!["Terminal".to_owned()],
+                )),
+            ],
+        );
+
+        let workspace = SerializedWorkspace {
+            id: WorkspaceId(7),
+            paths: PathList::new(&["/tmp-kinds"]),
+            identity_paths: None,
+            location: SerializedWorkspaceLocation::Local,
+            center_group,
+            window_bounds: Default::default(),
+            bookmarks: Default::default(),
+            breakpoints: Default::default(),
+            display: Default::default(),
+            docks: Default::default(),
+            centered_layout: false,
+            session_id: None,
+            window_id: None,
+            user_toolchains: Default::default(),
+        };
+
+        db.save_workspace(workspace.clone()).await;
+
+        let restored = db.workspace_for_roots(&["/tmp-kinds"]).unwrap();
+        assert_eq!(workspace, restored);
     }
 
     #[gpui::test]

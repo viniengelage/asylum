@@ -131,6 +131,11 @@ pub struct WorkspaceSettingsContent {
     ///
     /// Default: 8.0
     pub card_gap: Option<f32>,
+    /// Present panels as tabs in a single pane tree instead of in fixed docks, so
+    /// rows and columns can be arranged freely.
+    ///
+    /// Default: false
+    pub unified_panes: Option<bool>,
     pub zoomed_padding: Option<bool>,
     /// Whether toggling a panel (e.g. with its keyboard shortcut) also closes
     /// the panel when it is already focused, instead of just moving focus back

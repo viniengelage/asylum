@@ -13,6 +13,7 @@ use smallvec::SmallVec;
 use ui::{
     h_flex, prelude::*, v_flex, Color, Icon, IconButton, IconName, IconSize, Label, Tooltip,
 };
+use util::ResultExt as _;
 use workspace::{
     StatusItemView, Workspace,
     item::{Item, ItemEvent, ItemHandle},
@@ -37,6 +38,9 @@ actions!(
         SubmitUrl,
     ]
 );
+
+/// How often the poll loop looks for a URL dropped by the `zed browse` utility.
+const BROWSE_REQUEST_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
 
 pub fn init(cx: &mut App) {
     cx.observe_new(|workspace: &mut Workspace, window, _cx| {
@@ -95,7 +99,14 @@ pub struct WebPreviewView {
     #[cfg(target_os = "macos")]
     browser: Option<cef_browser::CefBrowserInstance>,
     #[cfg(target_os = "macos")]
-    last_frame: Option<std::sync::Arc<RenderImage>>,
+    latest_frame: Option<std::sync::Arc<RenderImage>>,
+    /// Frames the renderer has uploaded to the sprite atlas. Held one generation past
+    /// use because the atlas entry must outlive the last scene that referenced it.
+    current_rendered_frame: Option<std::sync::Arc<RenderImage>>,
+    previous_rendered_frame: Option<std::sync::Arc<RenderImage>>,
+    /// Whether the pane is showing another item, in which case nothing can see what CEF
+    /// paints.
+    hidden: bool,
     cef_error: Option<String>,
 }
 
@@ -107,7 +118,23 @@ impl WebPreviewView {
         cx: &mut Context<Workspace>,
     ) {
         let view = cx.new(|cx| Self::new(window, cx));
-        workspace.add_item_to_active_pane(Box::new(view), None, true, window, cx);
+        let item = Box::new(view) as Box<dyn workspace::ItemHandle>;
+        // Every page opens in the slot the layout assigned to the browser; without a
+        // declared slot this keeps opening next to the editor as before.
+        if !workspace.add_item_to_kind_slot(
+            &Self::content_kind(),
+            item.boxed_clone(),
+            true,
+            window,
+            cx,
+        ) {
+            workspace.add_item_to_active_pane(item, None, true, window, cx);
+        }
+    }
+
+    /// The layout slot browser pages are routed to.
+    pub fn content_kind() -> workspace::ContentKind {
+        workspace::ContentKind::new("Browser")
     }
 
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -125,32 +152,42 @@ impl WebPreviewView {
         });
 
         let poll_task = cx.spawn(async move |this, cx| {
+            let mut delay = std::time::Duration::from_millis(1);
+            let mut last_browse_check = std::time::Instant::now();
+
             loop {
-                cx.background_executor()
-                    .timer(std::time::Duration::from_millis(16))
-                    .await;
+                cx.background_executor().timer(delay).await;
 
                 // Step 1: Flush input + pump CEF OUTSIDE entity update
                 // to avoid re-entrancy crashes
                 #[cfg(target_os = "macos")]
                 {
-                    let flush_fn = this.update(cx, |this, _cx| {
-                        this.browser.as_ref().map(|b| {
-                            let iq = b.input_queue_arc();
-                            let ha = b.handler_arc();
-                            (iq, ha)
+                    let queues = this
+                        .update(cx, |this, _cx| {
+                            this.browser
+                                .as_ref()
+                                .map(|browser| (browser.input_queue_arc(), browser.handler_arc()))
                         })
-                    }).ok().flatten();
+                        .ok()
+                        .flatten();
 
-                    if let Some((input_queue, handler)) = flush_fn {
-                        cef_browser::CefBrowserInstance::flush_queued(&input_queue, &handler);
+                    if let Some((input_queue, handler)) = queues
+                        && cef_browser::CefBrowserInstance::flush_queued(&input_queue, &handler)
+                    {
+                        cef_browser::request_pump();
                     }
 
-                    cef::do_message_loop_work();
+                    delay = cef_browser::pump_message_loop();
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    delay = std::time::Duration::from_millis(50);
                 }
 
-                // Check for browse requests from the terminal utility
-                {
+                // Check for browse requests from the terminal utility. This is a miss
+                // on nearly every tick, so it runs far slower than the pump.
+                if last_browse_check.elapsed() >= BROWSE_REQUEST_INTERVAL {
+                    last_browse_check = std::time::Instant::now();
                     let browse_path = browse_request_path();
                     if let Ok(url) = std::fs::read_to_string(&browse_path) {
                         let url = url.trim().to_string();
@@ -176,20 +213,19 @@ impl WebPreviewView {
                     {
                         let old_title = this.title.clone();
                         let old_loading = this.loading;
-                        let had_frame = this.last_frame.is_some();
 
-                        this.sync_browser_state();
+                        let got_frame = this.sync_browser_state();
 
                         let title_changed = this.title != old_title;
                         let loading_changed = this.loading != old_loading;
-                        let got_frame = !had_frame && this.last_frame.is_some();
 
                         if title_changed || loading_changed {
                             cx.emit(ItemEvent::UpdateTab);
                         }
-                        if title_changed || loading_changed || got_frame
-                            || this.last_frame.is_some()
-                        {
+                        // Only a new frame or a state change is worth a redraw: this loop
+                        // ticks up to 60 times a second, and notifying unconditionally
+                        // re-rendered the whole pane on a page that had not moved.
+                        if title_changed || loading_changed || got_frame {
                             cx.notify();
                         }
                     }
@@ -203,6 +239,21 @@ impl WebPreviewView {
                 }
             }
         });
+
+        // Every frame the view showed holds a sprite-atlas texture that only an explicit
+        // drop releases, so closing the tab has to hand back the ones still retained.
+        cx.on_release_in(window, |this, window, cx| {
+            for frame in [
+                this.current_rendered_frame.take(),
+                this.previous_rendered_frame.take(),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                cx.drop_image(frame, Some(&mut *window));
+            }
+        })
+        .detach();
 
         Self {
             focus_handle,
@@ -220,42 +271,78 @@ impl WebPreviewView {
             #[cfg(target_os = "macos")]
             browser: None,
             #[cfg(target_os = "macos")]
-            last_frame: None,
+            latest_frame: None,
+            current_rendered_frame: None,
+            previous_rendered_frame: None,
+            hidden: false,
             cef_error: None,
         }
     }
 
+    /// Pulls state and any newly painted frame out of CEF. Returns whether a new frame
+    /// arrived.
     #[cfg(target_os = "macos")]
-    fn sync_browser_state(&mut self) {
-        if let Some(ref browser) = self.browser {
-            if let Some(state) = browser.current_state() {
-                self.url = state.url;
-                if !state.title.is_empty() {
-                    self.title = state.title;
-                }
-                self.loading = state.loading;
-                self.can_go_back = state.can_go_back;
-                self.can_go_forward = state.can_go_forward;
-            }
+    fn sync_browser_state(&mut self) -> bool {
+        let Some(ref browser) = self.browser else {
+            return false;
+        };
 
-            // Capture new frame if available
-            if let Some(frame_buf) = browser.take_frame() {
-                let mut rgba = frame_buf.pixels;
-                for pixel in rgba.chunks_exact_mut(4) {
-                    pixel.swap(0, 2); // BGRA → RGBA
-                }
-                if let Some(buffer) = image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(
-                    frame_buf.width,
-                    frame_buf.height,
-                    rgba,
-                ) {
-                    let frame = image::Frame::new(buffer);
-                    self.last_frame = Some(std::sync::Arc::new(RenderImage::new(
-                        SmallVec::from_elem(frame, 1),
-                    )));
-                }
+        if let Some(state) = browser.current_state() {
+            self.url = state.url;
+            if !state.title.is_empty() {
+                self.title = state.title;
             }
+            self.loading = state.loading;
+            self.can_go_back = state.can_go_back;
+            self.can_go_forward = state.can_go_forward;
         }
+
+        let Some(frame_buffer) = browser.take_frame() else {
+            return false;
+        };
+        // CEF paints BGRA, which is the order `RenderImage` expects, so the pixels go
+        // straight through without a pass over the buffer.
+        let Some(buffer) = image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(
+            frame_buffer.width,
+            frame_buffer.height,
+            frame_buffer.pixels,
+        ) else {
+            return false;
+        };
+
+        self.latest_frame = Some(std::sync::Arc::new(RenderImage::new(SmallVec::from_elem(
+            image::Frame::new(buffer),
+            1,
+        ))));
+        true
+    }
+
+    /// Releases the sprite-atlas entry of frames that are two generations old. Dropping
+    /// the frame the renderer just drew from would leave the atlas without the texture
+    /// the last scene still references.
+    fn track_rendered_frame(&mut self, window: &mut Window) {
+        #[cfg(target_os = "macos")]
+        let latest_frame = self.latest_frame.clone();
+        #[cfg(not(target_os = "macos"))]
+        let latest_frame: Option<std::sync::Arc<RenderImage>> = None;
+
+        let Some(latest_frame) = latest_frame else {
+            return;
+        };
+        if self
+            .current_rendered_frame
+            .as_ref()
+            .is_some_and(|frame| frame.id == latest_frame.id)
+        {
+            return;
+        }
+        if let Some(previous) = self.previous_rendered_frame.take()
+            && previous.id != latest_frame.id
+        {
+            window.drop_image(previous).log_err();
+        }
+        self.previous_rendered_frame = self.current_rendered_frame.take();
+        self.current_rendered_frame = Some(latest_frame);
     }
 
     #[cfg(target_os = "macos")]
@@ -284,6 +371,9 @@ impl WebPreviewView {
 
         match cef_browser::CefBrowserInstance::new(bounds, self.scale_factor) {
             Ok(instance) => {
+                if self.hidden {
+                    instance.set_hidden(true);
+                }
                 self.last_bounds = Some(bounds);
                 self.browser = Some(instance);
             }
@@ -294,8 +384,19 @@ impl WebPreviewView {
         }
     }
 
+    fn set_browser_hidden(&mut self, hidden: bool) {
+        if self.hidden == hidden {
+            return;
+        }
+        self.hidden = hidden;
+        #[cfg(target_os = "macos")]
+        if let Some(ref browser) = self.browser {
+            browser.set_hidden(hidden);
+        }
+    }
+
     fn submit_url(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        let url = self.url_editor.read(cx).text(cx).to_string();
+        let url = self.url_editor.read(cx).text(cx);
         if !url.is_empty() {
             log::info!("web_preview: navigating to {url}");
             #[cfg(target_os = "macos")]
@@ -358,7 +459,9 @@ impl Focusable for WebPreviewView {
 }
 
 impl Render for WebPreviewView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.track_rendered_frame(window);
+
         let can_go_back = self.can_go_back;
         let can_go_forward = self.can_go_forward;
         let loading = self.loading;
@@ -498,15 +601,11 @@ impl Render for WebPreviewView {
                 {
                     // Use a canvas to measure real size, then render the frame
                     let entity = cx.entity().downgrade();
-                    #[cfg(target_os = "macos")]
-                    let frame_image = self.last_frame.clone();
-                    #[cfg(not(target_os = "macos"))]
-                    let frame_image: Option<std::sync::Arc<RenderImage>> = None;
+                    let frame_image = self.current_rendered_frame.clone();
 
                     #[cfg(target_os = "macos")]
                     let browser_cursor = self.browser.as_ref()
-                        .and_then(|b| b.current_state())
-                        .map(|s| s.cursor)
+                        .and_then(|browser| browser.current_cursor())
                         .unwrap_or(CursorStyle::Arrow);
                     #[cfg(not(target_os = "macos"))]
                     let browser_cursor = CursorStyle::Arrow;
@@ -717,6 +816,10 @@ impl Render for WebPreviewView {
 impl Item for WebPreviewView {
     type Event = ItemEvent;
 
+    fn content_kind(&self, _cx: &App) -> Option<workspace::ContentKind> {
+        Some(Self::content_kind())
+    }
+
     fn tab_content_text(&self, _detail: usize, _cx: &App) -> SharedString {
         if self.title.is_empty() || self.title == "Web Preview" {
             SharedString::from("Web Preview")
@@ -737,7 +840,12 @@ impl Item for WebPreviewView {
         f(*event)
     }
 
+    fn activated(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+        self.set_browser_hidden(false);
+    }
+
     fn deactivated(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+        self.set_browser_hidden(true);
     }
 }
 

@@ -21364,6 +21364,7 @@ dependencies = [
  "serde_json",
  "smallvec",
  "ui",
+ "util",
  "workspace",
 ]
 

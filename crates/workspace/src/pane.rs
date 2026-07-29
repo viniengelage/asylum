@@ -391,6 +391,41 @@ impl fmt::Debug for Event {
     }
 }
 
+/// Identifies a family of content that the layout can route to a particular pane.
+///
+/// Opaque string rather than an enum so crates outside `workspace` — the web preview, the
+/// devices sidebar — can declare kinds of their own without this crate knowing about them.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ContentKind(SharedString);
+
+impl ContentKind {
+    /// Files opened from the project, the file finder, go-to-definition, and so on.
+    pub const EDITOR: &'static str = "Editor";
+    /// Individual terminals, however they are spawned: action, button, or task.
+    pub const TERMINAL: &'static str = "Terminal";
+
+    pub fn new(name: impl Into<SharedString>) -> Self {
+        Self(name.into())
+    }
+
+    pub fn editor() -> Self {
+        Self::new(Self::EDITOR)
+    }
+
+    pub fn terminal() -> Self {
+        Self::new(Self::TERMINAL)
+    }
+
+    /// A single-instance panel, identified by its [`crate::Panel::persistent_name`].
+    pub fn panel(persistent_name: impl Into<SharedString>) -> Self {
+        Self::new(persistent_name)
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// A container for 0 to many items that are open in the workspace.
 /// Treats all items uniformly via the [`ItemHandle`] trait, whether it's an editor, search results multibuffer, terminal or something else,
 /// responsible for managing item tabs, focus and zoom states and drag and drop features.
@@ -407,6 +442,7 @@ pub struct Pane {
     zoomed: bool,
     was_focused: bool,
     active_item_index: usize,
+    activated_item_id: Option<EntityId>,
     preview_item_id: Option<EntityId>,
     last_focus_handle_by_item: HashMap<EntityId, WeakFocusHandle>,
     nav_history: NavHistory,
@@ -454,6 +490,20 @@ pub struct Pane {
     welcome_page: Option<Entity<crate::welcome::WelcomePage>>,
 
     pub in_center_group: bool,
+    /// Set for panes created to host panels. Such a pane must never become the target
+    /// for opening files, even while focused.
+    pub hosts_panels: bool,
+    /// Content kinds the layout routes to this pane.
+    ///
+    /// Declared by the layout rather than derived from the pane's current items, so a
+    /// slot stays the destination for its kind even when empty: close every terminal and
+    /// the next one still opens here.
+    accepts_kinds: Vec<ContentKind>,
+    /// The flex this pane had before being collapsed, and the marker that it is hidden.
+    ///
+    /// Hiding keeps the pane in the tree at zero size instead of removing it, which is
+    /// what makes showing it again land in the same place with the same contents.
+    collapsed_flex: Option<f32>,
 }
 
 pub struct ActivationHistoryEntry {
@@ -599,6 +649,7 @@ impl Pane {
             was_focused: false,
             zoomed: false,
             active_item_index: 0,
+            activated_item_id: None,
             preview_item_id: None,
             max_tabs,
             use_max_tabs,
@@ -646,6 +697,9 @@ impl Pane {
             project_item_restoration_data: HashMap::default(),
             welcome_page: None,
             in_center_group: false,
+            hosts_panels: false,
+            accepts_kinds: Vec::new(),
+            collapsed_flex: None,
         }
     }
 
@@ -875,6 +929,31 @@ impl Pane {
 
     pub fn set_close_pane_if_empty(&mut self, close_pane_if_empty: bool, cx: &mut Context<Self>) {
         self.close_pane_if_empty = close_pane_if_empty;
+        cx.notify();
+    }
+
+    pub fn is_collapsed(&self) -> bool {
+        self.collapsed_flex.is_some()
+    }
+
+    pub(crate) fn take_collapsed_flex(&mut self) -> Option<f32> {
+        self.collapsed_flex.take()
+    }
+
+    pub(crate) fn set_collapsed_flex(&mut self, flex: Option<f32>) {
+        self.collapsed_flex = flex;
+    }
+
+    pub fn accepts_kinds(&self) -> &[ContentKind] {
+        &self.accepts_kinds
+    }
+
+    pub fn accepts_kind(&self, kind: &ContentKind) -> bool {
+        self.accepts_kinds.contains(kind)
+    }
+
+    pub fn set_accepts_kinds(&mut self, kinds: Vec<ContentKind>, cx: &mut Context<Self>) {
+        self.accepts_kinds = kinds;
         cx.notify();
     }
 
@@ -1452,7 +1531,7 @@ impl Pane {
         self.index_for_item_id(item.item_id())
     }
 
-    fn index_for_item_id(&self, item_id: EntityId) -> Option<usize> {
+    pub fn index_for_item_id(&self, item_id: EntityId) -> Option<usize> {
         self.items.iter().position(|i| i.item_id() == item_id)
     }
 
@@ -1508,6 +1587,15 @@ impl Pane {
                 && let Some(prev_item) = self.items.get(prev_active_item_ix)
             {
                 prev_item.deactivated(window, cx);
+            }
+            // Tracked by id rather than by index, so that the first item added to a
+            // pane still counts as newly activated even though the index never moved.
+            let new_item_id = self.items.get(index).map(|item| item.item_id());
+            if self.activated_item_id != new_item_id {
+                self.activated_item_id = new_item_id;
+                if let Some(new_item) = self.items.get(index).cloned() {
+                    new_item.activated(window, cx);
+                }
             }
             self.update_history(index);
             self.update_toolbar(window, cx);

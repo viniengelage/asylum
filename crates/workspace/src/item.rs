@@ -212,6 +212,17 @@ pub trait Item: Focusable + EventEmitter<Self::Event> + Render + Sized {
 
     fn to_item_events(_event: &Self::Event, _f: &mut dyn FnMut(ItemEvent)) {}
 
+    /// The layout slot this item belongs to, for items that are routed by kind.
+    ///
+    /// Returning a kind means dragging this item to another pane moves that kind's
+    /// destination with it, so the layout you build by dragging is the layout new content
+    /// opens into.
+    fn content_kind(&self, _cx: &App) -> Option<pane::ContentKind> {
+        None
+    }
+
+    /// Called when this item becomes the active item of its pane.
+    fn activated(&mut self, _window: &mut Window, _: &mut Context<Self>) {}
     fn deactivated(&mut self, _window: &mut Window, _: &mut Context<Self>) {}
     fn discarded(&self, _project: Entity<Project>, _window: &mut Window, _cx: &mut Context<Self>) {}
     fn on_removed(&self, _cx: &mut Context<Self>) {}
@@ -520,6 +531,8 @@ pub trait ItemHandle: 'static + Send {
         window: &mut Window,
         cx: &mut Context<Workspace>,
     );
+    fn content_kind(&self, cx: &App) -> Option<pane::ContentKind>;
+    fn activated(&self, window: &mut Window, cx: &mut App);
     fn deactivated(&self, window: &mut Window, cx: &mut App);
     fn on_removed(&self, cx: &mut App);
     fn workspace_deactivated(&self, window: &mut Window, cx: &mut App);
@@ -1010,6 +1023,14 @@ impl<T: Item> ItemHandle for Entity<T> {
         cx.defer_in(window, |workspace, window, cx| {
             workspace.serialize_workspace(window, cx);
         });
+    }
+
+    fn content_kind(&self, cx: &App) -> Option<pane::ContentKind> {
+        self.read(cx).content_kind(cx)
+    }
+
+    fn activated(&self, window: &mut Window, cx: &mut App) {
+        self.update(cx, |this, cx| this.activated(window, cx));
     }
 
     fn deactivated(&self, window: &mut Window, cx: &mut App) {

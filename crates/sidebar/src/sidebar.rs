@@ -10171,6 +10171,10 @@ pub fn dump_workspace_info(
 fn dump_single_workspace(workspace: &Workspace, output: &mut String, cx: &gpui::App) {
     use std::fmt::Write;
 
+    writeln!(output, "--- Layout ---").ok();
+    write!(output, "{}", workspace.dump_layout(cx)).ok();
+    writeln!(output, "--- /Layout ---\n").ok();
+
     let workspace_db_id = workspace.database_id();
     match workspace_db_id {
         Some(id) => writeln!(output, "Workspace DB ID: {id:?}").ok(),

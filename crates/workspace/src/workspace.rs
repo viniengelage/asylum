@@ -1,7 +1,6 @@
 pub mod active_file_name;
 pub mod dock;
 pub mod history_manager;
-pub mod layout_editor;
 pub mod invalid_item_view;
 pub mod item;
 mod modal_layer;
@@ -11,6 +10,7 @@ mod multi_workspace_tests;
 pub mod notifications;
 pub mod pane;
 pub mod pane_group;
+pub mod panel_item;
 pub mod path_list {
     pub use util::path_list::{PathList, SerializedPathList};
 }
@@ -86,6 +86,8 @@ pub use pane_group::{
     ActivePaneDecorator, HANDLE_HITBOX_SIZE, Member, PaneAxis, PaneGroup, PaneRenderContext,
     SplitDirection,
 };
+pub use pane::ContentKind;
+pub use panel_item::PanelItem;
 pub use persistence::{
     RecentWorkspace, WorkspaceDb, delete_unloaded_items,
     model::{
@@ -1122,6 +1124,13 @@ pub fn register_serializable_item<I: SerializableItem>(cx: &mut App) {
         .insert(TypeId::of::<I>(), descriptor);
 }
 
+/// Makes a panel restorable as a pane tab. Call once per panel type at startup,
+/// alongside the panel's own registration.
+pub fn register_panel_item<T: Panel>(cx: &mut App) {
+    register_serializable_item::<PanelItem<T>>(cx);
+    panel_item::PanelItemRegistry::register::<T>(cx);
+}
+
 pub struct AppState {
     pub languages: Arc<LanguageRegistry>,
     pub client: Arc<Client>,
@@ -1370,6 +1379,16 @@ struct DispatchingKeystrokes {
 /// In some way, is a counterpart of a window, as the [`WindowHandle`] could be downcast into `Workspace`.
 ///
 /// A `Workspace` usually consists of 1 or more projects, a central pane group, four docks and a status bar.
+/// What should happen to focus when a panel's tab is brought to the front.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RevealPanel {
+    Focus,
+    /// Mirrors the dock behaviour of toggling focus back to the editor.
+    RestoreCenterFocus,
+    /// Reveal without moving focus at all, for plain "open this panel" callers.
+    LeaveFocus,
+}
+
 /// The `Workspace` owns everybody's state and serves as a default, "global context",
 /// that can be used to register a global action to be triggered from any place in the window.
 pub struct Workspace {
@@ -1384,6 +1403,23 @@ pub struct Workspace {
     bottom_dock: Entity<Dock>,
     devices_dock: Entity<Dock>,
     right_dock: Entity<Dock>,
+    /// Owns every registered panel, so a panel outlives whichever dock or pane is
+    /// currently presenting it. Panels like the web preview and the iOS simulator own
+    /// native views whose state cannot be rebuilt, so closing their tab must not drop
+    /// the entity.
+    panels: Vec<Arc<dyn PanelHandle>>,
+    /// Indexes [`Self::panels`] by concrete panel type. `panel::<T>` runs inside render
+    /// paths, so it must not scan and downcast every registered panel per frame.
+    panels_by_type: TypeIdHashMap<Arc<dyn PanelHandle>>,
+    /// Maps a panel's entity id to the id of the [`PanelItem`] currently wrapping it,
+    /// so a panel is never opened as two tabs.
+    panel_items_by_panel: HashMap<EntityId, EntityId>,
+    /// Panel tabs from a restored layout whose panel had not been registered yet.
+    ///
+    /// Restoring the pane tree and registering panels are independent async tasks, so a
+    /// tab can be deserialized before its panel exists. Rather than dropping the tab,
+    /// the placement is replayed from [`Self::add_panel`].
+    pending_panel_tabs: Vec<(Arc<str>, WeakEntity<Pane>)>,
     panes: Vec<Entity<Pane>>,
     panes_by_item: HashMap<EntityId, WeakEntity<Pane>>,
     active_pane: Entity<Pane>,
@@ -1397,8 +1433,6 @@ pub struct Workspace {
     region_focus_handles: RegionFocusHandles,
     notifications: Notifications,
     suppressed_notifications: HashSet<NotificationId>,
-    layout_editor_state: Entity<layout_editor::LayoutEditorState>,
-    layout_editor_overlay: Entity<layout_editor::LayoutEditorOverlay>,
     project: Entity<Project>,
     follower_states: HashMap<CollaboratorId, FollowerState>,
     last_leaders_by_pane: HashMap<WeakEntity<Pane>, CollaboratorId>,
@@ -1759,15 +1793,6 @@ impl Workspace {
             .root::<MultiWorkspace>()
             .flatten()
             .map(|mw| mw.downgrade());
-        let layout_editor_state = cx.new(|_| layout_editor::LayoutEditorState::default());
-        // Overlay needs workspace WeakEntity — set after construction
-        let layout_editor_overlay = cx.new(|cx| {
-            layout_editor::LayoutEditorOverlay::new(
-                layout_editor_state.clone(),
-                cx,
-            )
-        });
-
         let status_bar = cx.new(|cx| {
             let mut status_bar =
                 StatusBar::new(&center_pane.clone(), multi_workspace.clone(), window, cx);
@@ -1775,8 +1800,6 @@ impl Workspace {
             status_bar.add_right_item(devices_dock_buttons, window, cx);
             status_bar.add_right_item(right_dock_buttons, window, cx);
             status_bar.add_right_item(bottom_dock_buttons, window, cx);
-            let layout_btn = cx.new(|_| layout_editor::LayoutEditorButton::new(layout_editor_state.clone()));
-            status_bar.add_right_item(layout_btn, window, cx);
             status_bar
         });
 
@@ -1835,16 +1858,19 @@ impl Workspace {
                     })
                 }
             }),
+            // Turning `unified_panes` on stops the docks from rendering, so the panels
+            // they were presenting have to be moved into the pane tree right away or
+            // they would silently disappear until the next restart.
+            cx.observe_global_in::<SettingsStore>(window, |this, window, cx| {
+                if Self::unified_panes(cx) && !this.has_panel_panes(cx) && !this.panels.is_empty() {
+                    this.build_unified_layout(window, cx);
+                }
+            }),
         ];
 
         cx.defer_in(window, move |this, window, cx| {
             this.update_window_title(window, cx);
             this.show_initial_notifications(cx);
-            // Set workspace reference on layout editor overlay
-            let weak = this.weak_self.clone();
-            this.layout_editor_overlay.update(cx, |overlay, _| {
-                overlay.set_workspace(weak);
-            });
         });
 
         let mut center = PaneGroup::new(center_pane.clone());
@@ -1871,12 +1897,14 @@ impl Workspace {
             region_focus_handles: RegionFocusHandles::new(cx),
             notifications: Notifications::default(),
             suppressed_notifications: HashSet::default(),
-            layout_editor_state: layout_editor_state.clone(),
-            layout_editor_overlay: layout_editor_overlay.clone(),
             left_dock,
             bottom_dock,
             devices_dock,
             right_dock,
+            panels: Vec::new(),
+            panels_by_type: TypeIdHashMap::default(),
+            panel_items_by_panel: HashMap::default(),
+            pending_panel_tabs: Vec::new(),
             _panels_task: None,
             project: project.clone(),
             follower_states: Default::default(),
@@ -2596,9 +2624,34 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let panel_id = panel.panel_id();
+        let type_id = TypeId::of::<T>();
+
         let focus_handle = panel.panel_focus_handle(cx);
         cx.on_focus_in(&focus_handle, window, Self::handle_panel_focused)
             .detach();
+
+        let handle = Arc::new(panel.clone()) as Arc<dyn PanelHandle>;
+        if !self.panels.iter().any(|panel| panel.panel_id() == panel_id) {
+            self.panels.push(handle.clone());
+            // Docks legitimately host more than one panel of a type (the same panel type
+            // in two positions), so this indexes the first and never overwrites it —
+            // otherwise `panel::<T>` and `panels` would disagree about which one is "the"
+            // panel of that type.
+            self.panels_by_type.entry(type_id).or_insert(handle.clone());
+        }
+        self.place_pending_panel_tabs(&handle, window, cx);
+
+        // A panel that finishes loading after a layout was applied still belongs in the
+        // slot that layout declared for it.
+        if Self::unified_panes(cx) {
+            let kind = ContentKind::panel(handle.persistent_name());
+            if self.existing_panel_item(handle.panel_id(), cx).is_none()
+                && let Some(slot) = self.pane_for_kind(&kind, cx)
+            {
+                self.open_panel_in_pane(&handle, &slot, false, window, cx);
+            }
+        }
 
         let dock_position = panel.position(window, cx);
         let dock = self.dock_at_position(dock_position);
@@ -2633,6 +2686,10 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let panel_id = panel.panel_id();
+        self.panels.retain(|panel| panel.panel_id() != panel_id);
+        self.panels_by_type
+            .retain(|_, panel| panel.panel_id() != panel_id);
         for dock in [
             &self.left_dock,
             &self.bottom_dock,
@@ -4210,6 +4267,20 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // In unified mode the dock is not the presentation surface: toggling has to hide
+        // and show the slot the content was routed to, in place.
+        if Self::unified_panes(cx) {
+            let kinds = self
+                .dock_at_position(dock_side)
+                .read(cx)
+                .panel_entries_kinds(cx);
+            for kind in kinds {
+                if self.toggle_kind_slot(&kind, window, cx) {
+                    return;
+                }
+            }
+        }
+
         let mut focus_center = false;
         let mut reveal_dock = false;
 
@@ -4438,8 +4509,34 @@ impl Workspace {
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-        should_focus: &mut dyn FnMut(&dyn PanelHandle, &mut Window, &mut Context<Dock>) -> bool,
+        should_focus: &mut dyn FnMut(&dyn PanelHandle, &mut Window, &mut App) -> bool,
     ) -> Option<Arc<dyn PanelHandle>> {
+        if Self::unified_panes(cx) {
+            let panel = self.panel_of_type::<T>()?;
+
+            // A container panel has no tab of its own; its slot is the thing to toggle.
+            if let Some(kind) = panel.hosted_content_kind(cx)
+                && self.toggle_kind_slot(&kind, window, cx)
+            {
+                return Some(panel);
+            }
+
+            // A hidden slot must be shown before its tab can be focused, otherwise the
+            // panel would be "focused" inside something that is collapsed.
+            if let Some((pane, _)) = self.existing_panel_item(panel.panel_id(), cx)
+                && pane.read(cx).is_collapsed()
+            {
+                self.set_slot_collapsed(&pane, false, window, cx);
+            }
+
+            let intent = if should_focus(panel.as_ref(), window, cx) {
+                RevealPanel::Focus
+            } else {
+                RevealPanel::RestoreCenterFocus
+            };
+            return self.reveal_panel_tab(&panel, intent, window, cx);
+        }
+
         let mut result_panel = None;
         let mut serialize = false;
         for dock in self.all_docks() {
@@ -4479,8 +4576,74 @@ impl Workspace {
         result_panel
     }
 
+    fn panel_of_type<T: Panel>(&self) -> Option<Arc<dyn PanelHandle>> {
+        self.panels_by_type.get(&TypeId::of::<T>()).cloned()
+    }
+
+    /// Brings a panel's tab to the front of whichever pane holds it, opening it in a new
+    /// panel pane on the right when it is not on screen anywhere.
+    fn reveal_panel_tab(
+        &mut self,
+        panel: &Arc<dyn PanelHandle>,
+        intent: RevealPanel,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Arc<dyn PanelHandle>> {
+        let focus = intent == RevealPanel::Focus;
+        let pane = match self.existing_panel_item(panel.panel_id(), cx) {
+            Some((pane, item)) => {
+                pane.update(cx, |pane, cx| {
+                    if let Some(index) = pane.index_for_item_id(item.item_id()) {
+                        pane.activate_item(index, true, focus, window, cx);
+                    }
+                });
+                pane
+            }
+            // The layout may declare a slot for a panel that had not finished loading
+            // when it was applied. Honour that declaration instead of inventing a new
+            // pane, otherwise the declared slot stays empty forever.
+            None => {
+                let kind = ContentKind::panel(panel.persistent_name());
+                let pane = match self.pane_for_kind(&kind, cx) {
+                    Some(pane) => {
+                        if pane.read(cx).is_collapsed() {
+                            self.set_slot_collapsed(&pane, false, window, cx);
+                        }
+                        pane
+                    }
+                    None => {
+                        let pane = self.add_panel_pane(window, cx);
+                        self.set_pane_kinds(&pane, vec![kind], cx);
+                        self.center
+                            .insert_pane_at_border(&pane, SplitDirection::Right, cx);
+                        pane
+                    }
+                };
+                self.open_panel_in_pane(panel, &pane, true, window, cx)?;
+                pane
+            }
+        };
+
+        match intent {
+            RevealPanel::Focus => window.focus(&pane.focus_handle(cx), cx),
+            RevealPanel::RestoreCenterFocus => self.focus_center_pane(window, cx),
+            RevealPanel::LeaveFocus => {}
+        }
+
+        self.serialize_workspace(window, cx);
+        cx.notify();
+        Some(panel.clone())
+    }
+
     /// Open the panel of the given type
     pub fn open_panel<T: Panel>(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if Self::unified_panes(cx) {
+            if let Some(panel) = self.panel_of_type::<T>() {
+                self.reveal_panel_tab(&panel, RevealPanel::LeaveFocus, window, cx);
+            }
+            return;
+        }
+
         for dock in self.all_docks() {
             if let Some(panel_index) = dock.read(cx).panel_index_for_type::<T>() {
                 dock.update(cx, |dock, cx| {
@@ -4503,6 +4666,18 @@ impl Workspace {
     }
 
     pub fn close_panel<T: Panel>(&self, window: &mut Window, cx: &mut Context<Self>) {
+        if Self::unified_panes(cx) {
+            let Some(panel) = self.panel_of_type::<T>() else {
+                return;
+            };
+            if let Some((pane, item)) = self.existing_panel_item(panel.panel_id(), cx) {
+                pane.update(cx, |pane, cx| {
+                    pane.remove_item(item.item_id(), false, true, window, cx);
+                });
+            }
+            return;
+        }
+
         for dock in self.all_docks().iter() {
             dock.update(cx, |dock, cx| {
                 if dock.panel::<T>().is_some() {
@@ -4512,10 +4687,164 @@ impl Workspace {
         }
     }
 
+    /// Resolved from the workspace's own registry rather than from the docks, so it
+    /// still finds panels that are currently hosted in a pane instead of a dock.
     pub fn panel<T: Panel>(&self, cx: &App) -> Option<Entity<T>> {
+        if let Some(panel) = self.panels_by_type.get(&TypeId::of::<T>()) {
+            return panel.to_any().downcast().ok();
+        }
         self.all_docks()
             .iter()
             .find_map(|dock| dock.read(cx).panel::<T>())
+    }
+
+    pub fn panels(&self) -> &[Arc<dyn PanelHandle>] {
+        &self.panels
+    }
+
+    pub(crate) fn register_panel_item_instance(&mut self, panel_id: EntityId, item_id: EntityId) {
+        self.panel_items_by_panel.insert(panel_id, item_id);
+    }
+
+    pub(crate) fn record_pending_panel_tab(&mut self, kind: Arc<str>, pane: WeakEntity<Pane>) {
+        self.pending_panel_tabs.push((kind, pane));
+    }
+
+    /// Places any restored-but-unresolved tabs for a panel that has just registered.
+    fn place_pending_panel_tabs(
+        &mut self,
+        panel: &Arc<dyn PanelHandle>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let name = panel.persistent_name();
+        let mut pending = Vec::new();
+        self.pending_panel_tabs.retain(|(kind, pane)| {
+            if kind.as_ref() == name {
+                pending.push(pane.clone());
+                false
+            } else {
+                true
+            }
+        });
+
+        for pane in pending {
+            let Some(pane) = pane.upgrade() else {
+                continue;
+            };
+            self.open_panel_in_pane(panel, &pane, false, window, cx);
+            pane.update(cx, |pane, _| pane.hosts_panels = true);
+        }
+    }
+
+    /// Resolves the tab presenting a panel kind, whichever entity backs it.
+    ///
+    /// Only meaningful for panel kinds, which have exactly one tab; multi-instance kinds
+    /// such as the terminal have many items sharing one kind.
+    fn existing_item_for_kind(
+        &self,
+        kind: &ContentKind,
+        cx: &App,
+    ) -> Option<(Entity<Pane>, Box<dyn ItemHandle>)> {
+        self.panes.iter().find_map(|pane| {
+            let item = pane
+                .read(cx)
+                .items()
+                .find(|item| item.content_kind(cx).as_ref() == Some(kind))?
+                .boxed_clone();
+            Some((pane.clone(), item))
+        })
+    }
+
+    /// Resolves the tab currently presenting `panel_id`, if any.
+    ///
+    /// Stale map entries are harmless: an item that is no longer in its pane resolves
+    /// to `None`, and the caller builds a fresh one.
+    fn existing_panel_item(
+        &self,
+        panel_id: EntityId,
+        cx: &App,
+    ) -> Option<(Entity<Pane>, Box<dyn ItemHandle>)> {
+        let item_id = *self.panel_items_by_panel.get(&panel_id)?;
+        // Scans the panes rather than consulting `panes_by_item`, which is filled from a
+        // deferred pane event: during a single synchronous pass — applying a layout — the
+        // index is still empty and a panel would be handed a second tab.
+        self.panes.iter().find_map(|pane| {
+            let item = pane
+                .read(cx)
+                .items()
+                .find(|item| item.item_id() == item_id)?
+                .boxed_clone();
+            Some((pane.clone(), item))
+        })
+    }
+
+    /// Presents a panel as a tab of `pane`.
+    ///
+    /// Panels are workspace singletons and [`Pane::add_item`] only dedupes within a
+    /// single pane, so an existing tab elsewhere in the tree is moved here rather than
+    /// duplicated.
+    pub fn open_panel_in_pane(
+        &mut self,
+        panel: &Arc<dyn PanelHandle>,
+        pane: &Entity<Pane>,
+        activate: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Box<dyn ItemHandle>> {
+        let panel_id = panel.panel_id();
+        let kind = ContentKind::panel(panel.persistent_name());
+
+        // Matched on the content kind rather than the panel entity: a kind maps to one
+        // slot and one tab, so a second entity of the same panel type must reuse the tab
+        // that already exists instead of adding a second rendering of that panel.
+        if let Some((existing_pane, existing_item)) = self
+            .existing_panel_item(panel_id, cx)
+            .or_else(|| self.existing_item_for_kind(&kind, cx))
+        {
+            if &existing_pane == pane {
+                if activate {
+                    pane.update(cx, |pane, cx| {
+                        if let Some(index) = pane.index_for_item_id(existing_item.item_id()) {
+                            pane.activate_item(index, true, true, window, cx);
+                        }
+                    });
+                }
+                return Some(existing_item);
+            }
+
+            existing_pane.update(cx, |existing_pane, cx| {
+                existing_pane.remove_item(existing_item.item_id(), false, false, window, cx);
+            });
+            pane.update(cx, |pane, cx| {
+                pane.add_item(
+                    existing_item.boxed_clone(),
+                    activate,
+                    activate,
+                    None,
+                    window,
+                    cx,
+                );
+            });
+            return Some(existing_item);
+        }
+
+        let item = panel_item::PanelItemRegistry::build(panel, window, cx)?;
+        // Registered here rather than relying on `Item::added_to_workspace`, which runs
+        // from a deferred pane event: applying a layout creates every slot in one
+        // synchronous pass, and a dedup map that is still empty during that pass hands
+        // out a second tab for a panel that already has one.
+        self.register_panel_item_instance(panel_id, item.item_id());
+        pane.update(cx, |pane, cx| {
+            pane.add_item(item.boxed_clone(), activate, activate, None, window, cx);
+        });
+        Some(item)
+    }
+
+    pub fn panel_for_persistent_name(&self, name: &str) -> Option<&Arc<dyn PanelHandle>> {
+        self.panels
+            .iter()
+            .find(|panel| panel.persistent_name() == name)
     }
 
     fn dismiss_zoomed_items_to_reveal(
@@ -4584,13 +4913,355 @@ impl Workspace {
         pane
     }
 
+    pub fn unified_panes(cx: &App) -> bool {
+        WorkspaceSettings::get_global(cx).unified_panes
+    }
+
+    pub fn has_panel_panes(&self, cx: &App) -> bool {
+        self.panes.iter().any(|pane| pane.read(cx).hosts_panels)
+    }
+
+    /// The pane the layout designates for `kind`.
+    ///
+    /// Returns `None` when no slot declares the kind, which is always the case in dock
+    /// mode: callers then keep their previous behaviour instead of changing where things
+    /// open.
+    pub fn pane_for_kind(&self, kind: &ContentKind, cx: &App) -> Option<Entity<Pane>> {
+        self.panes
+            .iter()
+            .find(|pane| pane.read(cx).accepts_kind(kind))
+            .cloned()
+    }
+
+    /// Where a newly opened file should go.
+    ///
+    /// The last focused pane wins while it is still an editor pane, so splitting the
+    /// editor keeps working. Once focus has moved to a panel slot, opening a file falls
+    /// back to the declared `Editor` slot instead of dropping the file into the panel.
+    fn editor_target_pane(&self, cx: &App) -> Option<WeakEntity<Pane>> {
+        let editor_kind = ContentKind::editor();
+
+        if let Some(last_active) = self
+            .last_active_center_pane
+            .clone()
+            .and_then(|pane| pane.upgrade())
+            && last_active.read(cx).accepts_kind(&editor_kind)
+        {
+            return Some(last_active.downgrade());
+        }
+
+        self.pane_for_kind(&editor_kind, cx)
+            .map(|pane| pane.downgrade())
+            .or_else(|| self.last_active_center_pane.clone())
+    }
+
+    /// Hides or shows the slot declared for `kind`, in place.
+    ///
+    /// Returns `false` when no slot declares the kind, so dock-mode callers fall through
+    /// to their existing toggle.
+    pub fn toggle_kind_slot(
+        &mut self,
+        kind: &ContentKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(pane) = self.pane_for_kind(kind, cx) else {
+            return false;
+        };
+
+        let collapsing = !pane.read(cx).is_collapsed();
+        if !self.set_slot_collapsed(&pane, collapsing, window, cx) {
+            return false;
+        }
+
+        if collapsing {
+            // Focus cannot stay in something that is no longer visible.
+            if pane.read(cx).has_focus(window, cx) {
+                self.focus_center_pane(window, cx);
+            }
+        } else {
+            window.focus(&pane.focus_handle(cx), cx);
+        }
+
+        self.serialize_workspace(window, cx);
+        cx.notify();
+        true
+    }
+
+    /// Adds `item` to the slot declared for `kind`.
+    ///
+    /// Returns `false` when the layout declares no such slot, so callers keep their own
+    /// placement and behaviour in dock mode is unchanged.
+    pub fn add_item_to_kind_slot(
+        &mut self,
+        kind: &ContentKind,
+        item: Box<dyn ItemHandle>,
+        focus_item: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(pane) = self.pane_for_kind(kind, cx) else {
+            return false;
+        };
+        // An empty slot is hidden; routing content to it is what brings it back.
+        if pane.read(cx).is_collapsed() {
+            self.set_slot_collapsed(&pane, false, window, cx);
+        }
+        pane.update(cx, |pane, cx| {
+            pane.add_item(item, true, focus_item, None, window, cx);
+        });
+        true
+    }
+
+    /// Collapses or expands a slot, telling its active item whether it is on screen.
+    ///
+    /// Views that own native subviews hide them from `Panel::set_active`, which
+    /// `Item::deactivated` drives — the iOS simulator's child window is the case that
+    /// matters, since a native window is not clipped by its host and would otherwise stay
+    /// visible over the collapsed slot.
+    fn set_slot_collapsed(
+        &mut self,
+        pane: &Entity<Pane>,
+        collapsed: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.center.set_pane_collapsed(pane, collapsed, cx) {
+            return false;
+        }
+
+        if let Some(item) = pane.read(cx).active_item() {
+            if collapsed {
+                item.deactivated(window, cx);
+            } else {
+                item.activated(window, cx);
+            }
+        }
+        true
+    }
+
+    /// Hides slots that have nothing in them yet.
+    ///
+    /// A declared slot with no content — a terminal slot before the first terminal is
+    /// opened — would otherwise render as a blank box holding space open. It stays in the
+    /// tree as the routing destination and reappears the moment something lands in it.
+    /// The editor slot is exempt: an editor with no file open is a normal, expected state.
+    pub fn collapse_empty_slots(&mut self, cx: &mut Context<Self>) {
+        let editor_kind = ContentKind::editor();
+        for pane in self.panes.clone() {
+            let should_collapse = {
+                let pane = pane.read(cx);
+                pane.items_len() == 0
+                    && !pane.accepts_kinds().is_empty()
+                    && !pane.accepts_kind(&editor_kind)
+                    && !pane.is_collapsed()
+            };
+            if should_collapse {
+                self.center.set_pane_collapsed(&pane, true, cx);
+            }
+        }
+        cx.notify();
+    }
+
+    /// Declares which content kinds route to `pane`, making it that content's slot.
+    pub fn set_pane_kinds(
+        &mut self,
+        pane: &Entity<Pane>,
+        kinds: Vec<ContentKind>,
+        cx: &mut Context<Self>,
+    ) {
+        // A kind has exactly one destination, so claiming it takes it from whoever held it.
+        for other in self.panes.clone() {
+            if &other == pane {
+                continue;
+            }
+            let retained = other
+                .read(cx)
+                .accepts_kinds()
+                .iter()
+                .filter(|existing| !kinds.contains(existing))
+                .cloned()
+                .collect::<Vec<_>>();
+            if retained.len() != other.read(cx).accepts_kinds().len() {
+                other.update(cx, |other, cx| other.set_accepts_kinds(retained, cx));
+            }
+        }
+        pane.update(cx, |pane, cx| pane.set_accepts_kinds(kinds, cx));
+    }
+
+    /// Recovers the `hosts_panels` flag after a restore.
+    ///
+    /// The flag is derived from the pane's contents rather than persisted, which keeps
+    /// the serialized pane schema unchanged: a pane holding nothing but panels is a
+    /// panel pane by definition.
+    fn mark_panel_panes(&mut self, cx: &mut Context<Self>) {
+        let panes = self.panes.clone();
+        for pane in panes {
+            let views = pane
+                .read(cx)
+                .items()
+                .map(|item| item.to_any_view())
+                .collect::<Vec<_>>();
+            let hosts_panels = !views.is_empty()
+                && views
+                    .iter()
+                    .all(|view| panel_item::PanelItemRegistry::is_panel_item(view, cx));
+            pane.update(cx, |pane, _| pane.hosts_panels = hosts_panels);
+        }
+    }
+
+    /// Creates a pane dedicated to hosting panels, so it is excluded from the panes
+    /// that files can be opened into.
+    pub fn add_panel_pane(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Entity<Pane> {
+        let pane = self.add_pane(window, cx);
+        pane.update(cx, |pane, cx| {
+            pane.hosts_panels = true;
+            // Splitting stays enabled: dropping a tab on this pane's edge is how a column
+            // or row gets inserted, which is the only way to compose the layout.
+            pane.set_can_navigate(false, cx);
+        });
+        pane
+    }
+
+    /// Arranges the currently registered panels into the pane tree, reproducing the
+    /// dock layout as a starting point: panels of the left dock become a column on the
+    /// left, the bottom dock a row under the editor, and so on.
+    pub fn build_unified_layout(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let mut panels_by_position: Vec<(DockPosition, Vec<Arc<dyn PanelHandle>>)> = vec![
+            (DockPosition::Left, Vec::new()),
+            (DockPosition::Bottom, Vec::new()),
+            (DockPosition::Devices, Vec::new()),
+            (DockPosition::Right, Vec::new()),
+        ];
+
+        for panel in self.panels.clone() {
+            if !panel.enabled(cx) {
+                continue;
+            }
+            let position = panel.position(window, cx);
+            if let Some((_, panels)) = panels_by_position
+                .iter_mut()
+                .find(|(candidate, _)| *candidate == position)
+            {
+                panels.push(panel);
+            }
+        }
+
+        for (position, panels) in panels_by_position {
+            if panels.is_empty() {
+                continue;
+            }
+
+            let pane = self.add_panel_pane(window, cx);
+
+            // A container panel (the terminal) contributes its content kind instead of
+            // itself: the slot hosts the instances, so nothing nests a pane in a pane.
+            let mut kinds = Vec::new();
+            let mut occupants = Vec::new();
+            for panel in &panels {
+                match panel.hosted_content_kind(cx) {
+                    Some(kind) => kinds.push(kind),
+                    None => {
+                        kinds.push(ContentKind::panel(panel.persistent_name()));
+                        occupants.push(panel.clone());
+                    }
+                }
+            }
+            self.set_pane_kinds(&pane, kinds, cx);
+            for panel in &occupants {
+                self.open_panel_in_pane(panel, &pane, false, window, cx);
+            }
+            if !occupants.is_empty() {
+                pane.update(cx, |pane, cx| {
+                    pane.activate_item(0, false, false, window, cx);
+                });
+            }
+
+            let direction = match position {
+                DockPosition::Left => SplitDirection::Left,
+                DockPosition::Bottom => SplitDirection::Down,
+                DockPosition::Devices | DockPosition::Right => SplitDirection::Right,
+            };
+            self.center.insert_pane_at_border(&pane, direction, cx);
+        }
+
+        if let Some(editor_pane) = self
+            .last_active_center_pane
+            .clone()
+            .and_then(|pane| pane.upgrade())
+        {
+            self.set_pane_kinds(&editor_pane, vec![ContentKind::editor()], cx);
+        }
+
+        // The docks are no longer the presentation surface; leaving them open would
+        // double-render every panel.
+        for dock in self.all_docks() {
+            dock.update(cx, |dock, cx| dock.set_open(false, window, cx));
+        }
+
+        if let Some(center_pane) = self
+            .last_active_center_pane
+            .clone()
+            .and_then(|pane| pane.upgrade())
+        {
+            window.focus(&center_pane.focus_handle(cx), cx);
+        }
+        cx.notify();
+    }
+
+    /// Replaces the whole pane tree with `root`.
+    ///
+    /// Panes that `root` does not contain are torn down. Panes that it does contain are
+    /// reused as-is, so open editors and panel state survive a layout change.
+    pub fn apply_pane_layout(
+        &mut self,
+        root: Member,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut kept = Vec::new();
+        root.collect_panes(&mut kept);
+        let kept = kept.into_iter().cloned().collect::<Vec<_>>();
+
+        for pane in self.panes.clone() {
+            if kept.contains(&pane) {
+                continue;
+            }
+            self.force_remove_pane(&pane, &None, window, cx);
+            self.unfollow_in_pane(&pane, window, cx);
+            self.last_leaders_by_pane.remove(&pane.downgrade());
+            for removed_item in pane.read(cx).items() {
+                self.panes_by_item.remove(&removed_item.item_id());
+            }
+        }
+
+        self.maximized_pane = None;
+        self.center = PaneGroup::with_root(root);
+        self.center.set_is_center(true);
+        self.center.mark_positions(cx);
+
+        let editor_pane = kept
+            .iter()
+            .find(|pane| !pane.read(cx).hosts_panels)
+            .or_else(|| kept.first())
+            .cloned();
+        if let Some(editor_pane) = editor_pane {
+            self.last_active_center_pane = Some(editor_pane.downgrade());
+            self.set_active_pane(&editor_pane, window, cx);
+            window.focus(&editor_pane.focus_handle(cx), cx);
+        }
+
+        self.serialize_workspace(window, cx);
+        cx.notify();
+    }
+
     pub fn add_item_to_center(
         &mut self,
         item: Box<dyn ItemHandle>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if let Some(center_pane) = self.last_active_center_pane.clone() {
+        if let Some(center_pane) = self.editor_target_pane(cx) {
             if let Some(center_pane) = center_pane.upgrade() {
                 center_pane.update(cx, |pane, cx| {
                     pane.add_item(item, true, true, None, window, cx)
@@ -4725,7 +5396,7 @@ impl Workspace {
         cx: &mut App,
     ) -> Task<anyhow::Result<Box<dyn ItemHandle>>> {
         let pane = pane.unwrap_or_else(|| {
-            self.last_active_center_pane.clone().unwrap_or_else(|| {
+            self.editor_target_pane(cx).unwrap_or_else(|| {
                 self.panes
                     .first()
                     .expect("There must be an active pane")
@@ -4881,7 +5552,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Task<anyhow::Result<Box<dyn ItemHandle>>> {
-        let pane = self.last_active_center_pane.clone().unwrap_or_else(|| {
+        let pane = self.editor_target_pane(cx).unwrap_or_else(|| {
             self.panes
                 .first()
                 .expect("There must be an active pane")
@@ -5583,7 +6254,7 @@ impl Workspace {
             self.set_active_pane(&pane, window, cx);
         }
 
-        if self.last_active_center_pane.is_none() {
+        if self.last_active_center_pane.is_none() && !pane.read(cx).hosts_panels {
             self.last_active_center_pane = Some(pane.downgrade());
         }
 
@@ -5634,7 +6305,9 @@ impl Workspace {
     ) {
         self.active_pane = pane.clone();
         self.active_item_path_changed(true, window, cx);
-        self.last_active_center_pane = Some(pane.downgrade());
+        if !pane.read(cx).hosts_panels {
+            self.last_active_center_pane = Some(pane.downgrade());
+        }
     }
 
     fn handle_panel_focused(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -5793,6 +6466,14 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> Entity<Pane> {
         let new_pane = self.add_pane(window, cx);
+        // Both halves of a split are the same slot, so new content keeps routing there;
+        // which half receives it is then decided by focus.
+        let inherited_kinds = pane_to_split.read(cx).accepts_kinds().to_vec();
+        if !inherited_kinds.is_empty() {
+            new_pane.update(cx, |new_pane, cx| {
+                new_pane.set_accepts_kinds(inherited_kinds, cx);
+            });
+        }
         self.center
             .split(&pane_to_split, &new_pane, split_direction, cx);
         cx.notify();
@@ -5913,6 +6594,128 @@ impl Workspace {
 
     pub fn panes_mut(&mut self) -> &mut [Entity<Pane>] {
         &mut self.panes
+    }
+
+    pub fn center_group(&self) -> &PaneGroup {
+        &self.center
+    }
+
+    /// Dumps the pane tree, slot declarations and panel bookkeeping.
+    ///
+    /// Layout problems are hard to read off the screen — two renderings of one panel look
+    /// the same whether the panel has two tabs or two panes — so this reports the state
+    /// that decides it.
+    pub fn dump_layout(&self, cx: &App) -> String {
+        use std::fmt::Write as _;
+
+        fn dump_member(
+            member: &Member,
+            depth: usize,
+            panes_in_tree: &mut Vec<EntityId>,
+            output: &mut String,
+            cx: &App,
+        ) {
+            let indent = "  ".repeat(depth);
+            match member {
+                Member::Axis(axis) => {
+                    let flexes = axis.flexes.lock().clone();
+                    let _ = writeln!(
+                        output,
+                        "{indent}Axis {:?} ({} members, flexes {:?})",
+                        axis.axis,
+                        axis.members.len(),
+                        flexes.iter().map(|f| (f * 100.).round() / 100.).collect::<Vec<_>>()
+                    );
+                    for child in &axis.members {
+                        dump_member(child, depth + 1, panes_in_tree, output, cx);
+                    }
+                }
+                Member::Pane(pane) => {
+                    panes_in_tree.push(pane.entity_id());
+                    let pane_read = pane.read(cx);
+                    let kinds = pane_read
+                        .accepts_kinds()
+                        .iter()
+                        .map(|kind| kind.as_str())
+                        .collect::<Vec<_>>();
+                    let _ = writeln!(
+                        output,
+                        "{indent}Pane {:?} kinds={kinds:?} hosts_panels={} collapsed={} items={}",
+                        pane.entity_id(),
+                        pane_read.hosts_panels,
+                        pane_read.is_collapsed(),
+                        pane_read.items_len(),
+                    );
+                    for item in pane_read.items() {
+                        let serialized = item
+                            .to_serializable_item_handle(cx)
+                            .map(|handle| handle.serialized_item_kind().to_owned())
+                            .unwrap_or_else(|| "(not serializable)".to_owned());
+                        let kind = item
+                            .content_kind(cx)
+                            .map(|kind| kind.as_str().to_owned())
+                            .unwrap_or_else(|| "-".to_owned());
+                        let _ = writeln!(
+                            output,
+                            "{indent}  item {:?} serialized={serialized} content_kind={kind}",
+                            item.item_id()
+                        );
+                    }
+                }
+            }
+        }
+
+        let mut output = String::new();
+        let _ = writeln!(
+            output,
+            "unified_panes: {}  |  panes: {}",
+            Self::unified_panes(cx),
+            self.panes.len()
+        );
+
+        let _ = writeln!(output, "\nPane tree:");
+        let mut panes_in_tree = Vec::new();
+        dump_member(&self.center.root, 1, &mut panes_in_tree, &mut output, cx);
+
+        // A pane the workspace still owns but the tree does not contain is invisible yet
+        // alive, which is the shape a duplicated panel leaves behind.
+        let orphans = self
+            .panes
+            .iter()
+            .filter(|pane| !panes_in_tree.contains(&pane.entity_id()))
+            .collect::<Vec<_>>();
+        let _ = writeln!(output, "\nPanes not in the tree: {}", orphans.len());
+        for pane in orphans {
+            let _ = writeln!(
+                output,
+                "  Pane {:?} items={}",
+                pane.entity_id(),
+                pane.read(cx).items_len()
+            );
+        }
+
+        let _ = writeln!(output, "\nRegistered panels: {}", self.panels.len());
+        for panel in &self.panels {
+            let tab = self
+                .existing_panel_item(panel.panel_id(), cx)
+                .map(|(pane, item)| format!("pane {:?} item {:?}", pane.entity_id(), item.item_id()));
+            let _ = writeln!(
+                output,
+                "  {} ({:?}) hosted_kind={:?} tab={:?}",
+                panel.persistent_name(),
+                panel.panel_id(),
+                panel.hosted_content_kind(cx).map(|k| k.as_str().to_owned()),
+                tab,
+            );
+        }
+
+        let _ = writeln!(
+            output,
+            "\npanel_items_by_panel: {:?}",
+            self.panel_items_by_panel
+        );
+
+        output
     }
 
     pub fn panes(&self) -> &[Entity<Pane>] {
@@ -7164,7 +7967,13 @@ impl Workspace {
                 )
             };
 
-            SerializedPane::new(items, active, pinned_count)
+            let accepts_kinds = pane_handle
+                .read(cx)
+                .accepts_kinds()
+                .iter()
+                .map(|kind| kind.as_str().to_owned())
+                .collect();
+            SerializedPane::with_kinds(items, active, pinned_count, accepts_kinds)
         }
 
         fn build_serialized_pane_group(
@@ -7420,6 +8229,8 @@ impl Workspace {
                     workspace.center = PaneGroup::with_root(center_group);
                     workspace.center.set_is_center(true);
                     workspace.center.mark_positions(cx);
+
+                    workspace.mark_panel_panes(cx);
 
                     if let Some(active_pane) = active_pane {
                         workspace.set_active_pane(&active_pane, window, cx);
@@ -9350,7 +10161,30 @@ impl Render for Workspace {
                                     },
                                 ))
                             })
-                            .child(
+                            .child(if Self::unified_panes(cx) {
+                                // Every panel is a tab in `center`, so the docks are not
+                                // rendered at all and the pane tree owns the whole area.
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .size_full()
+                                    .min_w_0()
+                                    .min_h_0()
+                                    .child(
+                                        h_flex()
+                                            .flex_1()
+                                            .min_h_0()
+                                            .overflow_hidden()
+                                            .child(self.render_center(
+                                                &pane_render_context,
+                                                window,
+                                                cx,
+                                            )),
+                                    )
+                                    .when(self.status_bar_visible(cx), |this| {
+                                        this.child(self.status_bar.clone())
+                                    })
+                            } else {
                                 div()
                                     .flex()
                                     .flex_row()
@@ -9407,8 +10241,8 @@ impl Render for Workspace {
                                         &self.right_dock,
                                         window,
                                         cx,
-                                    )),
-                            )
+                                    ))
+                            })
                             .children(self.zoomed.as_ref().and_then(|view| {
                                 let zoomed_view = view.upgrade()?;
                                 let div = div()
@@ -9437,7 +10271,7 @@ impl Render for Workspace {
                             .children(self.render_notifications(window, cx)),
                     )
                     .child(self.toast_layer.clone())
-                    .child(self.layout_editor_overlay.clone()),
+                    ,
             )
     }
 }
@@ -11371,11 +12205,42 @@ pub fn move_item(
         return;
     };
 
+    let moved_kind = item_handle.content_kind(cx);
+
     if source != destination {
         // Close item from previous pane
         source.update(cx, |source, cx| {
             source.remove_item_and_focus_on_pane(item_ix, false, destination.clone(), window, cx);
         });
+
+        // Dragging is how the layout is authored, so the destination for this kind of
+        // content follows the drag — but only once the source is out of that business.
+        // Pulling one of three terminals into a new column must not redirect the other
+        // two; pulling the last one must.
+        if let Some(kind) = moved_kind
+            && source.read(cx).accepts_kind(&kind)
+            && !source
+                .read(cx)
+                .items()
+                .any(|item| item.content_kind(cx).as_ref() == Some(&kind))
+        {
+            let retained = source
+                .read(cx)
+                .accepts_kinds()
+                .iter()
+                .filter(|existing| **existing != kind)
+                .cloned()
+                .collect::<Vec<_>>();
+            source.update(cx, |source, cx| source.set_accepts_kinds(retained, cx));
+
+            let mut destination_kinds = destination.read(cx).accepts_kinds().to_vec();
+            if !destination_kinds.contains(&kind) {
+                destination_kinds.push(kind);
+                destination.update(cx, |destination, cx| {
+                    destination.set_accepts_kinds(destination_kinds, cx)
+                });
+            }
+        }
     }
 
     // This automatically removes duplicate items in the pane
@@ -14872,6 +15737,442 @@ mod tests {
                 .is_some()),
             "reopen with an active modal that dismisses after the action should reveal the stash"
         );
+    }
+
+    fn enable_unified_panes(cx: &mut gpui::VisualTestContext) {
+        cx.update(|_, cx| {
+            SettingsStore::update_global(cx, |settings, cx| {
+                settings.update_user_settings(cx, |settings| {
+                    settings.workspace.unified_panes = Some(true);
+                })
+            });
+        });
+    }
+
+    #[gpui::test]
+    async fn test_content_kind_routing(cx: &mut gpui::TestAppContext) {
+        init_test(cx);
+        let fs = FakeFs::new(cx.executor());
+        let project = Project::test(fs, [], cx).await;
+        let (workspace, cx) =
+            cx.add_window_view(|window, cx| Workspace::test_new(project, window, cx));
+
+        let editor_pane = workspace.read_with(cx, |workspace, _| workspace.active_pane().clone());
+
+        // Declaring a slot is what makes routing happen; without one, callers keep their
+        // own placement so dock mode is unaffected.
+        workspace.update_in(cx, |workspace, _, cx| {
+            assert!(
+                workspace
+                    .pane_for_kind(&ContentKind::terminal(), cx)
+                    .is_none()
+            );
+            workspace.set_pane_kinds(&editor_pane, vec![ContentKind::editor()], cx);
+        });
+
+        let terminal_pane = workspace.update_in(cx, |workspace, window, cx| {
+            let pane = workspace.add_pane(window, cx);
+            workspace.set_pane_kinds(&pane, vec![ContentKind::terminal()], cx);
+            pane
+        });
+
+        workspace.update_in(cx, |workspace, window, cx| {
+            let item = cx.new(|cx| TestItem::new(cx));
+            assert!(workspace.add_item_to_kind_slot(
+                &ContentKind::terminal(),
+                Box::new(item),
+                false,
+                window,
+                cx,
+            ));
+        });
+
+        cx.run_until_parked();
+
+        workspace.update_in(cx, |workspace, _, cx| {
+            assert_eq!(terminal_pane.read(cx).items_len(), 1);
+            assert_eq!(editor_pane.read(cx).items_len(), 0);
+
+            // A kind has one destination: claiming it elsewhere moves it.
+            workspace.set_pane_kinds(&terminal_pane, vec![ContentKind::editor()], cx);
+            assert!(!editor_pane.read(cx).accepts_kind(&ContentKind::editor()));
+            assert_eq!(
+                workspace.pane_for_kind(&ContentKind::editor(), cx),
+                Some(terminal_pane.clone())
+            );
+        });
+    }
+
+    /// Docks legitimately host more than one panel of a type, so two entities of the same
+    /// panel type can both be registered. Only one of them may become a tab: two tabs would
+    /// render the panel twice, and dedup by entity id cannot see it since the ids differ.
+    #[gpui::test]
+    async fn test_two_panels_of_one_type_produce_a_single_tab(cx: &mut gpui::TestAppContext) {
+        init_test(cx);
+        cx.update(|cx| register_panel_item::<TestPanel>(cx));
+        let fs = FakeFs::new(cx.executor());
+        let project = Project::test(fs, [], cx).await;
+        let (workspace, cx) =
+            cx.add_window_view(|window, cx| Workspace::test_new(project, window, cx));
+
+        let (first, second) = workspace.update_in(cx, |workspace, window, cx| {
+            let first = cx.new(|cx| TestPanel::new(DockPosition::Left, 100, cx));
+            let second = cx.new(|cx| TestPanel::new(DockPosition::Right, 101, cx));
+            assert_ne!(first.entity_id(), second.entity_id());
+            workspace.add_panel(first.clone(), window, cx);
+            workspace.add_panel(second.clone(), window, cx);
+            (
+                Arc::new(first) as Arc<dyn PanelHandle>,
+                Arc::new(second) as Arc<dyn PanelHandle>,
+            )
+        });
+        cx.run_until_parked();
+
+        // No `run_until_parked` between the two opens: this is the apply-layout shape.
+        workspace.update_in(cx, |workspace, window, cx| {
+            let pane_a = workspace.add_panel_pane(window, cx);
+            let pane_b = workspace.add_panel_pane(window, cx);
+            workspace.open_panel_in_pane(&first, &pane_a, false, window, cx);
+            workspace.open_panel_in_pane(&second, &pane_b, false, window, cx);
+        });
+        cx.run_until_parked();
+
+        workspace.update_in(cx, |workspace, _, cx| {
+            let kind = ContentKind::panel("TestPanel");
+            let tabs: usize = workspace
+                .panes()
+                .iter()
+                .map(|pane| {
+                    pane.read(cx)
+                        .items()
+                        .filter(|item| item.content_kind(cx).as_ref() == Some(&kind))
+                        .count()
+                })
+                .sum();
+            assert_eq!(tabs, 1, "one panel type must render as one tab");
+        });
+    }
+
+    /// Applying a layout builds every slot in one synchronous pass, so dedup must not
+    /// depend on the deferred `AddItem` event: it would hand out a second tab and the
+    /// panel would render twice.
+    #[gpui::test]
+    async fn test_panel_is_not_duplicated_within_one_synchronous_pass(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        init_test(cx);
+        cx.update(|cx| register_panel_item::<TestPanel>(cx));
+        let fs = FakeFs::new(cx.executor());
+        let project = Project::test(fs, [], cx).await;
+        let (workspace, cx) =
+            cx.add_window_view(|window, cx| Workspace::test_new(project, window, cx));
+
+        workspace.update_in(cx, |workspace, window, cx| {
+            let panel = cx.new(|cx| TestPanel::new(DockPosition::Left, 100, cx));
+            workspace.add_panel(panel, window, cx);
+        });
+
+        // No `run_until_parked` between the two calls: this is the apply-layout shape.
+        let (first, second) = workspace.update_in(cx, |workspace, window, cx| {
+            let panel = workspace.panel_of_type::<TestPanel>().unwrap();
+            let pane_a = workspace.add_panel_pane(window, cx);
+            let pane_b = workspace.add_panel_pane(window, cx);
+            let first = workspace.open_panel_in_pane(&panel, &pane_a, false, window, cx);
+            let second = workspace.open_panel_in_pane(&panel, &pane_b, false, window, cx);
+            (first, second)
+        });
+        cx.run_until_parked();
+
+        let first = first.expect("panel should open");
+        let second = second.expect("panel should be revealed, not recreated");
+        assert_eq!(
+            first.item_id(),
+            second.item_id(),
+            "the same panel must not become two tabs"
+        );
+
+        workspace.update_in(cx, |workspace, _, cx| {
+            let tabs: usize = workspace
+                .panes()
+                .iter()
+                .map(|pane| pane.read(cx).items_len())
+                .sum();
+            assert_eq!(tabs, 1, "the panel must exist as exactly one tab");
+        });
+    }
+
+    /// Dragging authors the layout, so the destination for a kind follows the drag — but
+    /// only once the source pane holds nothing of that kind any more.
+    #[gpui::test]
+    async fn test_slot_declaration_follows_the_last_dragged_item(cx: &mut gpui::TestAppContext) {
+        init_test(cx);
+        let fs = FakeFs::new(cx.executor());
+        let project = Project::test(fs, [], cx).await;
+        let (workspace, cx) =
+            cx.add_window_view(|window, cx| Workspace::test_new(project, window, cx));
+
+        let source = workspace.read_with(cx, |workspace, _| workspace.active_pane().clone());
+        let (destination, first, second) = workspace.update_in(cx, |workspace, window, cx| {
+            workspace.set_pane_kinds(&source, vec![ContentKind::editor()], cx);
+            let destination =
+                workspace.split_pane(source.clone(), SplitDirection::Right, window, cx);
+
+            let first = cx.new(|cx| TestItem::new(cx));
+            let second = cx.new(|cx| TestItem::new(cx));
+            source.update(cx, |source, cx| {
+                source.add_item(Box::new(first.clone()), false, false, None, window, cx);
+                source.add_item(Box::new(second.clone()), false, false, None, window, cx);
+            });
+            (destination, first, second)
+        });
+        cx.run_until_parked();
+
+        // `split_pane` shares the kind with both halves; take it off the destination so
+        // the move is observable.
+        workspace.update_in(cx, |workspace, _, cx| {
+            workspace.set_pane_kinds(&source, vec![ContentKind::editor()], cx);
+            assert!(!destination.read(cx).accepts_kind(&ContentKind::editor()));
+        });
+
+        // TestItem reports no content kind, so a plain move must not touch declarations.
+        cx.update(|window, cx| {
+            move_item(
+                &source,
+                &destination,
+                first.entity_id(),
+                0,
+                true,
+                window,
+                cx,
+            );
+        });
+        cx.run_until_parked();
+
+        workspace.update_in(cx, |_, _, cx| {
+            assert!(
+                source.read(cx).accepts_kind(&ContentKind::editor()),
+                "an item with no kind must not move the declaration"
+            );
+        });
+        let _ = second;
+    }
+
+    #[gpui::test]
+    async fn test_hiding_a_slot_keeps_its_place_and_contents(cx: &mut gpui::TestAppContext) {
+        init_test(cx);
+        let fs = FakeFs::new(cx.executor());
+        let project = Project::test(fs, [], cx).await;
+        let (workspace, cx) =
+            cx.add_window_view(|window, cx| Workspace::test_new(project, window, cx));
+
+        let editor_pane = workspace.read_with(cx, |workspace, _| workspace.active_pane().clone());
+
+        let terminal_pane = workspace.update_in(cx, |workspace, window, cx| {
+            workspace.set_pane_kinds(&editor_pane, vec![ContentKind::editor()], cx);
+            let terminal_pane = workspace.split_pane(
+                editor_pane.clone(),
+                SplitDirection::Down,
+                window,
+                cx,
+            );
+            workspace.set_pane_kinds(&terminal_pane, vec![ContentKind::terminal()], cx);
+            let item = cx.new(|cx| TestItem::new(cx));
+            workspace.add_item_to_kind_slot(
+                &ContentKind::terminal(),
+                Box::new(item),
+                false,
+                window,
+                cx,
+            );
+            terminal_pane
+        });
+        cx.run_until_parked();
+
+        let panes_before = workspace.read_with(cx, |workspace, _| workspace.panes().to_vec());
+
+        workspace.update_in(cx, |workspace, window, cx| {
+            assert!(workspace.toggle_kind_slot(&ContentKind::terminal(), window, cx));
+        });
+        cx.run_until_parked();
+
+        workspace.update_in(cx, |workspace, _, cx| {
+            assert!(terminal_pane.read(cx).is_collapsed());
+            // Hidden, not removed: the pane, its item and its routing all survive.
+            assert_eq!(workspace.panes().to_vec(), panes_before);
+            assert_eq!(terminal_pane.read(cx).items_len(), 1);
+            assert_eq!(
+                workspace.pane_for_kind(&ContentKind::terminal(), cx),
+                Some(terminal_pane.clone())
+            );
+        });
+
+        workspace.update_in(cx, |workspace, window, cx| {
+            assert!(workspace.toggle_kind_slot(&ContentKind::terminal(), window, cx));
+        });
+        cx.run_until_parked();
+
+        workspace.update_in(cx, |workspace, _, cx| {
+            assert!(!terminal_pane.read(cx).is_collapsed());
+            assert_eq!(workspace.panes().to_vec(), panes_before);
+            assert_eq!(terminal_pane.read(cx).items_len(), 1);
+        });
+    }
+
+    #[gpui::test]
+    async fn test_files_open_in_the_editor_slot_not_the_focused_panel_slot(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        init_test(cx);
+        cx.update(|cx| register_panel_item::<TestPanel>(cx));
+        let fs = FakeFs::new(cx.executor());
+        let project = Project::test(fs, [], cx).await;
+        let (workspace, cx) =
+            cx.add_window_view(|window, cx| Workspace::test_new(project, window, cx));
+
+        let editor_pane = workspace.read_with(cx, |workspace, _| workspace.active_pane().clone());
+        let panel_pane = workspace.update_in(cx, |workspace, window, cx| {
+            workspace.set_pane_kinds(&editor_pane, vec![ContentKind::editor()], cx);
+            let panel_pane = workspace.add_panel_pane(window, cx);
+            workspace.set_pane_kinds(&panel_pane, vec![ContentKind::panel("TestPanel")], cx);
+            // Focus the panel slot: this is what used to hijack where files opened.
+            workspace.set_active_pane(&panel_pane, window, cx);
+            panel_pane
+        });
+
+        workspace.update_in(cx, |workspace, window, cx| {
+            let item = cx.new(|cx| TestItem::new(cx));
+            assert!(workspace.add_item_to_center(Box::new(item), window, cx));
+        });
+        cx.run_until_parked();
+
+        workspace.update_in(cx, |_, _, cx| {
+            assert_eq!(
+                editor_pane.read(cx).items_len(),
+                1,
+                "the file must open in the declared editor slot"
+            );
+            assert_eq!(panel_pane.read(cx).items_len(), 0);
+        });
+    }
+
+    #[gpui::test]
+    async fn test_unified_panes_places_panels_in_the_pane_tree(cx: &mut gpui::TestAppContext) {
+        init_test(cx);
+        cx.update(|cx| register_panel_item::<TestPanel>(cx));
+        let fs = FakeFs::new(cx.executor());
+        let project = Project::test(fs, [], cx).await;
+        let (workspace, cx) =
+            cx.add_window_view(|window, cx| Workspace::test_new(project, window, cx));
+
+        let editor_pane = workspace.read_with(cx, |workspace, _| workspace.active_pane().clone());
+
+        let panel = workspace.update_in(cx, |workspace, window, cx| {
+            let panel = cx.new(|cx| TestPanel::new(DockPosition::Left, 100, cx));
+            workspace.add_panel(panel.clone(), window, cx);
+            panel
+        });
+
+        enable_unified_panes(cx);
+        cx.run_until_parked();
+
+        workspace.update_in(cx, |workspace, _, cx| {
+            let panel_panes = workspace
+                .panes()
+                .iter()
+                .filter(|pane| pane.read(cx).hosts_panels)
+                .count();
+            assert_eq!(panel_panes, 1, "the panel should get its own pane");
+
+            // The editor pane must stay the target for opening files even though a
+            // panel pane exists and may have taken focus.
+            assert_eq!(
+                workspace
+                    .last_active_center_pane
+                    .as_ref()
+                    .and_then(|pane| pane.upgrade()),
+                Some(editor_pane.clone())
+            );
+
+            // Both panes are in the one tree that is now the whole layout.
+            let mut panes = Vec::new();
+            workspace.center.root.collect_panes(&mut panes);
+            assert_eq!(panes.len(), 2);
+        });
+
+        // Opening the same panel again must reuse its tab rather than duplicate it: a
+        // panel is a workspace singleton.
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.open_panel::<TestPanel>(window, cx);
+        });
+        cx.run_until_parked();
+
+        workspace.update_in(cx, |workspace, _, cx| {
+            let tabs = workspace
+                .panes()
+                .iter()
+                .flat_map(|pane| pane.read(cx).items().map(|item| item.item_id()))
+                .filter(|item_id| {
+                    workspace
+                        .panel_items_by_panel
+                        .values()
+                        .any(|panel_item| panel_item == item_id)
+                })
+                .count();
+            assert_eq!(tabs, 1, "the panel must not be opened as two tabs");
+            assert!(workspace.panel::<TestPanel>(cx).is_some());
+            drop(panel);
+        });
+    }
+
+    #[gpui::test]
+    async fn test_unified_panes_closing_a_panel_tab_keeps_the_panel(cx: &mut gpui::TestAppContext) {
+        init_test(cx);
+        cx.update(|cx| register_panel_item::<TestPanel>(cx));
+        let fs = FakeFs::new(cx.executor());
+        let project = Project::test(fs, [], cx).await;
+        let (workspace, cx) =
+            cx.add_window_view(|window, cx| Workspace::test_new(project, window, cx));
+
+        let panel = workspace.update_in(cx, |workspace, window, cx| {
+            let panel = cx.new(|cx| TestPanel::new(DockPosition::Left, 100, cx));
+            workspace.add_panel(panel.clone(), window, cx);
+            panel
+        });
+        let panel_id = panel.entity_id();
+
+        enable_unified_panes(cx);
+        cx.run_until_parked();
+
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.close_panel::<TestPanel>(window, cx);
+        });
+        cx.run_until_parked();
+
+        // The workspace owns the panel, so closing its tab must not drop the entity:
+        // panels like the web preview hold native state that cannot be rebuilt.
+        workspace.update_in(cx, |workspace, _, cx| {
+            let restored = workspace.panel::<TestPanel>(cx);
+            assert_eq!(
+                restored.map(|panel| panel.entity_id()),
+                Some(panel_id),
+                "the panel must survive its tab being closed"
+            );
+        });
+
+        // Reopening puts it back on screen.
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.open_panel::<TestPanel>(window, cx);
+        });
+        cx.run_until_parked();
+
+        workspace.update_in(cx, |workspace, _, cx| {
+            assert!(
+                workspace
+                    .existing_panel_item(panel_id, cx)
+                    .is_some(),
+                "the panel should be back in a pane"
+            );
+        });
     }
 
     #[gpui::test]

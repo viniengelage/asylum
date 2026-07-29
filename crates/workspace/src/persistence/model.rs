@@ -243,11 +243,11 @@ pub(crate) enum SerializedPaneGroup {
 #[cfg(test)]
 impl Default for SerializedPaneGroup {
     fn default() -> Self {
-        Self::Pane(SerializedPane {
-            children: vec![SerializedItem::default()],
-            active: false,
-            pinned_count: 0,
-        })
+        Self::Pane(SerializedPane::new(
+            vec![SerializedItem::default()],
+            false,
+            0,
+        ))
     }
 }
 
@@ -311,8 +311,13 @@ impl SerializedPaneGroup {
                     .context("Could not deserialize pane)")
                     .log_err()?;
 
+                // A pane that declares content kinds is a layout slot and is kept even
+                // when empty: close every terminal, restart, and the next terminal must
+                // still open in the slot the layout assigned to it.
                 if pane
-                    .read_with(cx, |pane, _| pane.items_len() != 0)
+                    .read_with(cx, |pane, _| {
+                        pane.items_len() != 0 || !pane.accepts_kinds().is_empty()
+                    })
                     .log_err()?
                 {
                     let pane = pane.upgrade()?;
@@ -340,6 +345,8 @@ pub struct SerializedPane {
     pub(crate) active: bool,
     pub(crate) children: Vec<SerializedItem>,
     pub(crate) pinned_count: usize,
+    /// Names of the [`crate::ContentKind`]s the layout routes to this pane.
+    pub(crate) accepts_kinds: Vec<String>,
 }
 
 impl SerializedPane {
@@ -348,6 +355,21 @@ impl SerializedPane {
             children,
             active,
             pinned_count,
+            accepts_kinds: Vec::new(),
+        }
+    }
+
+    pub fn with_kinds(
+        children: Vec<SerializedItem>,
+        active: bool,
+        pinned_count: usize,
+        accepts_kinds: Vec<String>,
+    ) -> Self {
+        SerializedPane {
+            children,
+            active,
+            pinned_count,
+            accepts_kinds,
         }
     }
 
@@ -384,14 +406,33 @@ impl SerializedPane {
         }
 
         let mut items = Vec::new();
-        for item_handle in futures::future::join_all(item_tasks).await {
+        for (item, item_handle) in self
+            .children
+            .iter()
+            .zip(futures::future::join_all(item_tasks).await)
+        {
             let item_handle = item_handle.log_err();
             items.push(item_handle.clone());
 
-            if let Some(item_handle) = item_handle {
-                pane.update_in(cx, |pane, window, cx| {
-                    pane.add_item(item_handle.clone(), true, true, None, window, cx);
-                })?;
+            match item_handle {
+                Some(item_handle) => {
+                    pane.update_in(cx, |pane, window, cx| {
+                        pane.add_item(item_handle.clone(), true, true, None, window, cx);
+                    })?;
+                }
+                // A panel tab can be restored before its panel is registered; hand it to
+                // the workspace so the placement is replayed instead of lost.
+                None => {
+                    let kind = item.kind.clone();
+                    let pane = pane.clone();
+                    workspace
+                        .update(cx, |workspace, cx| {
+                            if crate::panel_item::PanelItemRegistry::is_panel_kind(&kind, cx) {
+                                workspace.record_pending_panel_tab(kind, pane);
+                            }
+                        })
+                        .ok();
+                }
             }
         }
 
@@ -408,8 +449,18 @@ impl SerializedPane {
                 }
             })?;
         }
-        pane.update(cx, |pane, _| {
+        pane.update(cx, |pane, cx| {
             pane.set_pinned_count(self.pinned_count.min(items.len()));
+            // Restored before anything else routes content, so the first terminal or file
+            // opened after a restart already lands in the slot the layout declared.
+            if !self.accepts_kinds.is_empty() {
+                let kinds = self
+                    .accepts_kinds
+                    .iter()
+                    .map(|kind| crate::ContentKind::new(kind.clone()))
+                    .collect();
+                pane.set_accepts_kinds(kinds, cx);
+            }
         })?;
 
         anyhow::Ok(items)

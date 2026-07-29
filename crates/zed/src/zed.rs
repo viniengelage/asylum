@@ -806,8 +806,18 @@ fn initialize_panels(window: &mut Window, cx: &mut Context<Workspace>) -> Task<a
             add_panel_when_ready(git_panel, workspace_handle.clone(), cx.clone()),
             add_panel_when_ready(channels_panel, workspace_handle.clone(), cx.clone()),
             add_panel_when_ready(debug_panel, workspace_handle.clone(), cx.clone()),
-            initialize_agent_panel(workspace_handle, cx.clone()).map(|r| r.log_err()),
+            initialize_agent_panel(workspace_handle.clone(), cx.clone()).map(|r| r.log_err()),
         );
+
+        // Only seed a layout from the dock positions when the restored pane tree has
+        // no panel tabs of its own, so a saved layout is never overwritten.
+        workspace_handle
+            .update_in(cx, |workspace, window, cx| {
+                if Workspace::unified_panes(cx) && !workspace.has_panel_panes(cx) {
+                    workspace.build_unified_layout(window, cx);
+                }
+            })
+            .log_err();
 
         anyhow::Ok(())
     })

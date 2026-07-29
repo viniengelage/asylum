@@ -39,6 +39,7 @@ pub struct WorkspaceSettings {
     pub close_panel_on_toggle: bool,
     pub use_system_window_tabs: bool,
     pub card_gap: f32,
+    pub unified_panes: bool,
     pub zoomed_padding: bool,
     pub window_decorations: settings::WindowDecorations,
     pub focus_follows_mouse: FocusFollowsMouse,
@@ -131,6 +132,7 @@ impl Settings for WorkspaceSettings {
             close_panel_on_toggle: workspace.close_panel_on_toggle.unwrap(),
             use_system_window_tabs: workspace.use_system_window_tabs.unwrap(),
             card_gap: workspace.card_gap.unwrap_or(8.0),
+            unified_panes: workspace.unified_panes.unwrap_or(false),
             zoomed_padding: workspace.zoomed_padding.unwrap(),
             window_decorations: workspace.window_decorations.unwrap(),
             focus_follows_mouse: FocusFollowsMouse {

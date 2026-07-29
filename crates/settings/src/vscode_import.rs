@@ -1068,6 +1068,7 @@ impl VsCodeSettings {
                 }
             }),
             card_gap: None,
+            unified_panes: None,
             zoomed_padding: None,
             focus_follows_mouse: None,
             hidden_right_dock_panels: None,

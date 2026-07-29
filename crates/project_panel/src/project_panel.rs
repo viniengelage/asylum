@@ -462,6 +462,7 @@ impl FoldedAncestors {
 }
 
 pub fn init(cx: &mut App) {
+    workspace::register_panel_item::<ProjectPanel>(cx);
     cx.observe_new(|workspace: &mut Workspace, _, _| {
         workspace.register_action(|workspace, _: &ToggleFocus, window, cx| {
             workspace.toggle_panel_focus::<ProjectPanel>(window, cx);
