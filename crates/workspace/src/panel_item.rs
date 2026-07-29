@@ -112,7 +112,10 @@ impl<T: Panel> PanelItem<T> {
 
 impl<T: Panel> Focusable for PanelItem<T> {
     fn focus_handle(&self, cx: &App) -> FocusHandle {
-        self.panel.read(cx).focus_handle(cx)
+        // `Pane` uses an item's focus handle both to focus it and to test containment, so this
+        // returns the panel's activation handle (e.g. a commit or filter editor) to keep focusing
+        // a panel tab equivalent to activating it in a dock.
+        self.panel.read(cx).activation_focus_handle(cx)
     }
 }
 

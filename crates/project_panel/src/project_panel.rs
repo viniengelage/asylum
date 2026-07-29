@@ -779,7 +779,7 @@ impl ProjectPanel {
                     EditorEvent::SelectionsChanged { .. } => {
                         project_panel.autoscroll(cx);
                     }
-                    EditorEvent::Blurred => {
+                    EditorEvent::Blurred if window.is_window_active() => {
                         if project_panel
                             .state
                             .edit_state
@@ -1093,7 +1093,11 @@ impl ProjectPanel {
             let is_remote = project.is_remote();
             let is_collab = project.is_via_collab();
             let is_local = project.is_local() || project.is_via_wsl_with_host_interop(cx);
-            let is_markdown = !is_dir && MarkdownPreviewView::is_markdown_path(&*entry.path);
+            let is_markdown = !is_dir
+                && MarkdownPreviewView::is_markdown_path(
+                    entry.path.as_std_path(),
+                    project.languages(),
+                );
 
             let settings = ProjectPanelSettings::get_global(cx);
             let visible_worktrees_count = project.visible_worktrees(cx).count();
@@ -1784,7 +1788,12 @@ impl ProjectPanel {
         let Some((worktree, entry)) = self.selected_entry(cx) else {
             return;
         };
-        if !entry.is_file() || !MarkdownPreviewView::is_markdown_path(&*entry.path) {
+        if !entry.is_file()
+            || !MarkdownPreviewView::is_markdown_path(
+                entry.path.as_std_path(),
+                self.project.read(cx).languages(),
+            )
+        {
             return;
         }
         let project_path = ProjectPath {
@@ -4823,18 +4832,20 @@ impl ProjectPanel {
                     }
                     // update selection
                     if let Some(entry_id) = last_succeed {
-                        project_panel.update_in(cx, |project_panel, window, cx| {
-                            project_panel.selection = Some(SelectedEntry {
-                                worktree_id,
-                                entry_id,
-                            });
-                            // if only one entry was dragged and it was disambiguated, open the rename editor
-                            if item_count == 1 && disambiguation_range.is_some() {
-                                project_panel.rename_impl(disambiguation_range, window, cx);
-                            }
+                        project_panel
+                            .update_in(cx, |project_panel, window, cx| {
+                                project_panel.selection = Some(SelectedEntry {
+                                    worktree_id,
+                                    entry_id,
+                                });
+                                // if only one entry was dragged and it was disambiguated, open the rename editor
+                                if item_count == 1 && disambiguation_range.is_some() {
+                                    project_panel.rename_impl(disambiguation_range, window, cx);
+                                }
 
-                            project_panel.undo_manager.record(changes)
-                        })??;
+                                project_panel.undo_manager.record(changes)
+                            })?
+                            .log_err();
                     }
 
                     std::result::Result::Ok::<(), anyhow::Error>(())
