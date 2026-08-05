@@ -578,6 +578,8 @@ pub mod agent {
             ResetAgentZoom,
             /// Pastes clipboard content without any formatting.
             PasteRaw,
+            /// Opens an additional agent panel alongside the existing one.
+            NewAgentTab,
         ]
     );
 

@@ -33,7 +33,14 @@ util.workspace = true
 workspace.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
+async-compression.workspace = true
+async-tar.workspace = true
 cef = { version = "150", default-features = false, features = ["build-util"] }
+futures.workspace = true
+http_client.workspace = true
+smol.workspace = true
+core-foundation.workspace = true
+core-video.workspace = true
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = [
     "NSView",

@@ -22,7 +22,7 @@ use agent_ui::{
     ThreadTitleRegenerationResult, channels_with_threads, import_threads_from_other_channels,
 };
 use agent_ui::{MessageEditorEvent, StateChange, thread_worktree_archive};
-use android_sdk::{AndroidSdkManager, AndroidSdkState};
+use android_sdk::{AndroidSdkManager, AndroidSdkState, emulator_key_for_keystroke};
 use anyhow::Context as _;
 use chrono::{DateTime, Utc};
 use editor::Editor;
@@ -33,11 +33,10 @@ use fs::Fs;
 
 use gpui::{
     Action as _, AnyElement, App, Bounds, ClickEvent, Context, DismissEvent, Entity, EntityId,
-    FocusHandle, Focusable, KeyContext, ListState, Modifiers, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, ObjectFit, Pixels, Point, Render, SharedString,
-    StyledImage as _, Task, TaskExt,
-    WeakEntity, Window, WindowBackgroundAppearance, WindowHandle, canvas, img, linear_color_stop,
-    linear_gradient, list, prelude::*, px,
+    FocusHandle, Focusable, Hsla, KeyContext, KeyDownEvent, ListState, Modifiers, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, Pixels, Point, Render, SharedString,
+    StyledImage as _, Task, TaskExt, WeakEntity, Window, WindowBackgroundAppearance, WindowHandle,
+    canvas, img, linear_color_stop, linear_gradient, list, prelude::*, px,
 };
 use itertools::Itertools;
 use language_model::LanguageModelRegistry;
@@ -48,7 +47,6 @@ use notifications::status_toast::StatusToast;
 use project::{AgentId, AgentRegistryStore, Event as ProjectEvent, WorktreeId};
 use recent_projects::sidebar_recent_projects::SidebarRecentProjects;
 use remote::{RemoteConnectionOptions, same_remote_connection_identity};
-use ui::utils::platform_title_bar_height;
 
 use serde::{Deserialize, Serialize};
 use settings::Settings as _;
@@ -65,11 +63,11 @@ use task::{
 
 use theme::ActiveTheme;
 use ui::{
-    AgentThreadStatus, CommonAnimationExt, ContextMenu, ContextMenuEntry, Divider, DropdownMenu,
-    DropdownStyle, GradientFade, HighlightedLabel, IconPosition, KeyBinding, PopoverMenu,
-    PopoverMenuHandle, ProjectEmptyState, ScrollAxes, Scrollbars, Tab, TabPosition, ThreadItem,
-    ThreadItemWorktreeInfo, TintColor, Tooltip, WithScrollbar, prelude::*, render_modifiers,
-    right_click_menu,
+    AgentThreadStatus, CommonAnimationExt, ContextMenu, ContextMenuEntry, DropdownMenu,
+    DropdownStyle, GradientFade, HeaderBar, HighlightedLabel, IconPosition, KeyBinding,
+    PopoverMenu, PopoverMenuHandle, ProjectEmptyState, ScrollAxes, Scrollbars, Tab, TabBar,
+    TabPosition, ThreadItem, ThreadItemWorktreeInfo, TintColor, Tooltip, WithScrollbar, prelude::*,
+    render_modifiers, right_click_menu,
 };
 use unicode_segmentation::UnicodeSegmentation as _;
 use util::ResultExt as _;
@@ -156,6 +154,20 @@ struct IosSimulatorDevice {
 #[derive(Deserialize)]
 struct SimctlDeviceList {
     devices: HashMap<String, Vec<IosSimulatorDevice>>,
+}
+
+/// The fill of a sidebar row.
+///
+/// The sidebar is a panel, so its rows sit flush on `panel_background` and gain contrast only from
+/// hover and selection. This is also the color a [`GradientFade`] over a row has to fade into, so
+/// every caller must read it from here rather than mixing its own shade.
+fn sidebar_row_background(cx: &App) -> Hsla {
+    cx.theme().colors().panel_background
+}
+
+/// The fill of a hovered sidebar row.
+fn sidebar_row_hover_background(cx: &App) -> Hsla {
+    cx.theme().colors().element_hover
 }
 
 fn ios_simulator_label(device: &IosSimulatorDevice) -> String {
@@ -864,6 +876,10 @@ pub struct Sidebar {
     android_sdk_manager: Option<Entity<AndroidSdkManager>>,
     android_screen_bounds: Option<Bounds<Pixels>>,
     android_pointer_down: Option<AndroidPointerDown>,
+    /// Focus for the emulator screen. Held separately from the sidebar's own
+    /// handle so that keystrokes can be forwarded to the emulator only while
+    /// the screen itself is focused.
+    android_screen_focus: FocusHandle,
     android_current_rendered_frame: Option<Arc<gpui::RenderImage>>,
     android_previous_rendered_frame: Option<Arc<gpui::RenderImage>>,
     ios_devices: Vec<IosSimulatorDevice>,
@@ -1018,6 +1034,7 @@ impl Sidebar {
             android_sdk_manager: None,
             android_screen_bounds: None,
             android_pointer_down: None,
+            android_screen_focus: cx.focus_handle(),
             android_current_rendered_frame: None,
             android_previous_rendered_frame: None,
             ios_devices: Vec::new(),
@@ -2443,16 +2460,8 @@ impl Sidebar {
         };
 
         let color = cx.theme().colors();
-        let sidebar_base_bg = color
-            .title_bar_background
-            .blend(color.panel_background.opacity(0.25));
-
-        let base_bg = color.background.blend(sidebar_base_bg);
-
-        let hover_base = color
-            .element_active
-            .blend(color.element_background.opacity(0.2));
-        let hover_solid = base_bg.blend(hover_base);
+        let base_bg = sidebar_row_background(cx);
+        let hover_solid = sidebar_row_hover_background(cx);
 
         let group_name_for_gradient = group_name.clone();
         let gradient_overlay = move || {
@@ -3341,9 +3350,7 @@ impl Sidebar {
             .unwrap_or(px(0.));
 
         let color = cx.theme().colors();
-        let background = color
-            .title_bar_background
-            .blend(color.panel_background.opacity(0.2));
+        let background = sidebar_row_background(cx);
 
         let element = v_flex()
             .absolute()
@@ -3374,6 +3381,12 @@ impl Sidebar {
     fn dispatch_context(&self, window: &Window, cx: &Context<Self>) -> KeyContext {
         let mut dispatch_context = KeyContext::new_with_defaults();
         dispatch_context.add("ThreadsSidebar");
+        if self.android_screen_focus.is_focused(window) {
+            // Bindings match against every context in the dispatch path, so
+            // leaving `menu` here would let it swallow the arrow keys, enter
+            // and escape before they reach the emulator's key handler.
+            return dispatch_context;
+        }
         dispatch_context.add("menu");
 
         let is_archived_search_focused = matches!(&self.view, SidebarView::Archive(archive) if archive.read(cx).is_filter_editor_focused(window, cx));
@@ -6411,10 +6424,7 @@ impl Sidebar {
 
         let id = SharedString::from(format!("thread-entry-{}", ix));
 
-        let color = cx.theme().colors();
-        let sidebar_bg = color
-            .title_bar_background
-            .blend(color.panel_background.opacity(0.25));
+        let sidebar_bg = sidebar_row_background(cx);
 
         let timestamp: SharedString = if is_empty_draft {
             SharedString::default()
@@ -6753,10 +6763,7 @@ impl Sidebar {
         let id = ElementId::from(format!("terminal-{}", terminal.metadata.terminal_id));
         let timestamp = format_history_entry_timestamp(terminal.metadata.created_at);
         let is_hovered = self.hovered_thread_index == Some(ix);
-        let color = cx.theme().colors();
-        let sidebar_bg = color
-            .title_bar_background
-            .blend(color.panel_background.opacity(0.25));
+        let sidebar_bg = sidebar_row_background(cx);
         let metadata = terminal.metadata.clone();
         let workspace = terminal.workspace.clone();
         let focus_handle = self.focus_handle.clone();
@@ -7594,86 +7601,44 @@ impl Sidebar {
     ) -> impl IntoElement {
         let has_query = self.has_filter_query(cx);
         let sidebar_on_left = self.side(cx) == SidebarSide::Left;
-        let sidebar_on_right = self.side(cx) == SidebarSide::Right;
-        let not_fullscreen = !window.is_fullscreen();
-        let traffic_lights = cfg!(target_os = "macos") && not_fullscreen && sidebar_on_left;
-        let left_window_controls = !cfg!(target_os = "macos") && not_fullscreen && sidebar_on_left;
-        let right_window_controls =
-            !cfg!(target_os = "macos") && not_fullscreen && sidebar_on_right;
-        let header_height = platform_title_bar_height(window);
 
-        h_flex()
-            .h(header_height)
-            .mt_px()
-            .pb_px()
-            .when(left_window_controls, |this| {
-                this.children(Self::render_left_window_controls(window, cx))
-            })
-            .map(|this| {
-                if traffic_lights {
-                    this.pl(px(ui::utils::TRAFFIC_LIGHT_PADDING))
-                } else if !left_window_controls {
-                    this.pl_1p5()
-                } else {
-                    this
-                }
-            })
-            .when(!right_window_controls, |this| this.pr_1p5())
-            .gap_1()
+        let window_controls = platform_title_bar::render_panel_window_controls_row(
+            sidebar_on_left,
+            Box::new(CloseWindow),
+            window,
+            cx,
+        );
+
+        v_flex()
+            .flex_none()
+            .children(window_controls)
             .when(!no_open_projects, |this| {
-                this.border_b_1()
-                    .border_color(cx.theme().colors().border)
-                    .when(traffic_lights, |this| {
-                        this.child(Divider::vertical().color(ui::DividerColor::Border))
-                    })
-                    .child(
-                        div().ml_1().child(
+                this.child(
+                    HeaderBar::new("sidebar-search-header")
+                        .start_child(
                             Icon::new(IconName::MagnifyingGlass)
                                 .size(IconSize::Small)
                                 .color(Color::Muted),
-                        ),
-                    )
-                    .child(self.render_filter_input(cx))
-                    .child(
-                        h_flex()
-                            .gap_1()
-                            .when(
-                                self.selection.is_some()
-                                    && !self.filter_editor.focus_handle(cx).is_focused(window),
-                                |this| this.child(KeyBinding::for_action(&FocusSidebarFilter, cx)),
+                        )
+                        .child(self.render_filter_input(cx))
+                        .when(
+                            self.selection.is_some()
+                                && !self.filter_editor.focus_handle(cx).is_focused(window),
+                            |this| this.end_child(KeyBinding::for_action(&FocusSidebarFilter, cx)),
+                        )
+                        .when(has_query, |this| {
+                            this.end_child(
+                                IconButton::new("clear_filter", IconName::Close)
+                                    .icon_size(IconSize::Small)
+                                    .tooltip(Tooltip::text("Clear Search"))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.reset_filter_editor_text(window, cx);
+                                        this.update_entries(cx);
+                                    })),
                             )
-                            .when(has_query, |this| {
-                                this.child(
-                                    IconButton::new("clear_filter", IconName::Close)
-                                        .icon_size(IconSize::Small)
-                                        .tooltip(Tooltip::text("Clear Search"))
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            this.reset_filter_editor_text(window, cx);
-                                            this.update_entries(cx);
-                                        })),
-                                )
-                            }),
-                    )
+                        }),
+                )
             })
-            .when(right_window_controls, |this| {
-                this.children(Self::render_right_window_controls(window, cx))
-            })
-    }
-
-    fn render_left_window_controls(window: &Window, cx: &mut App) -> Option<AnyElement> {
-        platform_title_bar::render_left_window_controls(
-            cx.button_layout(),
-            Box::new(CloseWindow),
-            window,
-        )
-    }
-
-    fn render_right_window_controls(window: &Window, cx: &mut App) -> Option<AnyElement> {
-        platform_title_bar::render_right_window_controls(
-            cx.button_layout(),
-            Box::new(CloseWindow),
-            window,
-        )
     }
 
     fn render_sidebar_toggle_button(&self, _cx: &mut Context<Self>) -> impl IntoElement {
@@ -7736,181 +7701,191 @@ impl Sidebar {
         let on_right = self.side(cx) == SidebarSide::Right;
 
         v_flex()
-            .when(is_devices && self.device_platform == DevicePlatform::Ios, |this| {
-                let toolbar_disabled = self.ios_device_discovery_task.is_some()
-                    || self.selected_ios_device_udid.is_none();
-                this.child(
-                    h_flex()
-                        .p_1()
-                        .gap_1()
-                        .justify_center()
-                        .border_t_1()
-                        .border_color(cx.theme().colors().border)
-                        .child(
-                            IconButton::new("open-installed-ios-app", IconName::ArrowUpRight)
-                                .icon_size(IconSize::Medium)
-                                .tooltip(Tooltip::text("Abrir app iOS instalado"))
-                                .disabled(toolbar_disabled)
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    if let Some(workspace) = this.active_workspace(cx) {
-                                        this.launch_installed_expo_ios(&workspace, window, cx);
-                                    }
-                                })),
-                        )
-                        .child(
-                            IconButton::new("ios-home", IconName::Circle)
-                                .icon_size(IconSize::Medium)
-                                .tooltip(Tooltip::text("Home"))
-                                .disabled(toolbar_disabled)
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    if let Some(workspace) = this.active_workspace(cx) {
-                                        this.return_ios_simulator_to_home(&workspace, window, cx);
-                                    }
-                                })),
-                        )
-                        .child(
-                            IconButton::new("build-ios-app", IconName::ToolHammer)
-                                .icon_size(IconSize::Medium)
-                                .tooltip(Tooltip::text("Compilar app iOS"))
-                                .disabled(toolbar_disabled)
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    if let Some(workspace) = this.active_workspace(cx) {
-                                        this.build_expo_ios(&workspace, window, cx);
-                                    }
-                                })),
-                        )
-                        .child(
-                            IconButton::new("start-expo-ios", IconName::PlayFilled)
-                                .icon_size(IconSize::Medium)
-                                .tooltip(Tooltip::text("Iniciar Expo"))
-                                .disabled(toolbar_disabled)
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    if let Some(workspace) = this.active_workspace(cx) {
-                                        this.start_expo_ios(&workspace, window, cx);
-                                    }
-                                })),
-                        )
-                        .child(
-                            IconButton::new("paste-ios", IconName::Attach)
-                                .icon_size(IconSize::Medium)
-                                .tooltip(Tooltip::text("Colar (Cmd+V)"))
-                                .disabled(toolbar_disabled)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.paste_to_ios_simulator(cx);
-                                })),
-                        )
-                        .child(
-                            IconButton::new("screenshot-ios", IconName::Image)
-                                .icon_size(IconSize::Medium)
-                                .tooltip(Tooltip::text("Screenshot"))
-                                .disabled(toolbar_disabled)
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    if let Some(workspace) = this.active_workspace(cx) {
-                                        this.screenshot_ios_simulator(&workspace, window, cx);
-                                    }
-                                })),
-                        )
-                        .child(
-                            IconButton::new("shutdown-ios-simulator", IconName::Power)
-                                .icon_size(IconSize::Medium)
-                                .tooltip(Tooltip::text("Desligar simulador"))
-                                .disabled(toolbar_disabled)
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.shutdown_ios_simulator(window, cx);
-                                })),
-                        ),
-                )
-            })
-            .when(is_devices && self.device_platform == DevicePlatform::Android, |this| {
-                let emulator_running = self
-                    .android_sdk_manager
-                    .as_ref()
-                    .map(|m| matches!(m.read(cx).state(), AndroidSdkState::EmulatorRunning { .. }))
-                    .unwrap_or(false);
-                this.child(
-                    h_flex()
-                        .p_1()
-                        .gap_1()
-                        .justify_center()
-                        .border_t_1()
-                        .border_color(cx.theme().colors().border)
-                        .child(
-                            IconButton::new("android-back", IconName::ArrowLeft)
-                                .icon_size(IconSize::Medium)
-                                .tooltip(Tooltip::text("Voltar"))
-                                .disabled(!emulator_running)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.with_android_sdk_manager(cx, |manager, cx| {
-                                        manager.send_keyevent(4, cx)
-                                    });
-                                })),
-                        )
-                        .child(
-                            IconButton::new("android-home", IconName::Circle)
-                                .icon_size(IconSize::Medium)
-                                .tooltip(Tooltip::text("Home"))
-                                .disabled(!emulator_running)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.with_android_sdk_manager(cx, |manager, cx| {
-                                        manager.send_keyevent(3, cx)
-                                    });
-                                })),
-                        )
-                        .child(
-                            IconButton::new("android-recents", IconName::Blocks)
-                                .icon_size(IconSize::Medium)
-                                .tooltip(Tooltip::text("Apps recentes"))
-                                .disabled(!emulator_running)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.with_android_sdk_manager(cx, |manager, cx| {
-                                        manager.send_keyevent(187, cx)
-                                    });
-                                })),
-                        )
-                        .child(
-                            IconButton::new("android-stop", IconName::Power)
-                                .icon_size(IconSize::Medium)
-                                .tooltip(Tooltip::text("Parar emulador"))
-                                .disabled(!emulator_running)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.with_android_sdk_manager(cx, |manager, cx| {
-                                        manager.stop_emulator(cx)
-                                    });
-                                })),
-                        )
-                        .child(
-                            IconButton::new("build-android-app", IconName::ToolHammer)
-                                .icon_size(IconSize::Medium)
-                                .tooltip(Tooltip::text("Compilar app Android"))
-                                .disabled(!emulator_running)
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    if let Some(workspace) = this.active_workspace(cx) {
-                                        this.build_expo_android(&workspace, window, cx);
-                                    }
-                                })),
-                        )
-                        .child(
-                            IconButton::new("start-expo-android", IconName::PlayFilled)
-                                .icon_size(IconSize::Medium)
-                                .tooltip(Tooltip::text("Iniciar Expo"))
-                                .disabled(!emulator_running)
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    if let Some(workspace) = this.active_workspace(cx) {
-                                        this.start_expo_android(&workspace, window, cx);
-                                    }
-                                })),
-                        )
-                        .child(
-                            IconButton::new("reload-android", IconName::RotateCw)
-                                .icon_size(IconSize::Medium)
-                                .tooltip(Tooltip::text("Reload / Dev Menu"))
-                                .disabled(!emulator_running)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.reload_android_app(cx);
-                                })),
-                        ),
-                )
-            })
+            .when(
+                is_devices && self.device_platform == DevicePlatform::Ios,
+                |this| {
+                    let toolbar_disabled = self.ios_device_discovery_task.is_some()
+                        || self.selected_ios_device_udid.is_none();
+                    this.child(
+                        h_flex()
+                            .p_1()
+                            .gap_1()
+                            .justify_center()
+                            .border_t_1()
+                            .border_color(cx.theme().colors().border)
+                            .child(
+                                IconButton::new("open-installed-ios-app", IconName::ArrowUpRight)
+                                    .icon_size(IconSize::Medium)
+                                    .tooltip(Tooltip::text("Abrir app iOS instalado"))
+                                    .disabled(toolbar_disabled)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        if let Some(workspace) = this.active_workspace(cx) {
+                                            this.launch_installed_expo_ios(&workspace, window, cx);
+                                        }
+                                    })),
+                            )
+                            .child(
+                                IconButton::new("ios-home", IconName::Circle)
+                                    .icon_size(IconSize::Medium)
+                                    .tooltip(Tooltip::text("Home"))
+                                    .disabled(toolbar_disabled)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        if let Some(workspace) = this.active_workspace(cx) {
+                                            this.return_ios_simulator_to_home(
+                                                &workspace, window, cx,
+                                            );
+                                        }
+                                    })),
+                            )
+                            .child(
+                                IconButton::new("build-ios-app", IconName::ToolHammer)
+                                    .icon_size(IconSize::Medium)
+                                    .tooltip(Tooltip::text("Compilar app iOS"))
+                                    .disabled(toolbar_disabled)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        if let Some(workspace) = this.active_workspace(cx) {
+                                            this.build_expo_ios(&workspace, window, cx);
+                                        }
+                                    })),
+                            )
+                            .child(
+                                IconButton::new("start-expo-ios", IconName::PlayFilled)
+                                    .icon_size(IconSize::Medium)
+                                    .tooltip(Tooltip::text("Iniciar Expo"))
+                                    .disabled(toolbar_disabled)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        if let Some(workspace) = this.active_workspace(cx) {
+                                            this.start_expo_ios(&workspace, window, cx);
+                                        }
+                                    })),
+                            )
+                            .child(
+                                IconButton::new("paste-ios", IconName::Attach)
+                                    .icon_size(IconSize::Medium)
+                                    .tooltip(Tooltip::text("Colar (Cmd+V)"))
+                                    .disabled(toolbar_disabled)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.paste_to_ios_simulator(cx);
+                                    })),
+                            )
+                            .child(
+                                IconButton::new("screenshot-ios", IconName::Image)
+                                    .icon_size(IconSize::Medium)
+                                    .tooltip(Tooltip::text("Screenshot"))
+                                    .disabled(toolbar_disabled)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        if let Some(workspace) = this.active_workspace(cx) {
+                                            this.screenshot_ios_simulator(&workspace, window, cx);
+                                        }
+                                    })),
+                            )
+                            .child(
+                                IconButton::new("shutdown-ios-simulator", IconName::Power)
+                                    .icon_size(IconSize::Medium)
+                                    .tooltip(Tooltip::text("Desligar simulador"))
+                                    .disabled(toolbar_disabled)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.shutdown_ios_simulator(window, cx);
+                                    })),
+                            ),
+                    )
+                },
+            )
+            .when(
+                is_devices && self.device_platform == DevicePlatform::Android,
+                |this| {
+                    let emulator_running = self
+                        .android_sdk_manager
+                        .as_ref()
+                        .map(|m| {
+                            matches!(m.read(cx).state(), AndroidSdkState::EmulatorRunning { .. })
+                        })
+                        .unwrap_or(false);
+                    this.child(
+                        h_flex()
+                            .p_1()
+                            .gap_1()
+                            .justify_center()
+                            .border_t_1()
+                            .border_color(cx.theme().colors().border)
+                            .child(
+                                IconButton::new("android-back", IconName::ArrowLeft)
+                                    .icon_size(IconSize::Medium)
+                                    .tooltip(Tooltip::text("Voltar"))
+                                    .disabled(!emulator_running)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.with_android_sdk_manager(cx, |manager, cx| {
+                                            manager.send_keyevent(4, cx)
+                                        });
+                                    })),
+                            )
+                            .child(
+                                IconButton::new("android-home", IconName::Circle)
+                                    .icon_size(IconSize::Medium)
+                                    .tooltip(Tooltip::text("Home"))
+                                    .disabled(!emulator_running)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.with_android_sdk_manager(cx, |manager, cx| {
+                                            manager.send_keyevent(3, cx)
+                                        });
+                                    })),
+                            )
+                            .child(
+                                IconButton::new("android-recents", IconName::Blocks)
+                                    .icon_size(IconSize::Medium)
+                                    .tooltip(Tooltip::text("Apps recentes"))
+                                    .disabled(!emulator_running)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.with_android_sdk_manager(cx, |manager, cx| {
+                                            manager.send_keyevent(187, cx)
+                                        });
+                                    })),
+                            )
+                            .child(
+                                IconButton::new("android-stop", IconName::Power)
+                                    .icon_size(IconSize::Medium)
+                                    .tooltip(Tooltip::text("Parar emulador"))
+                                    .disabled(!emulator_running)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.with_android_sdk_manager(cx, |manager, cx| {
+                                            manager.stop_emulator(cx)
+                                        });
+                                    })),
+                            )
+                            .child(
+                                IconButton::new("build-android-app", IconName::ToolHammer)
+                                    .icon_size(IconSize::Medium)
+                                    .tooltip(Tooltip::text("Compilar app Android"))
+                                    .disabled(!emulator_running)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        if let Some(workspace) = this.active_workspace(cx) {
+                                            this.build_expo_android(&workspace, window, cx);
+                                        }
+                                    })),
+                            )
+                            .child(
+                                IconButton::new("start-expo-android", IconName::PlayFilled)
+                                    .icon_size(IconSize::Medium)
+                                    .tooltip(Tooltip::text("Iniciar Expo"))
+                                    .disabled(!emulator_running)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        if let Some(workspace) = this.active_workspace(cx) {
+                                            this.start_expo_android(&workspace, window, cx);
+                                        }
+                                    })),
+                            )
+                            .child(
+                                IconButton::new("reload-android", IconName::RotateCw)
+                                    .icon_size(IconSize::Medium)
+                                    .tooltip(Tooltip::text("Reload / Dev Menu"))
+                                    .disabled(!emulator_running)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.reload_android_app(cx);
+                                    })),
+                            ),
+                    )
+                },
+            )
             .when(!self.devices_only, |this| {
                 this.child(
                     h_flex()
@@ -8279,11 +8254,7 @@ impl Sidebar {
     }
 
     #[cfg(target_os = "macos")]
-    fn render_ios_simulator(
-        &self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn render_ios_simulator(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         if !self.ios_simulator_started {
             return v_flex()
                 .flex_1()
@@ -8295,11 +8266,9 @@ impl Sidebar {
                 .child(Icon::new(IconName::Screen).size(IconSize::XLarge))
                 .child(Label::new("Simulador iOS"))
                 .child(
-                    Label::new(
-                        "Clique no botão abaixo para inicializar o simulador iOS.",
-                    )
-                    .size(LabelSize::Small)
-                    .color(Color::Muted),
+                    Label::new("Clique no botão abaixo para inicializar o simulador iOS.")
+                        .size(LabelSize::Small)
+                        .color(Color::Muted),
                 )
                 .child(
                     Button::new("boot-ios-simulator", "Iniciar simulador")
@@ -8451,11 +8420,7 @@ impl Sidebar {
     }
 
     #[cfg(not(target_os = "macos"))]
-    fn render_ios_simulator(
-        &self,
-        _window: &mut Window,
-        _cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn render_ios_simulator(&self, _window: &mut Window, _cx: &mut Context<Self>) -> AnyElement {
         v_flex()
             .flex_1()
             .items_center()
@@ -8513,8 +8478,8 @@ impl Sidebar {
 
         let container_width = f32::from(bounds.size.width);
         let container_height = f32::from(bounds.size.height);
-        let scale = (container_width / screen_width as f32)
-            .min(container_height / screen_height as f32);
+        let scale =
+            (container_width / screen_width as f32).min(container_height / screen_height as f32);
         if scale <= 0. {
             return None;
         }
@@ -8576,156 +8541,151 @@ impl Sidebar {
             })
             .unwrap_or((None, None));
 
-
-        v_flex()
-            .flex_1()
-            .min_h_0()
-            .child(
-                div()
-                    .relative()
-                    .flex_1()
-                    .min_h_0()
-                    .map(|this| match frame {
-                        Some(frame) if screen_size.is_some() => this
-                            .child(
-                                img(frame)
-                                    .object_fit(ObjectFit::Contain)
-                                    .size_full()
-                                    .absolute(),
-                            )
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(|this, event: &MouseDownEvent, _, cx| {
-                                    let Some((x, y)) =
-                                        this.android_device_point(event.position, cx)
-                                    else {
-                                        return;
-                                    };
-                                    let via_grpc_touch =
-                                        this.android_send_grpc_touch(x, y, true, cx);
-                                    this.android_pointer_down = Some(AndroidPointerDown {
-                                        down_position: event.position,
-                                        last_position: event.position,
-                                        started_at: std::time::Instant::now(),
-                                        via_grpc_touch,
-                                    });
-                                }),
-                            )
-                            .on_mouse_move(cx.listener(
-                                |this, event: &MouseMoveEvent, _, cx| {
-                                    let Some(pointer) = &this.android_pointer_down else {
-                                        return;
-                                    };
-                                    if !pointer.via_grpc_touch {
-                                        return;
-                                    }
-                                    if event.pressed_button != Some(MouseButton::Left) {
-                                        // The button was released outside the
-                                        // screen area; end the touch at the last
-                                        // point we forwarded.
-                                        let last_position = pointer.last_position;
-                                        this.android_pointer_down = None;
-                                        if let Some((x, y)) =
-                                            this.android_device_point(last_position, cx)
-                                        {
-                                            this.android_send_grpc_touch(x, y, false, cx);
-                                        }
-                                        return;
-                                    }
-                                    if let Some((x, y)) =
-                                        this.android_device_point(event.position, cx)
-                                    {
-                                        this.android_send_grpc_touch(x, y, true, cx);
-                                        if let Some(pointer) = &mut this.android_pointer_down {
-                                            pointer.last_position = event.position;
-                                        }
-                                    }
-                                },
-                            ))
-                            .on_mouse_up(
-                                MouseButton::Left,
-                                cx.listener(|this, event: &MouseUpEvent, _, cx| {
-                                    let Some(pointer) = this.android_pointer_down.take()
-                                    else {
-                                        return;
-                                    };
-                                    if pointer.via_grpc_touch {
-                                        let position = this
-                                            .android_device_point(event.position, cx)
-                                            .or_else(|| {
-                                                this.android_device_point(
-                                                    pointer.last_position,
-                                                    cx,
-                                                )
-                                            });
-                                        if let Some((x, y)) = position {
-                                            this.android_send_grpc_touch(x, y, false, cx);
-                                        }
-                                        return;
-                                    }
-                                    let Some(from) =
-                                        this.android_device_point(pointer.down_position, cx)
-                                    else {
-                                        return;
-                                    };
-                                    let Some(to) = this.android_device_point(event.position, cx)
-                                    else {
-                                        return;
-                                    };
-                                    let dragged_distance = (f32::from(
-                                        event.position.x - pointer.down_position.x,
-                                    ))
-                                    .hypot(f32::from(event.position.y - pointer.down_position.y));
-                                    this.with_android_sdk_manager(cx, |manager, cx| {
-                                        if dragged_distance < 4. {
-                                            manager.send_tap(from.0, from.1, cx);
-                                        } else {
-                                            let duration = pointer
-                                                .started_at
-                                                .elapsed()
-                                                .clamp(
-                                                    Duration::from_millis(50),
-                                                    Duration::from_millis(800),
-                                                );
-                                            manager.send_swipe(from, to, duration, cx);
-                                        }
-                                    });
-                                }),
-                            ),
-                        _ => this.child(
-                            v_flex()
+        v_flex().flex_1().min_h_0().child(
+            div()
+                .relative()
+                .flex_1()
+                .min_h_0()
+                // The emulator screen is a plain image, so keystrokes only
+                // reach it while this element holds focus.
+                .track_focus(&self.android_screen_focus)
+                .key_context("AndroidEmulatorScreen")
+                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                    let Some(key) = emulator_key_for_keystroke(&event.keystroke) else {
+                        return;
+                    };
+                    this.with_android_sdk_manager(cx, |manager, cx| {
+                        manager.send_key(key, cx);
+                    });
+                }))
+                .map(|this| match frame {
+                    Some(frame) if screen_size.is_some() => this
+                        .child(
+                            img(frame)
+                                .object_fit(ObjectFit::Contain)
                                 .size_full()
-                                .items_center()
-                                .justify_center()
-                                .gap_2()
-                                .child(
-                                    Icon::new(IconName::ArrowCircle)
-                                        .size(IconSize::XLarge)
-                                        .color(Color::Muted)
-                                        .with_rotate_animation(2),
-                                )
-                                .child(Label::new("Conectando à tela do emulador…")),
-                        ),
-                    })
-                    .child(
-                        canvas(
-                            {
-                                let sidebar = cx.weak_entity();
-                                move |bounds, _, cx| {
-                                    sidebar
-                                        .update(cx, |this, _| {
-                                            this.android_screen_bounds = Some(bounds);
-                                        })
-                                        .log_err();
-                                }
-                            },
-                            |_, _, _, _| {},
+                                .absolute(),
                         )
-                        .absolute()
-                        .inset_0()
-                        .size_full(),
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                                // Clicking the screen takes keyboard focus,
+                                // matching how tapping a text field on a
+                                // real device starts typing.
+                                this.android_screen_focus.focus(window, cx);
+                                let Some((x, y)) = this.android_device_point(event.position, cx)
+                                else {
+                                    return;
+                                };
+                                let via_grpc_touch = this.android_send_grpc_touch(x, y, true, cx);
+                                this.android_pointer_down = Some(AndroidPointerDown {
+                                    down_position: event.position,
+                                    last_position: event.position,
+                                    started_at: std::time::Instant::now(),
+                                    via_grpc_touch,
+                                });
+                            }),
+                        )
+                        .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
+                            let Some(pointer) = &this.android_pointer_down else {
+                                return;
+                            };
+                            if !pointer.via_grpc_touch {
+                                return;
+                            }
+                            if event.pressed_button != Some(MouseButton::Left) {
+                                // The button was released outside the
+                                // screen area; end the touch at the last
+                                // point we forwarded.
+                                let last_position = pointer.last_position;
+                                this.android_pointer_down = None;
+                                if let Some((x, y)) = this.android_device_point(last_position, cx) {
+                                    this.android_send_grpc_touch(x, y, false, cx);
+                                }
+                                return;
+                            }
+                            if let Some((x, y)) = this.android_device_point(event.position, cx) {
+                                this.android_send_grpc_touch(x, y, true, cx);
+                                if let Some(pointer) = &mut this.android_pointer_down {
+                                    pointer.last_position = event.position;
+                                }
+                            }
+                        }))
+                        .on_mouse_up(
+                            MouseButton::Left,
+                            cx.listener(|this, event: &MouseUpEvent, _, cx| {
+                                let Some(pointer) = this.android_pointer_down.take() else {
+                                    return;
+                                };
+                                if pointer.via_grpc_touch {
+                                    let position =
+                                        this.android_device_point(event.position, cx).or_else(
+                                            || this.android_device_point(pointer.last_position, cx),
+                                        );
+                                    if let Some((x, y)) = position {
+                                        this.android_send_grpc_touch(x, y, false, cx);
+                                    }
+                                    return;
+                                }
+                                let Some(from) =
+                                    this.android_device_point(pointer.down_position, cx)
+                                else {
+                                    return;
+                                };
+                                let Some(to) = this.android_device_point(event.position, cx) else {
+                                    return;
+                                };
+                                let dragged_distance = (f32::from(
+                                    event.position.x - pointer.down_position.x,
+                                ))
+                                .hypot(f32::from(event.position.y - pointer.down_position.y));
+                                this.with_android_sdk_manager(cx, |manager, cx| {
+                                    if dragged_distance < 4. {
+                                        manager.send_tap(from.0, from.1, cx);
+                                    } else {
+                                        let duration = pointer.started_at.elapsed().clamp(
+                                            Duration::from_millis(50),
+                                            Duration::from_millis(800),
+                                        );
+                                        manager.send_swipe(from, to, duration, cx);
+                                    }
+                                });
+                            }),
+                        ),
+                    _ => this.child(
+                        v_flex()
+                            .size_full()
+                            .items_center()
+                            .justify_center()
+                            .gap_2()
+                            .child(
+                                Icon::new(IconName::ArrowCircle)
+                                    .size(IconSize::XLarge)
+                                    .color(Color::Muted)
+                                    .with_rotate_animation(2),
+                            )
+                            .child(Label::new("Conectando à tela do emulador…")),
                     ),
-            )
+                })
+                .child(
+                    canvas(
+                        {
+                            let sidebar = cx.weak_entity();
+                            move |bounds, _, cx| {
+                                sidebar
+                                    .update(cx, |this, _| {
+                                        this.android_screen_bounds = Some(bounds);
+                                    })
+                                    .log_err();
+                            }
+                        },
+                        |_, _, _, _| {},
+                    )
+                    .absolute()
+                    .inset_0()
+                    .size_full(),
+                ),
+        )
     }
 
     fn render_android_devices(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -8849,28 +8809,20 @@ impl Sidebar {
             .min_h_0()
             .overflow_hidden()
             .child(
-                h_flex()
-                    .id("device-platform-tabs")
-                    .w_full()
-                    .flex_shrink_0()
-                    .overflow_hidden()
+                TabBar::segmented("device-platform-tabs")
                     .child(
-                        div()
-                            .id("device-tab-android")
-                            .flex_1()
-                            .min_w_0()
-                            .cursor_pointer()
+                        Tab::new("device-tab-android")
+                            .position(TabPosition::First)
+                            .full_width(true)
+                            .toggle_state(is_android)
+                            .start_slot(
+                                Icon::new(IconName::Screen)
+                                    .size(IconSize::Small)
+                                    .when(!is_android, |icon| icon.color(Color::Muted)),
+                            )
                             .child(
-                                Tab::new("device-tab-android-tab")
-                                    .position(TabPosition::First)
-                                    .toggle_state(is_android)
-                                    .start_slot::<AnyElement>(Some(
-                                        Icon::new(IconName::Screen)
-                                            .size(IconSize::Small)
-                                            .when(!is_android, |i| i.color(Color::Muted))
-                                            .into_any_element(),
-                                    ))
-                                    .child("Android"),
+                                Label::new("Android")
+                                    .when(!is_android, |label| label.color(Color::Muted)),
                             )
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.hide_ios_simulator_view(window);
@@ -8880,22 +8832,18 @@ impl Sidebar {
                             })),
                     )
                     .child(
-                        div()
-                            .id("device-tab-ios")
-                            .flex_1()
-                            .min_w_0()
-                            .cursor_pointer()
+                        Tab::new("device-tab-ios")
+                            .position(TabPosition::Last)
+                            .full_width(true)
+                            .toggle_state(!is_android)
+                            .start_slot(
+                                Icon::new(IconName::Screen)
+                                    .size(IconSize::Small)
+                                    .when(is_android, |icon| icon.color(Color::Muted)),
+                            )
                             .child(
-                                Tab::new("device-tab-ios-tab")
-                                    .position(TabPosition::Last)
-                                    .toggle_state(!is_android)
-                                    .start_slot::<AnyElement>(Some(
-                                        Icon::new(IconName::Screen)
-                                            .size(IconSize::Small)
-                                            .when(is_android, |i| i.color(Color::Muted))
-                                            .into_any_element(),
-                                    ))
-                                    .child("iOS"),
+                                Label::new("iOS")
+                                    .when(is_android, |label| label.color(Color::Muted)),
                             )
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.device_platform = DevicePlatform::Ios;
@@ -9062,7 +9010,10 @@ impl Sidebar {
             .chain(arguments.iter().map(String::as_str))
             .join(" ");
         let task = SpawnInTerminal {
-            id: TaskId(format!("{platform}-{task_name}-{}", project_directory.display())),
+            id: TaskId(format!(
+                "{platform}-{task_name}-{}",
+                project_directory.display()
+            )),
             full_label: label.to_owned(),
             label: label.to_owned(),
             command: Some(command.to_owned()),
@@ -9117,16 +9068,17 @@ impl Sidebar {
             "start",
             "Iniciar Expo no Android",
             "yarn",
-            vec!["expo".to_owned(), "start".to_owned(), "--android".to_owned()],
+            vec![
+                "expo".to_owned(),
+                "start".to_owned(),
+                "--android".to_owned(),
+            ],
             window,
             cx,
         );
     }
 
-    fn reload_android_app(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
+    fn reload_android_app(&mut self, cx: &mut Context<Self>) {
         self.with_android_sdk_manager(cx, |manager, cx| {
             manager.send_keyevent(82, cx); // KEYCODE_MENU opens Expo dev menu / reload
         });

@@ -1,12 +1,27 @@
 use gpui::{AnyElement, ScrollHandle};
 use smallvec::SmallVec;
 
-use crate::Tab;
 use crate::prelude::*;
+use crate::{HeaderBar, HeaderBarLevel, Tab, TabPosition};
+
+/// How a [`TabBar`] distributes its tabs.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum TabBarLayout {
+    /// Tabs take their content width, align to the start and scroll when they overflow.
+    /// This is the layout for document tabs.
+    Scrollable,
+    /// Tabs split the available width evenly and center their content.
+    ///
+    /// Use this for a fixed set of mutually exclusive views — a panel's own sub-tabs, for
+    /// instance. Tabs rendered this way must be built with [`Tab::full_width`] so their
+    /// background covers the whole slot.
+    Segmented,
+}
 
 #[derive(IntoElement, RegisterComponent)]
 pub struct TabBar {
     id: ElementId,
+    layout: TabBarLayout,
     start_children: SmallVec<[AnyElement; 2]>,
     children: SmallVec<[AnyElement; 2]>,
     end_children: SmallVec<[AnyElement; 2]>,
@@ -17,10 +32,21 @@ impl TabBar {
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
             id: id.into(),
+            layout: TabBarLayout::Scrollable,
             start_children: SmallVec::new(),
             children: SmallVec::new(),
             end_children: SmallVec::new(),
             scroll_handle: None,
+        }
+    }
+
+    /// Builds a tab bar whose tabs split the width evenly instead of scrolling.
+    ///
+    /// The tabs passed in still need [`Tab::full_width`] so they fill the slot they are given.
+    pub fn segmented(id: impl Into<ElementId>) -> Self {
+        Self {
+            layout: TabBarLayout::Segmented,
+            ..Self::new(id)
         }
     }
 
@@ -91,24 +117,29 @@ impl ParentElement for TabBar {
 
 impl RenderOnce for TabBar {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let border_color = HeaderBarLevel::Pane.border(cx);
+        let slot_gap = HeaderBar::slot_gap(cx);
+        let slot_padding = HeaderBar::slot_padding(cx);
+        let layout = self.layout;
+
         div()
             .id(self.id)
             .group("tab_bar")
             .flex()
             .flex_none()
             .w_full()
-            .h(Tab::container_height(cx))
+            .h(HeaderBar::height(cx))
             .rounded_t_lg()
-            .bg(cx.theme().colors().tab_bar_background)
+            .bg(HeaderBarLevel::Pane.background(cx))
             .when(!self.start_children.is_empty(), |this| {
                 this.child(
                     h_flex()
                         .flex_none()
-                        .gap(DynamicSpacing::Base04.rems(cx))
-                        .px(DynamicSpacing::Base06.rems(cx))
+                        .gap(slot_gap)
+                        .px(slot_padding)
                         .border_b_1()
                         .border_r_1()
-                        .border_color(cx.theme().colors().border)
+                        .border_color(border_color)
                         .children(self.start_children),
                 )
             })
@@ -116,8 +147,11 @@ impl RenderOnce for TabBar {
                 div()
                     .relative()
                     .flex_1()
+                    .min_w_0()
                     .h_full()
                     .overflow_x_hidden()
+                    // The tabs draw their own bottom border; this fills the rule in across
+                    // whatever part of the strip they do not cover.
                     .child(
                         div()
                             .absolute()
@@ -125,26 +159,33 @@ impl RenderOnce for TabBar {
                             .left_0()
                             .size_full()
                             .border_b_1()
-                            .border_color(cx.theme().colors().border),
+                            .border_color(border_color),
                     )
-                    .child(
-                        h_flex()
+                    .child(match layout {
+                        TabBarLayout::Scrollable => h_flex()
                             .id("tabs")
                             .flex_grow_1()
                             .overflow_x_scroll()
-                            .when_some(self.scroll_handle, |cx, scroll_handle| {
-                                cx.track_scroll(&scroll_handle)
+                            .when_some(self.scroll_handle, |this, scroll_handle| {
+                                this.track_scroll(&scroll_handle)
                             })
                             .children(self.children),
-                    ),
+                        TabBarLayout::Segmented => h_flex()
+                            .id("tabs")
+                            .w_full()
+                            .h_full()
+                            .children(self.children.into_iter().map(|tab| {
+                                div().flex_1().min_w_0().h_full().child(tab)
+                            })),
+                    }),
             )
             .when(!self.end_children.is_empty(), |this| {
                 this.child(
                     h_flex()
                         .flex_none()
-                        .gap(DynamicSpacing::Base04.rems(cx))
-                        .px(DynamicSpacing::Base06.rems(cx))
-                        .border_color(cx.theme().colors().border)
+                        .gap(slot_gap)
+                        .px(slot_padding)
+                        .border_color(border_color)
                         .border_b_1()
                         .border_l_1()
                         .children(self.end_children),
@@ -198,6 +239,27 @@ impl Component for TabBar {
                             .child(Tab::new("tab2"))
                             .child(Tab::new("tab3"))
                             .end_child(Button::new("end_button", "End"))
+                            .into_any_element(),
+                    )],
+                ),
+                example_group_with_title(
+                    "Segmented",
+                    vec![single_example(
+                        "Equal-width tabs",
+                        TabBar::segmented("segmented_tab_bar")
+                            .child(
+                                Tab::new("segmented_android")
+                                    .position(TabPosition::First)
+                                    .full_width(true)
+                                    .toggle_state(true)
+                                    .child(Label::new("Android")),
+                            )
+                            .child(
+                                Tab::new("segmented_ios")
+                                    .position(TabPosition::Last)
+                                    .full_width(true)
+                                    .child(Label::new("iOS")),
+                            )
                             .into_any_element(),
                     )],
                 ),

@@ -87,7 +87,9 @@ script/generate-licenses
 rustup target add $target_triple
 
 echo "Compiling zed binaries"
-cargo build ${build_flag} --package zed --package cli --target $target_triple
+# web_preview is built explicitly so its `web_preview_helper` binary exists: without it
+# CEF has to run every Chromium process inside Zed itself.
+cargo build ${build_flag} --package zed --package cli --package web_preview --target $target_triple
 # Build remote_server in separate invocation to prevent feature unification from other crates
 # from influencing dynamic libraries required by it.
 cargo build ${build_flag} --package remote_server --target $target_triple
@@ -188,9 +190,83 @@ function download_git() {
     rm -rf "$tmp_dir"
 }
 
+web_preview_helper_apps=()
+
+# The nested app bundles that host Chromium's render/GPU/utility processes. Chromium derives
+# the executable for those from `browser_subprocess_path` by stripping
+# "<name>.app/Contents/MacOS/<name>" and appending "<name> (Renderer).app/Contents/MacOS/
+# <name> (Renderer)", so a bare executable in `Contents/MacOS` sends it looking outside the
+# bundle: it then falls back to the main executable, macOS blocks that launch, and the
+# renderer never starts — pages stay blank. The suffixes match Chromium's child process
+# flavors; the unsuffixed bundle is what `browser_subprocess_path` points at.
+WEB_PREVIEW_HELPER_FLAVORS=("" " (Renderer)" " (GPU)" " (Plugin)" " (Alerts)")
+
+# Copies the executable that hosts Chromium's render/GPU/utility processes into the bundle.
+# The Chromium Embedded Framework it loads is not bundled — it is 300 MB, and Zed downloads
+# it into the support directory the first time someone opens a Web Preview tab.
+function bundle_web_preview() {
+    local helper_source="target/${target_triple}/${target_dir}/web_preview_helper"
+
+    if [[ ! -f "${helper_source}" ]]; then
+        echo "====== WARNING ======"
+        echo "web_preview_helper not found; Web Preview would fall back to running Chromium inside Zed"
+        echo "====== WARNING ======"
+        return
+    fi
+
+    echo "Bundling web_preview_helper"
+
+    local app_identifier
+    app_identifier=$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" "${app_path}/Contents/Info.plist")
+    local app_version
+    app_version=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "${app_path}/Contents/Info.plist")
+
+    local flavor
+    for flavor in "${WEB_PREVIEW_HELPER_FLAVORS[@]}"; do
+        local helper_name="web_preview_helper${flavor}"
+        local helper_app="${app_path}/Contents/Frameworks/${helper_name}.app"
+        # "" -> ".helper", " (Renderer)" -> ".helper.renderer"
+        local identifier_suffix
+        identifier_suffix=$(echo "${flavor}" | tr -d '() ' | tr '[:upper:]' '[:lower:]')
+        if [[ -n "${identifier_suffix}" ]]; then
+            identifier_suffix=".${identifier_suffix}"
+        fi
+
+        mkdir -p "${helper_app}/Contents/MacOS"
+        cp "${helper_source}" "${helper_app}/Contents/MacOS/${helper_name}"
+        cat > "${helper_app}/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleExecutable</key>
+	<string>${helper_name}</string>
+	<key>CFBundleIdentifier</key>
+	<string>${app_identifier}.helper${identifier_suffix}</string>
+	<key>CFBundleName</key>
+	<string>${helper_name}</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>${app_version}</string>
+	<key>CFBundleVersion</key>
+	<string>${app_version}</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSSupportsAutomaticGraphicsSwitching</key>
+	<true/>
+</dict>
+</plist>
+PLIST
+        web_preview_helper_apps+=("${helper_app}")
+    done
+}
+
 function sign_app_binaries() {
     rm -rf "${app_path}/Contents/Frameworks"
     mkdir -p "${app_path}/Contents/Frameworks"
+
+    bundle_web_preview
 
     echo "Downloading git binary"
     download_git "${target_triple}" "${app_path}/Contents/MacOS/git"
@@ -201,6 +277,10 @@ function sign_app_binaries() {
     if [[ $can_code_sign = true ]]; then
         echo "Code signing binaries"
         # sequence of codesign commands modeled after this example: https://developer.apple.com/forums/thread/701514
+        local helper_app
+        for helper_app in ${web_preview_helper_apps[@]+"${web_preview_helper_apps[@]}"}; do
+            /usr/bin/codesign --force --timestamp --options runtime --entitlements crates/zed/resources/web_preview_helper.entitlements --sign "$IDENTITY" "${helper_app}" -v
+        done
         /usr/bin/codesign --deep --force --timestamp --options runtime --sign "$IDENTITY" "${app_path}/Contents/MacOS/cli" -v
         /usr/bin/codesign --deep --force --timestamp --options runtime --sign "$IDENTITY" "${app_path}/Contents/MacOS/git" -v
         /usr/bin/codesign --deep --force --timestamp --options runtime --entitlements crates/zed/resources/zed.entitlements --sign "$IDENTITY" "${app_path}/Contents/MacOS/zed" -v
@@ -242,6 +322,10 @@ function sign_app_binaries() {
             echo "Created application bundle:"
             echo "$app_path"
         fi
+    elif [ "$local_install" = true ]; then
+        # The bundle was moved into /Applications above, so there is no app left at
+        # `app_path` for the DMG to be built from.
+        echo "Local install - skipping DMG creation and signing"
     else
         dmg_target_directory="target/${target_triple}/${target_dir}"
         dmg_source_directory="${dmg_target_directory}/dmg"

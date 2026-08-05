@@ -91,7 +91,7 @@ use terminal_view::{TerminalView, terminal_panel::TerminalPanel};
 use text::OffsetRangeExt;
 use theme_settings::ThemeSettings;
 use ui::{
-    ContextMenu, ContextMenuEntry, IconButton, KeyBinding, PopoverMenu,
+    ContextMenu, ContextMenuEntry, HeaderBar, HeaderBarLevel, IconButton, KeyBinding, PopoverMenu,
     PopoverMenuHandle, ProjectEmptyState, Tooltip, prelude::*, utils::WithRemSize,
 };
 use util::ResultExt as _;
@@ -5487,7 +5487,9 @@ impl AgentPanel {
                             .absolute()
                             .right_0()
                             .h_full()
-                            .bg(cx.theme().colors().tab_bar_background)
+                            // Knocks out the title behind it, so it has to match the fill of the
+                            // toolbar this sits in.
+                            .bg(HeaderBarLevel::Content.background(cx))
                             .child(
                                 IconButton::new("edit_tile", IconName::Pencil)
                                     .icon_size(IconSize::Small)
@@ -6134,15 +6136,10 @@ impl AgentPanel {
                 .into_any_element()
         };
 
-        h_flex()
-            .id("agent-panel-toolbar")
-            .py(DynamicSpacing::Base08.rems(cx))
-            .px(DynamicSpacing::Base08.rems(cx))
-            .flex_shrink_0()
-            .max_w_full()
-            .bg(cx.theme().colors().toolbar_background)
-            .border_b_1()
-            .border_color(cx.theme().colors().border_variant)
+        // Carries the thread title and its actions, so it belongs to the panel's content the same
+        // way the editor's breadcrumb toolbar does — not to the chrome above it.
+        HeaderBar::new("agent-panel-toolbar")
+            .level(HeaderBarLevel::Content)
             .child(toolbar_content)
     }
 
@@ -6496,6 +6493,10 @@ impl Render for AgentPanel {
                         .size_full()
                         .when_some(search_bar, |this, search_bar| {
                             this.when(!search_bar.read(cx).is_dismissed(), |this| {
+                                // Kept height-flexible rather than a `HeaderBar`, because the
+                                // search bar grows a second row when replace is expanded. The
+                                // fill and divider still come from the shared level so they
+                                // cannot drift from the other content strips.
                                 this.child(
                                     v_flex()
                                         .group("toolbar")
@@ -6503,8 +6504,8 @@ impl Render for AgentPanel {
                                         .py(DynamicSpacing::Base06.rems(cx))
                                         .px(DynamicSpacing::Base08.rems(cx))
                                         .border_b_1()
-                                        .border_color(cx.theme().colors().border_variant)
-                                        .bg(cx.theme().colors().toolbar_background)
+                                        .border_color(HeaderBarLevel::Content.border(cx))
+                                        .bg(HeaderBarLevel::Content.background(cx))
                                         .child(search_bar),
                                 )
                             })

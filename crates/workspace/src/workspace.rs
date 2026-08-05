@@ -81,12 +81,12 @@ use notifications::{
     DetachAndPromptErr, Notifications, dismiss_app_notification,
     simple_message_notification::MessageNotification,
 };
+pub use pane::ContentKind;
 pub use pane::*;
 pub use pane_group::{
     ActivePaneDecorator, HANDLE_HITBOX_SIZE, Member, PaneAxis, PaneGroup, PaneRenderContext,
     SplitDirection,
 };
-pub use pane::ContentKind;
 pub use panel_item::PanelItem;
 pub use persistence::{
     RecentWorkspace, WorkspaceDb, delete_unloaded_items,
@@ -5212,12 +5212,7 @@ impl Workspace {
     ///
     /// Panes that `root` does not contain are torn down. Panes that it does contain are
     /// reused as-is, so open editors and panel state survive a layout change.
-    pub fn apply_pane_layout(
-        &mut self,
-        root: Member,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn apply_pane_layout(&mut self, root: Member, window: &mut Window, cx: &mut Context<Self>) {
         let mut kept = Vec::new();
         root.collect_panes(&mut kept);
         let kept = kept.into_iter().cloned().collect::<Vec<_>>();
@@ -6623,7 +6618,10 @@ impl Workspace {
                         "{indent}Axis {:?} ({} members, flexes {:?})",
                         axis.axis,
                         axis.members.len(),
-                        flexes.iter().map(|f| (f * 100.).round() / 100.).collect::<Vec<_>>()
+                        flexes
+                            .iter()
+                            .map(|f| (f * 100.).round() / 100.)
+                            .collect::<Vec<_>>()
                     );
                     for child in &axis.members {
                         dump_member(child, depth + 1, panes_in_tree, output, cx);
@@ -6697,7 +6695,9 @@ impl Workspace {
         for panel in &self.panels {
             let tab = self
                 .existing_panel_item(panel.panel_id(), cx)
-                .map(|(pane, item)| format!("pane {:?} item {:?}", pane.entity_id(), item.item_id()));
+                .map(|(pane, item)| {
+                    format!("pane {:?} item {:?}", pane.entity_id(), item.item_id())
+                });
             let _ = writeln!(
                 output,
                 "  {} ({:?}) hosted_kind={:?} tab={:?}",
@@ -6721,12 +6721,7 @@ impl Workspace {
         &self.panes
     }
 
-    pub fn set_center(
-        &mut self,
-        group: PaneGroup,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn set_center(&mut self, group: PaneGroup, _window: &mut Window, cx: &mut Context<Self>) {
         self.center = group;
         if let Some(first_pane) = self.center.panes().into_iter().next().cloned() {
             self.active_pane = first_pane;
@@ -9038,33 +9033,15 @@ impl Workspace {
 
         let mut container = div()
             .id(dock_element_id)
-            .when(position == DockPosition::Left && dock_is_open, |this| {
-                this.m_1()
-                    .rounded_lg()
-                    .border_1()
-                    .border_color(cx.theme().colors().border)
-                    .bg(cx.theme().colors().panel_background)
-                    .overflow_hidden()
-            })
-            .when(
-                matches!(position, DockPosition::Devices | DockPosition::Right)
-                    && dock_is_open,
-                |this| {
-                    this.m_1()
-                        .rounded_lg()
-                        .border_1()
-                        .border_color(cx.theme().colors().border)
-                        .bg(cx.theme().colors().panel_background)
-                        .overflow_hidden()
-                },
-            )
-            .when(position == DockPosition::Bottom && dock_is_open, |this| {
-                this.mx_1()
-                    .rounded_lg()
-                    .border_1()
-                    .border_color(cx.theme().colors().border)
-                    .bg(cx.theme().colors().panel_background)
-                    .overflow_hidden()
+            .when(dock_is_open, |this| {
+                // A bottom dock keeps its top and bottom edges flush with its neighbours, so it
+                // only gets side margins; every other dock is inset on all four sides.
+                this.map(|this| match position {
+                    DockPosition::Bottom => this.mx_1(),
+                    DockPosition::Left | DockPosition::Right | DockPosition::Devices => this.m_1(),
+                })
+                .workspace_card(cx)
+                .bg(cx.theme().colors().panel_background)
             })
             .when(dock_is_open, |this| {
                 this.role(gpui::Role::Complementary)
@@ -10167,17 +10144,9 @@ impl Render for Workspace {
                                     .size_full()
                                     .min_w_0()
                                     .min_h_0()
-                                    .child(
-                                        h_flex()
-                                            .flex_1()
-                                            .min_h_0()
-                                            .overflow_hidden()
-                                            .child(self.render_center(
-                                                &pane_render_context,
-                                                window,
-                                                cx,
-                                            )),
-                                    )
+                                    .child(h_flex().flex_1().min_h_0().overflow_hidden().child(
+                                        self.render_center(&pane_render_context, window, cx),
+                                    ))
                                     .when(self.status_bar_visible(cx), |this| {
                                         this.child(self.status_bar.clone())
                                     })
@@ -10267,8 +10236,7 @@ impl Render for Workspace {
                             }))
                             .children(self.render_notifications(window, cx)),
                     )
-                    .child(self.toast_layer.clone())
-                    ,
+                    .child(self.toast_layer.clone()),
             )
     }
 }
@@ -16009,12 +15977,8 @@ mod tests {
 
         let terminal_pane = workspace.update_in(cx, |workspace, window, cx| {
             workspace.set_pane_kinds(&editor_pane, vec![ContentKind::editor()], cx);
-            let terminal_pane = workspace.split_pane(
-                editor_pane.clone(),
-                SplitDirection::Down,
-                window,
-                cx,
-            );
+            let terminal_pane =
+                workspace.split_pane(editor_pane.clone(), SplitDirection::Down, window, cx);
             workspace.set_pane_kinds(&terminal_pane, vec![ContentKind::terminal()], cx);
             let item = cx.new(|cx| TestItem::new(cx));
             workspace.add_item_to_kind_slot(
@@ -16207,9 +16171,7 @@ mod tests {
 
         workspace.update_in(cx, |workspace, _, cx| {
             assert!(
-                workspace
-                    .existing_panel_item(panel_id, cx)
-                    .is_some(),
+                workspace.existing_panel_item(panel_id, cx).is_some(),
                 "the panel should be back in a pane"
             );
         });

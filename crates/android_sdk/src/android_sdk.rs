@@ -10,7 +10,9 @@ use async_compression::futures::bufread::GzipDecoder;
 use async_tar::Archive;
 use futures::channel::mpsc;
 use futures::{AsyncReadExt as _, AsyncWriteExt as _, SinkExt as _, StreamExt as _};
-use gpui::{AppContext as _, AsyncApp, Context, RenderImage, SharedString, Task, WeakEntity};
+use gpui::{
+    AppContext as _, AsyncApp, Context, Keystroke, RenderImage, SharedString, Task, WeakEntity,
+};
 use http_client::HttpClient;
 use smol::io::BufReader;
 use std::path::{Path, PathBuf};
@@ -60,7 +62,10 @@ fn system_image_abi() -> &'static str {
 }
 
 fn system_image_package() -> String {
-    format!("system-images;{API_LEVEL};google_apis;{}", system_image_abi())
+    format!(
+        "system-images;{API_LEVEL};google_apis;{}",
+        system_image_abi()
+    )
 }
 
 #[derive(Clone)]
@@ -119,6 +124,12 @@ impl AndroidPaths {
     fn avd_ini(&self) -> PathBuf {
         self.avd_home.join(format!("{AVD_NAME}.ini"))
     }
+
+    fn avd_config_ini(&self) -> PathBuf {
+        self.avd_home
+            .join(format!("{AVD_NAME}.avd"))
+            .join("config.ini")
+    }
 }
 
 fn apply_env(command: &mut smol::process::Command, paths: &AndroidPaths, java_home: Option<&Path>) {
@@ -158,19 +169,23 @@ pub enum AndroidSdkState {
     Installed,
     AvdReady,
     EmulatorBooting,
-    EmulatorRunning { serial: String },
+    EmulatorRunning {
+        serial: String,
+    },
     Failed(SharedString),
 }
 
 pub struct AndroidSdkManager {
     state: AndroidSdkState,
     install_task: Option<Task<()>>,
+    boot_task: Option<Task<()>>,
     emulator_process: Option<smol::process::Child>,
     adb_poll_task: Option<Task<()>>,
     screen_frame: Option<Arc<RenderImage>>,
     screen_size: Option<(u32, u32)>,
     screen_stream_task: Option<Task<()>>,
     touch_sender: Option<mpsc::UnboundedSender<TouchMessage>>,
+    key_sender: Option<mpsc::UnboundedSender<EmulatorKey>>,
 }
 
 /// A single-finger touch event in the coordinate space of the streamed
@@ -183,17 +198,74 @@ struct TouchMessage {
     pressed: bool,
 }
 
+/// A key press to deliver to the emulator's keyboard. Both variants carry
+/// what the gRPC `sendKey` endpoint needs plus what the adb fallback needs,
+/// because the transport is only decided at send time.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EmulatorKey {
+    /// Printable text produced by the keystroke, already resolved against the
+    /// keyboard layout and modifiers (so shift-a arrives as "A").
+    Text(String),
+    /// A non-printable key, identified by its W3C `KeyboardEvent.key` name for
+    /// gRPC and by its Android keycode for the adb fallback.
+    Named { w3c: &'static str, keycode: u32 },
+}
+
+/// Translates a GPUI keystroke into the key to deliver to the emulator, or
+/// `None` when the keystroke is a Zed shortcut that should not be forwarded.
+///
+/// `command`/`control` combinations are left to Zed so that the surrounding
+/// editor keybindings keep working; `alt` is forwarded when it produced a
+/// character, since that is how layouts such as ABNT reach `ç` and friends.
+pub fn emulator_key_for_keystroke(keystroke: &Keystroke) -> Option<EmulatorKey> {
+    if keystroke.modifiers.platform || keystroke.modifiers.control || keystroke.modifiers.function {
+        return None;
+    }
+
+    // Android keycodes from `android.view.KeyEvent`, used by the adb fallback.
+    let named = match keystroke.key.as_str() {
+        "backspace" => Some(("Backspace", 67)),
+        "enter" => Some(("Enter", 66)),
+        "tab" => Some(("Tab", 61)),
+        // Matches Android Studio's embedded emulator, where Esc is the Back button.
+        "escape" => Some(("GoBack", 4)),
+        "up" => Some(("ArrowUp", 19)),
+        "down" => Some(("ArrowDown", 20)),
+        "left" => Some(("ArrowLeft", 21)),
+        "right" => Some(("ArrowRight", 22)),
+        "home" => Some(("Home", 122)),
+        "end" => Some(("End", 123)),
+        "pageup" => Some(("PageUp", 92)),
+        "pagedown" => Some(("PageDown", 93)),
+        "delete" => Some(("Delete", 112)),
+        _ => None,
+    };
+    if let Some((w3c, keycode)) = named {
+        return Some(EmulatorKey::Named { w3c, keycode });
+    }
+
+    // Everything else is only forwarded when the keystroke produced text.
+    // Control characters would be interpreted as evdev codes by the emulator.
+    let key_char = keystroke.key_char.as_deref()?;
+    if key_char.is_empty() || key_char.chars().any(|character| character.is_control()) {
+        return None;
+    }
+    Some(EmulatorKey::Text(key_char.to_string()))
+}
+
 impl AndroidSdkManager {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let mut this = Self {
             state: AndroidSdkState::Unknown,
             install_task: None,
+            boot_task: None,
             emulator_process: None,
             adb_poll_task: None,
             screen_frame: None,
             screen_size: None,
             screen_stream_task: None,
             touch_sender: None,
+            key_sender: None,
         };
         this.detect_state(cx);
         this
@@ -226,6 +298,7 @@ impl AndroidSdkManager {
             _ => {
                 self.screen_stream_task = None;
                 self.touch_sender = None;
+                self.key_sender = None;
                 // The sidebar retires rendered frames from the sprite atlas;
                 // dropping the Arc here is enough.
                 self.screen_frame = None;
@@ -311,9 +384,31 @@ impl AndroidSdkManager {
     }
 
     pub fn boot_emulator(&mut self, cx: &mut Context<Self>) {
-        if self.emulator_process.is_some() {
+        if self.emulator_process.is_some() || matches!(self.state, AndroidSdkState::EmulatorBooting)
+        {
             return;
         }
+        // Marking the state before spawning keeps a second call from launching
+        // a second emulator while the config below is being repaired.
+        self.state = AndroidSdkState::EmulatorBooting;
+        cx.notify();
+        self.boot_task = Some(cx.spawn(async move |this, cx| {
+            // Repairs AVDs created before the hardware keyboard was enabled.
+            // Must happen before the emulator starts, which is the only time
+            // the setting is read.
+            cx.background_spawn(async {
+                enable_avd_hardware_keyboard(&AndroidPaths::new())
+                    .await
+                    .context("não foi possível habilitar o teclado físico do AVD")
+                    .log_err();
+            })
+            .await;
+            this.update(cx, |this, cx| this.spawn_emulator_process(cx))
+                .ok();
+        }));
+    }
+
+    fn spawn_emulator_process(&mut self, cx: &mut Context<Self>) {
         let paths = AndroidPaths::new();
         let mut command = smol::process::Command::new(paths.emulator());
         // Headless: the emulator's screen is streamed into Zed's devices view
@@ -328,7 +423,6 @@ impl AndroidSdkManager {
         match command.spawn() {
             Ok(child) => {
                 self.emulator_process = Some(child);
-                self.state = AndroidSdkState::EmulatorBooting;
                 self.spawn_adb_poll(cx);
             }
             Err(error) => {
@@ -342,6 +436,7 @@ impl AndroidSdkManager {
 
     pub fn stop_emulator(&mut self, cx: &mut Context<Self>) {
         self.adb_poll_task = None;
+        self.boot_task = None;
         if let Some(mut child) = self.emulator_process.take() {
             child.kill().log_err();
         } else if let AndroidSdkState::EmulatorRunning { serial } = &self.state {
@@ -403,7 +498,13 @@ impl AndroidSdkManager {
 
     /// Sends a swipe between the given device-pixel coordinates to the
     /// running emulator.
-    pub fn send_swipe(&mut self, from: (u32, u32), to: (u32, u32), duration: Duration, cx: &mut Context<Self>) {
+    pub fn send_swipe(
+        &mut self,
+        from: (u32, u32),
+        to: (u32, u32),
+        duration: Duration,
+        cx: &mut Context<Self>,
+    ) {
         self.send_input(
             vec![
                 "swipe".into(),
@@ -421,6 +522,27 @@ impl AndroidSdkManager {
     /// 187 = Recents) to the running emulator.
     pub fn send_keyevent(&mut self, keycode: u32, cx: &mut Context<Self>) {
         self.send_input(vec!["keyevent".into(), keycode.to_string()], cx);
+    }
+
+    /// Delivers a keystroke to the emulator's keyboard, preferring the gRPC
+    /// `sendKey` endpoint and falling back to `adb shell input` when it is
+    /// unavailable. The fallback takes ~300ms per key, which is too slow to
+    /// type with, so it exists only to keep the keyboard working at all.
+    pub fn send_key(&mut self, key: EmulatorKey, cx: &mut Context<Self>) {
+        if let Some(sender) = &self.key_sender {
+            if sender.unbounded_send(key.clone()).is_ok() {
+                return;
+            }
+            // The key worker died (for example, the gRPC connection broke);
+            // the screen stream loop recreates it on its next iteration.
+            self.key_sender = None;
+        }
+        match key {
+            EmulatorKey::Named { keycode, .. } => self.send_keyevent(keycode, cx),
+            EmulatorKey::Text(text) => {
+                self.send_input(vec!["text".into(), escape_adb_text(&text)], cx)
+            }
+        }
     }
 
     fn send_input(&mut self, arguments: Vec<String>, cx: &mut Context<Self>) {
@@ -462,6 +584,16 @@ impl AndroidSdkManager {
                     None
                 };
                 let via_grpc = endpoint.is_some();
+                let key_sender = endpoint.as_ref().map(|endpoint| {
+                    let (sender, receiver) = mpsc::unbounded();
+                    // Dropping the JoinHandle detaches the task; the worker
+                    // exits once the sender is dropped.
+                    drop(
+                        reqwest_client::runtime()
+                            .spawn(run_key_worker(endpoint.clone(), receiver)),
+                    );
+                    sender
+                });
                 let touch_sender = match &endpoint {
                     Some(endpoint) => {
                         let native_size = cx
@@ -493,7 +625,10 @@ impl AndroidSdkManager {
                     None => None,
                 };
                 if this
-                    .update(cx, |this, _| this.touch_sender = touch_sender)
+                    .update(cx, |this, _| {
+                        this.touch_sender = touch_sender;
+                        this.key_sender = key_sender;
+                    })
                     .is_err()
                 {
                     return;
@@ -536,7 +671,11 @@ impl AndroidSdkManager {
                 // The emulator connection is suspect once the stream ends;
                 // drop the touch worker so input falls back to adb until the
                 // next successful reconnect.
-                this.update(cx, |this, _| this.touch_sender = None).ok();
+                this.update(cx, |this, _| {
+                    this.touch_sender = None;
+                    this.key_sender = None;
+                })
+                .ok();
                 if received_any_frame {
                     grpc_failures = 0;
                 } else if via_grpc {
@@ -557,21 +696,20 @@ impl AndroidSdkManager {
 
     fn spawn_adb_poll(&mut self, cx: &mut Context<Self>) {
         self.adb_poll_task = Some(cx.spawn(async move |this, cx| {
-            let attempts =
-                (EMULATOR_BOOT_TIMEOUT.as_secs() / ADB_POLL_INTERVAL.as_secs()).max(1);
+            let attempts = (EMULATOR_BOOT_TIMEOUT.as_secs() / ADB_POLL_INTERVAL.as_secs()).max(1);
             for _ in 0..attempts {
                 cx.background_executor().timer(ADB_POLL_INTERVAL).await;
 
                 let exit_status = match this.update(cx, |this, _| {
-                    this.emulator_process.as_mut().and_then(|child| {
-                        match child.try_status() {
+                    this.emulator_process
+                        .as_mut()
+                        .and_then(|child| match child.try_status() {
                             Ok(status) => status,
                             Err(error) => {
                                 log::warn!("failed to poll emulator process status: {error}");
                                 None
                             }
-                        }
-                    })
+                        })
                 }) {
                     Ok(exit_status) => exit_status,
                     Err(_) => return,
@@ -616,9 +754,8 @@ impl AndroidSdkManager {
                 if let Some(mut child) = this.emulator_process.take() {
                     child.kill().log_err();
                 }
-                this.state = AndroidSdkState::Failed(
-                    "O emulador não ficou online em 120 segundos.".into(),
-                );
+                this.state =
+                    AndroidSdkState::Failed("O emulador não ficou online em 120 segundos.".into());
                 cx.notify();
             })
             .ok();
@@ -780,8 +917,12 @@ async fn run_install_pipeline(
             let java_home = java_home.clone();
             async move {
                 let platform = format!("platforms;{API_LEVEL}");
-                run_sdkmanager(&paths, &java_home, &["platform-tools", "emulator", &platform])
-                    .await
+                run_sdkmanager(
+                    &paths,
+                    &java_home,
+                    &["platform-tools", "emulator", &platform],
+                )
+                .await
             }
         })
         .await
@@ -1000,7 +1141,58 @@ async fn create_avd_on_disk(paths: &AndroidPaths, java_home: &Path) -> Result<()
     // avdmanager asks whether to create a custom hardware profile.
     run_command_accepting_prompts(command, "no\n")
         .await
-        .context("avdmanager create avd")
+        .context("avdmanager create avd")?;
+    enable_avd_hardware_keyboard(paths).await
+}
+
+/// avdmanager creates AVDs with `hw.keyboard = no`, which leaves the guest
+/// without a keyboard input device, so every key forwarded from the host is
+/// silently dropped and only the on-screen keyboard works. The emulator reads
+/// this only at boot and has no command line override (unlike `hw.gpu.enabled`,
+/// which `-gpu host` overrides), so the AVD config is rewritten in place.
+async fn enable_avd_hardware_keyboard(paths: &AndroidPaths) -> Result<()> {
+    const SETTING: &str = "hw.keyboard";
+
+    let config_path = paths.avd_config_ini();
+    let config = match smol::fs::read_to_string(&config_path).await {
+        Ok(config) => config,
+        // The AVD has not been created yet; creating it sets the value.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(error).with_context(|| format!("lendo {}", config_path.display()));
+        }
+    };
+
+    fn setting_value(line: &str) -> Option<&str> {
+        let (key, value) = line.split_once('=')?;
+        (key.trim() == SETTING).then(|| value.trim())
+    }
+
+    if config
+        .lines()
+        .any(|line| setting_value(line) == Some("yes"))
+    {
+        return Ok(());
+    }
+
+    let mut updated = String::with_capacity(config.len() + SETTING.len() + 8);
+    let mut replaced = false;
+    for line in config.lines() {
+        if setting_value(line).is_some() {
+            updated.push_str("hw.keyboard = yes");
+            replaced = true;
+        } else {
+            updated.push_str(line);
+        }
+        updated.push('\n');
+    }
+    if !replaced {
+        updated.push_str("hw.keyboard = yes\n");
+    }
+
+    smol::fs::write(&config_path, updated)
+        .await
+        .with_context(|| format!("gravando {}", config_path.display()))
 }
 
 /// Runs a command writing `input` to its stdin to answer interactive prompts
@@ -1317,8 +1509,9 @@ async fn run_touch_worker(
         let y = u64::from(event.y) * u64::from(native_size.1) / u64::from(frame_height);
         // 1024 is the maximum of Android's pressure range for touch screens.
         let pressure = if event.pressed { 1024 } else { 0 };
+        let body = encode_send_touch_request(x, y, pressure);
         if let Err(error) =
-            send_touch_request(&client, &url, endpoint.token.as_deref(), x, y, pressure).await
+            send_unary_grpc(&client, &url, endpoint.token.as_deref(), "sendTouch", body).await
         {
             log::warn!("gRPC sendTouch falhou: {error:#}");
             // Exiting closes the channel, so the manager falls back to adb.
@@ -1327,19 +1520,95 @@ async fn run_touch_worker(
     }
 }
 
-async fn send_touch_request(
+/// `adb shell input text` is parsed twice before reaching the keyboard: once
+/// by the device's shell, and once by `input`, which reads `%s` as a space.
+fn escape_adb_text(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for character in text.chars() {
+        match character {
+            ' ' => escaped.push_str("%s"),
+            '\\' | '"' | '\'' | '`' | '$' | '&' | '|' | ';' | '<' | '>' | '(' | ')' | '*' | '?'
+            | '[' | ']' | '{' | '}' | '~' | '#' | '!' | '%' => {
+                escaped.push('\\');
+                escaped.push(character);
+            }
+            _ => escaped.push(character),
+        }
+    }
+    escaped
+}
+
+/// Encodes a gRPC-framed `KeyboardEvent` request for
+/// `EmulatorController.sendKey`. `key` (field 4) takes priority over `keyCode`
+/// and `text`, and the emulator expands a printable character into the evdev
+/// sequence a shifted character needs. `eventType` must be `keypress` so that
+/// named keys such as `Backspace` are also released, not just pressed.
+fn encode_send_key_request(key: &str) -> Vec<u8> {
+    let mut message = Vec::new();
+    message.push(0x10); // field 2 (eventType), varint
+    message.push(0x02); // KeyEventType::keypress
+    message.push(0x22); // field 4 (key), length-delimited
+    encode_varint(key.len() as u64, &mut message);
+    message.extend_from_slice(key.as_bytes());
+    let mut framed = vec![0u8]; // uncompressed
+    framed.extend_from_slice(&(message.len() as u32).to_be_bytes());
+    framed.extend_from_slice(&message);
+    framed
+}
+
+/// Forwards keystrokes to the emulator's gRPC `sendKey` endpoint, the same
+/// path Android Studio's embedded emulator uses. Spawning `adb shell input`
+/// per key takes ~300ms, which is far too slow to type with.
+/// Must run on a tokio runtime (a reqwest requirement).
+async fn run_key_worker(
+    endpoint: EmulatorGrpcEndpoint,
+    mut events: mpsc::UnboundedReceiver<EmulatorKey>,
+) {
+    let client = match reqwest::Client::builder().http2_prior_knowledge().build() {
+        Ok(client) => client,
+        Err(error) => {
+            log::warn!("não foi possível criar o cliente HTTP/2 para teclado: {error:#}");
+            return;
+        }
+    };
+    let url = format!(
+        "http://127.0.0.1:{}/android.emulation.control.EmulatorController/sendKey",
+        endpoint.port
+    );
+    while let Some(event) = events.next().await {
+        // The emulator translates a multi-character `key` as a single named
+        // key, so text is sent one character at a time.
+        let keys: Vec<String> = match &event {
+            EmulatorKey::Named { w3c, .. } => vec![(*w3c).to_string()],
+            EmulatorKey::Text(text) => text.chars().map(String::from).collect(),
+        };
+        for key in keys {
+            let body = encode_send_key_request(&key);
+            if let Err(error) =
+                send_unary_grpc(&client, &url, endpoint.token.as_deref(), "sendKey", body).await
+            {
+                log::warn!("gRPC sendKey falhou: {error:#}");
+                // Exiting closes the channel, so the manager falls back to adb.
+                return;
+            }
+        }
+    }
+}
+
+/// Performs a unary gRPC call whose response body is ignored. `method` is only
+/// used for error messages.
+async fn send_unary_grpc(
     client: &reqwest::Client,
     url: &str,
     token: Option<&str>,
-    x: u64,
-    y: u64,
-    pressure: u64,
+    method: &str,
+    body: Vec<u8>,
 ) -> Result<()> {
     let mut request = client
         .post(url)
         .header("content-type", "application/grpc")
         .header("te", "trailers")
-        .body(encode_send_touch_request(x, y, pressure));
+        .body(body);
     if let Some(token) = token {
         request = request.header("authorization", format!("Bearer {token}"));
     }
@@ -1349,7 +1618,7 @@ async fn send_touch_request(
         .context("não foi possível conectar ao gRPC do emulador")?;
     anyhow::ensure!(
         response.status().is_success(),
-        "sendTouch retornou HTTP {}",
+        "{method} retornou HTTP {}",
         response.status()
     );
     // gRPC errors come back as HTTP 200 with a grpc-status header
@@ -1364,14 +1633,14 @@ async fn send_touch_request(
             .and_then(|message| message.to_str().ok())
             .unwrap_or("");
         anyhow::bail!(
-            "sendTouch falhou (grpc-status {}): {message}",
+            "{method} falhou (grpc-status {}): {message}",
             String::from_utf8_lossy(grpc_status.as_bytes())
         );
     }
     response
         .bytes()
         .await
-        .context("resposta do sendTouch interrompida")?;
+        .with_context(|| format!("resposta do {method} interrompida"))?;
     Ok(())
 }
 
@@ -1439,8 +1708,7 @@ async fn stream_screen_frames_grpc(
                 break;
             }
             anyhow::ensure!(buffer[0] == 0, "frame gRPC comprimido não suportado");
-            let length =
-                u32::from_be_bytes([buffer[1], buffer[2], buffer[3], buffer[4]]) as usize;
+            let length = u32::from_be_bytes([buffer[1], buffer[2], buffer[3], buffer[4]]) as usize;
             if buffer.len() < 5 + length {
                 break;
             }
@@ -1473,12 +1741,7 @@ async fn stream_screen_frames(
     let mut command = smol::process::Command::new(paths.adb());
     // `exec-out` (not `shell`) so the device shell has no pty, which would
     // mangle the binary output.
-    command.args([
-        "-s",
-        serial,
-        "exec-out",
-        "while true; do screencap; done",
-    ]);
+    command.args(["-s", serial, "exec-out", "while true; do screencap; done"]);
     apply_env(&mut command, &paths, None);
     command
         .stdin(Stdio::null())

@@ -19402,6 +19402,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df8b2b54733674ad286d16267dcfc7a71ed5c776e4ac7aa3c3e2561f7c637bf2"
 
 [[package]]
+name = "toolbox"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "editor",
+ "gpui",
+ "language",
+ "serde_json",
+ "ui",
+ "workspace",
+]
+
+[[package]]
 name = "toolchain_selector"
 version = "0.1.0"
 dependencies = [
@@ -21380,9 +21393,15 @@ name = "web_preview"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-compression",
+ "async-tar",
  "cef",
+ "core-foundation 0.10.0",
+ "core-video",
  "editor",
+ "futures 0.3.32",
  "gpui",
+ "http_client",
  "image",
  "language",
  "log",
@@ -21394,6 +21413,7 @@ dependencies = [
  "serde",
  "serde_json",
  "smallvec",
+ "smol",
  "ui",
  "util",
  "workspace",
@@ -23589,6 +23609,7 @@ dependencies = [
  "time",
  "time_format",
  "title_bar",
+ "toolbox",
  "toolchain_selector",
  "tracing",
  "ui",

@@ -123,8 +123,7 @@ impl<T: Panel> EventEmitter<PanelEvent> for PanelItem<T> {}
 
 impl<T: Panel> Render for PanelItem<T> {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        AnyView::from(self.panel.clone())
-            .cached(StyleRefinement::default().v_flex().size_full())
+        AnyView::from(self.panel.clone()).cached(StyleRefinement::default().v_flex().size_full())
     }
 }
 

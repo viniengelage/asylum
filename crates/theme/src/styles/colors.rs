@@ -120,15 +120,41 @@ pub struct ThemeColors {
     // ===
     // UI Elements
     // ===
+    //
+    // These fills form a three-step ladder that themes are expected to preserve, because the UI
+    // reads its hierarchy from it rather than from borders:
+    //
+    // 1. `background` — the window shell and the gutter between panes. Lightest in dark themes.
+    // 2. `tab_bar_background` / `panel_background` / `tab_inactive_background` — the chrome strip
+    //    at the top of a pane and the panels. One step in from the shell.
+    // 3. `editor_background` / `tab_active_background` / `toolbar_background` — the content of a
+    //    pane. Furthest in.
+    //
+    // The important consequence is that `tab_active_background` equals the content fill: the
+    // selected tab and the pane body are meant to read as one continuous surface, which is what
+    // makes the active tab legible without needing a highlight. `toolbar_background` matches the
+    // content for the same reason — a breadcrumb or search row belongs to the content it sits in,
+    // not to the chrome above it.
+    //
+    // When adding a header, pick the fill by asking whether it is the *topmost* strip of a pane
+    // (step 2) or a secondary strip *inside* the content (step 3). `ui::HeaderBarLevel` encodes
+    // exactly this choice.
     pub status_bar_background: Hsla,
     pub title_bar_background: Hsla,
     pub title_bar_inactive_background: Hsla,
+    /// Fill for a secondary strip inside a pane's content, such as breadcrumbs or a search row.
+    /// Themes set this equal to `editor_background` so the strip reads as part of the content.
     pub toolbar_background: Hsla,
+    /// Fill for the topmost strip of a pane, behind and around the tabs.
     pub tab_bar_background: Hsla,
+    /// Fill for a tab that is not selected. One step out from the content, matching the chrome.
     pub tab_inactive_background: Hsla,
+    /// Fill for the selected tab. Themes set this equal to `editor_background` so the tab and the
+    /// pane body form one surface.
     pub tab_active_background: Hsla,
     pub search_match_background: Hsla,
     pub search_active_match_background: Hsla,
+    /// Fill for a dock panel's body, matching the chrome step of the ladder.
     pub panel_background: Hsla,
     pub panel_focused_border: Hsla,
     pub panel_indent_guide: Hsla,

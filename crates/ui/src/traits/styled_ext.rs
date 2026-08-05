@@ -90,6 +90,21 @@ pub trait StyledExt: Styled + Sized {
         elevated_borderless(self, cx, ElevationIndex::ModalSurface)
     }
 
+    /// Frames an element as one of the window's cards — a pane, a dock, or the status bar.
+    ///
+    /// Cards are separated by the window background showing through the gap between them, so the
+    /// radius and border have to be identical everywhere or the seams stop reading as one grid.
+    /// The fill is left to the caller, since it says which step of the surface ladder the card
+    /// sits on: `panel_background` for a dock, `editor_background` for a pane.
+    ///
+    /// Sets `rounded_lg()`, `border_1()`, `border_color()`, `overflow_hidden()`.
+    fn workspace_card(self, cx: &App) -> Self {
+        self.rounded_lg()
+            .border_1()
+            .border_color(cx.theme().colors().border)
+            .overflow_hidden()
+    }
+
     /// The theme's primary border color.
     fn border_primary(self, cx: &mut App) -> Self {
         self.border_color(cx.theme().colors().border)

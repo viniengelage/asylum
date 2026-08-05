@@ -143,6 +143,60 @@ pub fn render_left_window_controls(
     )
 }
 
+/// The row that sits above a panel's own header to make room for the OS window controls.
+///
+/// A panel pinned to a window edge is the topmost thing in that corner, so it — not a title bar —
+/// has to clear the window controls. Giving them a row of their own lets the panel's real header
+/// keep `ui::HeaderBar`'s height and line up with the tab bars of neighbouring panes, instead of
+/// being stretched to title-bar height and reading as a different kind of surface.
+///
+/// Returns `None` when nothing needs clearing here, so the caller adds no empty space.
+pub fn render_panel_window_controls_row(
+    on_window_left_edge: bool,
+    close_action: Box<dyn Action>,
+    window: &Window,
+    cx: &mut App,
+) -> Option<AnyElement> {
+    if window.is_fullscreen() {
+        return None;
+    }
+
+    let left_controls = if on_window_left_edge {
+        render_left_window_controls(cx.button_layout(), close_action.boxed_clone(), window)
+    } else {
+        None
+    };
+    let right_controls = if on_window_left_edge {
+        None
+    } else {
+        render_right_window_controls(cx.button_layout(), close_action, window)
+    };
+
+    // On macOS the traffic lights are drawn by the system over this corner, so there is nothing to
+    // render — only room to reserve.
+    let reserve_traffic_lights =
+        PlatformStyle::platform() == PlatformStyle::Mac && on_window_left_edge;
+
+    if left_controls.is_none() && right_controls.is_none() && !reserve_traffic_lights {
+        return None;
+    }
+
+    Some(
+        h_flex()
+            .id("panel-window-controls")
+            .w_full()
+            .flex_none()
+            .h(platform_title_bar_height(window))
+            .when(reserve_traffic_lights, |this| {
+                this.pl(px(TRAFFIC_LIGHT_PADDING))
+            })
+            .when(right_controls.is_some(), |this| this.justify_end())
+            .children(left_controls)
+            .children(right_controls)
+            .into_any_element(),
+    )
+}
+
 /// Renders the platform-appropriate right-side window controls (close, minimize, maximize).
 ///
 /// Returns `None` on Mac or when the platform doesn't need custom controls

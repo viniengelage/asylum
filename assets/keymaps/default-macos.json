@@ -587,7 +587,6 @@
       "ctrl-shift-right": "editor::SelectLargerSyntaxNode", // Expand selection (VSCode version)
       "ctrl-shift-left": "editor::SelectSmallerSyntaxNode", // Shrink selection (VSCode version)
       "cmd-ctrl-down": "editor::SelectNextSyntaxNode", // Move selection down
-      "cmd-d": ["editor::SelectNext", { "replace_newest": false }], // editor.action.addSelectionToNextFindMatch / find_under_expand
       "cmd-shift-l": "editor::SelectAllMatches", // Select all occurrences of current selection
       "cmd-f2": "editor::SelectAllMatches", // Select all occurrences of current word
       "cmd-k cmd-d": ["editor::SelectNext", { "replace_newest": true }], // editor.action.moveSelectionToNextFindMatch / find_under_expand_skip
@@ -722,6 +721,7 @@
       "cmd-alt-b": "workspace::ToggleRightDock",
       "cmd-r": "workspace::ToggleRightDock",
       "cmd-j": "workspace::ToggleBottomDock",
+      "cmd-d": "workspace::ToggleDevicesDock",
       "cmd-alt-j": "multi_workspace::ToggleWorkspaceSidebar",
       "cmd-alt-;": "multi_workspace::FocusWorkspaceSidebar",
       "alt-cmd-y": "workspace::ToggleAllDocks",
@@ -1017,7 +1017,6 @@
       "right": "project_panel::ExpandSelectedEntry",
       "cmd-right": "project_panel::ExpandAllEntries",
       "cmd-n": "project_panel::NewFile",
-      "cmd-d": "project_panel::Duplicate",
       "alt-cmd-n": "project_panel::NewDirectory",
       "cmd-x": "project_panel::Cut",
       "cmd-c": "project_panel::Copy",
@@ -1289,6 +1288,53 @@
     },
   },
   {
+    // The embedded browser renders offscreen, so Chromium never sees the AppKit responder
+    // chain that normally drives the Cmd editing shortcuts — they have to be dispatched here.
+    "context": "WebPreview",
+    "use_key_equivalents": true,
+    "bindings": {
+      "cmd-a": "web_preview::SelectAll",
+      "cmd-c": "web_preview::Copy",
+      "cmd-x": "web_preview::Cut",
+      "cmd-v": "web_preview::Paste",
+      "cmd-z": "web_preview::Undo",
+      "cmd-shift-z": "web_preview::Redo",
+      "cmd-r": "web_preview::Reload",
+      "cmd-l": "web_preview::FocusUrlBar",
+      "cmd-[": "web_preview::GoBack",
+      "cmd-]": "web_preview::GoForward",
+      "cmd-alt-i": "web_preview::OpenDevTools",
+      // Bound to menu::Cancel/workspace::Unfollow in outer contexts; the page needs it to
+      // close its own dialogs, so unbind and let it fall through to the key forwarder.
+      "escape": null,
+    },
+  },
+  {
+    // The emulator screen renders as a plain image, so every keystroke has to be
+    // forwarded to the device by hand. Bindings match against every context in the
+    // dispatch path, so the keys the device expects are unbound here to let them
+    // fall through to the key forwarder.
+    "context": "AndroidEmulatorScreen",
+    "use_key_equivalents": true,
+    "bindings": {
+      "escape": null,
+      "enter": null,
+      "tab": null,
+      "shift-tab": null,
+      "backspace": null,
+      "delete": null,
+      "space": null,
+      "up": null,
+      "down": null,
+      "left": null,
+      "right": null,
+      "home": null,
+      "end": null,
+      "pageup": null,
+      "pagedown": null,
+    },
+  },
+  {
     "context": "Terminal",
     "use_key_equivalents": true,
     "bindings": {
@@ -1342,7 +1388,6 @@
       "ctrl-alt-down": "pane::SplitDown",
       "ctrl-alt-left": "pane::SplitLeft",
       "ctrl-alt-right": "pane::SplitRight",
-      "cmd-d": "pane::SplitRight",
       "cmd-alt-r": "terminal::RerunTask",
       "cmd->": "agent::AddSelectionToThread",
     },

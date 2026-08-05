@@ -685,7 +685,10 @@ impl DebugPanel {
                 .justify_between()
                 .border_b_1()
                 .border_color(cx.theme().colors().border)
-                .when(is_side, |this| this.gap_1().h(Tab::container_height(cx)))
+                // The height is not conditional on the dock position: a header strip is the same
+                // height everywhere, or it stops lining up with its neighbours.
+                .h(Tab::container_height(cx))
+                .when(is_side, |this| this.gap_1())
                 .child(
                     h_flex()
                         .justify_between()

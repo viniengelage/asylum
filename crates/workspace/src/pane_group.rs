@@ -623,11 +623,8 @@ impl Member {
                 let pane = div()
                     .relative()
                     .size_full()
-                    .rounded_lg()
-                    .border_1()
-                    .border_color(cx.theme().colors().border)
+                    .workspace_card(cx)
                     .bg(cx.theme().colors().editor_background)
-                    .overflow_hidden()
                     .when(is_maximized, |this| this.shadow_lg())
                     .child(
                         AnyView::from(pane.clone())
@@ -766,12 +763,7 @@ impl PaneAxis {
     /// The flexes of an axis must always sum to its member count
     /// (`flex_values_in_bounds`), so the collapsed member's flex is donated to its
     /// siblings and taken back on restore.
-    fn set_pane_collapsed(
-        &mut self,
-        pane: &Entity<Pane>,
-        collapsed: bool,
-        cx: &mut App,
-    ) -> bool {
+    fn set_pane_collapsed(&mut self, pane: &Entity<Pane>, collapsed: bool, cx: &mut App) -> bool {
         if let Some(index) = self.members.iter().position(|member| match member {
             Member::Pane(candidate) => candidate == pane,
             Member::Axis(_) => false,
@@ -1536,8 +1528,8 @@ mod element {
 
                 // Only a visible child that still has a visible sibling after it earns a
                 // gap, so collapsed slots leave no trace in the spacing.
-                let gap_after = child_flex > 0.
-                    && flexes.iter().skip(ix + 1).any(|flex| *flex > 0.);
+                let gap_after =
+                    child_flex > 0. && flexes.iter().skip(ix + 1).any(|flex| *flex > 0.);
                 origin = origin.apply_along(self.axis, |val| {
                     val + child_size.along(self.axis) + if gap_after { card_gap } else { px(0.) }
                 });

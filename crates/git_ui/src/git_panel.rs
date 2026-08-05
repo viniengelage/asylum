@@ -86,10 +86,10 @@ use strum::{IntoEnumIterator, VariantNames};
 use theme_settings::ThemeSettings;
 use time::OffsetDateTime;
 use ui::{
-    ButtonLike, Checkbox, Chip, ContextMenu, ContextMenuEntry, Divider, DocumentationSide,
+    ButtonLike, Checkbox, Chip, ContextMenu, ContextMenuEntry, DocumentationSide,
     ElevationIndex, IndentGuideColors, KeyBinding, PopoverMenu, PopoverMenuHandle,
-    ProjectEmptyState, ScrollAxes, Scrollbars, SplitButton, Tab, TintColor, Tooltip, WithScrollbar,
-    prelude::*,
+    ProjectEmptyState, ScrollAxes, Scrollbars, SplitButton, Tab, TabBar, TabPosition, TintColor,
+    Tooltip, WithScrollbar, prelude::*,
 };
 use util::paths::PathStyle;
 use util::{ResultExt, TryFutureExt, markdown::MarkdownInlineCode, maybe, rel_path::RelPath};
@@ -6090,7 +6090,8 @@ impl GitPanel {
         let active_tab = self.active_tab;
 
         let focus_handle = self.focus_handle.clone();
-        let tab = |id: ElementId,
+        let tab = |id: &'static str,
+                   position: TabPosition,
                    active: bool,
                    show_changes: bool,
                    label: SharedString,
@@ -6098,20 +6099,10 @@ impl GitPanel {
                    tooltip_action: Box<dyn Action>| {
             let focus_handle = focus_handle.clone();
 
-            h_flex()
-                .cursor_pointer()
-                .id(id)
-                .h_full()
-                .py_1()
-                .gap_1()
-                .flex_1()
-                .justify_center()
-                .hover(|s| s.bg(cx.theme().colors().element_hover))
-                .border_b_1()
-                .when(!active, |s| {
-                    s.bg(cx.theme().colors().editor_background.opacity(0.6))
-                        .border_color(cx.theme().colors().border.opacity(0.6))
-                })
+            Tab::new(id)
+                .position(position)
+                .full_width(true)
+                .toggle_state(active)
                 .child(Label::new(label.clone()).when(!active, |this| this.color(Color::Muted)))
                 .when(show_changes && self.changes_count > 0, |this| {
                     this.child(
@@ -6130,25 +6121,19 @@ impl GitPanel {
                 }))
         };
 
-        h_flex()
-            .relative()
-            .h(Tab::container_height(cx))
-            .w_full()
+        TabBar::segmented("git-panel-tabs")
             .child(tab(
-                ElementId::Name("changes-tab".into()),
+                "changes-tab",
+                TabPosition::First,
                 active_tab == GitPanelTab::Changes,
                 true,
                 "Changes".into(),
                 GitPanelTab::Changes,
                 ActivateChangesTab.boxed_clone(),
             ))
-            .child(
-                Divider::vertical()
-                    .color(ui::DividerColor::BorderFaded)
-                    .h_full(),
-            )
             .child(tab(
-                ElementId::Name("history-tab".into()),
+                "history-tab",
+                TabPosition::Last,
                 active_tab != GitPanelTab::Changes,
                 false,
                 "History".into(),

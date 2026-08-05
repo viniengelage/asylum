@@ -2907,10 +2907,12 @@ impl Pane {
             return Some(icon.into_any_element());
         };
 
+        // The knockout has to match the fill the icon actually sits on, which for an unselected
+        // tab is `tab_inactive_background` — not the strip behind it.
         let knockout_item_color = if is_active {
             cx.theme().colors().tab_active_background
         } else {
-            cx.theme().colors().tab_bar_background
+            cx.theme().colors().tab_inactive_background
         };
 
         let (icon_decoration, icon_color) = if matches!(diagnostic, &DiagnosticSeverity::ERROR) {
@@ -3796,9 +3798,7 @@ impl Pane {
             .rounded_b_sm()
             .hover(|this| this.bg(cx.theme().colors().element_hover))
             .on_drag(
-                DraggedPane {
-                    pane: cx.entity(),
-                },
+                DraggedPane { pane: cx.entity() },
                 |dragged_pane, _, _, cx| cx.new(|_| dragged_pane.clone()),
             )
     }
@@ -4093,17 +4093,10 @@ impl Pane {
                 cx.defer_in(window, move |workspace, _window, cx| {
                     if let Some(split_direction) = split_direction {
                         // Move all items from source pane into a new split of target
-                        let items: Vec<Box<dyn crate::ItemHandle>> = source_pane
-                            .read(cx)
-                            .items()
-                            .cloned()
-                            .collect();
-                        let new_pane = workspace.split_pane(
-                            target_pane,
-                            split_direction,
-                            _window,
-                            cx,
-                        );
+                        let items: Vec<Box<dyn crate::ItemHandle>> =
+                            source_pane.read(cx).items().cloned().collect();
+                        let new_pane =
+                            workspace.split_pane(target_pane, split_direction, _window, cx);
                         for item in items {
                             crate::move_item(
                                 &source_pane,

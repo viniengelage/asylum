@@ -11,14 +11,15 @@ use gpui::{
     Action, Anchor, AnyView, App, Axis, ClickEvent, Context, Entity, EntityId, EventEmitter,
     FocusHandle, Focusable, IntoElement, KeyContext, MouseButton, MouseDownEvent, MouseUpEvent,
     ParentElement, Render, SharedString, StyleRefinement, Styled, Subscription, WeakEntity, Window,
-    deferred, div, px, relative,
+    deferred, div, px,
 };
 use serde::{Deserialize, Serialize};
 use settings::{Settings, SettingsStore, TerminalDockPosition};
+use std::collections::HashSet;
 use std::sync::Arc;
 use ui::{
-    ContextMenu, CountBadge, Divider, DividerColor, Icon, IconButton, IconSize, Tab, TabPosition,
-    Tooltip, prelude::*, right_click_menu,
+    ContextMenu, CountBadge, Divider, DividerColor, Icon, IconButton, IconSize, Tab, TabBar,
+    TabPosition, Tooltip, prelude::*, right_click_menu,
 };
 use util::ResultExt as _;
 
@@ -322,6 +323,10 @@ pub struct Dock {
     workspace: WeakEntity<Workspace>,
     is_open: bool,
     active_panel_index: Option<usize>,
+    /// Panels whose tab the user closed. They stay in the dock so the status bar button
+    /// can bring them back; dropping them from the workspace instead would leave nothing
+    /// to reopen them with.
+    closed_tabs: HashSet<EntityId>,
     focus_handle: FocusHandle,
     focus_follows_mouse: FocusFollowsMouse,
     pub(crate) serialized_dock: Option<DockData>,
@@ -483,6 +488,7 @@ impl Dock {
                 workspace: workspace.downgrade(),
                 panel_entries: Default::default(),
                 active_panel_index: None,
+                closed_tabs: HashSet::default(),
                 is_open: false,
                 focus_handle: focus_handle.clone(),
                 focus_follows_mouse: WorkspaceSettings::get_global(cx).focus_follows_mouse,
@@ -563,12 +569,9 @@ impl Dock {
         self.panel_entries
             .iter()
             .map(|entry| {
-                entry
-                    .panel
-                    .hosted_content_kind(cx)
-                    .unwrap_or_else(|| {
-                        crate::pane::ContentKind::panel(entry.panel.persistent_name())
-                    })
+                entry.panel.hosted_content_kind(cx).unwrap_or_else(|| {
+                    crate::pane::ContentKind::panel(entry.panel.persistent_name())
+                })
             })
             .collect()
     }
@@ -903,6 +906,12 @@ impl Dock {
     }
 
     pub fn activate_panel(&mut self, panel_ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        // Activating a panel is what reopens a closed tab: the status bar button and the
+        // panel's own toggle action both land here.
+        if let Some(entry) = self.panel_entries.get(panel_ix) {
+            self.closed_tabs.remove(&entry.panel.panel_id());
+        }
+
         if Some(panel_ix) != self.active_panel_index {
             // For the right dock, preserve the current width when switching tabs.
             let previous_size = if self.position == DockPosition::Right {
@@ -974,137 +983,174 @@ impl Dock {
         cx.notify();
     }
 
+    /// Hides a panel's tab. The panel keeps its place in the dock, so its status bar button
+    /// still toggles it and `activate_panel` brings the tab back.
+    fn close_tab(&mut self, panel_id: EntityId, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.closed_tabs.insert(panel_id) {
+            return;
+        }
+
+        let closed_active_tab = self
+            .active_panel_entry()
+            .is_some_and(|entry| entry.panel.panel_id() == panel_id);
+        if closed_active_tab {
+            // Something has to take over the dock, or it has nothing left to show.
+            match self.first_open_tab_index(cx) {
+                Some(index) => self.activate_panel(index, window, cx),
+                None => self.set_open(false, window, cx),
+            }
+        }
+        cx.notify();
+    }
+
+    /// The first panel whose tab is still open, for picking a successor when the active one
+    /// is closed.
+    fn first_open_tab_index(&self, cx: &App) -> Option<usize> {
+        self.panel_entries.iter().position(|entry| {
+            entry.panel.enabled(cx)
+                && !self.closed_tabs.contains(&entry.panel.panel_id())
+                && !right_dock_panel_is_hidden(entry.panel.persistent_name(), cx)
+        })
+    }
+
+    /// The tab strip that lets the right dock switch between panels.
+    ///
+    /// Returns `None` when there is nothing to switch between, so the dock does not reserve a
+    /// header's worth of height for a single tab.
     fn render_right_dock_tabs(
         &self,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    ) -> Option<TabBar> {
         let active_panel_index = self.active_panel_index;
         let is_open = self.is_open;
         let position = self.position;
-        let hidden_panels = &WorkspaceSettings::get_global(cx).hidden_right_dock_panels;
-
         let visible_entries: Vec<(usize, &PanelEntry)> = self
             .panel_entries
             .iter()
             .enumerate()
             .filter(|(_, entry)| {
-                if !entry.panel.enabled(cx) {
-                    return false;
-                }
-                let name = entry.panel.persistent_name().replace(' ', "");
-                !hidden_panels
-                    .iter()
-                    .any(|h| h.replace(' ', "").eq_ignore_ascii_case(&name))
+                entry.panel.enabled(cx)
+                    && !self.closed_tabs.contains(&entry.panel.panel_id())
+                    && !right_dock_panel_is_hidden(entry.panel.persistent_name(), cx)
             })
             .collect();
 
         if visible_entries.len() < 2 {
-            return h_flex().id("right-dock-tabs");
+            return None;
         }
 
         let visible_count = visible_entries.len();
+        let active_visible_index = visible_entries
+            .iter()
+            .position(|(panel_index, _)| is_open && active_panel_index == Some(*panel_index));
 
-        h_flex()
-            .id("right-dock-tabs")
-            .w_full()
-            .flex_shrink_0()
-            .overflow_hidden()
-            .children(visible_entries.into_iter().enumerate().map(
-                |(visible_index, (panel_index, entry))| {
-                    let icon = entry.panel.icon(window, cx);
-                    let panel_id = entry.panel.panel_id();
-                    let label = entry
-                        .panel
-                        .persistent_name()
-                        .strip_suffix("Panel")
-                        .unwrap_or_else(|| entry.panel.persistent_name());
-                    let is_active = is_open && active_panel_index == Some(panel_index);
+        // Disabled until a second agent panel is actually usable: both instances restore the
+        // same serialized thread, and the agent's actions all resolve to the first one.
+        // `agent::NewAgentTab` still works from the command palette for trying it out.
+        let new_agent_tab_button = IconButton::new("new-agent-tab", ui::IconName::Plus)
+            .icon_size(IconSize::Small)
+            .disabled(true)
+            .tooltip(Tooltip::text("New Agent Tab (not supported yet)"))
+            .on_click(|_, window, cx| {
+                window.dispatch_action(zed_actions::agent::NewAgentTab.boxed_clone(), cx);
+            });
 
-                    let tab_position = if visible_index == 0 {
-                        TabPosition::First
-                    } else if visible_index == visible_count - 1 {
-                        TabPosition::Last
-                    } else if is_active {
-                        TabPosition::Middle(std::cmp::Ordering::Equal)
-                    } else {
-                        let active_visible_index = visible_index;
-                        let _ = active_visible_index;
-                        TabPosition::Middle(std::cmp::Ordering::Greater)
-                    };
+        Some(
+            TabBar::segmented("right-dock-tabs")
+                .end_child(new_agent_tab_button)
+                .children(visible_entries.into_iter().enumerate().map(
+                    |(visible_index, (panel_index, entry))| {
+                        let icon = entry.panel.icon(window, cx);
+                        let panel_id = entry.panel.panel_id();
+                        let label = entry.panel.tab_label(window, cx);
+                        let is_active = is_open && active_panel_index == Some(panel_index);
 
-                    div()
-                        .id(("right-dock-tab-wrap", panel_index))
-                        .w(relative(1.0 / visible_count as f32))
-                        .min_w_0()
-                        .cursor_pointer()
-                        .child(
-                            Tab::new(("right-dock-tab", panel_index))
-                                .position(tab_position)
-                                .toggle_state(is_active)
-                                .start_slot::<AnyElement>(icon.map(|icon| {
-                                    Icon::new(icon)
-                                        .size(IconSize::Small)
-                                        .when(!is_active, |i| i.color(Color::Muted))
-                                        .into_any_element()
-                                }))
-                                .child(div().flex_1().truncate().child(label))
-                                .end_slot(
-                                    IconButton::new(
-                                        ("close-dock-tab", panel_index),
-                                        ui::IconName::Close,
-                                    )
-                                    .icon_size(IconSize::XSmall)
-                                    .on_click(cx.listener(
-                                        move |dock, _, window, cx| {
-                                            if is_active {
-                                                dock.set_open(false, window, cx);
-                                            }
-                                        },
-                                    )),
+                        let tab_position = if visible_index == 0 {
+                            TabPosition::First
+                        } else if visible_index == visible_count - 1 {
+                            TabPosition::Last
+                        } else {
+                            TabPosition::Middle(match active_visible_index {
+                                Some(active_visible_index) => {
+                                    visible_index.cmp(&active_visible_index)
+                                }
+                                None => std::cmp::Ordering::Greater,
+                            })
+                        };
+
+                        Tab::new(("right-dock-tab", panel_index))
+                            .position(tab_position)
+                            .full_width(true)
+                            .toggle_state(is_active)
+                            .start_slot::<AnyElement>(icon.map(|icon| {
+                                Icon::new(icon)
+                                    .size(IconSize::Small)
+                                    .when(!is_active, |i| i.color(Color::Muted))
+                                    .into_any_element()
+                            }))
+                            // The label takes the slack so the close button sits against the
+                            // tab's right edge rather than trailing the text in the middle.
+                            .child(
+                                h_flex().flex_1().min_w_0().justify_center().child(
+                                    Label::new(label)
+                                        .when(!is_active, |label| label.color(Color::Muted))
+                                        .truncate(),
                                 ),
-                        )
-                        .on_click(cx.listener(
-                            move |dock, _: &ClickEvent, window, cx| {
+                            )
+                            .end_slot(
+                                IconButton::new(
+                                    ("close-dock-tab", panel_index),
+                                    ui::IconName::Close,
+                                )
+                                .icon_size(IconSize::XSmall)
+                                .tooltip(Tooltip::text("Close Tab"))
+                                .on_click(cx.listener(
+                                    move |dock, _, window, cx| {
+                                        dock.close_tab(panel_id, window, cx);
+                                    },
+                                )),
+                            )
+                            .on_click(cx.listener(move |dock, _: &ClickEvent, window, cx| {
                                 dock.set_open(true, window, cx);
                                 dock.activate_panel(panel_index, window, cx);
                                 if let Some(panel) = dock.active_panel() {
                                     window.focus(&panel.panel_focus_handle(cx), cx);
                                 }
-                            },
-                        ))
-                        .on_drag(
-                            DraggedDockTab {
-                                source_position: position,
-                                panel_id,
-                            },
-                            |tab, _, _, cx| cx.new(|_| tab.clone()),
-                        )
-                        .drag_over::<DraggedDockTab>(move |tab, dragged, _, cx| {
-                            if dragged.source_position == DockPosition::Right
-                                && dragged.panel_id != panel_id
-                            {
-                                tab.bg(cx.theme().colors().drop_target_background)
-                                    .border_color(cx.theme().colors().drop_target_border)
-                                    .border_b_2()
-                            } else {
-                                tab
-                            }
-                        })
-                        .on_drop(cx.listener(
-                            move |dock, dragged: &DraggedDockTab, window, cx| {
-                                if dragged.source_position == DockPosition::Right {
-                                    dock.reorder_panel(
-                                        dragged.panel_id,
-                                        panel_index,
-                                        window,
-                                        cx,
-                                    );
+                            }))
+                            .on_drag(
+                                DraggedDockTab {
+                                    source_position: position,
+                                    panel_id,
+                                },
+                                |tab, _, _, cx| cx.new(|_| tab.clone()),
+                            )
+                            .drag_over::<DraggedDockTab>(move |tab, dragged, _, cx| {
+                                if dragged.source_position == DockPosition::Right
+                                    && dragged.panel_id != panel_id
+                                {
+                                    tab.bg(cx.theme().colors().drop_target_background)
+                                        .border_color(cx.theme().colors().drop_target_border)
+                                        .border_b_2()
+                                } else {
+                                    tab
                                 }
-                            },
-                        ))
-                },
-            ))
+                            })
+                            .on_drop(cx.listener(
+                                move |dock, dragged: &DraggedDockTab, window, cx| {
+                                    if dragged.source_position == DockPosition::Right {
+                                        dock.reorder_panel(
+                                            dragged.panel_id,
+                                            panel_index,
+                                            window,
+                                            cx,
+                                        );
+                                    }
+                                },
+                            ))
+                    },
+                )),
+        )
     }
 
     pub fn visible_panel(&self) -> Option<&Arc<dyn PanelHandle>> {
@@ -1371,7 +1417,7 @@ impl Render for Dock {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let dispatch_context = Self::dispatch_context();
         let right_dock_tabs = if self.position == DockPosition::Right {
-            Some(self.render_right_dock_tabs(window, cx).into_any_element())
+            self.render_right_dock_tabs(window, cx)
         } else {
             None
         };
@@ -1483,6 +1529,17 @@ impl Render for Dock {
     }
 }
 
+/// Whether `hidden_right_dock_panels` names this panel. Matching ignores case and spaces so
+/// the setting accepts a panel's `persistent_name` ("CollabPanel") and its label ("Collab
+/// Panel") interchangeably.
+fn right_dock_panel_is_hidden(persistent_name: &str, cx: &App) -> bool {
+    let name = persistent_name.replace(' ', "");
+    WorkspaceSettings::get_global(cx)
+        .hidden_right_dock_panels
+        .iter()
+        .any(|hidden| hidden.replace(' ', "").eq_ignore_ascii_case(&name))
+}
+
 impl PanelButtons {
     pub fn new(dock: Entity<Dock>, cx: &mut Context<Self>) -> Self {
         cx.observe(&dock, |_, _, cx| cx.notify()).detach();
@@ -1515,6 +1572,13 @@ impl Render for PanelButtons {
             .iter()
             .enumerate()
             .filter_map(|(i, entry)| {
+                // A panel hidden from the right dock's tab strip has no way to be shown,
+                // so its status bar button would only ever open an empty dock.
+                if dock_position == DockPosition::Right
+                    && right_dock_panel_is_hidden(entry.panel.persistent_name(), cx)
+                {
+                    return None;
+                }
                 let icon = entry.panel.icon(window, cx)?;
                 let icon_tooltip = entry
                     .panel

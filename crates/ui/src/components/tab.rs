@@ -35,6 +35,7 @@ pub struct Tab {
     selected: bool,
     position: TabPosition,
     close_side: TabCloseSide,
+    full_width: bool,
     start_slot: Option<AnyElement>,
     end_slot: Option<AnyElement>,
     children: SmallVec<[AnyElement; 2]>,
@@ -50,6 +51,7 @@ impl Tab {
             selected: false,
             position: TabPosition::First,
             close_side: TabCloseSide::End,
+            full_width: false,
             start_slot: None,
             end_slot: None,
             children: SmallVec::new(),
@@ -58,6 +60,16 @@ impl Tab {
 
     pub fn position(mut self, position: TabPosition) -> Self {
         self.position = position;
+        self
+    }
+
+    /// Makes the tab fill its parent's width and center its content.
+    ///
+    /// Without this a tab shrinks to its content, so a caller that sizes the tab through a
+    /// wrapper (`flex_1`, `w(relative(..))`) would paint the tab background over the label only
+    /// and let the parent's background show through the rest of the slot.
+    pub fn full_width(mut self, full_width: bool) -> Self {
+        self.full_width = full_width;
         self
     }
 
@@ -109,20 +121,25 @@ impl ParentElement for Tab {
 impl RenderOnce for Tab {
     #[allow(refining_impl_trait)]
     fn render(self, _: &mut Window, cx: &mut App) -> Stateful<Div> {
-        let (text_color, tab_bg, _tab_hover_bg, _tab_active_bg) = match self.selected {
+        let (text_color, tab_bg) = match self.selected {
             false => (
                 cx.theme().colors().text_muted,
                 cx.theme().colors().tab_inactive_background,
-                cx.theme().colors().ghost_element_hover,
-                cx.theme().colors().ghost_element_active,
             ),
             true => (
                 cx.theme().colors().text,
                 cx.theme().colors().tab_active_background,
-                cx.theme().colors().element_hover,
-                cx.theme().colors().element_active,
             ),
         };
+
+        // Only unselected tabs get pointer feedback: the selected tab is painted
+        // `tab_active_background`, which the themes deliberately set equal to the content
+        // background so the tab and the pane body read as one surface. Lightening it on hover
+        // would break that continuity, and there is nothing to activate on an active tab.
+        let (tab_hover_bg, tab_pressed_bg) = (
+            cx.theme().colors().ghost_element_hover,
+            cx.theme().colors().ghost_element_active,
+        );
 
         let (start_slot, end_slot) = {
             let start_slot = h_flex()
@@ -143,7 +160,12 @@ impl RenderOnce for Tab {
 
         self.div
             .h(Tab::container_height(cx))
+            .when(self.full_width, |this| this.w_full())
             .bg(tab_bg)
+            .when(!self.selected, |this| {
+                this.hover(|style| style.bg(tab_hover_bg))
+                    .active(|style| style.bg(tab_pressed_bg))
+            })
             .border_color(cx.theme().colors().border)
             .map(|this| match self.position {
                 TabPosition::First => {
@@ -171,7 +193,8 @@ impl RenderOnce for Tab {
                     .relative()
                     .h(Tab::content_height(cx))
                     .px(DynamicSpacing::Base04.px(cx))
-                    .gap(DynamicSpacing::Base04.rems(cx))
+                    .gap(DynamicSpacing::Base04.px(cx))
+                    .when(self.full_width, |this| this.w_full().justify_center())
                     .text_color(text_color)
                     .child(start_slot)
                     .children(self.children)

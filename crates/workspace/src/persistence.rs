@@ -2253,9 +2253,7 @@ impl WorkspaceDb {
             .get_pane_group(workspace_id, None)?
             .into_iter()
             .next()
-            .unwrap_or_else(|| {
-                SerializedPaneGroup::Pane(SerializedPane::new(vec![], true, 0))
-            }))
+            .unwrap_or_else(|| SerializedPaneGroup::Pane(SerializedPane::new(vec![], true, 0))))
     }
 
     fn get_pane_group(
@@ -2305,29 +2303,31 @@ impl WorkspaceDb {
                 ORDER BY position
         ))?((group_id, workspace_id))?
         .into_iter()
-        .map(|(group_id, axis, pane_id, active, pinned_count, flexes, accepts_kinds)| {
-            let maybe_pane = maybe!({ Some((pane_id?, active?, pinned_count?)) });
-            if let Some((group_id, axis)) = group_id.zip(axis) {
-                let flexes = flexes
-                    .map(|flexes: String| serde_json::from_str::<Vec<f32>>(&flexes))
-                    .transpose()?;
+        .map(
+            |(group_id, axis, pane_id, active, pinned_count, flexes, accepts_kinds)| {
+                let maybe_pane = maybe!({ Some((pane_id?, active?, pinned_count?)) });
+                if let Some((group_id, axis)) = group_id.zip(axis) {
+                    let flexes = flexes
+                        .map(|flexes: String| serde_json::from_str::<Vec<f32>>(&flexes))
+                        .transpose()?;
 
-                Ok(SerializedPaneGroup::Group {
-                    axis,
-                    children: self.get_pane_group(workspace_id, Some(group_id))?,
-                    flexes,
-                })
-            } else if let Some((pane_id, active, pinned_count)) = maybe_pane {
-                Ok(SerializedPaneGroup::Pane(SerializedPane::with_kinds(
-                    self.get_items(pane_id)?,
-                    active,
-                    pinned_count,
-                    deserialize_accepts_kinds(accepts_kinds),
-                )))
-            } else {
-                bail!("Pane Group Child was neither a pane group or a pane");
-            }
-        })
+                    Ok(SerializedPaneGroup::Group {
+                        axis,
+                        children: self.get_pane_group(workspace_id, Some(group_id))?,
+                        flexes,
+                    })
+                } else if let Some((pane_id, active, pinned_count)) = maybe_pane {
+                    Ok(SerializedPaneGroup::Pane(SerializedPane::with_kinds(
+                        self.get_items(pane_id)?,
+                        active,
+                        pinned_count,
+                        deserialize_accepts_kinds(accepts_kinds),
+                    )))
+                } else {
+                    bail!("Pane Group Child was neither a pane group or a pane");
+                }
+            },
+        )
         // Filter out panes and pane groups which don't have any children or items.
         // A pane that declares content kinds is kept even when empty: it is a layout slot,
         // and dropping it would lose the destination for its kind.

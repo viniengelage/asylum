@@ -118,11 +118,8 @@ impl Render for StatusBar {
             .p(DynamicSpacing::Base04.rems(cx))
             .mx_1()
             .mb_1()
-            .rounded_lg()
-            .border_1()
-            .border_color(cx.theme().colors().border)
+            .workspace_card(cx)
             .bg(cx.theme().colors().panel_background)
-            .overflow_hidden()
             .child(self.render_left_tools(cx))
             .child(self.render_right_tools(cx))
     }
