@@ -1874,7 +1874,12 @@ impl Buffer {
                 language.clone(),
                 sync_parse_timeout,
             ) {
-                self.did_finish_parsing(syntax_snapshot, Some(Duration::from_millis(300)), cx);
+                self.did_finish_parsing(
+                    syntax_snapshot,
+                    Some(Duration::from_millis(300)),
+                    false,
+                    cx,
+                );
                 self.reparse = None;
                 return;
             }
@@ -1906,7 +1911,7 @@ impl Buffer {
                 let parse_again = this.version.changed_since(&parsed_version)
                     || language_registry_changed()
                     || grammar_changed();
-                this.did_finish_parsing(new_syntax_map, None, cx);
+                this.did_finish_parsing(new_syntax_map, None, parse_again, cx);
                 this.reparse = None;
                 if parse_again {
                     this.reparse(cx, false);
@@ -1920,13 +1925,21 @@ impl Buffer {
         &mut self,
         syntax_snapshot: SyntaxSnapshot,
         block_budget: Option<Duration>,
+        parse_again: bool,
         cx: &mut Context<Self>,
     ) {
         self.non_text_state_update_count += 1;
         self.syntax_map.lock().did_parse(syntax_snapshot);
         self.was_changed();
-        self.request_autoindent(cx, block_budget);
-        self.parse_status.0.send(ParseStatus::Idle).unwrap();
+
+        let parsing_complete = !parse_again || self.language.is_none();
+        if self.language.is_none() {
+            self.syntax_map.lock().clear(&self.text);
+        }
+        if parsing_complete {
+            self.request_autoindent(cx, block_budget);
+            self.parse_status.0.send(ParseStatus::Idle).unwrap();
+        }
         Self::invalidate_tree_sitter_data(&mut self.tree_sitter_data, &self.text.snapshot());
         cx.emit(BufferEvent::Reparsed);
         cx.notify();
@@ -2880,6 +2893,7 @@ impl Buffer {
                 .map(|((ix, (range, _)), new_text)| {
                     let new_text_length = new_text.len();
                     let old_start = range.start.to_point(&before_edit);
+                    let old_end = range.end.to_point(&before_edit);
                     let new_start = (delta + range.start as isize) as usize;
                     let range_len = range.end - range.start;
                     delta += new_text_length as isize - range_len as isize;
@@ -2898,8 +2912,7 @@ impl Buffer {
                     }
 
                     if !new_text.contains('\n')
-                        && (old_start.column + (range_len as u32) < old_line_end
-                            || old_line_end == old_line_start)
+                        && (old_end.row == old_start.row || old_line_end == old_line_start)
                     {
                         first_line_is_new = false;
                     }
@@ -3473,7 +3486,7 @@ impl Buffer {
         self.text.fast_forward(edited.text);
         if edited.snapshot.language == self.language {
             self.reparse = None;
-            self.did_finish_parsing(edited.snapshot.syntax, None, cx);
+            self.did_finish_parsing(edited.snapshot.syntax, None, false, cx);
             if did_edit {
                 cx.emit(BufferEvent::Edited {
                     source: BufferEditSource::User,
@@ -5081,12 +5094,26 @@ impl BufferSnapshot {
         T: 'a + Clone + ToOffset,
         O: 'a + FromAnchor,
     {
+        self.diagnostic_entries_in_range(search_range, reversed)
+            .map(|entry| entry.resolve(self))
+    }
+
+    /// Returns the stored entries that intersect the given range, with their ranges
+    /// and related information left in the buffer's own coordinates.
+    pub fn diagnostic_entries_in_range<'a, T>(
+        &'a self,
+        search_range: Range<T>,
+        reversed: bool,
+    ) -> impl 'a + Iterator<Item = &'a DiagnosticEntry<Anchor>>
+    where
+        T: 'a + Clone + ToOffset,
+    {
         let mut iterators: Vec<_> = self
             .diagnostics
             .iter()
             .map(|(_, collection)| {
                 collection
-                    .range::<T, text::Anchor>(search_range.clone(), self, true, reversed)
+                    .entries_in_range::<T>(search_range.clone(), self, true, reversed)
                     .peekable()
             })
             .collect();
@@ -5107,15 +5134,7 @@ impl BufferSnapshot {
                         .then(a.diagnostic.group_id.cmp(&b.diagnostic.group_id));
                     if reversed { cmp.reverse() } else { cmp }
                 })?;
-            iterators[next_ix]
-                .next()
-                .map(
-                    |DiagnosticEntryRef { range, diagnostic }| DiagnosticEntryRef {
-                        diagnostic,
-                        range: FromAnchor::from_anchor(&range.start, self)
-                            ..FromAnchor::from_anchor(&range.end, self),
-                    },
-                )
+            iterators[next_ix].next()
         })
     }
 

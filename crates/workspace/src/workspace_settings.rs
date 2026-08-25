@@ -40,12 +40,25 @@ pub struct WorkspaceSettings {
     pub use_system_window_tabs: bool,
     pub card_gap: f32,
     pub unified_panes: bool,
+    pub fullscreen_mode: settings::FullscreenMode,
     pub zoomed_padding: bool,
     pub window_decorations: settings::WindowDecorations,
     pub focus_follows_mouse: FocusFollowsMouse,
     /// List of panel names to hide from the right dock tab bar.
     /// Example: `["CollabPanel", "OutlinePanel"]`
     pub hidden_right_dock_panels: Vec<String>,
+}
+
+#[cfg(target_os = "macos")]
+pub fn closing_last_window_quits_app(cx: &App) -> bool {
+    WorkspaceSettings::get_global(cx)
+        .on_last_window_closed
+        .is_quit_app()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn closing_last_window_quits_app(_cx: &App) -> bool {
+    true
 }
 
 #[derive(Copy, Clone, Deserialize)]
@@ -87,7 +100,7 @@ impl Settings for WorkspaceSettings {
         Self {
             active_pane_modifiers: ActivePanelModifiers {
                 border_size: Some(
-                    workspace
+                    *workspace
                         .active_pane_modifiers
                         .unwrap()
                         .border_size
@@ -133,6 +146,7 @@ impl Settings for WorkspaceSettings {
             use_system_window_tabs: workspace.use_system_window_tabs.unwrap(),
             card_gap: workspace.card_gap.unwrap_or(8.0),
             unified_panes: workspace.unified_panes.unwrap_or(false),
+            fullscreen_mode: workspace.fullscreen_mode.unwrap(),
             zoomed_padding: workspace.zoomed_padding.unwrap(),
             window_decorations: workspace.window_decorations.unwrap(),
             focus_follows_mouse: FocusFollowsMouse {

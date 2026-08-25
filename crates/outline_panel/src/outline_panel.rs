@@ -2283,7 +2283,7 @@ impl OutlinePanel {
     ) -> Stateful<Div> {
         let item_id = ElementId::from(SharedString::from(format!(
             "{:?}|{:?}",
-            outline.range, &outline.text,
+            outline.range, outline.text,
         )));
 
         let label_element = outline::render_item(
@@ -6882,6 +6882,12 @@ outline: struct OutlineEntryExcerpt
             project_search::init(cx);
             buffer_search::init(cx);
             super::init(cx);
+
+            SettingsStore::update_global(cx, |store, cx| {
+                store.update_user_settings(cx, |settings| {
+                    settings.project.worktree.file_scan_depth = Some(0);
+                });
+            });
         });
     }
 
