@@ -915,6 +915,22 @@ pub mod preview {
     }
 }
 
+/// Declared here rather than in `web_preview` so crates that only need to ask for a page —
+/// the project panel, for one — do not have to depend on the browser itself.
+pub mod web_preview {
+    use gpui::Action;
+    use schemars::JsonSchema;
+    use serde::Deserialize;
+
+    /// Opens a URL in the built-in browser.
+    #[derive(Clone, PartialEq, Deserialize, JsonSchema, Action)]
+    #[action(namespace = web_preview)]
+    #[serde(deny_unknown_fields)]
+    pub struct OpenUrlInWebPreview {
+        pub url: String,
+    }
+}
+
 pub mod agents_sidebar {
     use gpui::{Action, actions};
     use schemars::JsonSchema;

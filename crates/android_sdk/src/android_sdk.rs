@@ -5,13 +5,13 @@
 //! the emulator. Everything lives under `paths::android_dir()`, so
 //! uninstalling is a matter of deleting that directory.
 
-use anyhow::{Context as _, Result};
+use anyhow::{Context as _, Result, anyhow};
 use async_compression::futures::bufread::GzipDecoder;
 use async_tar::Archive;
 use futures::channel::mpsc;
 use futures::{AsyncReadExt as _, AsyncWriteExt as _, SinkExt as _, StreamExt as _};
 use gpui::{
-    AppContext as _, AsyncApp, Context, Keystroke, RenderImage, SharedString, Task, WeakEntity,
+    App, AppContext as _, AsyncApp, Context, Keystroke, RenderImage, SharedString, Task, WeakEntity,
 };
 use http_client::HttpClient;
 use smol::io::BufReader;
@@ -44,6 +44,9 @@ const GRPC_STREAM_MAX_HEIGHT: u32 = 1200;
 /// After this many gRPC attempts that produced no frame, fall back to the
 /// slower `screencap` streaming (e.g. stale discovery file, gRPC disabled).
 const GRPC_STREAM_MAX_FAILURES: u32 = 3;
+/// Keycodes from `android.view.KeyEvent`.
+pub const KEYCODE_HOME: u32 = 3;
+const KEYCODE_COPY: u32 = 278;
 
 fn jdk_url() -> &'static str {
     if std::env::consts::ARCH == "aarch64" {
@@ -543,6 +546,113 @@ impl AndroidSdkManager {
                 self.send_input(vec!["text".into(), escape_adb_text(&text)], cx)
             }
         }
+    }
+
+    /// The serial of the running emulator, if there is one.
+    pub fn running_serial(&self) -> Option<&str> {
+        match &self.state {
+            AndroidSdkState::EmulatorRunning { serial } => Some(serial),
+            _ => None,
+        }
+    }
+
+    /// Captures the emulator screen to a PNG file and resolves with its path.
+    pub fn screenshot(&self, cx: &App) -> Task<Result<PathBuf>> {
+        let Some(serial) = self.running_serial().map(str::to_string) else {
+            return Task::ready(Err(anyhow!("nenhum emulador Android em execução")));
+        };
+        cx.background_spawn(async move {
+            // `exec-out` keeps the PNG bytes binary-clean, unlike `shell`, which would
+            // translate line endings.
+            let png = run_adb(&serial, &["exec-out", "screencap", "-p"]).await?;
+            anyhow::ensure!(!png.is_empty(), "screencap não retornou nenhuma imagem");
+            let path = std::env::temp_dir().join("zed_emulator_screenshot.png");
+            smol::fs::write(&path, png)
+                .await
+                .with_context(|| format!("não foi possível gravar {}", path.display()))?;
+            Ok(path)
+        })
+    }
+
+    /// Force-stops and relaunches the given package's launcher activity.
+    pub fn launch_package(&self, package: String, cx: &App) -> Task<Result<()>> {
+        let Some(serial) = self.running_serial().map(str::to_string) else {
+            return Task::ready(Err(anyhow!("nenhum emulador Android em execução")));
+        };
+        cx.background_spawn(async move {
+            // Stopping first is best-effort: the app may simply not be running.
+            run_adb(&serial, &["shell", "am", "force-stop", &package])
+                .await
+                .log_err();
+            run_adb(
+                &serial,
+                &[
+                    "shell",
+                    "monkey",
+                    "-p",
+                    &package,
+                    "-c",
+                    "android.intent.category.LAUNCHER",
+                    "1",
+                ],
+            )
+            .await?;
+            Ok(())
+        })
+    }
+
+    /// Moves the emulator's simulated GPS position.
+    pub fn set_location(&self, latitude: f64, longitude: f64, cx: &App) -> Task<Result<()>> {
+        let Some(serial) = self.running_serial().map(str::to_string) else {
+            return Task::ready(Err(anyhow!("nenhum emulador Android em execução")));
+        };
+        cx.background_spawn(async move {
+            // `geo fix` takes longitude before latitude, unlike every other API here.
+            // `adb emu` resolves the emulator console auth token on its own.
+            run_adb(
+                &serial,
+                &[
+                    "emu",
+                    "geo",
+                    "fix",
+                    &longitude.to_string(),
+                    &latitude.to_string(),
+                ],
+            )
+            .await?;
+            Ok(())
+        })
+    }
+
+    /// Types `text` into whatever the device has focused, which is what pasting into the
+    /// device looks like from the host's side.
+    pub fn paste_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        if text.is_empty() {
+            return;
+        }
+        self.send_input(vec!["text".into(), escape_adb_text(text)], cx);
+    }
+
+    /// Copies on the device and resolves with the device clipboard so the host can mirror
+    /// it. Reading the clipboard needs `cmd clipboard`, which Android denies to a shell in
+    /// the background on API 29+, so the read half is best-effort and resolves to `None`.
+    pub fn copy_from_device(&mut self, cx: &mut Context<Self>) -> Task<Option<String>> {
+        self.send_keyevent(KEYCODE_COPY, cx);
+        let Some(serial) = self.running_serial().map(str::to_string) else {
+            return Task::ready(None);
+        };
+        cx.background_spawn(async move {
+            match run_adb(&serial, &["shell", "cmd", "clipboard", "get-text"]).await {
+                Ok(stdout) => {
+                    let text = String::from_utf8_lossy(&stdout).trim_end().to_string();
+                    (!text.is_empty()).then_some(text)
+                }
+                Err(error) => {
+                    log::warn!("não foi possível ler o clipboard do device: {error:#}");
+                    None
+                }
+            }
+        })
     }
 
     fn send_input(&mut self, arguments: Vec<String>, cx: &mut Context<Self>) {
@@ -1790,6 +1900,26 @@ async fn stream_screen_frames(
             return Ok(());
         }
     }
+}
+
+/// Runs `adb -s <serial> <arguments>` and returns its stdout.
+async fn run_adb(serial: &str, arguments: &[&str]) -> Result<Vec<u8>> {
+    let paths = AndroidPaths::new();
+    let mut command = smol::process::Command::new(paths.adb());
+    command.arg("-s").arg(serial).args(arguments);
+    apply_env(&mut command, &paths, None);
+    command.stdin(Stdio::null());
+    let output = command
+        .output()
+        .await
+        .with_context(|| format!("não foi possível executar adb {}", arguments.join(" ")))?;
+    anyhow::ensure!(
+        output.status.success(),
+        "adb {} falhou: {}",
+        arguments.join(" "),
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    Ok(output.stdout)
 }
 
 async fn adb_devices(paths: &AndroidPaths) -> Result<Vec<String>> {

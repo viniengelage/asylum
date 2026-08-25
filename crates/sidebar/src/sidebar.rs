@@ -1,4 +1,7 @@
+mod device_location_modal;
 mod thread_switcher;
+
+use device_location_modal::{DeviceLocation, DeviceLocationModal};
 
 use acp_thread::ThreadStatus;
 use action_log::DiffStats;
@@ -32,11 +35,12 @@ use feature_flags::{
 use fs::Fs;
 
 use gpui::{
-    Action as _, AnyElement, App, Bounds, ClickEvent, Context, DismissEvent, Entity, EntityId,
-    FocusHandle, Focusable, Hsla, KeyContext, KeyDownEvent, ListState, Modifiers, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, Pixels, Point, Render, SharedString,
-    StyledImage as _, Task, TaskExt, WeakEntity, Window, WindowBackgroundAppearance, WindowHandle,
-    canvas, img, linear_color_stop, linear_gradient, list, prelude::*, px,
+    Action as _, AnyElement, App, AsyncApp, Bounds, ClickEvent, ClipboardItem, Context,
+    DismissEvent, Entity, EntityId, FocusHandle, Focusable, Hsla, KeyContext, KeyDownEvent,
+    ListState, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit,
+    Pixels, Point, Render, SharedString, StyledImage as _, Task, TaskExt, WeakEntity, Window,
+    WindowBackgroundAppearance, WindowHandle, canvas, img, linear_color_stop, linear_gradient,
+    list, prelude::*, px,
 };
 use itertools::Itertools;
 use language_model::LanguageModelRegistry;
@@ -114,6 +118,19 @@ gpui::actions!(
     ]
 );
 
+gpui::actions!(
+    devices,
+    [
+        /// Pastes the clipboard into the focused field on the device.
+        PasteIntoDevice,
+        /// Copies the device's current selection.
+        CopyFromDevice,
+    ]
+);
+
+/// How often the host and simulator pasteboards are reconciled. Slow enough to be free, fast
+/// enough that a copy on one side is there by the time the user reaches for paste on the other.
+const IOS_PASTEBOARD_SYNC_INTERVAL: Duration = Duration::from_millis(750);
 const DEFAULT_WIDTH: Pixels = px(300.0);
 const MIN_WIDTH: Pixels = px(200.0);
 const MAX_WIDTH: Pixels = px(800.0);
@@ -854,10 +871,21 @@ pub struct Sidebar {
     selected_ios_device_udid: Option<String>,
     ios_native_subview_id: Option<u64>,
     ios_native_subview_udid: Option<String>,
+    ios_native_subview_hidden: bool,
+    /// Bumped by every hide, so a sync deferred by a frame drawn before the hide does not
+    /// put the simulator back on screen after the panel is gone.
+    ios_view_hide_epoch: u64,
+    observed_devices_dock: Option<gpui::EntityId>,
+    devices_dock_subscription: Option<gpui::Subscription>,
     ios_simulator_bounds: Option<Bounds<Pixels>>,
     ios_simulator_error: Option<SharedString>,
     ios_failed_device_udid: Option<String>,
     ios_device_discovery_task: Option<Task<()>>,
+    ios_pasteboard_sync_task: Option<Task<()>>,
+    ios_pasteboard_sync_udid: Option<String>,
+    device_settings_menu_handle: PopoverMenuHandle<ContextMenu>,
+    /// Prefills the location modal with whatever was applied last.
+    device_location: Option<DeviceLocation>,
     restoring_tasks: HashMap<agent_ui::ThreadId, Task<()>>,
     recent_projects_popover_handle: PopoverMenuHandle<SidebarRecentProjects>,
     project_header_menu_handles: HashMap<usize, PopoverMenuHandle<ContextMenu>>,
@@ -905,6 +933,7 @@ impl Sidebar {
                     this.sync_active_entry_from_active_workspace(cx);
                     this.replace_archived_panel_thread(window, cx);
                     this.schedule_update_entries(false, cx);
+                    this.observe_devices_dock(window, cx);
                 }
                 MultiWorkspaceEvent::WorkspaceAdded(workspace) => {
                     this.subscribe_to_workspace(workspace, window, cx);
@@ -1009,10 +1038,18 @@ impl Sidebar {
             selected_ios_device_udid: None,
             ios_native_subview_id: None,
             ios_native_subview_udid: None,
+            ios_native_subview_hidden: false,
+            ios_view_hide_epoch: 0,
+            observed_devices_dock: None,
+            devices_dock_subscription: None,
             ios_simulator_bounds: None,
             ios_simulator_error: None,
             ios_failed_device_udid: None,
             ios_device_discovery_task: None,
+            ios_pasteboard_sync_task: None,
+            ios_pasteboard_sync_udid: None,
+            device_settings_menu_handle: PopoverMenuHandle::default(),
+            device_location: None,
             restoring_tasks: HashMap::new(),
             recent_projects_popover_handle: PopoverMenuHandle::default(),
             project_header_menu_handles: HashMap::new(),
@@ -1036,6 +1073,7 @@ impl Sidebar {
         sidebar.width = px(420.0);
         sidebar.devices_only = true;
         sidebar.view = SidebarView::Devices;
+        sidebar.observe_devices_dock(window, cx);
         sidebar
     }
 
@@ -7410,191 +7448,9 @@ impl Sidebar {
         let on_right = self.side(cx) == SidebarSide::Right;
 
         v_flex()
-            .when(
-                is_devices && self.device_platform == DevicePlatform::Ios,
-                |this| {
-                    let toolbar_disabled = self.ios_device_discovery_task.is_some()
-                        || self.selected_ios_device_udid.is_none();
-                    this.child(
-                        h_flex()
-                            .p_1()
-                            .gap_1()
-                            .justify_center()
-                            .border_t_1()
-                            .border_color(cx.theme().colors().border)
-                            .child(
-                                IconButton::new("open-installed-ios-app", IconName::ArrowUpRight)
-                                    .icon_size(IconSize::Medium)
-                                    .tooltip(Tooltip::text("Abrir app iOS instalado"))
-                                    .disabled(toolbar_disabled)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        if let Some(workspace) = this.active_workspace(cx) {
-                                            this.launch_installed_expo_ios(&workspace, window, cx);
-                                        }
-                                    })),
-                            )
-                            .child(
-                                IconButton::new("ios-home", IconName::Circle)
-                                    .icon_size(IconSize::Medium)
-                                    .tooltip(Tooltip::text("Home"))
-                                    .disabled(toolbar_disabled)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        if let Some(workspace) = this.active_workspace(cx) {
-                                            this.return_ios_simulator_to_home(
-                                                &workspace, window, cx,
-                                            );
-                                        }
-                                    })),
-                            )
-                            .child(
-                                IconButton::new("build-ios-app", IconName::ToolHammer)
-                                    .icon_size(IconSize::Medium)
-                                    .tooltip(Tooltip::text("Compilar app iOS"))
-                                    .disabled(toolbar_disabled)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        if let Some(workspace) = this.active_workspace(cx) {
-                                            this.build_expo_ios(&workspace, window, cx);
-                                        }
-                                    })),
-                            )
-                            .child(
-                                IconButton::new("start-expo-ios", IconName::PlayFilled)
-                                    .icon_size(IconSize::Medium)
-                                    .tooltip(Tooltip::text("Iniciar Expo"))
-                                    .disabled(toolbar_disabled)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        if let Some(workspace) = this.active_workspace(cx) {
-                                            this.start_expo_ios(&workspace, window, cx);
-                                        }
-                                    })),
-                            )
-                            .child(
-                                IconButton::new("paste-ios", IconName::Attach)
-                                    .icon_size(IconSize::Medium)
-                                    .tooltip(Tooltip::text("Colar (Cmd+V)"))
-                                    .disabled(toolbar_disabled)
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.paste_to_ios_simulator(cx);
-                                    })),
-                            )
-                            .child(
-                                IconButton::new("screenshot-ios", IconName::Image)
-                                    .icon_size(IconSize::Medium)
-                                    .tooltip(Tooltip::text("Screenshot"))
-                                    .disabled(toolbar_disabled)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        if let Some(workspace) = this.active_workspace(cx) {
-                                            this.screenshot_ios_simulator(&workspace, window, cx);
-                                        }
-                                    })),
-                            )
-                            .child(
-                                IconButton::new("shutdown-ios-simulator", IconName::Power)
-                                    .icon_size(IconSize::Medium)
-                                    .tooltip(Tooltip::text("Desligar simulador"))
-                                    .disabled(toolbar_disabled)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.shutdown_ios_simulator(window, cx);
-                                    })),
-                            ),
-                    )
-                },
-            )
-            .when(
-                is_devices && self.device_platform == DevicePlatform::Android,
-                |this| {
-                    let emulator_running = self
-                        .android_sdk_manager
-                        .as_ref()
-                        .map(|m| {
-                            matches!(m.read(cx).state(), AndroidSdkState::EmulatorRunning { .. })
-                        })
-                        .unwrap_or(false);
-                    this.child(
-                        h_flex()
-                            .p_1()
-                            .gap_1()
-                            .justify_center()
-                            .border_t_1()
-                            .border_color(cx.theme().colors().border)
-                            .child(
-                                IconButton::new("android-back", IconName::ArrowLeft)
-                                    .icon_size(IconSize::Medium)
-                                    .tooltip(Tooltip::text("Voltar"))
-                                    .disabled(!emulator_running)
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.with_android_sdk_manager(cx, |manager, cx| {
-                                            manager.send_keyevent(4, cx)
-                                        });
-                                    })),
-                            )
-                            .child(
-                                IconButton::new("android-home", IconName::Circle)
-                                    .icon_size(IconSize::Medium)
-                                    .tooltip(Tooltip::text("Home"))
-                                    .disabled(!emulator_running)
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.with_android_sdk_manager(cx, |manager, cx| {
-                                            manager.send_keyevent(3, cx)
-                                        });
-                                    })),
-                            )
-                            .child(
-                                IconButton::new("android-recents", IconName::Blocks)
-                                    .icon_size(IconSize::Medium)
-                                    .tooltip(Tooltip::text("Apps recentes"))
-                                    .disabled(!emulator_running)
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.with_android_sdk_manager(cx, |manager, cx| {
-                                            manager.send_keyevent(187, cx)
-                                        });
-                                    })),
-                            )
-                            .child(
-                                IconButton::new("android-stop", IconName::Power)
-                                    .icon_size(IconSize::Medium)
-                                    .tooltip(Tooltip::text("Parar emulador"))
-                                    .disabled(!emulator_running)
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.with_android_sdk_manager(cx, |manager, cx| {
-                                            manager.stop_emulator(cx)
-                                        });
-                                    })),
-                            )
-                            .child(
-                                IconButton::new("build-android-app", IconName::ToolHammer)
-                                    .icon_size(IconSize::Medium)
-                                    .tooltip(Tooltip::text("Compilar app Android"))
-                                    .disabled(!emulator_running)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        if let Some(workspace) = this.active_workspace(cx) {
-                                            this.build_expo_android(&workspace, window, cx);
-                                        }
-                                    })),
-                            )
-                            .child(
-                                IconButton::new("start-expo-android", IconName::PlayFilled)
-                                    .icon_size(IconSize::Medium)
-                                    .tooltip(Tooltip::text("Iniciar Expo"))
-                                    .disabled(!emulator_running)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        if let Some(workspace) = this.active_workspace(cx) {
-                                            this.start_expo_android(&workspace, window, cx);
-                                        }
-                                    })),
-                            )
-                            .child(
-                                IconButton::new("reload-android", IconName::RotateCw)
-                                    .icon_size(IconSize::Medium)
-                                    .tooltip(Tooltip::text("Reload / Dev Menu"))
-                                    .disabled(!emulator_running)
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.reload_android_app(cx);
-                                    })),
-                            ),
-                    )
-                },
-            )
+            .when(is_devices, |this| {
+                this.child(self.render_device_toolbar(cx))
+            })
             .when(!self.devices_only, |this| {
                 this.child(
                     h_flex()
@@ -7630,6 +7486,318 @@ impl Sidebar {
         self.multi_workspace
             .upgrade()
             .map(|w| w.read(cx).workspace().clone())
+    }
+
+    /// One toolbar serves both platforms: same tools, same order, same icons, so switching
+    /// tabs never moves a control. That constrains it to tools both platforms can actually
+    /// perform — back, app switcher and dev menu are Android-only and so are absent.
+    fn render_device_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let is_android = self.device_platform == DevicePlatform::Android;
+        let device_ready = if is_android {
+            self.android_sdk_manager.as_ref().is_some_and(|manager| {
+                matches!(
+                    manager.read(cx).state(),
+                    AndroidSdkState::EmulatorRunning { .. }
+                )
+            })
+        } else {
+            self.ios_device_discovery_task.is_none() && self.selected_ios_device_udid.is_some()
+        };
+
+        h_flex()
+            .p_1()
+            .gap_1()
+            .justify_between()
+            .border_t_1()
+            .border_color(cx.theme().colors().border)
+            .child(
+                h_flex()
+                    .gap_1()
+                    // The panel can be dragged down to `MIN_WIDTH`, which is narrower than the
+                    // row of tools; wrapping keeps every tool reachable instead of clipping
+                    // whichever ones fall off the end.
+                    .flex_wrap()
+                    .child(
+                        device_toolbar_button(
+                            "device-home",
+                            IconName::Circle,
+                            "Home",
+                            device_ready,
+                        )
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                if is_android {
+                                    this.with_android_sdk_manager(cx, |manager, cx| {
+                                        manager.send_keyevent(android_sdk::KEYCODE_HOME, cx)
+                                    });
+                                } else if let Some(workspace) = this.active_workspace(cx) {
+                                    this.return_ios_simulator_to_home(&workspace, window, cx);
+                                }
+                            },
+                        )),
+                    )
+                    .child(
+                        device_toolbar_button(
+                            "device-open-installed-app",
+                            IconName::ArrowUpRight,
+                            "Abrir app instalado",
+                            device_ready,
+                        )
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                let Some(workspace) = this.active_workspace(cx) else {
+                                    return;
+                                };
+                                if is_android {
+                                    this.launch_installed_expo_android(&workspace, cx);
+                                } else {
+                                    this.launch_installed_expo_ios(&workspace, window, cx);
+                                }
+                            },
+                        )),
+                    )
+                    .child(
+                        device_toolbar_button(
+                            "device-build",
+                            IconName::ToolHammer,
+                            "Compilar app",
+                            device_ready,
+                        )
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                let Some(workspace) = this.active_workspace(cx) else {
+                                    return;
+                                };
+                                if is_android {
+                                    this.build_expo_android(&workspace, window, cx);
+                                } else {
+                                    this.build_expo_ios(&workspace, window, cx);
+                                }
+                            },
+                        )),
+                    )
+                    .child(
+                        device_toolbar_button(
+                            "device-start-expo",
+                            IconName::PlayFilled,
+                            "Iniciar Expo",
+                            device_ready,
+                        )
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                let Some(workspace) = this.active_workspace(cx) else {
+                                    return;
+                                };
+                                if is_android {
+                                    this.start_expo_android(&workspace, window, cx);
+                                } else {
+                                    this.start_expo_ios(&workspace, window, cx);
+                                }
+                            },
+                        )),
+                    )
+                    .child(
+                        device_toolbar_button(
+                            "device-screenshot",
+                            IconName::Image,
+                            "Screenshot",
+                            device_ready,
+                        )
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                let Some(workspace) = this.active_workspace(cx) else {
+                                    return;
+                                };
+                                if is_android {
+                                    this.screenshot_android_emulator(&workspace, cx);
+                                } else {
+                                    this.screenshot_ios_simulator(&workspace, window, cx);
+                                }
+                            },
+                        )),
+                    )
+                    .child(
+                        device_toolbar_button(
+                            "device-copy-id",
+                            IconName::Copy,
+                            "Copiar ID do device",
+                            device_ready && self.device_identifier(cx).is_some(),
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.copy_device_identifier(cx);
+                        })),
+                    )
+                    .child(
+                        device_toolbar_button(
+                            "device-power",
+                            IconName::Power,
+                            "Desligar device",
+                            device_ready,
+                        )
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                if is_android {
+                                    this.with_android_sdk_manager(cx, |manager, cx| {
+                                        manager.stop_emulator(cx)
+                                    });
+                                } else {
+                                    this.shutdown_ios_simulator(window, cx);
+                                }
+                            },
+                        )),
+                    ),
+            )
+            .child(self.render_device_settings_menu(device_ready, cx))
+    }
+
+    /// How the platform's own tools address the running device: the adb serial on Android
+    /// (`emulator-5554`), the simulator UDID on iOS. That is what a command line pasted next
+    /// to `adb -s` or `xcrun simctl` expects.
+    fn device_identifier(&self, cx: &App) -> Option<String> {
+        match self.device_platform {
+            DevicePlatform::Android => self
+                .android_sdk_manager
+                .as_ref()
+                .and_then(|manager| manager.read(cx).running_serial().map(str::to_string)),
+            DevicePlatform::Ios => self.selected_ios_device_udid.clone(),
+        }
+    }
+
+    fn copy_device_identifier(&mut self, cx: &mut Context<Self>) {
+        let Some(identifier) = self.device_identifier(cx) else {
+            return;
+        };
+        cx.write_to_clipboard(ClipboardItem::new_string(identifier.clone()));
+
+        let Some(workspace) = self.active_workspace(cx) else {
+            return;
+        };
+        workspace.update(cx, |workspace, cx| {
+            show_device_toast(workspace, format!("ID do device copiado: {identifier}"), cx);
+        });
+    }
+
+    /// Device settings, kept apart from the controls on the left because they configure the
+    /// device rather than act on it.
+    fn render_device_settings_menu(
+        &self,
+        device_ready: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let this = cx.weak_entity();
+        PopoverMenu::new("device-settings-menu")
+            .menu(move |window, cx| {
+                let this = this.clone();
+                Some(ContextMenu::build(window, cx, move |menu, _window, _cx| {
+                    menu.item(
+                        ContextMenuEntry::new("Change user location")
+                            .icon(IconName::LocationEdit)
+                            .handler(move |window, cx| {
+                                this.update(cx, |this, cx| {
+                                    this.show_device_location_modal(window, cx);
+                                })
+                                .log_err();
+                            }),
+                    )
+                }))
+            })
+            .trigger_with_tooltip(
+                IconButton::new("device-settings", IconName::Settings)
+                    .icon_size(IconSize::Medium)
+                    .disabled(!device_ready),
+                Tooltip::text("Configurações do device"),
+            )
+            .anchor(gpui::Anchor::BottomRight)
+            .with_handle(self.device_settings_menu_handle.clone())
+    }
+
+    fn show_device_location_modal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(workspace) = self.active_workspace(cx) else {
+            return;
+        };
+        let initial = self.device_location;
+        let this = cx.weak_entity();
+        workspace.update(cx, |workspace, cx| {
+            workspace.toggle_modal(window, cx, |window, cx| {
+                let this = this.clone();
+                DeviceLocationModal::new(
+                    initial,
+                    move |location, _window, cx| {
+                        this.update(cx, |this, cx| {
+                            this.set_device_location(location, cx);
+                        })
+                        .log_err();
+                    },
+                    window,
+                    cx,
+                )
+            });
+        });
+    }
+
+    fn set_device_location(&mut self, location: DeviceLocation, cx: &mut Context<Self>) {
+        self.device_location = Some(location);
+        let Some(workspace) = self.active_workspace(cx) else {
+            return;
+        };
+        let workspace = workspace.downgrade();
+
+        let task = if self.device_platform == DevicePlatform::Android {
+            let Some(manager) = self.android_sdk_manager.as_ref() else {
+                return;
+            };
+            manager
+                .read(cx)
+                .set_location(location.latitude, location.longitude, cx)
+        } else {
+            let Some(udid) = self.selected_ios_device_udid.clone() else {
+                self.ios_simulator_error =
+                    Some("Selecione primeiro um simulador iOS inicializado.".into());
+                cx.notify();
+                return;
+            };
+            cx.background_spawn(async move {
+                let output = smol::process::Command::new("xcrun")
+                    .args([
+                        "simctl",
+                        "location",
+                        &udid,
+                        "set",
+                        &format!("{},{}", location.latitude, location.longitude),
+                    ])
+                    .output()
+                    .await
+                    .context("não foi possível executar xcrun simctl location")?;
+                anyhow::ensure!(
+                    output.status.success(),
+                    "xcrun simctl location falhou: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                );
+                Ok(())
+            })
+        };
+
+        cx.spawn(async move |_this, cx| {
+            let result = task.await;
+            workspace
+                .update(cx, |workspace, cx| match result {
+                    Ok(()) => show_device_toast(
+                        workspace,
+                        format!(
+                            "Localização do device definida para {}, {}",
+                            location.latitude, location.longitude
+                        ),
+                        cx,
+                    ),
+                    Err(error) => show_device_toast(
+                        workspace,
+                        format!("Não foi possível definir a localização: {error:#}"),
+                        cx,
+                    ),
+                })
+                .log_err();
+        })
+        .detach();
     }
 
     fn show_thread_import_modal(
@@ -7852,13 +8020,57 @@ impl Sidebar {
     /// produce frames again, so views are kept alive and re-shown by
     /// `sync_ios_simulator_view` instead of being recreated.
     fn hide_ios_simulator_view(&mut self, window: &mut Window) {
+        self.ios_view_hide_epoch = self.ios_view_hide_epoch.wrapping_add(1);
+
         #[cfg(target_os = "macos")]
-        if let Some(subview_id) = self.ios_native_subview_id {
+        if let Some(subview_id) = self.ios_native_subview_id
+            && !self.ios_native_subview_hidden
+        {
+            log::debug!("hiding iOS simulator view (subview {subview_id})");
+            self.ios_native_subview_hidden = true;
             window.set_native_subview_hidden(subview_id, true);
         }
 
         #[cfg(not(target_os = "macos"))]
         let _ = window;
+
+        self.stop_ios_pasteboard_sync();
+    }
+
+    /// Hides the simulator whenever the dock hosting this panel is closed.
+    ///
+    /// The simulator is a native child window, so nothing about the dock's own layout takes
+    /// it off screen: closing the dock would leave it floating over the workspace. Watching
+    /// the dock covers every way it can close, including the ones that never deactivate the
+    /// panel first.
+    fn observe_devices_dock(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.devices_only {
+            return;
+        }
+
+        let Some(workspace) = self
+            .multi_workspace
+            .upgrade()
+            .map(|multi_workspace| multi_workspace.read(cx).workspace().clone())
+        else {
+            return;
+        };
+
+        let dock = workspace
+            .read(cx)
+            .dock_at_position(DockPosition::Devices)
+            .clone();
+        if self.observed_devices_dock == Some(dock.entity_id()) {
+            return;
+        }
+
+        self.devices_dock_subscription =
+            Some(cx.observe_in(&dock, window, |this, dock, window, cx| {
+                if !dock.read(cx).is_open() {
+                    this.hide_ios_simulator_view(window);
+                }
+            }));
+        self.observed_devices_dock = Some(dock.entity_id());
     }
 
     fn remove_ios_simulator_view(&mut self, window: &mut Window) {
@@ -7872,11 +8084,13 @@ impl Sidebar {
 
         self.ios_native_subview_id = None;
         self.ios_native_subview_udid = None;
+        self.ios_native_subview_hidden = false;
         self.ios_simulator_bounds = None;
     }
 
     fn shutdown_ios_simulator(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.remove_ios_simulator_view(window);
+        self.stop_ios_pasteboard_sync();
 
         let udids: Vec<String> = self
             .ios_devices
@@ -7917,12 +8131,21 @@ impl Sidebar {
     ) {
         let Some(udid) = self.selected_ios_device_udid.clone() else {
             self.remove_ios_simulator_view(window);
+            self.stop_ios_pasteboard_sync();
             return;
         };
 
+        // Paste inside the simulator only works while the pasteboards are kept in step; the
+        // sync follows the visible device, so start it here rather than on selection.
+        self.sync_ios_pasteboard(cx);
+
         if self.ios_native_subview_udid.as_deref() == Some(udid.as_str()) {
             if let Some(subview_id) = self.ios_native_subview_id {
-                window.set_native_subview_hidden(subview_id, false);
+                if self.ios_native_subview_hidden {
+                    log::debug!("showing iOS simulator view (subview {subview_id})");
+                    self.ios_native_subview_hidden = false;
+                    window.set_native_subview_hidden(subview_id, false);
+                }
                 if self.ios_simulator_bounds.as_ref() != Some(&bounds) {
                     window.resize_simulator_display_view(subview_id, bounds);
                     self.ios_simulator_bounds = Some(bounds);
@@ -7939,8 +8162,10 @@ impl Sidebar {
         match window.create_simulator_display_view(&udid, bounds.size) {
             Ok(display_view) => match unsafe { window.add_native_subview(display_view, bounds) } {
                 Some(subview_id) => {
+                    log::debug!("mounted iOS simulator view (subview {subview_id})");
                     self.ios_native_subview_id = Some(subview_id);
                     self.ios_native_subview_udid = Some(udid);
+                    self.ios_native_subview_hidden = false;
                     window.resize_simulator_display_view(subview_id, bounds);
                     self.ios_simulator_bounds = Some(bounds);
                     self.ios_simulator_error = None;
@@ -8107,9 +8332,19 @@ impl Sidebar {
                     .child(
                         canvas(
                             move |bounds, window, cx| {
+                                // The sync runs after this frame, by which point the panel may
+                                // already have been taken off screen — showing the native view
+                                // then would leave it floating over the workspace.
+                                let epoch = match sidebar.upgrade() {
+                                    Some(sidebar) => sidebar.read(cx).ios_view_hide_epoch,
+                                    None => return,
+                                };
                                 window.defer(cx, move |window, cx| {
                                     sidebar
                                         .update(cx, |this, cx| {
+                                            if this.ios_view_hide_epoch != epoch {
+                                                return;
+                                            }
                                             this.sync_ios_simulator_view(bounds, window, cx);
                                         })
                                         .log_err();
@@ -8259,6 +8494,14 @@ impl Sidebar {
                 // reach it while this element holds focus.
                 .track_focus(&self.android_screen_focus)
                 .key_context("AndroidEmulatorScreen")
+                // Bindings win over `on_key_down`, so clipboard shortcuts have to arrive as
+                // actions; `emulator_key_for_keystroke` drops anything with Cmd held anyway.
+                .on_action(cx.listener(|this, _: &PasteIntoDevice, _, cx| {
+                    this.paste_into_android_device(cx);
+                }))
+                .on_action(cx.listener(|this, _: &CopyFromDevice, _, cx| {
+                    this.copy_from_android_device(cx);
+                }))
                 .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
                     let Some(key) = emulator_key_for_keystroke(&event.keystroke) else {
                         return;
@@ -8787,29 +9030,95 @@ impl Sidebar {
         );
     }
 
-    fn reload_android_app(&mut self, cx: &mut Context<Self>) {
+    /// Mirrors the host pasteboard into the selected simulator and back, so copy and paste
+    /// inside iOS use the device's own gestures and shortcuts.
+    ///
+    /// The simulator display is a native child window that takes the keyboard for itself, so
+    /// there is no keystroke for GPUI to intercept here — keeping the two pasteboards in step
+    /// is the only way in, and it is what the Simulator app's own "Automatically Sync
+    /// Pasteboard" does.
+    fn sync_ios_pasteboard(&mut self, cx: &mut Context<Self>) {
+        let Some(udid) = self.selected_ios_device_udid.clone() else {
+            self.ios_pasteboard_sync_task = None;
+            return;
+        };
+        if self.ios_pasteboard_sync_udid.as_deref() == Some(udid.as_str())
+            && self.ios_pasteboard_sync_task.is_some()
+        {
+            return;
+        }
+
+        self.ios_pasteboard_sync_udid = Some(udid.clone());
+        self.ios_pasteboard_sync_task = Some(cx.spawn(async move |this, cx| {
+            // Seeded from the host so the first tick does not push a clipboard the simulator
+            // may already be holding.
+            let mut last_synced = read_host_clipboard_text(cx);
+            loop {
+                cx.background_executor()
+                    .timer(IOS_PASTEBOARD_SYNC_INTERVAL)
+                    .await;
+                if this.update(cx, |_this, _cx| ()).is_err() {
+                    return;
+                }
+
+                let host_text = read_host_clipboard_text(cx);
+                if host_text.is_some() && host_text != last_synced {
+                    if let Some(text) = &host_text {
+                        simctl_pbcopy(&udid, text).await.log_err();
+                    }
+                    last_synced = host_text;
+                    continue;
+                }
+
+                match simctl_pbpaste(&udid).await {
+                    Ok(device_text) => {
+                        if !device_text.is_empty() && Some(&device_text) != host_text.as_ref() {
+                            cx.update(|cx| {
+                                cx.write_to_clipboard(ClipboardItem::new_string(
+                                    device_text.clone(),
+                                ));
+                            });
+                            last_synced = Some(device_text);
+                        }
+                    }
+                    Err(error) => {
+                        log::warn!("não foi possível ler o pasteboard do simulador: {error:#}")
+                    }
+                }
+            }
+        }));
+    }
+
+    fn stop_ios_pasteboard_sync(&mut self) {
+        self.ios_pasteboard_sync_task = None;
+        self.ios_pasteboard_sync_udid = None;
+    }
+
+    /// Pastes the host clipboard into whatever the emulator has focused. Typing the text is
+    /// what pasting looks like from the host's side, and unlike `KEYCODE_PASTE` it does not
+    /// depend on the device clipboard already holding the right thing.
+    fn paste_into_android_device(&mut self, cx: &mut Context<Self>) {
+        let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
+            return;
+        };
         self.with_android_sdk_manager(cx, |manager, cx| {
-            manager.send_keyevent(82, cx); // KEYCODE_MENU opens Expo dev menu / reload
+            manager.paste_text(&text, cx);
         });
     }
 
-    fn paste_to_ios_simulator(&mut self, cx: &mut Context<Self>) {
-        let Some(udid) = self.selected_ios_device_udid.clone() else {
+    /// Copies on the device, then mirrors the device clipboard onto the host when Android
+    /// allows it to be read.
+    fn copy_from_android_device(&mut self, cx: &mut Context<Self>) {
+        let Some(manager) = self.android_sdk_manager.clone() else {
             return;
         };
-        cx.spawn(async move |_, _| {
-            // Sync host clipboard to simulator, then trigger paste
-            let _ = smol::process::Command::new("xcrun")
-                .args(["simctl", "pbsync", "host", &udid])
-                .output()
-                .await;
-            let _ = smol::process::Command::new("xcrun")
-                .args(["simctl", "keyevent", &udid, "paste"])
-                .output()
-                .await;
-            anyhow::Ok(())
+        let copy = manager.update(cx, |manager, cx| manager.copy_from_device(cx));
+        cx.spawn(async move |_this, cx| {
+            if let Some(text) = copy.await {
+                cx.update(|cx| cx.write_to_clipboard(ClipboardItem::new_string(text)));
+            }
         })
-        .detach_and_log_err(cx);
+        .detach();
     }
 
     fn return_ios_simulator_to_home(
@@ -8843,7 +9152,8 @@ impl Sidebar {
             .spawn(cx, async move |cx| {
                 let result = async {
                     let bundle_identifier =
-                        resolve_expo_bundle_identifier(fs, project_directory).await?;
+                        resolve_expo_bundle_identifier(fs, project_directory, DevicePlatform::Ios)
+                            .await?;
                     let output = smol::process::Command::new("xcrun")
                         .args(["simctl", "terminate", &udid, &bundle_identifier])
                         .output()
@@ -8926,7 +9236,8 @@ impl Sidebar {
             .spawn(cx, async move |cx| {
                 let result = async {
                     let bundle_identifier =
-                        resolve_expo_bundle_identifier(fs, project_directory).await?;
+                        resolve_expo_bundle_identifier(fs, project_directory, DevicePlatform::Ios)
+                            .await?;
                     // Terminate is best-effort — the app may not be running.
                     let _ = smol::process::Command::new("xcrun")
                         .args(["simctl", "terminate", &udid, &bundle_identifier])
@@ -9019,26 +9330,7 @@ impl Sidebar {
                     .await;
 
                 let result = match screenshot_result {
-                    Ok(output) if output.status.success() => {
-                        let copy_result = smol::process::Command::new("osascript")
-                            .args([
-                                "-e",
-                                &format!(
-                                    "set the clipboard to (read (POSIX file \"{}\") as «class PNGf»)",
-                                    tmp_path.to_string_lossy()
-                                ),
-                            ])
-                            .output()
-                            .await;
-                        match copy_result {
-                            Ok(o) if o.status.success() => Ok(()),
-                            Ok(o) => Err(anyhow::anyhow!(
-                                "Falha ao copiar para clipboard: {}",
-                                String::from_utf8_lossy(&o.stderr).trim()
-                            )),
-                            Err(e) => Err(anyhow::anyhow!("Falha ao copiar para clipboard: {e:#}")),
-                        }
-                    }
+                    Ok(output) if output.status.success() => copy_png_to_clipboard(&tmp_path).await,
                     Ok(output) => Err(anyhow::anyhow!(
                         "xcrun simctl screenshot failed: {}",
                         String::from_utf8_lossy(&output.stderr).trim()
@@ -9063,14 +9355,97 @@ impl Sidebar {
                         cx.notify();
                     }
                     Err(error) => {
-                        this.ios_simulator_error =
-                            Some(format!("{error:#}").into());
+                        this.ios_simulator_error = Some(format!("{error:#}").into());
                         cx.notify();
                     }
                 })
                 .log_err();
             })
             .detach();
+    }
+
+    fn screenshot_android_emulator(
+        &mut self,
+        workspace: &Entity<Workspace>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(manager) = self.android_sdk_manager.clone() else {
+            return;
+        };
+        let screenshot = manager.read(cx).screenshot(cx);
+        let workspace = workspace.downgrade();
+        cx.spawn(async move |_this, cx| {
+            let result = async {
+                let path = screenshot.await?;
+                copy_png_to_clipboard(&path).await
+            }
+            .await;
+            workspace
+                .update(cx, |workspace, cx| match result {
+                    Ok(()) => show_device_toast(
+                        workspace,
+                        "Screenshot copiado para a área de transferência",
+                        cx,
+                    ),
+                    Err(error) => show_device_toast(
+                        workspace,
+                        format!("Não foi possível tirar o screenshot: {error:#}"),
+                        cx,
+                    ),
+                })
+                .log_err();
+        })
+        .detach();
+    }
+
+    fn launch_installed_expo_android(
+        &mut self,
+        workspace: &Entity<Workspace>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(manager) = self.android_sdk_manager.clone() else {
+            return;
+        };
+        let project = workspace.read(cx).project().clone();
+        let Some(project_directory) = project
+            .read(cx)
+            .active_project_directory(cx)
+            .map(|path| path.to_path_buf())
+        else {
+            return;
+        };
+        let fs = project.read(cx).fs().clone();
+        let workspace = workspace.downgrade();
+        let manager = manager.downgrade();
+
+        cx.spawn(async move |_this, cx| {
+            let result = async {
+                let package =
+                    resolve_expo_bundle_identifier(fs, project_directory, DevicePlatform::Android)
+                        .await?;
+                let launch = manager.read_with(cx, |manager, cx| {
+                    manager.launch_package(package.clone(), cx)
+                })?;
+                launch.await?;
+                anyhow::Ok(package)
+            }
+            .await;
+            workspace
+                .update(cx, |workspace, cx| match result {
+                    Ok(package) => show_device_toast(
+                        workspace,
+                        format!("{package} aberto no emulador Android"),
+                        cx,
+                    ),
+                    Err(error) => show_device_toast(
+                        workspace,
+                        format!("Não foi possível abrir o app Android instalado: {error:#}"),
+                        cx,
+                    ),
+                })
+                .log_err();
+        })
+        .detach();
     }
 
     fn show_archive(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -9224,18 +9599,137 @@ async fn discover_or_boot_ios_simulator() -> anyhow::Result<Vec<IosSimulatorDevi
     }])
 }
 
-fn expo_bundle_identifier(app_config: &serde_json::Value) -> anyhow::Result<String> {
+fn read_host_clipboard_text(cx: &mut AsyncApp) -> Option<String> {
+    cx.update(|cx| cx.read_from_clipboard())
+        .and_then(|item| item.text())
+}
+
+/// Writes `text` onto the simulator's own pasteboard.
+async fn simctl_pbcopy(udid: &str, text: &str) -> anyhow::Result<()> {
+    let mut child = smol::process::Command::new("xcrun")
+        .args(["simctl", "pbcopy", udid])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .context("não foi possível executar xcrun simctl pbcopy")?;
+    if let Some(stdin) = child.stdin.as_mut() {
+        use smol::io::AsyncWriteExt as _;
+        stdin
+            .write_all(text.as_bytes())
+            .await
+            .context("não foi possível escrever no xcrun simctl pbcopy")?;
+        stdin.close().await.ok();
+    }
+    let output = child
+        .output()
+        .await
+        .context("xcrun simctl pbcopy não terminou")?;
+    anyhow::ensure!(
+        output.status.success(),
+        "xcrun simctl pbcopy falhou: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    Ok(())
+}
+
+/// Reads the simulator's own pasteboard.
+async fn simctl_pbpaste(udid: &str) -> anyhow::Result<String> {
+    let output = smol::process::Command::new("xcrun")
+        .args(["simctl", "pbpaste", udid])
+        .output()
+        .await
+        .context("não foi possível executar xcrun simctl pbpaste")?;
+    anyhow::ensure!(
+        output.status.success(),
+        "xcrun simctl pbpaste falhou: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+/// A control in the devices toolbar, inert until a device is up.
+fn device_toolbar_button(
+    id: &'static str,
+    icon: IconName,
+    tooltip: &'static str,
+    device_ready: bool,
+) -> IconButton {
+    IconButton::new(id, icon)
+        .icon_size(IconSize::Medium)
+        .aria_label(tooltip)
+        .tooltip(Tooltip::text(tooltip))
+        .disabled(!device_ready)
+}
+
+/// Reports the outcome of a device action. Every such message shares one notification id, so
+/// a second action replaces the first message instead of stacking toasts.
+fn show_device_toast(
+    workspace: &mut Workspace,
+    message: impl Into<std::borrow::Cow<'static, str>>,
+    cx: &mut Context<Workspace>,
+) {
+    struct DeviceActionToast;
+    workspace.show_toast(
+        Toast::new(NotificationId::unique::<DeviceActionToast>(), message).autohide(),
+        cx,
+    );
+}
+
+/// Puts a PNG on the macOS pasteboard as an image rather than as a file path, so it can be
+/// pasted straight into a chat or an editor.
+async fn copy_png_to_clipboard(path: &Path) -> anyhow::Result<()> {
+    let output = smol::process::Command::new("osascript")
+        .args([
+            "-e",
+            &format!(
+                "set the clipboard to (read (POSIX file \"{}\") as «class PNGf»)",
+                path.to_string_lossy()
+            ),
+        ])
+        .output()
+        .await
+        .context("Falha ao copiar para clipboard")?;
+    anyhow::ensure!(
+        output.status.success(),
+        "Falha ao copiar para clipboard: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    Ok(())
+}
+
+/// Where each platform keeps the identifier Expo installs the app under.
+impl DevicePlatform {
+    fn expo_identifier_pointer(self) -> &'static str {
+        match self {
+            DevicePlatform::Ios => "/ios/bundleIdentifier",
+            DevicePlatform::Android => "/android/package",
+        }
+    }
+}
+
+fn expo_bundle_identifier(
+    app_config: &serde_json::Value,
+    platform: DevicePlatform,
+) -> anyhow::Result<String> {
     let expo_config = app_config.get("expo").unwrap_or(app_config);
+    let pointer = platform.expo_identifier_pointer();
     expo_config
-        .pointer("/ios/bundleIdentifier")
+        .pointer(pointer)
         .and_then(serde_json::Value::as_str)
         .map(str::to_owned)
-        .context("Expo app configuration is missing ios.bundleIdentifier")
+        .with_context(|| {
+            format!(
+                "a configuração do Expo não tem {}",
+                pointer.trim_start_matches('/').replace('/', ".")
+            )
+        })
 }
 
 async fn resolve_expo_bundle_identifier(
     fs: Arc<dyn Fs>,
     project_directory: PathBuf,
+    platform: DevicePlatform,
 ) -> anyhow::Result<String> {
     let app_config_typescript_path = project_directory.join("app.config.ts");
     let app_config_javascript_path = project_directory.join("app.config.js");
@@ -9260,7 +9754,7 @@ async fn resolve_expo_bundle_identifier(
             .with_context(|| format!("não foi possível ler {}", app_config_path.display()))?;
         let app_config: serde_json::Value =
             serde_json::from_str(&app_config).context("não foi possível analisar o app.json")?;
-        expo_bundle_identifier(&app_config)
+        expo_bundle_identifier(&app_config, platform)
     } else {
         let expo_cli_path = project_directory.join("node_modules/.bin/expo");
         anyhow::ensure!(
@@ -9282,7 +9776,7 @@ async fn resolve_expo_bundle_identifier(
         );
         let app_config: serde_json::Value = serde_json::from_slice(&output.stdout)
             .context("o Expo retornou uma configuração JSON inválida")?;
-        expo_bundle_identifier(&app_config)
+        expo_bundle_identifier(&app_config, platform)
     }
 }
 
@@ -9594,7 +10088,12 @@ impl Render for Sidebar {
             .font(ui_font)
             .size_full()
             .overflow_hidden()
-            .bg(color.panel_background)
+            // The devices view hosts a device screen rather than rows, so it reads as part of
+            // the editing surface instead of as a panel.
+            .bg(match &self.view {
+                SidebarView::Devices => color.editor_background,
+                _ => color.panel_background,
+            })
             .map(|this| match &self.view {
                 SidebarView::ThreadList => this
                     .child(self.render_sidebar_header(no_open_projects, window, cx))

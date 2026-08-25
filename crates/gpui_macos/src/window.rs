@@ -99,6 +99,8 @@ const NSTrackingMouseMoved: NSUInteger = 0x02;
 #[allow(non_upper_case_globals)]
 const NSTrackingActiveAlways: NSUInteger = 0x80;
 #[allow(non_upper_case_globals)]
+const NSTrackingCursorUpdate: NSUInteger = 0x04;
+#[allow(non_upper_case_globals)]
 const NSTrackingInVisibleRect: NSUInteger = 0x200;
 #[allow(non_upper_case_globals)]
 const NSWindowAnimationBehaviorUtilityWindow: NSInteger = 4;
@@ -814,6 +816,52 @@ fn native_host_window_class() -> *const Class {
     }
 }
 
+/// The content view of a native host window.
+///
+/// GPUI never sees mouse-moved events over a child window, so it cannot update the cursor
+/// while the pointer is inside one: whatever cursor GPUI last set — a pointing hand from a
+/// button the pointer crossed on the way in — would stick. A plain `NSView` registers no
+/// cursor rects of its own, so the container claims the whole area for the arrow cursor.
+fn native_host_container_class() -> *const Class {
+    static REGISTER: std::sync::Once = std::sync::Once::new();
+    static mut CLASS: *const Class = ptr::null();
+    unsafe {
+        REGISTER.call_once(|| {
+            let mut decl = ClassDecl::new("GPUINativeHostContainer", class!(NSView)).unwrap();
+            decl.add_method(
+                sel!(resetCursorRects),
+                native_host_container_reset_cursor_rects as extern "C" fn(&Object, Sel),
+            );
+            decl.add_method(
+                sel!(cursorUpdate:),
+                native_host_container_cursor_update as extern "C" fn(&Object, Sel, id),
+            );
+            CLASS = decl.register();
+        });
+        CLASS
+    }
+}
+
+extern "C" fn native_host_container_reset_cursor_rects(this: &Object, _: Sel) {
+    // SAFETY: AppKit invokes cursor-rect updates on the main thread, and `arrowCursor` is a
+    // valid NSCursor.
+    unsafe {
+        let _: () = msg_send![super(this, class!(NSView)), resetCursorRects];
+        let cursor: id = msg_send![class!(NSCursor), arrowCursor];
+        let bounds = NSView::bounds(this as *const Object as id);
+        let _: () = msg_send![this, addCursorRect: bounds cursor: cursor];
+    }
+}
+
+/// Cursor rects lose to a subview that sets the cursor itself, so reassert the arrow here too.
+extern "C" fn native_host_container_cursor_update(_: &Object, _: Sel, _: id) {
+    // SAFETY: called on the main thread by AppKit; `arrowCursor` is a valid NSCursor.
+    unsafe {
+        let cursor: id = msg_send![class!(NSCursor), arrowCursor];
+        let _: () = msg_send![cursor, set];
+    }
+}
+
 extern "C" fn native_host_window_can_become_key(_: &Object, _: Sel) -> BOOL {
     YES
 }
@@ -861,12 +909,24 @@ impl MacWindow {
             let _: () = msg_send![child_window, setHasShadow: NO];
             let _: () = msg_send![child_window, setAcceptsMouseMovedEvents: YES];
 
-            let container: id = msg_send![class!(NSView), alloc];
+            let container: id = msg_send![native_host_container_class(), alloc];
             let container: id = msg_send![
                 container,
                 initWithFrame: NSRect::new(NSPoint::new(0., 0.), screen_rect.size)
             ];
             let _: () = msg_send![container, addSubview: subview];
+            // Cursor rects lose to a subview that sets the cursor itself, so also ask for
+            // `cursorUpdate:` over the whole container.
+            let tracking_area: id = msg_send![class!(NSTrackingArea), alloc];
+            let _: () = msg_send![
+                tracking_area,
+                initWithRect: NSRect::new(NSPoint::new(0., 0.), NSSize::new(0., 0.))
+                options: NSTrackingCursorUpdate | NSTrackingActiveAlways | NSTrackingInVisibleRect
+                owner: container
+                userInfo: nil
+            ];
+            let _: () = msg_send![container, addTrackingArea: tracking_area];
+            let _: () = msg_send![tracking_area, release];
             let _: () = msg_send![child_window, setContentView: container];
             let _: () = msg_send![container, release];
             // `init` gives the caller one ownership reference; the container

@@ -77,6 +77,7 @@ struct PreviewError {
 pub fn init(cx: &mut App) {
     cx.observe_new(|workspace: &mut Workspace, window, _cx| {
         workspace.register_action(WebPreviewView::open_action);
+        workspace.register_action(WebPreviewView::open_url_action);
 
         if let Some(window) = window {
             let button = _cx.new(|_cx| WebPreviewButton);
@@ -156,6 +157,26 @@ impl WebPreviewView {
         cx: &mut Context<Workspace>,
     ) {
         let view = cx.new(|cx| Self::new(window, cx));
+        Self::add_to_workspace(view, workspace, window, cx);
+    }
+
+    pub fn open_url_action(
+        workspace: &mut Workspace,
+        action: &zed_actions::web_preview::OpenUrlInWebPreview,
+        window: &mut Window,
+        cx: &mut Context<Workspace>,
+    ) {
+        let url = action.url.clone();
+        let view = cx.new(|cx| Self::new_with_url(url, window, cx));
+        Self::add_to_workspace(view, workspace, window, cx);
+    }
+
+    fn add_to_workspace(
+        view: Entity<Self>,
+        workspace: &mut Workspace,
+        window: &mut Window,
+        cx: &mut Context<Workspace>,
+    ) {
         let item = Box::new(view) as Box<dyn workspace::ItemHandle>;
         // Every page opens in the slot the layout assigned to the browser; without a
         // declared slot this keeps opening next to the editor as before.
@@ -422,6 +443,18 @@ impl WebPreviewView {
             #[cfg(target_os = "macos")]
             cef_installer,
         }
+    }
+
+    /// A tab that starts out on `url` instead of blank. The browser is only created on the
+    /// first layout, and `ensure_browser` navigates to `self.url` when it is, so there is
+    /// nothing to drive here beyond seeding the state.
+    pub fn new_with_url(url: String, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let mut this = Self::new(window, cx);
+        this.url_editor.update(cx, |editor, cx| {
+            editor.set_text(url.as_str(), window, cx);
+        });
+        this.url = url;
+        this
     }
 
     /// Offers to download Chromium, and reports how that download is going. Shown instead

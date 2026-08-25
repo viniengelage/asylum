@@ -1317,6 +1317,8 @@
     "context": "AndroidEmulatorScreen",
     "use_key_equivalents": true,
     "bindings": {
+      "cmd-v": "devices::PasteIntoDevice",
+      "cmd-c": "devices::CopyFromDevice",
       "escape": null,
       "enter": null,
       "tab": null,

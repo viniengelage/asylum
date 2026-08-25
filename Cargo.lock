@@ -14445,6 +14445,7 @@ dependencies = [
  "theme",
  "theme_settings",
  "ui",
+ "url",
  "util",
  "workspace",
  "worktree",
@@ -21458,6 +21459,7 @@ dependencies = [
  "ui",
  "util",
  "workspace",
+ "zed_actions",
 ]
 
 [[package]]

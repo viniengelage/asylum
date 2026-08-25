@@ -411,8 +411,13 @@ actions!(
         Redo,
         /// Opens a markdown preview for the selected file.
         OpenMarkdownPreview,
+        /// Opens the selected HTML file in the built-in browser.
+        OpenInBrowser,
     ]
 );
+
+/// The extensions [`OpenInBrowser`] is offered for.
+const BROWSER_PREVIEW_EXTENSIONS: [&str; 2] = ["html", "htm"];
 
 #[derive(Clone, Debug, Default)]
 struct FoldedAncestors {
@@ -1086,6 +1091,7 @@ impl ProjectPanel {
                     entry.path.as_std_path(),
                     project.languages(),
                 );
+            let is_browser_previewable = !is_dir && is_browser_previewable_path(&entry.path);
 
             let settings = ProjectPanelSettings::get_global(cx);
             let visible_worktrees_count = project.visible_worktrees(cx).count();
@@ -1117,6 +1123,9 @@ impl ProjectPanel {
                         menu.when(is_markdown, |menu| {
                             menu.action("Open Markdown Preview", Box::new(OpenMarkdownPreview))
                         })
+                        .when(is_browser_previewable, |menu| {
+                            menu.action("Open in Browser", Box::new(OpenInBrowser))
+                        })
                         .when(is_dir, |menu| {
                             menu.action("Search Inside", Box::new(NewSearchInDirectory))
                         })
@@ -1136,6 +1145,9 @@ impl ProjectPanel {
                             .action("Open in Terminal", Box::new(OpenInTerminal))
                             .when(is_markdown, |menu| {
                                 menu.action("Open Markdown Preview", Box::new(OpenMarkdownPreview))
+                            })
+                            .when(is_browser_previewable, |menu| {
+                                menu.action("Open in Browser", Box::new(OpenInBrowser))
                             })
                             .when(is_dir, |menu| {
                                 menu.separator()
@@ -1790,6 +1802,28 @@ impl ProjectPanel {
                 MarkdownPreviewView::open_for_project_path(project_path, workspace, window, cx);
             })
             .ok();
+    }
+
+    fn open_in_browser(&mut self, _: &OpenInBrowser, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((worktree, entry)) = self.selected_entry(cx) else {
+            return;
+        };
+        if !entry.is_file() || !is_browser_previewable_path(&entry.path) {
+            return;
+        }
+        let abs_path = worktree.absolutize(&entry.path);
+        // `Url::from_file_path` rather than a `file://` format so spaces and other characters
+        // that are not legal in a URL come out percent-encoded.
+        let Ok(url) = url::Url::from_file_path(&abs_path) else {
+            log::warn!("cannot build a file URL for {}", abs_path.display());
+            return;
+        };
+        window.dispatch_action(
+            Box::new(zed_actions::web_preview::OpenUrlInWebPreview {
+                url: url.to_string(),
+            }),
+            cx,
+        );
     }
 
     fn open_internal(
@@ -7051,6 +7085,7 @@ impl Render for ProjectPanel {
                 .on_action(cx.listener(Self::open_split_vertical))
                 .on_action(cx.listener(Self::open_split_horizontal))
                 .on_action(cx.listener(Self::open_markdown_preview))
+                .on_action(cx.listener(Self::open_in_browser))
                 .on_action(cx.listener(Self::confirm))
                 .on_action(cx.listener(Self::cancel))
                 .on_action(cx.listener(Self::copy_path))
@@ -7749,6 +7784,17 @@ pub fn par_sort_worktree_entries(
     order: settings::ProjectPanelSortOrder,
 ) {
     entries.par_sort_by(|lhs, rhs| cmp_worktree_entries(lhs, rhs, &mode, &order));
+}
+
+fn is_browser_previewable_path(path: &RelPath) -> bool {
+    path.as_std_path()
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            BROWSER_PREVIEW_EXTENSIONS
+                .iter()
+                .any(|previewable| previewable.eq_ignore_ascii_case(extension))
+        })
 }
 
 fn git_status_indicator(git_status: GitSummary) -> Option<(&'static str, Color)> {
