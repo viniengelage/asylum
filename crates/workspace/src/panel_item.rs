@@ -239,7 +239,6 @@ impl<T: Panel> SerializableItem for PanelItem<T> {
         _workspace: &mut Workspace,
         _item_id: ItemId,
         _closing: bool,
-        _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<Task<Result<()>>> {
         None
