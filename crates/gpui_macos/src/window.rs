@@ -1011,6 +1011,12 @@ fn native_host_window_class() -> *const Class {
 /// while the pointer is inside one: whatever cursor GPUI last set — a pointing hand from a
 /// button the pointer crossed on the way in — would stick. A plain `NSView` registers no
 /// cursor rects of its own, so the container claims the whole area for the arrow cursor.
+///
+/// Cursor rects and `cursorUpdate:` alone are not enough: AppKit only runs cursor management
+/// for the key window, and the child window stays non-key until the user clicks it, so the
+/// stale cursor survives the whole hover. `mouseEntered:`/`mouseMoved:` from an
+/// `NSTrackingActiveAlways` area are delivered whether or not the window is key, so the
+/// container sets the arrow cursor from those too.
 fn native_host_container_class() -> *const Class {
     static REGISTER: std::sync::Once = std::sync::Once::new();
     static mut CLASS: *const Class = ptr::null();
@@ -1023,7 +1029,15 @@ fn native_host_container_class() -> *const Class {
             );
             decl.add_method(
                 sel!(cursorUpdate:),
-                native_host_container_cursor_update as extern "C" fn(&Object, Sel, id),
+                native_host_container_set_arrow_cursor as extern "C" fn(&Object, Sel, id),
+            );
+            decl.add_method(
+                sel!(mouseEntered:),
+                native_host_container_set_arrow_cursor as extern "C" fn(&Object, Sel, id),
+            );
+            decl.add_method(
+                sel!(mouseMoved:),
+                native_host_container_set_arrow_cursor as extern "C" fn(&Object, Sel, id),
             );
             CLASS = decl.register();
         });
@@ -1042,8 +1056,9 @@ extern "C" fn native_host_container_reset_cursor_rects(this: &Object, _: Sel) {
     }
 }
 
-/// Cursor rects lose to a subview that sets the cursor itself, so reassert the arrow here too.
-extern "C" fn native_host_container_cursor_update(_: &Object, _: Sel, _: id) {
+/// Cursor rects lose to a subview that sets the cursor itself, and they do not run at all
+/// while the host window is not key, so reassert the arrow from the tracking-area callbacks.
+extern "C" fn native_host_container_set_arrow_cursor(_: &Object, _: Sel, _: id) {
     // SAFETY: called on the main thread by AppKit; `arrowCursor` is a valid NSCursor.
     unsafe {
         let cursor: id = msg_send![class!(NSCursor), arrowCursor];
@@ -1105,12 +1120,18 @@ impl MacWindow {
             ];
             let _: () = msg_send![container, addSubview: subview];
             // Cursor rects lose to a subview that sets the cursor itself, so also ask for
-            // `cursorUpdate:` over the whole container.
+            // `cursorUpdate:` over the whole container. Enter and move are tracked as well
+            // because cursor updates only fire while the host window is key, and the pointer
+            // reaches the hosted view long before the user clicks it.
             let tracking_area: id = msg_send![class!(NSTrackingArea), alloc];
             let _: () = msg_send![
                 tracking_area,
                 initWithRect: NSRect::new(NSPoint::new(0., 0.), NSSize::new(0., 0.))
-                options: NSTrackingCursorUpdate | NSTrackingActiveAlways | NSTrackingInVisibleRect
+                options: NSTrackingCursorUpdate
+                    | NSTrackingMouseEnteredAndExited
+                    | NSTrackingMouseMoved
+                    | NSTrackingActiveAlways
+                    | NSTrackingInVisibleRect
                 owner: container
                 userInfo: nil
             ];
