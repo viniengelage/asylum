@@ -1160,20 +1160,13 @@ impl Dock {
             .iter()
             .position(|(panel_index, _)| is_open && active_panel_index == Some(*panel_index));
 
-        // Disabled until a second agent panel is actually usable: both instances restore the
-        // same serialized thread, and the agent's actions all resolve to the first one.
-        // `agent::NewAgentTab` still works from the command palette for trying it out.
-        let new_agent_tab_button = IconButton::new("new-agent-tab", ui::IconName::Plus)
-            .icon_size(IconSize::Small)
-            .disabled(true)
-            .tooltip(Tooltip::text("New Agent Tab (not supported yet)"))
-            .on_click(|_, window, cx| {
-                window.dispatch_action(zed_actions::agent::NewAgentTab.boxed_clone(), cx);
-            });
-
+        // No "new tab" affordance here: a second agent panel is not usable yet (both instances
+        // restore the same serialized thread, and the agent's actions all resolve to the
+        // first one), and a permanently disabled button would only take room from the tabs in
+        // the narrowest strip on screen. `agent::NewAgentTab` still works from the command
+        // palette for trying it out.
         Some(
             TabBar::segmented("right-dock-tabs")
-                .end_child(new_agent_tab_button)
                 .children(visible_entries.into_iter().enumerate().map(
                     |(visible_index, (panel_index, entry))| {
                         let icon = entry.panel.icon(window, cx);
@@ -1197,6 +1190,7 @@ impl Dock {
                         Tab::new(("right-dock-tab", panel_index))
                             .position(tab_position)
                             .full_width(true)
+                            .surface(cx.theme().colors().panel_background)
                             .toggle_state(is_active)
                             .start_slot::<AnyElement>(icon.map(|icon| {
                                 Icon::new(icon)
@@ -1204,21 +1198,23 @@ impl Dock {
                                     .when(!is_active, |i| i.color(Color::Muted))
                                     .into_any_element()
                             }))
-                            // The label takes the slack so the close button sits against the
-                            // tab's right edge rather than trailing the text in the middle.
                             .child(
-                                h_flex().flex_1().min_w_0().justify_center().child(
-                                    Label::new(label)
-                                        .when(!is_active, |label| label.color(Color::Muted))
-                                        .truncate(),
-                                ),
+                                Label::new(label)
+                                    .when(!is_active, |label| label.color(Color::Muted))
+                                    .truncate(),
                             )
                             .end_slot(
                                 IconButton::new(
                                     ("close-dock-tab", panel_index),
                                     ui::IconName::Close,
                                 )
-                                .icon_size(IconSize::XSmall)
+                                // Same metrics as a pane tab's close button: without
+                                // `ButtonSize::None` the default padding overflows the tab's
+                                // slot and crowds the neighbouring tab.
+                                .shape(ui::IconButtonShape::Square)
+                                .icon_color(Color::Muted)
+                                .size(ui::ButtonSize::None)
+                                .icon_size(IconSize::Small)
                                 .tooltip(Tooltip::text("Close Tab"))
                                 .on_click(cx.listener(
                                     move |dock, _, window, cx| {

@@ -3016,7 +3016,13 @@ impl Pane {
         let has_file_icon = icon.is_some();
 
         let capability = item.capability(cx);
+        // The tab is painted with the surface of the content it covers, so the two read as one
+        // plane; items that paint no surface of their own sit on the pane's background.
+        let tab_surface = item
+            .content_background(cx)
+            .unwrap_or_else(|| cx.theme().colors().editor_background);
         let tab = Tab::new(ix)
+            .surface(tab_surface)
             .position(if is_first_item {
                 TabPosition::First
             } else if is_last_item {
@@ -4608,7 +4614,7 @@ impl Render for Pane {
             .track_focus(&self.focus_handle(cx))
             .size_full()
             .flex_none()
-            .rounded_lg()
+            .rounded(ui::pane_corner_radius())
             .bg(cx.theme().colors().editor_background)
             .overflow_hidden()
             .relative()

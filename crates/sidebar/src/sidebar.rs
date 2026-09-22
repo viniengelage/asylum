@@ -1,3 +1,4 @@
+mod android_device_modal;
 mod device_location_modal;
 mod thread_switcher;
 
@@ -25,7 +26,8 @@ use agent_ui::{
     ThreadTitleRegenerationResult, channels_with_threads, import_threads_from_other_channels,
 };
 use agent_ui::{MessageEditorEvent, StateChange, thread_worktree_archive};
-use android_sdk::{AndroidSdkManager, AndroidSdkState, emulator_key_for_keystroke};
+use android_device_modal::AndroidDeviceModal;
+use android_sdk::{AndroidAvd, AndroidSdkManager, AndroidSdkState, emulator_key_for_keystroke};
 use anyhow::Context as _;
 use chrono::{DateTime, Utc};
 use editor::Editor;
@@ -70,7 +72,8 @@ use task::{
 use theme::ActiveTheme;
 use ui::{
     AgentThreadStatus, CommonAnimationExt, ContextMenu, ContextMenuEntry, DropdownMenu,
-    DropdownStyle, GradientFade, HeaderBar, HighlightedLabel, IconPosition, KeyBinding,
+    DropdownStyle, GradientFade, HeaderBar, HeaderBarLevel, HighlightedLabel, IconPosition,
+    KeyBinding,
     PopoverMenu, PopoverMenuHandle, ProjectEmptyState, ScrollAxes, Scrollbars, Tab, TabBar,
     TabPosition, ThreadItem, ThreadItemWorktreeInfo, TintColor, Tooltip, WithScrollbar, prelude::*,
     render_modifiers, right_click_menu,
@@ -168,6 +171,12 @@ struct IosSimulatorDevice {
     state: String,
 }
 
+impl IosSimulatorDevice {
+    fn is_booted(&self) -> bool {
+        self.state == "Booted"
+    }
+}
+
 #[derive(Deserialize)]
 struct SimctlDeviceList {
     devices: HashMap<String, Vec<IosSimulatorDevice>>,
@@ -190,6 +199,7 @@ fn sidebar_row_hover_background(cx: &App) -> Hsla {
 fn ios_simulator_label(device: &IosSimulatorDevice) -> String {
     let state = match device.state.as_str() {
         "Booted" => "Inicializado",
+        "Shutdown" => "Desligado",
         state => state,
     };
     format!("{} ({state})", device.name)
@@ -919,11 +929,17 @@ pub struct Sidebar {
     ios_simulator_error: Option<SharedString>,
     ios_failed_device_udid: Option<String>,
     ios_device_discovery_task: Option<Task<()>>,
+    /// What the simulator pane is waiting on while
+    /// `ios_device_discovery_task` runs, so the spinner can say whether it is
+    /// listing devices or booting one.
+    ios_busy_message: Option<SharedString>,
     ios_pasteboard_sync_task: Option<Task<()>>,
     ios_pasteboard_sync_udid: Option<String>,
     device_settings_menu_handle: PopoverMenuHandle<ContextMenu>,
     /// Prefills the location modal with whatever was applied last.
     device_location: Option<DeviceLocation>,
+    /// Whether the device is currently forced to draw its own on-screen keyboard.
+    device_software_keyboard_visible: bool,
     restoring_tasks: HashMap<agent_ui::ThreadId, Task<()>>,
     recent_projects_popover_handle: PopoverMenuHandle<SidebarRecentProjects>,
     project_header_menu_handles: HashMap<usize, PopoverMenuHandle<ContextMenu>>,
@@ -1097,10 +1113,12 @@ impl Sidebar {
             ios_simulator_error: None,
             ios_failed_device_udid: None,
             ios_device_discovery_task: None,
+            ios_busy_message: None,
             ios_pasteboard_sync_task: None,
             ios_pasteboard_sync_udid: None,
             device_settings_menu_handle: PopoverMenuHandle::default(),
             device_location: None,
+            device_software_keyboard_visible: false,
             restoring_tasks: HashMap::new(),
             recent_projects_popover_handle: PopoverMenuHandle::default(),
             project_header_menu_handles: HashMap::new(),
@@ -7589,32 +7607,39 @@ impl Sidebar {
                 this.child(self.render_device_toolbar(cx))
             })
             .when(!self.devices_only, |this| {
+                let view_controls = h_flex()
+                    .gap(HeaderBar::slot_gap(cx))
+                    .child(self.render_sidebar_toggle_button(cx))
+                    .child(
+                        IconButton::new("history", IconName::Clock)
+                            .icon_size(IconSize::Small)
+                            .toggle_state(is_archive)
+                            .tooltip(move |_, cx| {
+                                let label = if is_archive {
+                                    "Hide Thread History"
+                                } else {
+                                    "Show Thread History"
+                                };
+                                Tooltip::for_action(label, &ToggleThreadHistory, cx)
+                            })
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.toggle_archive(&ToggleThreadHistory, window, cx);
+                            })),
+                    )
+                    .into_any_element();
+                let recent_projects = self.render_recent_projects_button(cx).into_any_element();
+                // The bar mirrors with the sidebar so its controls always hug the window's
+                // outer edge and the recent-projects button the inner one.
+                let (start, end) = match on_right {
+                    false => (view_controls, recent_projects),
+                    true => (recent_projects, view_controls),
+                };
+
                 this.child(
-                    h_flex()
-                        .p_1()
-                        .gap_1()
-                        .when(on_right, |this| this.flex_row_reverse())
-                        .border_t_1()
-                        .border_color(cx.theme().colors().border)
-                        .child(self.render_sidebar_toggle_button(cx))
-                        .child(
-                            IconButton::new("history", IconName::Clock)
-                                .icon_size(IconSize::Small)
-                                .toggle_state(is_archive)
-                                .tooltip(move |_, cx| {
-                                    let label = if is_archive {
-                                        "Hide Thread History"
-                                    } else {
-                                        "Show Thread History"
-                                    };
-                                    Tooltip::for_action(label, &ToggleThreadHistory, cx)
-                                })
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.toggle_archive(&ToggleThreadHistory, window, cx);
-                                })),
-                        )
-                        .child(div().flex_1())
-                        .child(self.render_recent_projects_button(cx)),
+                    HeaderBar::footer("sidebar-bottom-bar")
+                        .level(HeaderBarLevel::Content)
+                        .start_child(start)
+                        .end_child(end),
                 )
             })
     }
@@ -7641,18 +7666,14 @@ impl Sidebar {
             self.ios_device_discovery_task.is_none() && self.selected_ios_device_udid.is_some()
         };
 
-        h_flex()
-            .p_1()
-            .gap_1()
-            .justify_between()
-            .border_t_1()
-            .border_color(cx.theme().colors().border)
+        HeaderBar::footer("device-toolbar")
+            .level(HeaderBarLevel::Content)
+            // The panel can be dragged down to `MIN_WIDTH`, which is narrower than the row of
+            // tools, so the row is allowed to wrap and the bar to grow with it.
+            .wrapping(true)
             .child(
                 h_flex()
-                    .gap_1()
-                    // The panel can be dragged down to `THREADS_LIST_MIN_WIDTH`, which is narrower than the
-                    // row of tools; wrapping keeps every tool reachable instead of clipping
-                    // whichever ones fall off the end.
+                    .gap(HeaderBar::slot_gap(cx))
                     .flex_wrap()
                     .child(
                         device_toolbar_button(
@@ -7784,7 +7805,7 @@ impl Sidebar {
                         )),
                     ),
             )
-            .child(self.render_device_settings_menu(device_ready, cx))
+            .end_child(self.render_device_settings_menu(device_ready, cx))
     }
 
     /// How the platform's own tools address the running device: the adb serial on Android
@@ -7822,18 +7843,34 @@ impl Sidebar {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let this = cx.weak_entity();
+        let software_keyboard_visible = self.device_software_keyboard_visible;
         PopoverMenu::new("device-settings-menu")
             .menu(move |window, cx| {
                 let this = this.clone();
                 Some(ContextMenu::build(window, cx, move |menu, _window, _cx| {
+                    let location_owner = this.clone();
+                    let keyboard_owner = this;
                     menu.item(
-                        ContextMenuEntry::new("Change user location")
+                        ContextMenuEntry::new("Alterar localização do usuário")
                             .icon(IconName::LocationEdit)
                             .handler(move |window, cx| {
-                                this.update(cx, |this, cx| {
-                                    this.show_device_location_modal(window, cx);
-                                })
-                                .log_err();
+                                location_owner
+                                    .update(cx, |this, cx| {
+                                        this.show_device_location_modal(window, cx);
+                                    })
+                                    .log_err();
+                            }),
+                    )
+                    .item(
+                        ContextMenuEntry::new("Mostrar teclado do device")
+                            .icon(IconName::Keyboard)
+                            .toggleable(IconPosition::End, software_keyboard_visible)
+                            .handler(move |window, cx| {
+                                keyboard_owner
+                                    .update(cx, |this, cx| {
+                                        this.toggle_device_software_keyboard(window, cx);
+                                    })
+                                    .log_err();
                             }),
                     )
                 }))
@@ -7931,6 +7968,71 @@ impl Sidebar {
                         format!("Não foi possível definir a localização: {error:#}"),
                         cx,
                     ),
+                })
+                .log_err();
+        })
+        .detach();
+    }
+
+    /// Both platforms drop their on-screen keyboard as soon as a hardware keyboard is
+    /// attached, and the host keyboard always counts as one, so an embedded device never shows
+    /// the keyboard an app actually ships with. Forcing it back is a per-device setting rather
+    /// than a one-shot command, which is why this is a toggle: Android keeps typing from the
+    /// Mac working alongside the IME, while iOS has to report the hardware keyboard as
+    /// detached, exactly like Simulator.app's "Connect Hardware Keyboard".
+    fn toggle_device_software_keyboard(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let visible = !self.device_software_keyboard_visible;
+        let Some(workspace) = self.active_workspace(cx) else {
+            return;
+        };
+
+        let task = if self.device_platform == DevicePlatform::Android {
+            let Some(manager) = self.android_sdk_manager.as_ref() else {
+                return;
+            };
+            manager.read(cx).set_software_keyboard_visible(visible, cx)
+        } else {
+            let Some(udid) = self.selected_ios_device_udid.clone() else {
+                self.ios_simulator_error =
+                    Some("Selecione primeiro um simulador iOS inicializado.".into());
+                cx.notify();
+                return;
+            };
+
+            #[cfg(target_os = "macos")]
+            let result = window.set_simulator_hardware_keyboard_enabled(&udid, !visible);
+
+            #[cfg(not(target_os = "macos"))]
+            let result = {
+                let _ = (udid, window);
+                Err(anyhow::anyhow!(
+                    "simuladores iOS só estão disponíveis no macOS"
+                ))
+            };
+
+            Task::ready(result)
+        };
+
+        self.device_software_keyboard_visible = visible;
+        cx.notify();
+
+        let workspace = workspace.downgrade();
+        cx.spawn(async move |this, cx| {
+            let message = match task.await {
+                Ok(()) if visible => "Teclado do device visível".to_string(),
+                Ok(()) => "Teclado do device oculto".to_string(),
+                Err(error) => {
+                    this.update(cx, |this, cx| {
+                        this.device_software_keyboard_visible = !visible;
+                        cx.notify();
+                    })
+                    .log_err();
+                    format!("Não foi possível alternar o teclado do device: {error:#}")
+                }
+            };
+            workspace
+                .update(cx, |workspace, cx| {
+                    show_device_toast(workspace, message, cx)
                 })
                 .log_err();
         })
@@ -8101,40 +8203,124 @@ impl Sidebar {
 
     #[cfg(target_os = "macos")]
     fn refresh_ios_devices(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.sync_ios_devices(None, window, cx);
+    }
+
+    /// Lists the available simulators and, when `boot_udid` is set, boots that
+    /// device and lists again so the view connects to a display that is
+    /// already producing frames.
+    ///
+    /// With no `boot_udid` and nothing booted, the device that ends up
+    /// selected is booted anyway: reaching this view is a request to see a
+    /// simulator, not just to enumerate them.
+    #[cfg(target_os = "macos")]
+    fn sync_ios_devices(
+        &mut self,
+        boot_udid: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.ios_device_discovery_task.is_some() {
             return;
         }
 
+        self.ios_busy_message = Some("Procurando simuladores iOS…".into());
+        cx.notify();
+
         let this = cx.weak_entity();
         self.ios_device_discovery_task = Some(window.spawn(cx, async move |cx| {
-            let devices = cx.background_spawn(discover_or_boot_ios_simulator()).await;
+            let mut devices = cx.background_spawn(list_ios_simulators()).await;
+
+            // Adopting the list before booting lets the picker show the real
+            // device names while the boot is still running.
+            let boot_udid = this
+                .update_in(cx, |this, window, cx| {
+                    let Ok(devices) = devices.as_ref() else {
+                        return None;
+                    };
+                    this.adopt_ios_devices(devices.clone(), window, cx);
+                    boot_udid
+                        .or_else(|| this.selected_ios_device_udid.clone())
+                        .filter(|udid| !this.is_ios_device_booted(udid))
+                })
+                .ok()
+                .flatten();
+
+            if let Some(udid) = boot_udid {
+                this.update(cx, |this, cx| {
+                    this.ios_busy_message = Some(
+                        match this.ios_device(&udid) {
+                            Some(device) => format!("Inicializando {}…", device.name),
+                            None => "Inicializando simulador iOS…".to_owned(),
+                        }
+                        .into(),
+                    );
+                    cx.notify();
+                })
+                .log_err();
+
+                let booted = cx
+                    .background_spawn({
+                        let udid = udid.clone();
+                        async move { boot_ios_simulator(&udid).await }
+                    })
+                    .await;
+                match booted {
+                    // The device's state changed, so the list has to be read again.
+                    Ok(()) => devices = cx.background_spawn(list_ios_simulators()).await,
+                    Err(error) => {
+                        devices = Err(error.context("não foi possível inicializar o simulador"))
+                    }
+                }
+            }
 
             this.update_in(cx, |this, window, cx| {
                 this.ios_device_discovery_task = None;
+                this.ios_busy_message = None;
                 match devices {
-                    Ok(devices) => {
-                        let selected_device_is_available = this
-                            .selected_ios_device_udid
-                            .as_ref()
-                            .is_some_and(|udid| devices.iter().any(|device| &device.udid == udid));
-                        if !selected_device_is_available {
-                            this.remove_ios_simulator_view(window);
-                            this.selected_ios_device_udid =
-                                devices.first().map(|device| device.udid.clone());
-                        }
-                        this.ios_devices = devices;
-                        this.ios_simulator_error = None;
-                        this.ios_failed_device_udid = None;
-                    }
+                    Ok(devices) => this.adopt_ios_devices(devices, window, cx),
                     Err(error) => {
                         this.ios_simulator_error =
-                            Some(format!("Não foi possível encontrar simuladores iOS inicializados: {error:#}").into());
+                            Some(format!("Simuladores iOS indisponíveis: {error:#}").into());
                     }
                 }
                 cx.notify();
             })
             .log_err();
         }));
+    }
+
+    /// Replaces the known device list, keeping the current selection when it
+    /// survived and falling back to the default device when it did not.
+    #[cfg(target_os = "macos")]
+    fn adopt_ios_devices(
+        &mut self,
+        devices: Vec<IosSimulatorDevice>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let selected_device_is_available = self
+            .selected_ios_device_udid
+            .as_ref()
+            .is_some_and(|udid| devices.iter().any(|device| &device.udid == udid));
+        if !selected_device_is_available {
+            self.remove_ios_simulator_view(window);
+            self.selected_ios_device_udid =
+                default_ios_device(&devices).map(|device| device.udid.clone());
+        }
+        self.ios_devices = devices;
+        self.ios_simulator_error = None;
+        self.ios_failed_device_udid = None;
+        cx.notify();
+    }
+
+    fn ios_device(&self, udid: &str) -> Option<&IosSimulatorDevice> {
+        self.ios_devices.iter().find(|device| device.udid == udid)
+    }
+
+    fn is_ios_device_booted(&self, udid: &str) -> bool {
+        self.ios_device(udid)
+            .is_some_and(IosSimulatorDevice::is_booted)
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -8146,10 +8332,15 @@ impl Sidebar {
         }
 
         self.remove_ios_simulator_view(window);
-        self.selected_ios_device_udid = Some(udid);
+        self.selected_ios_device_udid = Some(udid.clone());
         self.ios_simulator_error = None;
         self.ios_failed_device_udid = None;
         cx.notify();
+
+        #[cfg(target_os = "macos")]
+        if !self.is_ios_device_booted(&udid) {
+            self.sync_ios_devices(Some(udid), window, cx);
+        }
     }
 
     /// Hides the simulator's native view without destroying it. Reconnecting
@@ -8295,6 +8486,14 @@ impl Sidebar {
             return;
         }
 
+        // Connecting to a device that has not finished booting yields a
+        // display that never produces frames, and the failed attempt is
+        // remembered in `ios_failed_device_udid`, which would then block the
+        // retry once the boot completes.
+        if !self.is_ios_device_booted(&udid) {
+            return;
+        }
+
         self.remove_ios_simulator_view(window);
         match window.create_simulator_display_view(&udid, bounds.size) {
             Ok(display_view) => match unsafe { window.add_native_subview(display_view, bounds) } {
@@ -8385,6 +8584,7 @@ impl Sidebar {
             menu
         });
         let is_discovering_devices = self.ios_device_discovery_task.is_some();
+        let busy_message = self.ios_busy_message.clone();
         let has_devices = !self.ios_devices.is_empty();
         let error = self.ios_simulator_error.clone();
         let selected_device = self.selected_ios_device_udid.clone();
@@ -8394,17 +8594,15 @@ impl Sidebar {
             .flex_1()
             .min_h_0()
             .child(
-                h_flex()
-                    .w_full()
-                    .gap_2()
-                    .p_2()
+                HeaderBar::new("ios-device-header")
+                    .level(HeaderBarLevel::Content)
                     .child(
                         DropdownMenu::new("ios-simulator-selector", selected_label, device_menu)
                             .style(DropdownStyle::Subtle)
                             .full_width(true)
                             .disabled(is_discovering_devices || !has_devices),
                     )
-                    .child(
+                    .end_child(
                         IconButton::new("refresh-ios-simulators", IconName::RotateCw)
                             .icon_size(IconSize::Small)
                             .aria_label("Atualizar simuladores iOS")
@@ -8433,20 +8631,18 @@ impl Sidebar {
                                     Label::new(error).size(LabelSize::Small).color(Color::Error),
                                 )
                             })
-                            .when(is_discovering_devices, |this| {
+                            .when_some(busy_message, |this, busy_message| {
                                 this.child(
                                     Icon::new(IconName::ArrowCircle)
                                         .size(IconSize::XLarge)
                                         .color(Color::Muted)
                                         .with_rotate_animation(2),
                                 )
-                                .child(Label::new("Inicializando simulador iOS..."))
+                                .child(Label::new(busy_message))
                                 .child(
-                                    Label::new(
-                                        "Aguarde enquanto o dispositivo padrão é preparado.",
-                                    )
-                                    .size(LabelSize::Small)
-                                    .color(Color::Muted),
+                                    Label::new("O primeiro boot de um device leva mais tempo.")
+                                        .size(LabelSize::Small)
+                                        .color(Color::Muted),
                                 )
                             })
                             .when(!is_discovering_devices && !has_devices, |this| {
@@ -8777,7 +8973,158 @@ impl Sidebar {
         )
     }
 
-    fn render_android_devices(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    /// Toolbar with the virtual device picker, mirroring the iOS one. There
+    /// is nothing to pick before the SDK is installed, since AVDs cannot
+    /// exist yet.
+    fn render_android_device_selector(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let manager = self.android_sdk_manager.clone()?;
+        let (state, avds, selected_avd, has_device_profiles, is_loading_device_profiles) = {
+            let manager = manager.read(cx);
+            (
+                manager.state().clone(),
+                manager.avds().to_vec(),
+                manager.selected_avd().map(str::to_string),
+                !manager.device_profiles().is_empty(),
+                manager.is_loading_device_profiles(),
+            )
+        };
+        if matches!(
+            state,
+            AndroidSdkState::Unknown | AndroidSdkState::NotInstalled
+        ) {
+            return None;
+        }
+
+        let is_busy = matches!(
+            state,
+            AndroidSdkState::Installing(_) | AndroidSdkState::EmulatorBooting
+        );
+        let selected_label = selected_avd
+            .as_ref()
+            .and_then(|name| avds.iter().find(|avd| &avd.name == name))
+            .map(AndroidAvd::label)
+            .unwrap_or_else(|| "Selecione um dispositivo virtual".to_owned());
+
+        let sidebar = cx.weak_entity();
+        let menu_avds = avds.clone();
+        let menu_selection = selected_avd;
+        let device_menu = ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
+            for avd in menu_avds {
+                let is_selected = menu_selection.as_deref() == Some(avd.name.as_str());
+                let label = avd.label();
+                let name = avd.name;
+                let sidebar = sidebar.clone();
+                menu = menu.toggleable_entry(
+                    label,
+                    is_selected,
+                    IconPosition::Start,
+                    None,
+                    move |_window, cx| {
+                        let name = name.clone();
+                        sidebar
+                            .update(cx, |this, cx| {
+                                this.with_android_sdk_manager(cx, move |manager, cx| {
+                                    manager.select_avd(name, cx);
+                                });
+                            })
+                            .log_err();
+                    },
+                );
+            }
+            menu
+        });
+
+        let add_device_tooltip = if is_loading_device_profiles {
+            "Carregando dispositivos disponíveis…"
+        } else {
+            "Adicionar dispositivo"
+        };
+
+        Some(
+            HeaderBar::new("android-device-header")
+                .level(HeaderBarLevel::Content)
+                .child(
+                    DropdownMenu::new("android-avd-selector", selected_label, device_menu)
+                        .style(DropdownStyle::Subtle)
+                        .full_width(true)
+                        .disabled(is_busy || avds.is_empty()),
+                )
+                .end_child(
+                    IconButton::new("add-android-device", IconName::Plus)
+                        .icon_size(IconSize::Small)
+                        .aria_label("Adicionar dispositivo")
+                        .tooltip(Tooltip::text(add_device_tooltip))
+                        .disabled(is_busy || !has_device_profiles)
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.show_android_device_modal(window, cx);
+                        })),
+                )
+                .end_child(
+                    IconButton::new("refresh-android-devices", IconName::RotateCw)
+                        .icon_size(IconSize::Small)
+                        .aria_label("Atualizar dispositivos Android")
+                        .tooltip(Tooltip::text("Atualizar dispositivos Android"))
+                        .disabled(is_busy)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.with_android_sdk_manager(cx, |manager, cx| manager.refresh(cx));
+                        })),
+                )
+                .into_any_element(),
+        )
+    }
+
+    fn show_android_device_modal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(workspace) = self.active_workspace(cx) else {
+            return;
+        };
+        let Some(manager) = self.android_sdk_manager.as_ref() else {
+            return;
+        };
+        let profiles = manager.read(cx).device_profiles().to_vec();
+        if profiles.is_empty() {
+            return;
+        }
+
+        let this = cx.weak_entity();
+        workspace.update(cx, |workspace, cx| {
+            workspace.toggle_modal(window, cx, |window, cx| {
+                let this = this.clone();
+                AndroidDeviceModal::new(
+                    profiles,
+                    move |profile, _window, cx| {
+                        this.update(cx, |this, cx| {
+                            this.with_android_sdk_manager(cx, |manager, cx| {
+                                manager.create_avd_for_device(profile.id, cx);
+                            });
+                        })
+                        .log_err();
+                    },
+                    window,
+                    cx,
+                )
+            });
+        });
+    }
+
+    fn render_android_devices(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let selector = self.render_android_device_selector(window, cx);
+        let content = self.render_android_devices_content(cx);
+        match selector {
+            Some(selector) => v_flex()
+                .flex_1()
+                .min_h_0()
+                .child(selector)
+                .child(content)
+                .into_any_element(),
+            None => content.into_any_element(),
+        }
+    }
+
+    fn render_android_devices_content(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self
             .android_sdk_manager
             .as_ref()
@@ -8903,6 +9250,7 @@ impl Sidebar {
                         Tab::new("device-tab-android")
                             .position(TabPosition::First)
                             .full_width(true)
+                            .surface(sidebar_row_background(cx))
                             .toggle_state(is_android)
                             .start_slot(
                                 Icon::new(IconName::Screen)
@@ -8924,6 +9272,7 @@ impl Sidebar {
                         Tab::new("device-tab-ios")
                             .position(TabPosition::Last)
                             .full_width(true)
+                            .surface(sidebar_row_background(cx))
                             .toggle_state(!is_android)
                             .start_slot(
                                 Icon::new(IconName::Screen)
@@ -8948,7 +9297,7 @@ impl Sidebar {
                     .flex_1()
                     .min_h_0()
                     .when(is_android, |this| {
-                        this.child(self.render_android_devices(cx))
+                        this.child(self.render_android_devices(window, cx))
                     })
                     .when(!is_android, |this| {
                         this.child(self.render_ios_simulator(window, cx))
@@ -9667,7 +10016,10 @@ impl Sidebar {
 }
 
 #[cfg(target_os = "macos")]
-async fn discover_or_boot_ios_simulator() -> anyhow::Result<Vec<IosSimulatorDevice>> {
+/// Every available iOS simulator, whether or not it is booted, so the device
+/// picker can offer them all. Booted devices come first because those are the
+/// ones that can be shown without waiting on a boot.
+async fn list_ios_simulators() -> anyhow::Result<Vec<IosSimulatorDevice>> {
     let output = smol::process::Command::new("xcrun")
         .args(["simctl", "list", "devices", "available", "--json"])
         .output()
@@ -9687,39 +10039,43 @@ async fn discover_or_boot_ios_simulator() -> anyhow::Result<Vec<IosSimulatorDevi
         .filter(|(runtime, _)| runtime.contains("SimRuntime.iOS"))
         .flat_map(|(_, devices)| devices)
         .collect();
-    available_devices.sort_by(|left, right| left.name.cmp(&right.name));
+    available_devices.sort_by(|left, right| {
+        let booted = right.is_booted().cmp(&left.is_booted());
+        booted.then_with(|| left.name.cmp(&right.name))
+    });
+    Ok(available_devices)
+}
 
-    let booted_devices: Vec<_> = available_devices
+/// The device to open on first use, when the user has not picked one yet.
+fn default_ios_device(devices: &[IosSimulatorDevice]) -> Option<&IosSimulatorDevice> {
+    devices
         .iter()
-        .filter(|device| device.state == "Booted")
-        .cloned()
-        .collect();
-    if !booted_devices.is_empty() {
-        return Ok(booted_devices);
-    }
-
-    let device = available_devices
-        .iter()
-        .find(|device| device.name == "iPhone 16e")
+        .find(|device| device.is_booted())
+        .or_else(|| devices.iter().find(|device| device.name == "iPhone 16e"))
         .or_else(|| {
-            available_devices
+            devices
                 .iter()
                 .find(|device| device.name.starts_with("iPhone"))
         })
-        .or_else(|| available_devices.first())
-        .context("no available iOS simulators were found")?;
+        .or_else(|| devices.first())
+}
+
+/// Boots `udid` and waits until the device finishes booting, so the caller can
+/// connect SimulatorKit to a display that is actually producing frames.
+async fn boot_ios_simulator(udid: &str) -> anyhow::Result<()> {
     let output = smol::process::Command::new("xcrun")
-        .args(["simctl", "boot", &device.udid])
+        .args(["simctl", "boot", udid])
         .output()
         .await
-        .context("failed to boot the default iOS simulator")?;
+        .context("failed to boot the iOS simulator")?;
+    // Booting an already-booted device is a success for our purposes.
     anyhow::ensure!(
         output.status.success() || String::from_utf8_lossy(&output.stderr).contains("Booted"),
         "xcrun simctl boot failed: {}",
         String::from_utf8_lossy(&output.stderr).trim()
     );
     let output = smol::process::Command::new("xcrun")
-        .args(["simctl", "bootstatus", &device.udid, "-b"])
+        .args(["simctl", "bootstatus", udid, "-b"])
         .output()
         .await
         .context("failed while waiting for the iOS simulator to boot")?;
@@ -9728,12 +10084,7 @@ async fn discover_or_boot_ios_simulator() -> anyhow::Result<Vec<IosSimulatorDevi
         "xcrun simctl bootstatus failed: {}",
         String::from_utf8_lossy(&output.stderr).trim()
     );
-
-    Ok(vec![IosSimulatorDevice {
-        name: device.name.clone(),
-        udid: device.udid.clone(),
-        state: "Booted".to_owned(),
-    }])
+    Ok(())
 }
 
 fn read_host_clipboard_text(cx: &mut AsyncApp) -> Option<String> {

@@ -1790,33 +1790,50 @@ impl ContextMenu {
         let handler = handler.clone();
         let menu = cx.entity().downgrade();
 
-        let icon_color = if *disabled {
-            Color::Muted
-        } else if toggle.is_some() {
-            icon_color.unwrap_or(Color::Accent)
-        } else {
-            icon_color.unwrap_or(Color::Default)
-        };
-
         let label_color = if *disabled {
             Color::Disabled
         } else {
             Color::Default
         };
 
+        // A toggle in the start slot sits exactly where the entry's own icon would go, so the
+        // icon has to give way and doubles as the checked glyph. A toggle in the end slot
+        // leaves the start slot free, so the icon stays there and the toggle falls back to a
+        // check mark.
+        let start_slot_taken_by_toggle = matches!(toggle, Some((IconPosition::Start, _)));
+        let renders_start_icon =
+            *icon_position == IconPosition::Start && !start_slot_taken_by_toggle;
+        let toggle_icon = if renders_start_icon {
+            IconName::Check
+        } else {
+            icon.unwrap_or(IconName::Check)
+        };
+
+        let toggle_color = if *disabled {
+            Color::Muted
+        } else {
+            icon_color.unwrap_or(Color::Accent)
+        };
+        // The accent colour is what marks the checked state, so an icon that merely labels the
+        // entry keeps the default colour even though the entry is toggleable.
+        let icon_color = if *disabled {
+            Color::Muted
+        } else if toggle.is_some() && !renders_start_icon {
+            icon_color.unwrap_or(Color::Accent)
+        } else {
+            icon_color.unwrap_or(Color::Default)
+        };
+
         let label_element = if let Some(custom_path) = custom_icon_path {
             h_flex()
                 .gap_1p5()
-                .when(
-                    *icon_position == IconPosition::Start && toggle.is_none(),
-                    |flex| {
-                        flex.child(
-                            Icon::from_path(custom_path.clone())
-                                .size(*icon_size)
-                                .color(icon_color),
-                        )
-                    },
-                )
+                .when(renders_start_icon, |flex| {
+                    flex.child(
+                        Icon::from_path(custom_path.clone())
+                            .size(*icon_size)
+                            .color(icon_color),
+                    )
+                })
                 .child(Label::new(label.clone()).color(label_color).truncate())
                 .when(*icon_position == IconPosition::End, |flex| {
                     flex.child(
@@ -1829,16 +1846,13 @@ impl ContextMenu {
         } else if let Some(custom_icon_svg) = custom_icon_svg {
             h_flex()
                 .gap_1p5()
-                .when(
-                    *icon_position == IconPosition::Start && toggle.is_none(),
-                    |flex| {
-                        flex.child(
-                            Icon::from_external_svg(custom_icon_svg.clone())
-                                .size(*icon_size)
-                                .color(icon_color),
-                        )
-                    },
-                )
+                .when(renders_start_icon, |flex| {
+                    flex.child(
+                        Icon::from_external_svg(custom_icon_svg.clone())
+                            .size(*icon_size)
+                            .color(icon_color),
+                    )
+                })
                 .child(Label::new(label.clone()).color(label_color).truncate())
                 .when(*icon_position == IconPosition::End, |flex| {
                     flex.child(
@@ -1851,10 +1865,9 @@ impl ContextMenu {
         } else if let Some(icon_name) = icon {
             h_flex()
                 .gap_1p5()
-                .when(
-                    *icon_position == IconPosition::Start && toggle.is_none(),
-                    |flex| flex.child(Icon::new(*icon_name).size(*icon_size).color(icon_color)),
-                )
+                .when(renders_start_icon, |flex| {
+                    flex.child(Icon::new(*icon_name).size(*icon_size).color(icon_color))
+                })
                 .child(Label::new(label.clone()).color(label_color).truncate())
                 .when(*icon_position == IconPosition::End, |flex| {
                     flex.child(Icon::new(*icon_name).size(*icon_size).color(icon_color))
@@ -1995,11 +2008,7 @@ impl ContextMenu {
                     .when_some(*toggle, |list_item, (position, toggled)| {
                         let contents = div()
                             .flex_none()
-                            .child(
-                                Icon::new(icon.unwrap_or(IconName::Check))
-                                    .color(icon_color)
-                                    .size(*icon_size),
-                            )
+                            .child(Icon::new(toggle_icon).color(toggle_color).size(*icon_size))
                             .when(!toggled, |contents| contents.invisible());
 
                         match position {

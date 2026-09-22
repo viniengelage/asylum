@@ -5,7 +5,7 @@ use anthropic::{ANTHROPIC_API_URL, AnthropicError, AnthropicModelMode};
 use anyhow::Result;
 use collections::BTreeMap;
 use credentials_provider::CredentialsProvider;
-use futures::{FutureExt, StreamExt, future::BoxFuture, stream::BoxStream};
+use futures::{FutureExt, StreamExt, channel::oneshot, future::BoxFuture, stream::BoxStream};
 use gpui::{App, AppContext, AsyncApp, Context, Entity, SharedString, Task, Window};
 use http_client::{CustomHeaders, HttpClient};
 use language_model::{
@@ -79,6 +79,7 @@ impl AnthropicProviderHandle {
             refresh_token: String::new(),
             access_token: token,
             expires_ms: u64::MAX,
+            scopes: Vec::new(),
         };
         self.state.update(cx, |state, cx| state.set_oauth(auth, cx))
     }
@@ -1213,6 +1214,38 @@ mod tests {
     }
 }
 
+/// The credential for one request, refreshed first when the OAuth token is at or near expiry.
+///
+/// The access token outlives sign-in by only hours, and the refresh used to run at startup only,
+/// so a session still open when the token lapsed failed every request with "no credentials"
+/// until the whole sign-in flow was run again. The answer comes back over a channel because the
+/// request future has to be `Send`, which rules out holding an `AsyncApp` across the refresh.
+fn api_key_for_request(
+    state: &Entity<State>,
+    api_url: SharedString,
+    cx: &mut AsyncApp,
+) -> oneshot::Receiver<Option<Arc<str>>> {
+    let (sender, receiver) = oneshot::channel();
+    state.update(cx, |state, cx| {
+        match state.refresh_oauth_if_needed(cx) {
+            None => {
+                sender.send(state.effective_api_key(&api_url)).ok();
+            }
+            Some(refresh) => cx
+                .spawn(async move |state, cx| {
+                    refresh.await.log_err();
+                    let api_key = state
+                        .read_with(cx, |state, _cx| state.effective_api_key(&api_url))
+                        .ok()
+                        .flatten();
+                    sender.send(api_key).ok();
+                })
+                .detach(),
+        };
+    });
+    receiver
+}
+
 pub struct AnthropicModel {
     id: LanguageModelId,
     model: anthropic::Model,
@@ -1234,21 +1267,17 @@ impl AnthropicModel {
         >,
     > {
         let http_client = self.http_client.clone();
+        let mut cx = cx.clone();
 
-        let (api_key, api_url, extra_headers, using_oauth) =
-            self.state.read_with(cx, |state, cx| {
-                let api_url = AnthropicLanguageModelProvider::api_url(cx);
-                let extra_headers = AnthropicLanguageModelProvider::settings(cx)
-                    .custom_headers
-                    .clone();
-                let using_oauth = state.is_using_oauth(&api_url);
-                (
-                    state.effective_api_key(&api_url),
-                    api_url,
-                    extra_headers,
-                    using_oauth,
-                )
-            });
+        let (api_url, extra_headers, using_oauth) = self.state.read_with(&cx, |state, cx| {
+            let api_url = AnthropicLanguageModelProvider::api_url(cx);
+            let extra_headers = AnthropicLanguageModelProvider::settings(cx)
+                .custom_headers
+                .clone();
+            let using_oauth = state.is_using_oauth(&api_url);
+            (api_url, extra_headers, using_oauth)
+        });
+        let api_key = api_key_for_request(&self.state, api_url.clone(), &mut cx);
 
         let beta_headers = {
             let mut base = self.model.beta_headers().unwrap_or_default();
@@ -1262,7 +1291,7 @@ impl AnthropicModel {
         };
 
         async move {
-            let Some(api_key) = api_key else {
+            let Some(api_key) = api_key.await.ok().flatten() else {
                 return Err(LanguageModelCompletionError::NoApiKey {
                     provider: PROVIDER_NAME,
                 });

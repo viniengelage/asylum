@@ -961,6 +961,44 @@ pub(crate) struct TooltipRequest {
     tooltip: AnyTooltip,
 }
 
+/// The area a slice of the scene actually covered, in window coordinates, or `None` when the
+/// slice painted nothing visible.
+#[cfg(target_os = "macos")]
+fn painted_bounds(
+    scene: &Scene,
+    range: Range<usize>,
+    scale_factor: f32,
+) -> Option<Bounds<Pixels>> {
+    let mut painted: Option<Bounds<ScaledPixels>> = None;
+    for operation in scene.paint_operations.get(range)? {
+        let crate::scene::PaintOperation::Primitive(primitive) = operation else {
+            continue;
+        };
+        let bounds = primitive
+            .bounds()
+            .intersect(&primitive.content_mask().bounds);
+        if bounds.is_empty() {
+            continue;
+        }
+        painted = Some(match painted {
+            Some(painted) => painted.union(&bounds),
+            None => bounds,
+        });
+    }
+
+    let painted = painted?;
+    Some(Bounds {
+        origin: point(
+            px(painted.origin.x.0 / scale_factor),
+            px(painted.origin.y.0 / scale_factor),
+        ),
+        size: size(
+            px(painted.size.width.0 / scale_factor),
+            px(painted.size.height.0 / scale_factor),
+        ),
+    })
+}
+
 pub(crate) struct DeferredDraw {
     current_view: EntityId,
     priority: usize,
@@ -1213,6 +1251,10 @@ pub struct Window {
         SubscriberSet<(), Box<dyn FnMut(WindowVisibility, &mut Window, &mut App) -> bool>>,
     hovered: Rc<Cell<bool>>,
     pub(crate) needs_present: Rc<Cell<bool>>,
+    /// Where the last frame painted overlays, so hosted native views can be punched out to let
+    /// them through. Kept to skip the platform call on frames that did not move anything.
+    #[cfg(target_os = "macos")]
+    native_subview_occlusions: Vec<Bounds<Pixels>>,
     /// Tracks recent input event timestamps to determine if input is arriving at a high rate.
     /// Used to selectively enable VRR optimization only when input rate exceeds 60fps.
     pub(crate) input_rate_tracker: Rc<RefCell<InputRateTracker>>,
@@ -2068,6 +2110,8 @@ impl Window {
             visibility_observers: SubscriberSet::new(),
             hovered,
             needs_present,
+            #[cfg(target_os = "macos")]
+            native_subview_occlusions: Vec::new(),
             input_rate_tracker,
             #[cfg(feature = "profiler")]
             window_profiler: profiler::WindowProfiler::new(handle.window_id())?,
@@ -3584,6 +3628,11 @@ impl Window {
 
         self.paint_deferred_draws(cx);
 
+        // Prompts, drag images and tooltips paint outside the deferred-draw list, so their
+        // scene range has to be tracked by hand to be reported as an overlay.
+        #[cfg(target_os = "macos")]
+        let trailing_overlays_start = self.next_frame.scene.len();
+
         if let Some(mut prompt_element) = prompt_element {
             prompt_element.paint(self, cx);
         } else if let Some(mut drag_element) = active_drag_element {
@@ -3591,6 +3640,9 @@ impl Window {
         } else if let Some(mut tooltip_element) = tooltip_element {
             tooltip_element.paint(self, cx);
         }
+
+        #[cfg(target_os = "macos")]
+        self.update_native_subview_occlusions(trailing_overlays_start..self.next_frame.scene.len());
 
         #[cfg(any(feature = "inspector", debug_assertions))]
         self.paint_inspector_hitbox(cx);
@@ -3620,6 +3672,37 @@ impl Window {
                 );
                 self.platform_window.a11y_tree_update(tree_update);
             }
+        }
+    }
+
+    /// A hosted native view lives in a child window stacked above everything GPUI paints, so
+    /// popovers, menus and tooltips would be swallowed by it. Reporting where this frame's
+    /// overlays landed lets the platform cut matching holes out of the hosted view, which both
+    /// reveals the overlay and lets the window server route clicks there back to GPUI.
+    #[cfg(target_os = "macos")]
+    fn update_native_subview_occlusions(&mut self, trailing_overlays: Range<usize>) {
+        if !self.platform_window.has_native_subviews() {
+            self.native_subview_occlusions.clear();
+            return;
+        }
+
+        let scale_factor = self.scale_factor;
+        let scene = &self.next_frame.scene;
+        let mut occlusions = Vec::new();
+        occlusions.extend(self.next_frame.deferred_draws.iter().filter_map(|deferred_draw| {
+            painted_bounds(
+                scene,
+                deferred_draw.paint_range.start.scene_index
+                    ..deferred_draw.paint_range.end.scene_index,
+                scale_factor,
+            )
+        }));
+        occlusions.extend(painted_bounds(scene, trailing_overlays, scale_factor));
+
+        if occlusions != self.native_subview_occlusions {
+            self.platform_window
+                .set_native_subview_occlusions(&occlusions);
+            self.native_subview_occlusions = occlusions;
         }
     }
 
@@ -7390,6 +7473,17 @@ impl Window {
     ) -> anyhow::Result<*mut std::ffi::c_void> {
         self.platform_window
             .create_simulator_display_view(udid, size)
+    }
+
+    /// Attaches or detaches the host keyboard from the simulator with this UDID. iOS draws its
+    /// on-screen keyboard only while no hardware keyboard is attached.
+    pub fn set_simulator_hardware_keyboard_enabled(
+        &self,
+        udid: &str,
+        enabled: bool,
+    ) -> anyhow::Result<()> {
+        self.platform_window
+            .set_simulator_hardware_keyboard_enabled(udid, enabled)
     }
 }
 

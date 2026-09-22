@@ -1586,9 +1586,10 @@ impl Element for TerminalElement {
             let scroll_top = terminal_view.scroll_top;
             let mouse_input_mode = terminal_view.mouse_input_mode();
 
+            let bottom_radius = ui::pane_corner_radius_px(window);
             window.paint_quad(fill(bounds, layout.background_color).corner_radii(Corners {
-                bottom_left: px(8.0),
-                bottom_right: px(8.0),
+                bottom_left: bottom_radius,
+                bottom_right: bottom_radius,
                 ..Corners::default()
             }));
             let origin = layout.dimensions.bounds.origin - GpuiPoint::new(px(0.), scroll_top);

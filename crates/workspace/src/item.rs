@@ -12,8 +12,8 @@ use client::{Client, proto};
 use futures::channel::mpsc;
 use gpui::{
     Action, AnyElement, AnyEntity, AnyView, App, AppContext, Context, Entity, EntityId,
-    EventEmitter, FocusHandle, Focusable, Font, Pixels, Point, Render, SharedString, Task, TaskExt,
-    WeakEntity, Window,
+    EventEmitter, FocusHandle, Focusable, Font, Hsla, Pixels, Point, Render, SharedString, Task,
+    TaskExt, WeakEntity, Window,
 };
 use language::Capability;
 pub use language::HighlightedText;
@@ -382,6 +382,15 @@ pub trait Item: Focusable + EventEmitter<Self::Event> + Render + Sized {
         true
     }
 
+    /// The background this item fills its content area with, when that is not the pane's own
+    /// `editor_background`.
+    ///
+    /// The pane paints the active tab with it so the tab reads as part of the content rather
+    /// than as a chip above it. Items that do not paint their own surface return `None`.
+    fn content_background(&self, _cx: &App) -> Option<Hsla> {
+        None
+    }
+
     fn pixel_position_of_cursor(&self, _: &App) -> Option<Point<Pixels>> {
         None
     }
@@ -578,6 +587,7 @@ pub trait ItemHandle: 'static + Send {
     fn breadcrumbs(&self, cx: &App) -> Option<(Vec<HighlightedText>, Option<Font>)>;
     fn breadcrumb_prefix(&self, window: &mut Window, cx: &mut App) -> Option<gpui::AnyElement>;
     fn show_toolbar(&self, cx: &App) -> bool;
+    fn content_background(&self, cx: &App) -> Option<Hsla>;
     fn pixel_position_of_cursor(&self, cx: &App) -> Option<Point<Pixels>>;
     fn downgrade_item(&self) -> Box<dyn WeakItemHandle>;
     fn workspace_settings<'a>(&self, cx: &'a App) -> &'a WorkspaceSettings;
@@ -1149,6 +1159,10 @@ impl<T: Item> ItemHandle for Entity<T> {
 
     fn show_toolbar(&self, cx: &App) -> bool {
         self.read(cx).show_toolbar()
+    }
+
+    fn content_background(&self, cx: &App) -> Option<Hsla> {
+        self.read(cx).content_background(cx)
     }
 
     fn pixel_position_of_cursor(&self, cx: &App) -> Option<Point<Pixels>> {

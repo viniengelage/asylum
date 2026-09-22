@@ -13,6 +13,15 @@ pub const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 pub const AUTHORIZE_URL: &str = "https://claude.ai/oauth/authorize";
 pub const TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
 pub const DEFAULT_REDIRECT_URI: &str = "https://platform.claude.com/oauth/code/callback";
+/// Scopes requested at sign-in and echoed back on every refresh. The token endpoint grants what
+/// it is asked for, so omitting them on refresh can hand back a narrower token than the session
+/// started with.
+pub const SCOPES: &[&str] = &["user:profile", "user:inference", "user:sessions:claude_code"];
+/// How long before the stated expiry a token is treated as spent. The access token outlives
+/// sign-in by hours, so a session that is still running when it lapses would otherwise fail its
+/// next request; refreshing early also keeps a request that starts just under the wire valid for
+/// its whole round trip. Claude Code uses the same five minutes.
+const EXPIRY_LEEWAY_MS: u64 = 300_000;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AnthropicOAuth {
@@ -20,6 +29,10 @@ pub struct AnthropicOAuth {
     pub access_token: String,
     /// Expiration as milliseconds since UNIX epoch.
     pub expires_ms: u64,
+    /// Scopes this token was granted. Empty for credentials stored before scopes were tracked,
+    /// in which case [`SCOPES`] is sent instead.
+    #[serde(default)]
+    pub scopes: Vec<String>,
 }
 
 impl AnthropicOAuth {
@@ -28,7 +41,15 @@ impl AnthropicOAuth {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
-        self.expires_ms <= now
+        self.expires_ms <= now.saturating_add(EXPIRY_LEEWAY_MS)
+    }
+
+    fn scopes_to_request(&self) -> String {
+        if self.scopes.is_empty() {
+            SCOPES.join(" ")
+        } else {
+            self.scopes.join(" ")
+        }
     }
 
     pub fn access_token(&self) -> &str {
@@ -65,7 +86,7 @@ pub fn build_authorize_url_with_redirect(redirect_uri: &str) -> Result<Authorize
          &code_challenge_method=S256\
          &state={state}",
         redirect = urlencoding(redirect_uri),
-        scope = urlencoding("user:profile user:inference user:sessions:claude_code"),
+        scope = urlencoding(&SCOPES.join(" ")),
     );
 
     Ok(AuthorizeParams {
@@ -151,7 +172,7 @@ pub async fn exchange_code_with_redirect_and_state(
     let token: TokenResponse = serde_json::from_str(&response_body)
         .context("failed to parse OAuth token response")?;
 
-    Ok(token_response_to_auth(token))
+    token_response_to_auth(token, None)
 }
 
 pub async fn refresh_token(
@@ -162,6 +183,7 @@ pub async fn refresh_token(
         "grant_type": "refresh_token",
         "refresh_token": current.refresh_token,
         "client_id": CLIENT_ID,
+        "scope": current.scopes_to_request(),
     });
 
     let request = HttpRequest::builder()
@@ -200,27 +222,46 @@ pub async fn refresh_token(
     let token: TokenResponse = serde_json::from_str(&response_body)
         .context("failed to parse OAuth token refresh response")?;
 
-    Ok(token_response_to_auth(token))
+    token_response_to_auth(token, Some(current))
 }
 
 #[derive(Debug, Deserialize)]
 struct TokenResponse {
-    refresh_token: String,
+    /// Absent whenever the server keeps the current refresh token alive across a refresh, which
+    /// it is free to do. Treating it as required would throw away a working credential.
+    #[serde(default)]
+    refresh_token: Option<String>,
     access_token: String,
     expires_in: u64,
+    #[serde(default)]
+    scope: Option<String>,
 }
 
-fn token_response_to_auth(token: TokenResponse) -> AnthropicOAuth {
+fn token_response_to_auth(
+    token: TokenResponse,
+    current: Option<&AnthropicOAuth>,
+) -> Result<AnthropicOAuth> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64;
 
-    AnthropicOAuth {
-        refresh_token: token.refresh_token,
+    let refresh_token = token
+        .refresh_token
+        .or_else(|| current.map(|current| current.refresh_token.clone()))
+        .context("OAuth response carried no refresh token and none was already stored")?;
+
+    let scopes = match token.scope {
+        Some(scope) => scope.split_whitespace().map(str::to_string).collect(),
+        None => current.map_or_else(Vec::new, |current| current.scopes.clone()),
+    };
+
+    Ok(AnthropicOAuth {
+        refresh_token,
         access_token: token.access_token,
         expires_ms: now + (token.expires_in * 1000),
-    }
+        scopes,
+    })
 }
 
 fn generate_pkce_pair() -> (String, String) {
@@ -248,4 +289,76 @@ fn urlencoding(input: &str) -> String {
         }
     }
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stored_token() -> AnthropicOAuth {
+        AnthropicOAuth {
+            refresh_token: "old-refresh".into(),
+            access_token: "old-access".into(),
+            expires_ms: 0,
+            scopes: vec!["user:profile".into(), "user:inference".into()],
+        }
+    }
+
+    #[test]
+    fn refresh_response_without_a_refresh_token_keeps_the_stored_one() {
+        let response: TokenResponse =
+            serde_json::from_str(r#"{"access_token":"new-access","expires_in":3600}"#).unwrap();
+
+        let refreshed = token_response_to_auth(response, Some(&stored_token())).unwrap();
+
+        assert_eq!(refreshed.refresh_token, "old-refresh");
+        assert_eq!(refreshed.access_token, "new-access");
+        assert_eq!(refreshed.scopes, stored_token().scopes);
+    }
+
+    #[test]
+    fn refresh_response_rotating_the_refresh_token_replaces_it() {
+        let response: TokenResponse = serde_json::from_str(
+            r#"{"access_token":"new-access","refresh_token":"new-refresh","expires_in":3600,"scope":"user:profile user:inference"}"#,
+        )
+        .unwrap();
+
+        let refreshed = token_response_to_auth(response, Some(&stored_token())).unwrap();
+
+        assert_eq!(refreshed.refresh_token, "new-refresh");
+        assert_eq!(refreshed.scopes, ["user:profile", "user:inference"]);
+    }
+
+    #[test]
+    fn sign_in_without_a_refresh_token_is_rejected() {
+        let response: TokenResponse =
+            serde_json::from_str(r#"{"access_token":"new-access","expires_in":3600}"#).unwrap();
+
+        assert!(token_response_to_auth(response, None).is_err());
+    }
+
+    #[test]
+    fn a_token_inside_the_refresh_leeway_counts_as_expired() {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+
+        let mut auth = stored_token();
+        auth.expires_ms = now + EXPIRY_LEEWAY_MS / 2;
+        assert!(auth.is_expired());
+
+        auth.expires_ms = now + EXPIRY_LEEWAY_MS * 2;
+        assert!(!auth.is_expired());
+    }
+
+    #[test]
+    fn credentials_stored_before_scopes_were_tracked_fall_back_to_the_defaults() {
+        let auth: AnthropicOAuth = serde_json::from_str(
+            r#"{"refresh_token":"r","access_token":"a","expires_ms":1}"#,
+        )
+        .unwrap();
+
+        assert_eq!(auth.scopes_to_request(), SCOPES.join(" "));
+    }
 }

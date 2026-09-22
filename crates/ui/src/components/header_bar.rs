@@ -1,8 +1,21 @@
-use gpui::{AnyElement, Hsla};
+use gpui::{AnyElement, Div, Hsla};
 use smallvec::SmallVec;
 
 use crate::Tab;
 use crate::prelude::*;
+
+/// Which edge of a bar carries its dividing rule.
+///
+/// A strip at the top of a pane rules against the content below it; a strip at the bottom
+/// rules against the content above it. Everything else about the two is identical, so they
+/// share [`HeaderBar`] rather than being hand-rolled separately.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum HeaderBarEdge {
+    /// The bar sits above its content; the rule is on its bottom edge.
+    Top,
+    /// The bar sits below its content; the rule is on its top edge.
+    Bottom,
+}
 
 /// Where a header bar sits in the surface hierarchy, which determines its fill and divider color.
 ///
@@ -45,6 +58,8 @@ impl HeaderBarLevel {
 pub struct HeaderBar {
     id: ElementId,
     level: HeaderBarLevel,
+    edge: HeaderBarEdge,
+    wrapping: bool,
     start_children: SmallVec<[AnyElement; 2]>,
     children: SmallVec<[AnyElement; 2]>,
     end_children: SmallVec<[AnyElement; 2]>,
@@ -55,14 +70,33 @@ impl HeaderBar {
         Self {
             id: id.into(),
             level: HeaderBarLevel::Pane,
+            edge: HeaderBarEdge::Top,
+            wrapping: false,
             start_children: SmallVec::new(),
             children: SmallVec::new(),
             end_children: SmallVec::new(),
         }
     }
 
+    /// A bar that sits *below* its content, such as a pane's tool strip, ruled on its top edge.
+    pub fn footer(id: impl Into<ElementId>) -> Self {
+        Self {
+            edge: HeaderBarEdge::Bottom,
+            ..Self::new(id)
+        }
+    }
+
     pub fn level(mut self, level: HeaderBarLevel) -> Self {
         self.level = level;
+        self
+    }
+
+    /// Lets the bar grow past [`HeaderBar::height`] when a slot's content wraps onto more rows.
+    ///
+    /// A bar fixed to one row clips whatever wraps below it, so a slot that sets `flex_wrap`
+    /// has to opt in here.
+    pub fn wrapping(mut self, wrapping: bool) -> Self {
+        self.wrapping = wrapping;
         self
     }
 
@@ -134,42 +168,36 @@ impl RenderOnce for HeaderBar {
         let slot_gap = HeaderBar::slot_gap(cx);
         let slot_padding = HeaderBar::slot_padding(cx);
 
+        let wrapping = self.wrapping;
+        // A wrapping bar has no definite height, so its slots cannot stretch to one.
+        let slot = move |slot: Div| {
+            slot.gap(slot_gap)
+                .when(!wrapping, |slot| slot.h_full())
+        };
+
         h_flex()
             .id(self.id)
             .group("header_bar")
             .flex_none()
             .w_full()
-            .h(HeaderBar::height(cx))
+            .map(|this| match wrapping {
+                false => this.h(HeaderBar::height(cx)),
+                true => this.min_h(HeaderBar::height(cx)),
+            })
             .px(slot_padding)
             .gap(slot_gap)
             .bg(self.level.background(cx))
-            .border_b_1()
+            .map(|this| match self.edge {
+                HeaderBarEdge::Top => this.border_b_1(),
+                HeaderBarEdge::Bottom => this.border_t_1(),
+            })
             .border_color(self.level.border(cx))
             .when(!self.start_children.is_empty(), |this| {
-                this.child(
-                    h_flex()
-                        .flex_none()
-                        .h_full()
-                        .gap(slot_gap)
-                        .children(self.start_children),
-                )
+                this.child(slot(h_flex().flex_none()).children(self.start_children))
             })
-            .child(
-                h_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .h_full()
-                    .gap(slot_gap)
-                    .children(self.children),
-            )
+            .child(slot(h_flex().flex_1().min_w_0()).children(self.children))
             .when(!self.end_children.is_empty(), |this| {
-                this.child(
-                    h_flex()
-                        .flex_none()
-                        .h_full()
-                        .gap(slot_gap)
-                        .children(self.end_children),
-                )
+                this.child(slot(h_flex().flex_none()).children(self.end_children))
             })
     }
 }

@@ -129,7 +129,7 @@ impl RenderOnce for TabBar {
             .flex_none()
             .w_full()
             .h(HeaderBar::height(cx))
-            .rounded_t_lg()
+            .rounded_t(pane_corner_radius())
             .bg(HeaderBarLevel::Pane.background(cx))
             .when(!self.start_children.is_empty(), |this| {
                 this.child(

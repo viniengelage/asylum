@@ -6888,6 +6888,7 @@ impl GitPanel {
     fn render_tab_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let active_tab = self.active_tab;
 
+        let surface = cx.theme().colors().panel_background;
         let focus_handle = self.focus_handle.clone();
         let tab = |id: &'static str,
                    position: TabPosition,
@@ -6901,6 +6902,7 @@ impl GitPanel {
             Tab::new(id)
                 .position(position)
                 .full_width(true)
+                .surface(surface)
                 .toggle_state(active)
                 .child(Label::new(label.clone()).when(!active, |this| this.color(Color::Muted)))
                 .when(show_changes && self.changes_count > 0, |this| {

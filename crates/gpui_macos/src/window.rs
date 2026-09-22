@@ -39,6 +39,8 @@ use core_foundation::base::{CFRelease, CFTypeRef};
 use core_foundation_sys::base::CFEqual;
 use core_foundation_sys::number::{CFBooleanGetValue, CFBooleanRef};
 use core_graphics::display::{CGDirectDisplayID, CGRect};
+use core_graphics::geometry::{CGPoint, CGSize};
+use core_graphics::sys::CGPath;
 use ctor::ctor;
 use futures::channel::oneshot;
 use gpui_util::ResultExt;
@@ -673,6 +675,9 @@ struct MacWindowState {
     native_view: NonNull<Object>,
     native_subviews: HashMap<u64, NativeHostedView>,
     next_native_subview_id: u64,
+    /// Where GPUI last painted overlays, in window coordinates. Kept so the mask can be rebuilt
+    /// whenever a hosted view moves, which changes the rect the holes have to be expressed in.
+    native_subview_occlusions: Vec<Bounds<Pixels>>,
     blurred_view: Option<id>,
     background_appearance: WindowBackgroundAppearance,
     cursor_style: CursorStyle,
@@ -953,6 +958,15 @@ impl MacWindowState {
         get_scale_factor(self.native_window)
     }
 
+    /// The overlay rects from the last frame, in screen coordinates, which is the common frame
+    /// of reference between GPUI's window and each hosted view's child window.
+    fn native_subview_occlusion_rects(&self) -> Vec<NSRect> {
+        self.native_subview_occlusions
+            .iter()
+            .map(|occlusion| self.native_subview_screen_rect(*occlusion))
+            .collect()
+    }
+
     fn native_subview_screen_rect(&self, bounds: Bounds<Pixels>) -> NSRect {
         let content_height = self.content_size().height;
         // AppKit uses bottom-left origin (y increases upward), while GPUI uses
@@ -1086,6 +1100,129 @@ extern "C" fn native_host_window_cannot_become_main(_: &Object, _: Sel) -> BOOL 
     NO
 }
 
+unsafe extern "C" {
+    fn CGPathCreateMutable() -> *mut CGPath;
+    fn CGPathAddRect(path: *mut CGPath, transform: *const c_void, rect: CGRect);
+    fn CGPathRelease(path: *mut CGPath);
+}
+
+/// Cuts `occlusions` out of the child window hosting a native view. The window is already
+/// non-opaque over a clear background, so the window server treats the cut-out pixels as empty:
+/// whatever GPUI painted underneath shows through, and clicks there land on GPUI's window
+/// instead of on the hosted view.
+unsafe fn set_native_host_window_mask(child_window: id, occlusions: &[NSRect]) {
+    unsafe {
+        let container: id = msg_send![child_window, contentView];
+        if container == nil {
+            return;
+        }
+        let layer: id = msg_send![container, layer];
+        if layer == nil {
+            return;
+        }
+
+        let window_frame: NSRect = msg_send![child_window, frame];
+        let holes: Vec<NSRect> = occlusions
+            .iter()
+            .filter_map(|occlusion| {
+                clip_to_container(*occlusion, window_frame)
+            })
+            .collect();
+
+        if holes.is_empty() {
+            let _: () = msg_send![layer, setMask: nil];
+            return;
+        }
+
+        let path = CGPathCreateMutable();
+        for rect in unmasked_rects(window_frame.size, &holes) {
+            CGPathAddRect(path, ptr::null(), rect);
+        }
+        let mask: id = msg_send![class!(CAShapeLayer), layer];
+        let _: () = msg_send![mask, setFrame: NSRect::new(NSPoint::new(0., 0.), window_frame.size)];
+        let _: () = msg_send![mask, setPath: path];
+        let _: () = msg_send![layer, setMask: mask];
+        CGPathRelease(path);
+    }
+}
+
+/// Moves a screen rect into `window_frame`'s coordinates, clipped to it, or `None` when the two
+/// do not meet.
+fn clip_to_container(rect: NSRect, window_frame: NSRect) -> Option<NSRect> {
+    let min_x = (rect.origin.x - window_frame.origin.x).max(0.);
+    let min_y = (rect.origin.y - window_frame.origin.y).max(0.);
+    let max_x = (rect.origin.x - window_frame.origin.x + rect.size.width).min(window_frame.size.width);
+    let max_y =
+        (rect.origin.y - window_frame.origin.y + rect.size.height).min(window_frame.size.height);
+    (max_x > min_x && max_y > min_y).then(|| {
+        NSRect::new(
+            NSPoint::new(min_x, min_y),
+            NSSize::new(max_x - min_x, max_y - min_y),
+        )
+    })
+}
+
+/// The container rect minus `holes`, as disjoint rectangles.
+///
+/// Holes overlap whenever one overlay is drawn over another, such as a submenu over its parent
+/// menu, and neither Core Graphics fill rule subtracts overlapping subpaths correctly: even-odd
+/// makes the shared area solid again, and non-zero never removes it. So the area that stays
+/// visible is decomposed instead of being punched out.
+fn unmasked_rects(container: NSSize, holes: &[NSRect]) -> Vec<CGRect> {
+    let mut columns = vec![0., container.width];
+    let mut bands = vec![0., container.height];
+    for hole in holes {
+        columns.push(hole.origin.x);
+        columns.push(hole.origin.x + hole.size.width);
+        bands.push(hole.origin.y);
+        bands.push(hole.origin.y + hole.size.height);
+    }
+    sort_and_dedup(&mut columns);
+    sort_and_dedup(&mut bands);
+
+    let mut rects = Vec::new();
+    for band in bands.windows(2) {
+        let (bottom, top) = (band[0], band[1]);
+        let center_y = (bottom + top) / 2.;
+        // Runs of adjacent uncovered cells are emitted as one rectangle to keep the path small.
+        let mut run: Option<(f64, f64)> = None;
+        for column in columns.windows(2) {
+            let (left, right) = (column[0], column[1]);
+            let center_x = (left + right) / 2.;
+            let covered = holes.iter().any(|hole| {
+                center_x > hole.origin.x
+                    && center_x < hole.origin.x + hole.size.width
+                    && center_y > hole.origin.y
+                    && center_y < hole.origin.y + hole.size.height
+            });
+            run = match (run, covered) {
+                (Some((start, _)), true) => {
+                    rects.push(CGRect::new(
+                        &CGPoint::new(start, bottom),
+                        &CGSize::new(left - start, top - bottom),
+                    ));
+                    None
+                }
+                (None, true) => None,
+                (Some((start, _)), false) => Some((start, right)),
+                (None, false) => Some((left, right)),
+            };
+        }
+        if let Some((start, end)) = run {
+            rects.push(CGRect::new(
+                &CGPoint::new(start, bottom),
+                &CGSize::new(end - start, top - bottom),
+            ));
+        }
+    }
+    rects
+}
+
+fn sort_and_dedup(values: &mut Vec<f64>) {
+    values.sort_by(|left, right| left.total_cmp(right));
+    values.dedup_by(|left, right| (*left - *right).abs() < 0.01);
+}
+
 /// Detaches and closes a child window created by `add_native_subview`.
 /// NSWindow defaults to `releasedWhenClosed`, so `close` balances the
 /// ownership reference taken by `alloc`/`init`.
@@ -1130,6 +1267,9 @@ impl MacWindow {
                 container,
                 initWithFrame: NSRect::new(NSPoint::new(0., 0.), screen_rect.size)
             ];
+            // The mask that cuts overlays out of the hosted view lives on the container's layer,
+            // so it has to be layer-backed whether or not the hosted view asks for layers.
+            let _: () = msg_send![container, setWantsLayer: YES];
             let _: () = msg_send![container, addSubview: subview];
             // Cursor rects lose to a subview that sets the cursor itself, so also ask for
             // `cursorUpdate:` over the whole container. Enter and move are tracked as well
@@ -1166,6 +1306,7 @@ impl MacWindow {
                 addChildWindow: child_window
                 ordered: NSWindowOrderingMode::NSWindowAbove
             ];
+            set_native_host_window_mask(child_window, &state.native_subview_occlusion_rects());
             child_window
         };
         state.native_subviews.insert(
@@ -1184,7 +1325,30 @@ impl MacWindow {
             let screen_rect = state.native_subview_screen_rect(bounds);
             unsafe {
                 let _: () = msg_send![hosted.child_window, setFrame: screen_rect display: YES];
+                // The holes are expressed relative to the child window, so moving it invalidates
+                // them even though the overlays themselves did not move.
+                set_native_host_window_mask(
+                    hosted.child_window,
+                    &state.native_subview_occlusion_rects(),
+                );
             }
+        }
+    }
+
+    pub(crate) fn has_native_subviews(&self) -> bool {
+        !self.0.lock().native_subviews.is_empty()
+    }
+
+    pub(crate) fn set_native_subview_occlusions(&self, occlusions: &[Bounds<Pixels>]) {
+        let mut state = self.0.lock();
+        if state.native_subview_occlusions == occlusions {
+            return;
+        }
+        state.native_subview_occlusions = occlusions.to_vec();
+
+        let rects = state.native_subview_occlusion_rects();
+        for hosted in state.native_subviews.values() {
+            unsafe { set_native_host_window_mask(hosted.child_window, &rects) };
         }
     }
 
@@ -1200,8 +1364,10 @@ impl MacWindow {
                 state.native_subview_screen_rect(bounds),
             )
         };
+        let occlusion_rects = self.0.lock().native_subview_occlusion_rects();
         unsafe {
             let _: () = msg_send![child_window, setFrame: screen_rect display: YES];
+            set_native_host_window_mask(child_window, &occlusion_rects);
         }
         crate::simulator_kit::resize_sim_display_view(view, bounds.size);
         crate::simulator_kit::fit_sim_display_view(view, bounds.size);
@@ -1381,6 +1547,7 @@ impl MacWindow {
                 native_view: NonNull::new_unchecked(native_view),
                 native_subviews: HashMap::new(),
                 next_native_subview_id: 0,
+                native_subview_occlusions: Vec::new(),
                 blurred_view: None,
                 background_appearance: WindowBackgroundAppearance::Opaque,
                 cursor_style: CursorStyle::Arrow,
@@ -1958,6 +2125,22 @@ impl PlatformWindow for MacWindow {
     ) -> anyhow::Result<*mut c_void> {
         let device = crate::core_simulator::sim_device_for_udid(udid)?;
         crate::simulator_kit::create_sim_display_view(device, size).map(|view| view.cast())
+    }
+
+    fn set_simulator_hardware_keyboard_enabled(
+        &self,
+        udid: &str,
+        enabled: bool,
+    ) -> anyhow::Result<()> {
+        crate::core_simulator::set_hardware_keyboard_enabled(udid, enabled)
+    }
+
+    fn has_native_subviews(&self) -> bool {
+        MacWindow::has_native_subviews(self)
+    }
+
+    fn set_native_subview_occlusions(&self, occlusions: &[Bounds<Pixels>]) {
+        MacWindow::set_native_subview_occlusions(self, occlusions);
     }
 
     fn scale_factor(&self) -> f32 {
@@ -4222,5 +4405,48 @@ mod tests {
     #[test]
     fn display_id_for_screen_returns_none_for_null_screen() {
         assert_eq!(display_id_for_screen(nil), None);
+    }
+
+    fn covered_area(rects: &[CGRect]) -> f64 {
+        rects
+            .iter()
+            .map(|rect| rect.size.width * rect.size.height)
+            .sum()
+    }
+
+    fn hole(x: f64, y: f64, width: f64, height: f64) -> NSRect {
+        NSRect::new(NSPoint::new(x, y), NSSize::new(width, height))
+    }
+
+    #[test]
+    fn unmasked_rects_leaves_everything_but_the_hole() {
+        let container = NSSize::new(100., 100.);
+        let rects = unmasked_rects(container, &[hole(20., 20., 10., 10.)]);
+
+        assert_eq!(covered_area(&rects), 100. * 100. - 10. * 10.);
+        for rect in &rects {
+            assert!(!rect.is_intersects(&CGRect::new(
+                &CGPoint::new(20., 20.),
+                &CGSize::new(10., 10.)
+            )));
+        }
+    }
+
+    #[test]
+    fn unmasked_rects_counts_overlapping_holes_once() {
+        let container = NSSize::new(100., 100.);
+        let rects = unmasked_rects(
+            container,
+            &[hole(10., 10., 30., 30.), hole(30., 30., 30., 30.)],
+        );
+
+        // The two holes share a 10x10 corner, so together they remove 2 * 900 - 100 points.
+        assert_eq!(covered_area(&rects), 100. * 100. - (2. * 30. * 30. - 10. * 10.));
+    }
+
+    #[test]
+    fn unmasked_rects_is_empty_when_a_hole_covers_everything() {
+        let rects = unmasked_rects(NSSize::new(100., 100.), &[hole(0., 0., 100., 100.)]);
+        assert!(rects.is_empty());
     }
 }

@@ -1012,6 +1012,22 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     ) -> anyhow::Result<*mut std::ffi::c_void> {
         anyhow::bail!("SimulatorKit is not available on this platform")
     }
+    #[cfg(target_os = "macos")]
+    fn set_simulator_hardware_keyboard_enabled(
+        &self,
+        _udid: &str,
+        _enabled: bool,
+    ) -> anyhow::Result<()> {
+        anyhow::bail!("CoreSimulator is not available on this platform")
+    }
+    #[cfg(target_os = "macos")]
+    fn has_native_subviews(&self) -> bool {
+        false
+    }
+    /// Reports the areas of the window that overlays painted over, so hosted native views can be
+    /// cut back to let them through.
+    #[cfg(target_os = "macos")]
+    fn set_native_subview_occlusions(&self, _occlusions: &[Bounds<Pixels>]) {}
     fn show_character_palette(&self) {}
     fn titlebar_double_click(&self, _is_resizable: bool, _is_minimizable: bool) {}
     fn on_move_tab_to_new_window(&self, _callback: Box<dyn FnMut()>) {}

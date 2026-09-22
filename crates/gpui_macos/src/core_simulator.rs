@@ -3,11 +3,14 @@ use anyhow::{Context as _, Result};
 use cocoa::base::{id, nil};
 use objc::{
     class, msg_send,
-    runtime::{BOOL, Class, NO},
+    runtime::{BOOL, Class, NO, YES},
     sel, sel_impl,
 };
 
 const CORE_SIMULATOR_PATH: &str = "/Library/Developer/PrivateFrameworks/CoreSimulator.framework";
+/// The layout CoreSimulator reports for the attached keyboard, in `LMGetKbdType` terms;
+/// 40 is the ANSI layout every current Apple keyboard reports.
+const ANSI_KEYBOARD_TYPE: u8 = 40;
 
 pub(crate) fn sim_device_for_udid(udid: &str) -> Result<id> {
     unsafe {
@@ -56,6 +59,46 @@ pub(crate) fn sim_device_for_udid(udid: &str) -> Result<id> {
         anyhow::bail!(
             "CoreSimulator could not find device {udid} in the default device set ({device_count} devices)"
         );
+    }
+}
+
+/// Attaches or detaches the guest's hardware keyboard. iOS only draws its on-screen keyboard
+/// while it believes no hardware keyboard is attached, so detaching is how Simulator.app's
+/// "Connect Hardware Keyboard" reveals it.
+pub(crate) fn set_hardware_keyboard_enabled(udid: &str, enabled: bool) -> Result<()> {
+    unsafe {
+        let device = sim_device_for_udid(udid)?;
+        let mut error: id = nil;
+        let changed: BOOL = msg_send![
+            device,
+            setHardwareKeyboardEnabled: if enabled { YES } else { NO }
+            keyboardType: ANSI_KEYBOARD_TYPE
+            error: &mut error
+        ];
+        anyhow::ensure!(
+            changed != NO,
+            "CoreSimulator could not {} the hardware keyboard of {udid}: {}",
+            if enabled { "attach" } else { "detach" },
+            describe_error(error)
+        );
+        Ok(())
+    }
+}
+
+unsafe fn describe_error(error: id) -> String {
+    unsafe {
+        if error == nil {
+            return "no error reported".to_string();
+        }
+        let description: id = msg_send![error, localizedDescription];
+        if description == nil {
+            return "no error reported".to_string();
+        }
+        let utf8: *const std::os::raw::c_char = msg_send![description, UTF8String];
+        if utf8.is_null() {
+            return "no error reported".to_string();
+        }
+        std::ffi::CStr::from_ptr(utf8).to_string_lossy().into_owned()
     }
 }
 

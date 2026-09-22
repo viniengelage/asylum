@@ -1,0 +1,41 @@
+# UI component rules
+
+These are traps that cost real time in this crate. They are all about chrome — the strips,
+tabs and toolbars around content — because that is where inconsistency is visible and where
+call sites keep re-deriving values that already exist.
+
+* Never hardcode a pane-level corner radius. `rounded_lg`, `px(8.)` in a `paint_quad` and
+  `rounded_t_lg` used to all mean "the pane radius" in different files and drifted apart. Use
+  `pane_corner_radius()` (or `pane_corner_radius_px(window)` at paint time) for the pane, its
+  tab strip, and any content clipped against those corners.
+
+* A selected `Tab` must be told the surface it covers, via `Tab::surface`. Without it the tab
+  falls back to `tab_active_background`, which is continuous with the content only in themes
+  that set the two equal — Zed's bundled themes do, many third-party ones (Tokyo Night Storm,
+  for one) do not, and the tab then reads as a chip floating above unrelated content. A pane
+  passes its item's `Item::content_background`; a panel's own sub-tabs pass the panel
+  background.
+
+* An item that paints its own background must implement `Item::content_background`, or its
+  pane's active tab will be painted with the wrong colour. `TerminalView` is the example:
+  themes are free to make `terminal_background` differ from `editor_background`.
+
+* Do not spell out spacing in chrome with the Tailwind helpers (`.p_2()`, `.gap_1()`). They
+  are fixed rems and do not respond to UI density, so a header built with them drifts out of
+  alignment with the `DynamicSpacing`-based `HeaderBar`/`TabBar`/`Tab` next to it at any
+  density other than Default. Use `HeaderBar::slot_padding`/`slot_gap`/`height`, or
+  `DynamicSpacing` directly.
+
+* Any strip at the top or bottom of a pane is a `HeaderBar` (`HeaderBar::footer` for the
+  bottom one), not a hand-rolled `h_flex` with a literal height. Neighbouring panes are
+  expected to line their strips up horizontally, which only holds if they share the metrics.
+  A bar whose content wraps must call `wrapping(true)`, or the wrapped rows are clipped.
+
+* An `IconButton` placed in a `Tab` slot needs `size(ButtonSize::None)` and
+  `shape(IconButtonShape::Square)`. The default button size adds padding that overflows the
+  14px slot and visually collides with the neighbouring tab.
+
+* Icon size follows the role, not the taste of the call site: `IconSize::Small` for chrome
+  inside a header or a tab, `IconSize::Medium` only for a primary action row such as a
+  device/tool strip, `IconSize::XSmall` for indicators. A single pane showing three sizes is
+  the symptom that this was decided per call site.

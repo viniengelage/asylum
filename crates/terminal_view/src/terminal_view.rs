@@ -1412,7 +1412,6 @@ impl Render for TerminalView {
             .id("terminal-view")
             .size_full()
             .relative()
-            .rounded_lg()
             .overflow_hidden()
             .track_focus(&self.focus_handle(cx))
             .key_context(self.dispatch_context(cx))
@@ -1468,9 +1467,12 @@ impl Render for TerminalView {
                 div()
                     .id("terminal-view-container")
                     .size_full()
-                    .rounded_b_lg()
+                    .rounded_b(ui::pane_corner_radius())
                     .overflow_hidden()
-                    .bg(cx.theme().colors().editor_background)
+                    // `terminal_background`, not `editor_background`: `TerminalElement` fills
+                    // the grid with the former, and themes are free to make the two differ
+                    // (Tokyo Night Storm does), which framed the grid in the editor's colour.
+                    .bg(cx.theme().colors().terminal_background)
                     .child(TerminalElement::new(
                         terminal_handle,
                         terminal_view_handle,
@@ -1513,6 +1515,10 @@ impl Item for TerminalView {
 
     fn content_kind(&self, _cx: &App) -> Option<workspace::ContentKind> {
         Some(workspace::ContentKind::terminal())
+    }
+
+    fn content_background(&self, cx: &App) -> Option<gpui::Hsla> {
+        Some(cx.theme().colors().terminal_background)
     }
 
     fn tab_tooltip_content(&self, cx: &App) -> Option<TabTooltipContent> {

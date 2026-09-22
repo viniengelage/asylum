@@ -166,6 +166,12 @@ impl<T: Panel> Item for PanelItem<T> {
         Some(crate::pane::ContentKind::panel(T::persistent_name()))
     }
 
+    /// Panels fill themselves with `panel_background`, not the pane's `editor_background`, so
+    /// the hosting pane paints their tab with it too.
+    fn content_background(&self, cx: &App) -> Option<gpui::Hsla> {
+        Some(cx.theme().colors().panel_background)
+    }
+
     fn added_to_workspace(
         &mut self,
         workspace: &mut Workspace,
