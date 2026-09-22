@@ -12,6 +12,7 @@ use http_client::{
     StatusCode,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use strum::EnumString;
 use thiserror::Error;
 
@@ -42,6 +43,11 @@ pub const FAST_MODE_BETA_HEADER: &str = "fast-mode-2026-02-01";
 /// Beta header required for OAuth subscription tokens (Claude Pro/Max/Team).
 pub const OAUTH_BETA_HEADER: &str = "oauth-2025-04-20";
 
+/// Claude Code release that OAuth requests identify as. The API rejects newer
+/// models (e.g. Claude Opus 5.5) for clients that report an older version.
+const CLAUDE_CODE_VERSION: &str = "2.1.280";
+const CLAUDE_CODE_USER_AGENT: &str = "claude-cli/2.1.280 (external, zed)";
+
 /// Returns `true` when the credential is an OAuth bearer token rather than a
 /// standard Anthropic API key (`sk-ant-api…`).
 pub fn is_oauth_token(api_key: &str) -> bool {
@@ -49,7 +55,10 @@ pub fn is_oauth_token(api_key: &str) -> bool {
 }
 
 pub fn supports_fast_mode(model_id: &str) -> bool {
-    matches!(model_id, "claude-opus-5" | "claude-opus-4-8")
+    matches!(
+        model_id,
+        "claude-opus-5-5" | "claude-opus-5" | "claude-opus-4-8"
+    )
 }
 
 /// Model IDs where adaptive thinking runs by default when a request omits the
@@ -72,11 +81,14 @@ pub const FABLE_FALLBACK_MODEL_ID: &str = "claude-opus-4-8";
 pub const THINKING_BINDING_CONTROLS_BETA_HEADER: &str = "thinking-binding-controls-2026-08-01";
 
 pub fn binds_thinking_blocks_to_prefix(model_id: &str) -> bool {
-    matches!(model_id, "claude-fable-5-1")
+    matches!(model_id, "claude-fable-5-1" | "claude-opus-5-5")
 }
 
 pub fn supports_forced_tool_use(model_id: &str) -> bool {
-    !matches!(model_id, "claude-fable-5-1" | "claude-mythos-5-1")
+    !matches!(
+        model_id,
+        "claude-fable-5-1" | "claude-mythos-5-1" | "claude-opus-5-5"
+    )
 }
 
 /// <https://platform.claude.com/docs/en/build-with-claude/compaction>
@@ -224,6 +236,7 @@ impl Model {
                 | "claude-mythos-5-1"
                 | "claude-mythos-5"
                 | "claude-mythos-preview"
+                | "claude-opus-5-5"
                 | "claude-opus-5"
                 | "claude-opus-4-8"
                 | "claude-opus-4-7"
@@ -387,7 +400,7 @@ pub async fn list_models(
         builder = builder
             .header("Anthropic-Beta", OAUTH_BETA_HEADER)
             .header("x-app", "cli")
-            .header("User-Agent", "claude-cli/2.1.77 (external, zed)");
+            .header("User-Agent", CLAUDE_CODE_USER_AGENT);
     }
     let request = apply_auth_header(builder, api_key)
         .extra_headers(extra_headers)
@@ -545,7 +558,7 @@ async fn send_request_to_route(
     if using_oauth {
         base_builder = base_builder
             .header("x-app", "cli")
-            .header("User-Agent", "claude-cli/2.1.77 (external, zed)");
+            .header("User-Agent", CLAUDE_CODE_USER_AGENT);
     }
 
     let mut request_builder = apply_auth_header(base_builder, api_key);
@@ -704,8 +717,52 @@ fn get_header<'a>(key: &str, headers: &'a HeaderMap) -> anyhow::Result<&'a str> 
         .to_str()?)
 }
 
-const BILLING_HEADER_TEXT: &str =
-    "x-anthropic-billing-header: cc_version=2.1.77.e19; cc_entrypoint=sdk-cli; cch=d51e0;";
+const BILLING_FINGERPRINT_SALT: &str = "59cf53e54c78";
+
+/// Mirrors Claude Code's `cc_version` suffix: the first 3 hex digits of
+/// sha256(salt + UTF-16 code units 4, 7 and 20 of the first user text + version).
+/// Claude Code indexes JS strings, hence UTF-16 code units rather than chars or bytes.
+fn billing_fingerprint(first_user_text: &str) -> String {
+    let code_units: Vec<u16> = first_user_text.encode_utf16().collect();
+    let sampled: String = [4, 7, 20]
+        .iter()
+        .map(|&index| {
+            code_units.get(index).map_or('0', |&unit| {
+                char::decode_utf16([unit])
+                    .next()
+                    .and_then(|decoded| decoded.ok())
+                    .unwrap_or(char::REPLACEMENT_CHARACTER)
+            })
+        })
+        .collect();
+    let digest = Sha256::digest(
+        format!("{BILLING_FINGERPRINT_SALT}{sampled}{CLAUDE_CODE_VERSION}").as_bytes(),
+    );
+    let mut fingerprint = format!("{:02x}{:02x}", digest[0], digest[1]);
+    fingerprint.truncate(3);
+    fingerprint
+}
+
+fn first_user_text(request: &Request) -> &str {
+    request
+        .messages
+        .iter()
+        .find(|message| message.role == Role::User)
+        .and_then(|message| {
+            message.content.iter().find_map(|content| match content {
+                RequestContent::Text { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+        })
+        .unwrap_or("")
+}
+
+fn billing_header_text(request: &Request) -> String {
+    let fingerprint = billing_fingerprint(first_user_text(request));
+    format!(
+        "x-anthropic-billing-header: cc_version={CLAUDE_CODE_VERSION}.{fingerprint}; cc_entrypoint=sdk-cli; cch=d51e0;"
+    )
+}
 
 /// Prepend the billing header to the system prompt when using OAuth tokens.
 /// The Anthropic API requires this for subscription tokens to access paid models.
@@ -715,7 +772,7 @@ fn inject_billing_header(mut request: Request, api_key: &str) -> Request {
     }
 
     let billing_block = RequestContent::Text {
-        text: BILLING_HEADER_TEXT.to_string(),
+        text: billing_header_text(&request),
         cache_control: None,
     };
 
@@ -1566,7 +1623,7 @@ mod tests {
                 request
                     .headers()
                     .get("X-Api-Key")
-                    .is_some_and(|value| value == "test-key")
+                    .is_some_and(|value| value == "sk-ant-api-test-key")
             );
             assert_eq!(request.headers()["Anthropic-Version"], "2023-06-01");
             assert_eq!(request.headers()["Anthropic-Beta"], "test-beta");
@@ -1595,7 +1652,7 @@ mod tests {
         let count = futures::executor::block_on(count_input_tokens(
             client.as_ref(),
             ANTHROPIC_API_URL,
-            " test-key ",
+            " sk-ant-api-test-key ",
             request.into_count_tokens_request(),
             Some("test-beta".into()),
             &CustomHeaders::default(),
@@ -1643,6 +1700,12 @@ mod tests {
                 assert!(matches!(error, AnthropicError::DeserializeResponse(_)));
             }
         }
+    }
+
+    #[test]
+    fn billing_fingerprint_matches_claude_code() {
+        // Captured from a real Claude Code 2.1.280 request with this prompt.
+        assert_eq!(billing_fingerprint("hello world test"), "e80");
     }
 
     #[test]
