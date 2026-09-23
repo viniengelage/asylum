@@ -15746,3 +15746,77 @@ async fn test_find_or_create_workspace_returns_the_created_remote_workspace(
         "the local workspace should have re-activated during the open"
     );
 }
+
+#[gpui::test]
+async fn test_device_instances_open_to_the_right_and_close_independently(cx: &mut TestAppContext) {
+    let project = init_test_project("/my-project", cx).await;
+    let (multi_workspace, cx) =
+        cx.add_window_view(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+    let devices = cx.update(|window, cx| {
+        cx.new(|cx| Sidebar::new_devices(multi_workspace.clone(), window, cx))
+    });
+    multi_workspace.update_in(cx, |multi_workspace, window, cx| {
+        multi_workspace.register_devices_sidebar(devices.clone(), window, cx);
+    });
+    cx.run_until_parked();
+
+    // The panel's own instance already shows iOS, so the new ones stay on the start screen
+    // instead of booting a simulator.
+    let host_id = devices.entity_id();
+    devices.update_in(cx, |devices, window, cx| {
+        devices.open_device_instance(host_id, DeviceInstanceKind::Ios, window, cx);
+    });
+    let first = devices.read_with(cx, |devices, _cx| devices.device_instances[0].clone());
+    first.update_in(cx, |first, window, cx| {
+        first.request_new_device_instance(DeviceInstanceKind::Ios, window, cx);
+    });
+    cx.run_until_parked();
+
+    let second = devices.read_with(cx, |devices, cx| {
+        assert_eq!(devices.device_instances.len(), 2);
+        assert_eq!(
+            devices.device_instances[0].entity_id(),
+            first.entity_id(),
+            "an instance opened from another one goes right after it"
+        );
+        assert!(devices.draws_own_cards(cx));
+        assert!(
+            devices
+                .device_instances
+                .iter()
+                .all(|instance| instance.read(cx).device_instance_split)
+        );
+        devices.device_instances[1].clone()
+    });
+
+    devices.update_in(cx, |devices, window, cx| {
+        devices.close_device_instance(host_id, window, cx);
+    });
+    cx.run_until_parked();
+    devices.read_with(cx, |devices, _cx| {
+        assert!(devices.own_device_instance_closed);
+        assert_eq!(devices.visible_device_instance_count(), 2);
+    });
+
+    second.update_in(cx, |second, window, cx| {
+        second.request_close_device_instance(window, cx);
+    });
+    cx.run_until_parked();
+    devices.read_with(cx, |devices, cx| {
+        assert_eq!(devices.visible_device_instance_count(), 1);
+        assert!(!devices.draws_own_cards(cx));
+        assert!(!first.read(cx).device_instance_split);
+    });
+
+    first.update_in(cx, |first, window, cx| {
+        first.request_close_device_instance(window, cx);
+    });
+    cx.run_until_parked();
+    devices.read_with(cx, |devices, _cx| {
+        assert_eq!(
+            devices.visible_device_instance_count(),
+            1,
+            "the last instance only closes with the dock"
+        );
+    });
+}

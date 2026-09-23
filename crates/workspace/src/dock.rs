@@ -96,6 +96,11 @@ pub trait Panel: Focusable + EventEmitter<PanelEvent> + Render + Sized {
     fn hosted_content_kind(&self) -> Option<crate::pane::ContentKind> {
         None
     }
+    /// Set by panels that lay themselves out as several cards side by side, so the dock
+    /// must not frame them in a single card of its own.
+    fn draws_own_cards(&self, _cx: &App) -> bool {
+        false
+    }
     fn remote_id() -> Option<proto::PanelId> {
         None
     }
@@ -130,6 +135,7 @@ pub trait PanelHandle: Send + Sync {
     fn remote_id(&self) -> Option<proto::PanelId>;
     fn pane(&self, cx: &App) -> Option<Entity<Pane>>;
     fn hosted_content_kind(&self, cx: &App) -> Option<crate::pane::ContentKind>;
+    fn draws_own_cards(&self, cx: &App) -> bool;
     fn default_size(&self, window: &Window, cx: &App) -> Pixels;
     fn min_size(&self, window: &Window, cx: &App) -> Option<Pixels>;
     fn initial_size_state(&self, window: &Window, cx: &App) -> PanelSizeState;
@@ -230,6 +236,10 @@ where
 
     fn hosted_content_kind(&self, cx: &App) -> Option<crate::pane::ContentKind> {
         self.read(cx).hosted_content_kind()
+    }
+
+    fn draws_own_cards(&self, cx: &App) -> bool {
+        self.read(cx).draws_own_cards(cx)
     }
 
     fn remote_id(&self) -> Option<PanelId> {
@@ -1663,9 +1673,10 @@ impl Render for Dock {
                 .focus_follows_mouse(self.focus_follows_mouse, cx)
                 .flex()
                 .rounded_lg()
-                .when(self.position() != DockPosition::Bottom, |this| {
-                    this.bg(cx.theme().colors().panel_background)
-                })
+                .when(
+                    self.position() != DockPosition::Bottom && !entry.panel.draws_own_cards(cx),
+                    |this| this.bg(cx.theme().colors().panel_background),
+                )
                 .overflow_hidden()
                 .map(|this| match self.position() {
                     // Width and height are always set on the workspace wrapper in

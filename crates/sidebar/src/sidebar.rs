@@ -152,6 +152,33 @@ enum DevicePlatform {
     Ios,
 }
 
+/// What a devices instance shows: one of the tabs in its header.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DeviceInstanceKind {
+    Android,
+    Ios,
+    Browser,
+}
+
+impl DeviceInstanceKind {
+    const ALL: [Self; 3] = [Self::Android, Self::Ios, Self::Browser];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Android => "Android",
+            Self::Ios => "iOS",
+            Self::Browser => "Browser",
+        }
+    }
+
+    fn icon(self) -> IconName {
+        match self {
+            Self::Android | Self::Ios => IconName::Smartphone,
+            Self::Browser => IconName::ToolWeb,
+        }
+    }
+}
+
 /// An in-progress pointer gesture on the Android emulator screen. When the
 /// emulator's gRPC touch channel is available, down/move/up events are
 /// forwarded as they happen; otherwise the gesture is resolved into an adb
@@ -1179,6 +1206,19 @@ pub struct Sidebar {
     /// Created the first time the Browser tab is opened, and kept so the page survives
     /// switching to a device and back.
     browser_view: Option<Entity<web_preview::WebPreviewView>>,
+    /// Instances opened with the header's + button, laid out to the right of this one. Only
+    /// the sidebar registered as the Devices panel holds them. Each is a devices-only sidebar
+    /// with its own device state, which is what lets a simulator and an emulator run side by
+    /// side.
+    device_instances: Vec<Entity<Sidebar>>,
+    /// Points an instance opened with the + button back at the panel that lays it out.
+    device_instance_host: Option<WeakEntity<Sidebar>>,
+    /// Whether the panel's own instance was closed while other instances stayed open.
+    own_device_instance_closed: bool,
+    /// Whether this instance shares the panel with others, and so draws its own card and
+    /// can be closed on its own.
+    device_instance_split: bool,
+    add_device_instance_menu_handle: PopoverMenuHandle<ContextMenu>,
     android_sdk_manager: Option<Entity<AndroidSdkManager>>,
     android_screen_bounds: Option<Bounds<Pixels>>,
     android_pointer_down: Option<AndroidPointerDown>,
@@ -1370,6 +1410,11 @@ impl Sidebar {
             device_platform: DevicePlatform::default(),
             browser_active: false,
             browser_view: None,
+            device_instances: Vec::new(),
+            device_instance_host: None,
+            own_device_instance_closed: false,
+            device_instance_split: false,
+            add_device_instance_menu_handle: PopoverMenuHandle::default(),
             android_sdk_manager: None,
             android_screen_bounds: None,
             android_pointer_down: None,
@@ -1419,6 +1464,29 @@ impl Sidebar {
         sidebar.devices_only = true;
         sidebar.view = SidebarView::Devices;
         sidebar.observe_devices_dock(window, cx);
+        // The focused instance is outlined, and moving focus between two instances fires no
+        // focus event on the panel that lays them out, so both have to be told.
+        let focus_handle = sidebar.focus_handle.clone();
+        cx.on_focus_in(&focus_handle, window, |this, _window, cx| {
+            this.notify_device_instance_host(cx);
+        })
+        .detach();
+        cx.on_focus_out(&focus_handle, window, |this, _event, _window, cx| {
+            this.notify_device_instance_host(cx);
+        })
+        .detach();
+        sidebar
+    }
+
+    fn new_device_instance(
+        multi_workspace: Entity<MultiWorkspace>,
+        host: WeakEntity<Sidebar>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut sidebar = Self::new_devices(multi_workspace, window, cx);
+        sidebar.device_instance_host = Some(host);
+        sidebar.device_instance_split = true;
         sidebar
     }
 
@@ -3733,7 +3801,11 @@ impl Sidebar {
     fn dispatch_context(&self, window: &Window, cx: &Context<Self>) -> KeyContext {
         let mut dispatch_context = KeyContext::new_with_defaults();
         dispatch_context.add("ThreadsSidebar");
-        if self.android_screen_focus.is_focused(window) {
+        // The devices view has no list to navigate, and instances opened with the + button
+        // sit inside this one in the dispatch path, so their emulator screens need `menu`
+        // gone here as well.
+        if self.android_screen_focus.is_focused(window) || matches!(self.view, SidebarView::Devices)
+        {
             // Bindings match against every context in the dispatch path, so
             // leaving `menu` here would let it swallow the arrow keys, enter
             // and escape before they reach the emulator's key handler.
@@ -3760,7 +3832,8 @@ impl Sidebar {
     }
 
     fn focus_in(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.focus_handle.is_focused(window) {
+        // The filter editor is not part of the devices view, so focus has nowhere to go.
+        if !self.focus_handle.is_focused(window) || matches!(self.view, SidebarView::Devices) {
             return;
         }
 
@@ -9628,6 +9701,352 @@ impl Sidebar {
         }
     }
 
+    fn device_instance_kind(&self) -> DeviceInstanceKind {
+        if self.browser_active {
+            DeviceInstanceKind::Browser
+        } else {
+            match self.device_platform {
+                DevicePlatform::Android => DeviceInstanceKind::Android,
+                DevicePlatform::Ios => DeviceInstanceKind::Ios,
+            }
+        }
+    }
+
+    fn show_device_instance_kind(
+        &mut self,
+        kind: DeviceInstanceKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match kind {
+            DeviceInstanceKind::Android => {
+                self.hide_ios_simulator_view(window);
+                self.browser_active = false;
+                self.set_browser_visible(false, cx);
+                self.device_platform = DevicePlatform::Android;
+                self.ensure_android_sdk_manager(cx);
+            }
+            DeviceInstanceKind::Ios => {
+                self.browser_active = false;
+                self.set_browser_visible(false, cx);
+                self.device_platform = DevicePlatform::Ios;
+                if self.ios_simulator_started {
+                    self.refresh_ios_devices(window, cx);
+                }
+            }
+            DeviceInstanceKind::Browser => {
+                // The simulator is a native view drawn over the panel; it has to go before
+                // the page can be seen.
+                self.hide_ios_simulator_view(window);
+                self.browser_active = true;
+                if self.browser_view.is_none() {
+                    self.browser_view =
+                        Some(cx.new(|cx| web_preview::WebPreviewView::new(window, cx)));
+                }
+                self.set_browser_visible(true, cx);
+            }
+        }
+        cx.notify();
+    }
+
+    fn notify_device_instance_host(&self, cx: &mut Context<Self>) {
+        cx.notify();
+        if let Some(host) = &self.device_instance_host {
+            host.update(cx, |_host, cx| cx.notify()).ok();
+        }
+    }
+
+    fn visible_device_instance_count(&self) -> usize {
+        usize::from(!self.own_device_instance_closed) + self.device_instances.len()
+    }
+
+    /// The kinds shown by every open instance, in the order they sit in the panel.
+    fn open_device_instance_kinds(&self, cx: &App) -> Vec<DeviceInstanceKind> {
+        (!self.own_device_instance_closed)
+            .then(|| self.device_instance_kind())
+            .into_iter()
+            .chain(
+                self.device_instances
+                    .iter()
+                    .map(|instance| instance.read(cx).device_instance_kind()),
+            )
+            .collect()
+    }
+
+    fn sync_device_instance_split(&mut self, cx: &mut Context<Self>) {
+        let split = self.visible_device_instance_count() > 1;
+        self.device_instance_split = split;
+        for instance in &self.device_instances {
+            instance.update(cx, |instance, cx| {
+                instance.device_instance_split = split;
+                cx.notify();
+            });
+        }
+        cx.notify();
+    }
+
+    /// Asks the panel to open an instance after this one. Opening and closing touch every
+    /// instance, including the one asking, so the panel acts once no instance is being
+    /// updated.
+    fn request_new_device_instance(
+        &mut self,
+        kind: DeviceInstanceKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let requester = cx.entity_id();
+        let Some(host) = self.device_instance_host_entity(cx) else {
+            return;
+        };
+        window.defer(cx, move |window, cx| {
+            host.update(cx, |host, cx| {
+                host.open_device_instance(requester, kind, window, cx);
+            });
+        });
+    }
+
+    fn request_close_device_instance(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let requester = cx.entity_id();
+        let Some(host) = self.device_instance_host_entity(cx) else {
+            return;
+        };
+        window.defer(cx, move |window, cx| {
+            host.update(cx, |host, cx| {
+                host.close_device_instance(requester, window, cx);
+            });
+        });
+    }
+
+    fn device_instance_host_entity(&self, cx: &Context<Self>) -> Option<Entity<Sidebar>> {
+        match &self.device_instance_host {
+            Some(host) => host.upgrade(),
+            None => Some(cx.entity()),
+        }
+    }
+
+    /// Opens a new instance right after `after`, which is either this panel's own instance
+    /// or one of `device_instances`.
+    fn open_device_instance(
+        &mut self,
+        after: EntityId,
+        kind: DeviceInstanceKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(multi_workspace) = self.multi_workspace.upgrade() else {
+            return;
+        };
+        let ios_already_open = self
+            .open_device_instance_kinds(cx)
+            .contains(&DeviceInstanceKind::Ios);
+        let host = cx.weak_entity();
+        let instance = cx.new(|cx| Sidebar::new_device_instance(multi_workspace, host, window, cx));
+        instance.update(cx, |instance, cx| {
+            // Picking iOS from the menu asks to see a simulator, so it boots right away like
+            // the start button would. With another iOS instance open that would land on the
+            // same default device, so the choice is left to the start screen instead.
+            if kind == DeviceInstanceKind::Ios && !ios_already_open {
+                instance.ios_simulator_started = true;
+            }
+            instance.show_device_instance_kind(kind, window, cx);
+        });
+
+        let index = self
+            .device_instances
+            .iter()
+            .position(|instance| instance.entity_id() == after)
+            .map_or(0, |index| index + 1);
+        let previous_count = self.visible_device_instance_count();
+        self.device_instances.insert(index, instance.clone());
+        self.sync_device_instance_split(cx);
+        self.resize_devices_dock_for_instances(previous_count, window, cx);
+        instance.read(cx).focus_handle.clone().focus(window, cx);
+    }
+
+    fn close_device_instance(
+        &mut self,
+        instance_id: EntityId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let previous_count = self.visible_device_instance_count();
+        // The last instance stays: the panel itself closes through the dock.
+        if previous_count < 2 {
+            return;
+        }
+
+        if instance_id == cx.entity_id() {
+            if self.own_device_instance_closed {
+                return;
+            }
+            self.tear_down_device_instance(window, cx);
+            self.own_device_instance_closed = true;
+        } else {
+            let Some(index) = self
+                .device_instances
+                .iter()
+                .position(|instance| instance.entity_id() == instance_id)
+            else {
+                return;
+            };
+            let instance = self.device_instances.remove(index);
+            instance.update(cx, |instance, cx| {
+                instance.tear_down_device_instance(window, cx);
+            });
+        }
+
+        self.sync_device_instance_split(cx);
+        self.resize_devices_dock_for_instances(previous_count, window, cx);
+    }
+
+    /// Releases everything a closed instance shows. The simulator's native view and the
+    /// browser would otherwise stay on screen, since neither is drawn by the element tree.
+    fn tear_down_device_instance(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.remove_ios_simulator_view(window);
+        self.stop_ios_pasteboard_sync();
+        // Otherwise reopening the panel would boot a simulator for an instance nobody sees.
+        self.ios_simulator_started = false;
+        self.ios_device_discovery_task = None;
+        self.ios_busy_message = None;
+        self.set_browser_visible(false, cx);
+        self.browser_view = None;
+        self.browser_active = false;
+        self.android_sdk_manager = None;
+        self.android_screen_bounds = None;
+        self.android_pointer_down = None;
+
+        // The last drawn scene may still reference these frames and be repainted before the
+        // next one is built, so they leave the sprite atlas only once two newer frames exist.
+        let retired_frames: Vec<_> = [
+            self.android_current_rendered_frame.take(),
+            self.android_previous_rendered_frame.take(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        if !retired_frames.is_empty() {
+            window.on_next_frame(move |window, _cx| {
+                window.on_next_frame(move |window, _cx| {
+                    for frame in retired_frames {
+                        window.drop_image(frame).log_err();
+                    }
+                });
+            });
+        }
+        cx.notify();
+    }
+
+    /// Keeps each instance as wide as it was: the dock grows by one instance when one opens
+    /// and shrinks by one when one closes.
+    fn resize_devices_dock_for_instances(
+        &self,
+        previous_count: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let next_count = self.visible_device_instance_count();
+        if previous_count == 0 || previous_count == next_count {
+            return;
+        }
+        let Some(workspace) = self.active_workspace(cx) else {
+            return;
+        };
+        let fallback_width = self.width * previous_count as f32;
+        // Resizing the dock reads this panel, which is still being updated here.
+        window.defer(cx, move |window, cx| {
+            workspace.update(cx, |workspace, cx| {
+                let current_width = workspace
+                    .dock_at_position(DockPosition::Devices)
+                    .read(cx)
+                    .stored_active_panel_size(window, cx)
+                    .unwrap_or(fallback_width);
+                let instance_width = current_width / previous_count as f32;
+                workspace.resize_dock(
+                    DockPosition::Devices,
+                    instance_width * next_count as f32,
+                    window,
+                    cx,
+                );
+            });
+        });
+    }
+
+    /// Whether keyboard focus is inside this instance. The panel's own instance contains the
+    /// others in the focus tree, so focus inside one of them does not count for it.
+    fn device_instance_focused(&self, window: &Window, cx: &App) -> bool {
+        self.focus_handle.contains_focused(window, cx)
+            && !self
+                .device_instances
+                .iter()
+                .any(|instance| instance.read(cx).focus_handle.contains_focused(window, cx))
+    }
+
+    fn render_add_device_instance_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let this = cx.weak_entity();
+        let host = self
+            .device_instance_host
+            .clone()
+            .unwrap_or_else(|| cx.weak_entity());
+
+        PopoverMenu::new("add-device-instance-menu")
+            .menu(move |window, cx| {
+                let this = this.clone();
+                // Read when the menu opens rather than while rendering: the host reads every
+                // instance, including the one that would be mid-render.
+                let open_kinds = host
+                    .read_with(cx, |host, cx| host.open_device_instance_kinds(cx))
+                    .unwrap_or_default();
+                let suggested = DeviceInstanceKind::ALL
+                    .iter()
+                    .position(|kind| !open_kinds.contains(kind))
+                    .unwrap_or(0);
+                let menu = ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
+                    menu = menu.header("Nova instância à direita");
+                    for kind in DeviceInstanceKind::ALL {
+                        let description = if open_kinds.contains(&kind) {
+                            "Já aberto em outra instância"
+                        } else {
+                            match kind {
+                                DeviceInstanceKind::Android => "Emulador Android",
+                                DeviceInstanceKind::Ios => "Simulador iOS",
+                                DeviceInstanceKind::Browser => "Web preview",
+                            }
+                        };
+                        let this = this.clone();
+                        menu = menu.item(
+                            ContextMenuEntry::new(kind.label())
+                                .icon(kind.icon())
+                                .description(description)
+                                .handler(move |window, cx| {
+                                    this.update(cx, |this, cx| {
+                                        this.request_new_device_instance(kind, window, cx);
+                                    })
+                                    .log_err();
+                                }),
+                        );
+                    }
+                    menu
+                });
+                // The platform that is not open yet comes preselected, so + and enter open
+                // the missing half of an iOS and Android pair.
+                menu.update(cx, |menu, cx| {
+                    menu.select_first(&SelectFirst, window, cx);
+                    for _ in 0..suggested {
+                        menu.select_next(&SelectNext, window, cx);
+                    }
+                });
+                Some(menu)
+            })
+            .trigger_with_tooltip(
+                IconButton::new("add-device-instance", IconName::Plus)
+                    .icon_size(IconSize::Small)
+                    .selected_style(ButtonStyle::Tinted(TintColor::Accent)),
+                Tooltip::text("Nova instância à direita"),
+            )
+            .anchor(gpui::Anchor::TopRight)
+            .with_handle(self.add_device_instance_menu_handle.clone())
+    }
+
     fn render_devices_view(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let browser_active = self.browser_active;
         let is_android = !browser_active && self.device_platform == DevicePlatform::Android;
@@ -9676,12 +10095,7 @@ impl Sidebar {
                             is_android,
                         )
                         .on_click(cx.listener(|this, _, window, cx| {
-                            this.hide_ios_simulator_view(window);
-                            this.browser_active = false;
-                            this.set_browser_visible(false, cx);
-                            this.device_platform = DevicePlatform::Android;
-                            this.ensure_android_sdk_manager(cx);
-                            cx.notify();
+                            this.show_device_instance_kind(DeviceInstanceKind::Android, window, cx);
                         })),
                     )
                     .child(
@@ -9693,13 +10107,7 @@ impl Sidebar {
                             is_ios,
                         )
                         .on_click(cx.listener(|this, _, window, cx| {
-                            this.browser_active = false;
-                            this.set_browser_visible(false, cx);
-                            this.device_platform = DevicePlatform::Ios;
-                            if this.ios_simulator_started {
-                                this.refresh_ios_devices(window, cx);
-                            }
-                            cx.notify();
+                            this.show_device_instance_kind(DeviceInstanceKind::Ios, window, cx);
                         })),
                     )
                     .child(
@@ -9711,18 +10119,20 @@ impl Sidebar {
                             browser_active,
                         )
                         .on_click(cx.listener(|this, _, window, cx| {
-                            // The simulator is a native view drawn over the panel; it has to
-                            // go before the page can be seen.
-                            this.hide_ios_simulator_view(window);
-                            this.browser_active = true;
-                            if this.browser_view.is_none() {
-                                this.browser_view =
-                                    Some(cx.new(|cx| web_preview::WebPreviewView::new(window, cx)));
-                            }
-                            this.set_browser_visible(true, cx);
-                            cx.notify();
+                            this.show_device_instance_kind(DeviceInstanceKind::Browser, window, cx);
                         })),
-                    ),
+                    )
+                    .end_child(self.render_add_device_instance_button(cx))
+                    .when(self.device_instance_split, |this| {
+                        this.end_child(
+                            IconButton::new("close-device-instance", IconName::Close)
+                                .icon_size(IconSize::Small)
+                                .tooltip(Tooltip::text("Fechar instância"))
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.request_close_device_instance(window, cx);
+                                })),
+                        )
+                    }),
             )
             .child(
                 v_flex()
@@ -10802,8 +11212,11 @@ impl WorkspaceSidebar for Sidebar {
         }
     }
 
-    fn on_close(&mut self, window: &mut Window, _cx: &mut Context<Self>) {
+    fn on_close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.hide_ios_simulator_view(window);
+        for instance in &self.device_instances {
+            instance.update(cx, |instance, _cx| instance.hide_ios_simulator_view(window));
+        }
     }
 
     fn side(&self, cx: &App) -> SidebarSide {
@@ -10954,10 +11367,17 @@ impl Panel for Sidebar {
         }
     }
 
-    fn set_active(&mut self, active: bool, window: &mut Window, _cx: &mut Context<Self>) {
+    fn set_active(&mut self, active: bool, window: &mut Window, cx: &mut Context<Self>) {
         if !active {
             self.hide_ios_simulator_view(window);
+            for instance in &self.device_instances {
+                instance.update(cx, |instance, _cx| instance.hide_ios_simulator_view(window));
+            }
         }
+    }
+
+    fn draws_own_cards(&self, _cx: &App) -> bool {
+        self.devices_only && self.device_instance_split
     }
 
     fn icon(&self, _window: &Window, _cx: &App) -> Option<IconName> {
@@ -10987,14 +11407,41 @@ impl Focusable for Sidebar {
     }
 }
 
+impl Sidebar {
+    /// Places the panel's own instance and the ones opened with the + button side by side,
+    /// each in its own card. Every other sidebar renders `own_instance` alone.
+    fn lay_out_device_instances(&self, own_instance: AnyElement, cx: &App) -> AnyElement {
+        let hosts_instances = self.devices_only && self.device_instance_host.is_none();
+        if !hosts_instances || (!self.device_instance_split && !self.own_device_instance_closed) {
+            return own_instance;
+        }
+
+        h_flex()
+            .size_full()
+            .gap(px(WorkspaceSettings::get_global(cx).card_gap.max(0.0)))
+            .when(!self.own_device_instance_closed, |this| {
+                this.child(own_instance)
+            })
+            .children(
+                self.device_instances
+                    .iter()
+                    .map(|instance| div().flex_1().min_w_0().h_full().child(instance.clone())),
+            )
+            .into_any_element()
+    }
+}
+
 impl Render for Sidebar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let ui_font = theme_settings::setup_ui_font(window, cx);
         self.track_android_rendered_frame(window, cx);
         let sticky_header = self.render_sticky_header(window, cx);
 
-        // The devices-only instance lives in a dock, which already draws the card around it.
+        // The devices-only instance lives in a dock, which already draws the card around it,
+        // unless it shares the dock with other instances and each draws its own.
         let is_island = !self.devices_only;
+        let draws_device_card = self.devices_only && self.device_instance_split;
+        let device_instance_focused = draws_device_card && self.device_instance_focused(window, cx);
 
         let island_half_gap = px(WorkspaceSettings::get_global(cx).card_gap.max(0.0)) / 2.;
 
@@ -11002,6 +11449,88 @@ impl Render for Sidebar {
 
         let no_open_projects = !self.contents.has_open_projects;
         let no_search_results = self.contents.entries.is_empty();
+
+        let own_instance = v_flex()
+            .size_full()
+            .overflow_hidden()
+            .bg(color.panel_background)
+            .when(is_island || draws_device_card, |this| {
+                this.workspace_card(cx)
+            })
+            .when(draws_device_card, |this| {
+                this.flex_1()
+                    .min_w_0()
+                    .when(device_instance_focused, |this| {
+                        this.border_color(color.border_focused)
+                    })
+                    // Clicking anywhere in an instance makes it the focused one, unless
+                    // something inside (the emulator screen) already took focus.
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _, window, cx| {
+                            if !this.device_instance_focused(window, cx) {
+                                this.focus_handle.focus(window, cx);
+                            }
+                        }),
+                    )
+            })
+            .map(|this| match &self.view {
+                SidebarView::ThreadList => this
+                    .child(self.render_sidebar_header(no_open_projects, window, cx))
+                    .map(|this| {
+                        if no_open_projects {
+                            this.child(self.render_empty_state(cx))
+                        } else {
+                            this.child(
+                                v_flex()
+                                    .relative()
+                                    .flex_1()
+                                    .overflow_hidden()
+                                    .child(
+                                        list(
+                                            self.list_state.clone(),
+                                            cx.processor(Self::render_list_entry),
+                                        )
+                                        .flex_1()
+                                        .size_full(),
+                                    )
+                                    .when(no_search_results, |this| {
+                                        this.child(self.render_no_results(cx))
+                                    })
+                                    .when_some(sticky_header, |this, header| this.child(header))
+                                    .custom_scrollbars(
+                                        Scrollbars::new(ScrollAxes::Vertical)
+                                            .tracked_scroll_handle(&self.list_state),
+                                        window,
+                                        cx,
+                                    ),
+                            )
+                        }
+                    }),
+                SidebarView::Archive(archive_view) => this.child(archive_view.clone()),
+                SidebarView::Devices => this.child(self.render_devices_view(window, cx)),
+            })
+            .map(|this| {
+                if matches!(self.view, SidebarView::Devices) {
+                    return this;
+                }
+
+                let show_acp = self.should_render_acp_import_onboarding(cx);
+                let show_cross_channel = self.should_render_cross_channel_import_onboarding(cx);
+
+                let verbose = *self
+                    .import_banners_use_verbose_labels
+                    .get_or_insert(show_acp && show_cross_channel);
+
+                this.when(show_acp, |this| {
+                    this.child(self.render_acp_import_onboarding(verbose, cx))
+                })
+                .when(show_cross_channel, |this| {
+                    this.child(self.render_cross_channel_import_onboarding(verbose, cx))
+                })
+            })
+            .child(self.render_sidebar_bottom_bar(cx))
+            .into_any_element();
 
         v_flex()
             .id("workspace-sidebar")
@@ -11039,72 +11568,7 @@ impl Render for Sidebar {
             // Like every workspace card, the island is inset by half the card gap; the window
             // container adds the other half at the edges.
             .when(is_island, |this| this.p(island_half_gap))
-            .child(
-                v_flex()
-                    .size_full()
-                    .overflow_hidden()
-                    .bg(color.panel_background)
-                    .when(is_island, |this| this.workspace_card(cx))
-                    .map(|this| match &self.view {
-                        SidebarView::ThreadList => this
-                            .child(self.render_sidebar_header(no_open_projects, window, cx))
-                            .map(|this| {
-                                if no_open_projects {
-                                    this.child(self.render_empty_state(cx))
-                                } else {
-                                    this.child(
-                                        v_flex()
-                                            .relative()
-                                            .flex_1()
-                                            .overflow_hidden()
-                                            .child(
-                                                list(
-                                                    self.list_state.clone(),
-                                                    cx.processor(Self::render_list_entry),
-                                                )
-                                                .flex_1()
-                                                .size_full(),
-                                            )
-                                            .when(no_search_results, |this| {
-                                                this.child(self.render_no_results(cx))
-                                            })
-                                            .when_some(sticky_header, |this, header| {
-                                                this.child(header)
-                                            })
-                                            .custom_scrollbars(
-                                                Scrollbars::new(ScrollAxes::Vertical)
-                                                    .tracked_scroll_handle(&self.list_state),
-                                                window,
-                                                cx,
-                                            ),
-                                    )
-                                }
-                            }),
-                        SidebarView::Archive(archive_view) => this.child(archive_view.clone()),
-                        SidebarView::Devices => this.child(self.render_devices_view(window, cx)),
-                    })
-                    .map(|this| {
-                        if matches!(self.view, SidebarView::Devices) {
-                            return this;
-                        }
-
-                        let show_acp = self.should_render_acp_import_onboarding(cx);
-                        let show_cross_channel =
-                            self.should_render_cross_channel_import_onboarding(cx);
-
-                        let verbose = *self
-                            .import_banners_use_verbose_labels
-                            .get_or_insert(show_acp && show_cross_channel);
-
-                        this.when(show_acp, |this| {
-                            this.child(self.render_acp_import_onboarding(verbose, cx))
-                        })
-                        .when(show_cross_channel, |this| {
-                            this.child(self.render_cross_channel_import_onboarding(verbose, cx))
-                        })
-                    })
-                    .child(self.render_sidebar_bottom_bar(cx)),
-            )
+            .child(self.lay_out_device_instances(own_instance, cx))
     }
 }
 

@@ -2790,8 +2790,7 @@ impl Workspace {
 
         let use_flex = dock::panel_uses_flexible_width(position, panel.as_ref(), window, cx);
 
-        if use_flex
-            && let Some(flex) = size_state.flex.or_else(|| self.default_dock_flex(position))
+        if use_flex && let Some(flex) = size_state.flex.or_else(|| self.default_dock_flex(position))
         {
             let workspace_width = self.bounds.size.width;
             if workspace_width <= Pixels::ZERO {
@@ -9586,15 +9585,23 @@ impl Workspace {
             dock.clone().into_any_element()
         };
 
+        let panel_draws_own_cards = dock
+            .read(cx)
+            .visible_panel()
+            .is_some_and(|panel| panel.draws_own_cards(cx));
         let mut container = div()
             .id(dock_element_id)
             .when(dock_is_open, |this| {
                 // Every card is inset by half the card gap, so two neighbouring cards end up a
                 // full gap apart and the outermost ones a full gap from the window edge once the
                 // window container adds its own half-gap padding.
-                this.m(pane_group::workspace_card_gap(cx) / 2.)
-                    .workspace_card(cx)
-                    .bg(cx.theme().colors().panel_background)
+                this.m(pane_group::workspace_card_gap(cx) / 2.).when(
+                    !panel_draws_own_cards,
+                    |this| {
+                        this.workspace_card(cx)
+                            .bg(cx.theme().colors().panel_background)
+                    },
+                )
             })
             .when(dock_is_open, |this| {
                 this.role(gpui::Role::Complementary)
