@@ -3177,6 +3177,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "clickup"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "credentials_provider",
+ "futures 0.3.34",
+ "gpui",
+ "http_client",
+ "log",
+ "menu",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "ui",
+ "ui_input",
+ "util",
+ "workspace",
+ "zed_credentials_provider",
+]
+
+[[package]]
 name = "client"
 version = "0.1.0"
 dependencies = [
@@ -23143,6 +23165,7 @@ dependencies = [
  "chrono",
  "clap",
  "cli",
+ "clickup",
  "client",
  "clock",
  "codestral",
