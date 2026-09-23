@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
-use editor::Editor;
+use editor::{Editor, EditorEvent};
+use fs::{Fs, RemoveOptions};
 use gpui::{
     Anchor, App, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, Global, Hsla,
     Task, WeakEntity, Window, prelude::*, rgb,
@@ -21,7 +22,8 @@ use ui::{
 use util::ResultExt as _;
 use util::paths::{PathMatcher, PathStyle, PathWithPosition};
 use workspace::{
-    HideStatusItem, ItemHandle, StatusItemView, Workspace, notifications::NotifyTaskExt as _,
+    HideStatusItem, ItemHandle, ModalView, StatusItemView, Workspace,
+    notifications::NotifyTaskExt as _,
 };
 
 use crate::zed::mac_only_instance;
@@ -248,8 +250,32 @@ pub fn foreign_owner(paths: &[String]) -> Option<AppProfile> {
         .cloned()
 }
 
-/// Lets File > Open offer to open a folder in the profile it belongs to.
+gpui::actions!(
+    profiles,
+    [
+        /// Opens the list of profiles to rename, recolor, tie folders to or delete them.
+        ManageProfiles
+    ]
+);
+
+fn open_manager(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
+    let store = ProfileStore::global(cx);
+    let weak_workspace = workspace.weak_handle();
+    workspace.toggle_modal(window, cx, move |window, cx| {
+        ManageProfilesModal::new(store, weak_workspace, window, cx)
+    });
+}
+
+/// Registers the profile actions and lets File > Open offer to open a folder in the profile
+/// it belongs to.
 pub fn init(cx: &mut App) {
+    cx.observe_new(|workspace: &mut Workspace, _, _| {
+        workspace.register_action(|workspace, _: &ManageProfiles, window, cx| {
+            open_manager(workspace, window, cx)
+        });
+    })
+    .detach();
+
     cx.set_global(workspace::ForeignPathsHandler(Arc::new(|paths, _cx| {
         let paths: Vec<String> = paths
             .iter()
@@ -451,6 +477,96 @@ impl ProfileStore {
                         profile.folders.extend(folders.iter().cloned());
                     }
                 }
+                save_profiles(&profiles)
+            })
+            .await?;
+            this.update(cx, |this, cx| this.refresh(cx))
+        })
+    }
+
+    /// Changes the registry entry of `profile_id`.
+    fn update_profile(
+        &mut self,
+        profile_id: String,
+        change: impl FnOnce(&mut AppProfile) + Send + 'static,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<()>> {
+        cx.spawn(async move |this, cx| {
+            cx.background_spawn(async move {
+                let mut profiles = load_profiles()?;
+                let profile = profiles
+                    .iter_mut()
+                    .find(|profile| profile.id == profile_id)
+                    .context("o perfil não existe mais")?;
+                change(profile);
+                save_profiles(&profiles)
+            })
+            .await?;
+            this.update(cx, |this, cx| this.refresh(cx))
+        })
+    }
+
+    /// Deletes `profile_id`: its keychain entries, and its data and browser directories,
+    /// which go to the Trash so a mistake can still be undone.
+    fn delete(
+        &mut self,
+        profile_id: String,
+        fs: Arc<dyn Fs>,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<()>> {
+        cx.spawn(async move |this, cx| {
+            anyhow::ensure!(
+                profile_id != paths::DEFAULT_PROFILE_ID,
+                "O perfil padrão não pode ser excluído"
+            );
+            anyhow::ensure!(
+                profile_id != active_profile_id(),
+                "Não dá para excluir o perfil desta janela"
+            );
+            let data_dir = paths::profiles_dir().join(&profile_id);
+            let credential_urls = cx
+                .background_spawn({
+                    let profile_id = profile_id.clone();
+                    let data_dir = data_dir.clone();
+                    async move {
+                        anyhow::ensure!(
+                            !mac_only_instance::is_profile_running(&profile_id),
+                            "Feche o perfil antes de excluí-lo"
+                        );
+                        match std::fs::read(data_dir.join("credential_urls.json")) {
+                            Ok(json) => serde_json::from_slice::<Vec<String>>(&json)
+                                .context("failed to parse credential_urls.json"),
+                            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                                Ok(Vec::new())
+                            }
+                            Err(error) => Err(error).context("failed to read credential_urls.json"),
+                        }
+                    }
+                })
+                .await?;
+
+            // These URLs already carry the deleted profile's namespace, so they go straight to
+            // the keychain rather than through this profile's credentials provider.
+            for url in credential_urls {
+                let deletion = cx.update(|cx| cx.delete_credentials(&url));
+                if let Err(error) = deletion.await {
+                    log::warn!("failed to delete the keychain entry {url}: {error:#}");
+                }
+            }
+
+            let remove_options = RemoveOptions {
+                recursive: true,
+                ignore_if_not_exists: true,
+            };
+            fs.trash(&data_dir, remove_options)
+                .await
+                .with_context(|| format!("failed to move {} to the Trash", data_dir.display()))?;
+            let browser_dir = web_preview::browser_cache_dir_for_profile(&profile_id);
+            fs.trash(&browser_dir, remove_options).await.log_err();
+
+            cx.background_spawn(async move {
+                let mut profiles = load_profiles()?;
+                profiles.retain(|profile| profile.id != profile_id);
                 save_profiles(&profiles)
             })
             .await?;
@@ -850,6 +966,31 @@ impl ProfilePicker {
                     )
                     .child(Label::new("Novo perfil…")),
             )
+            .child(
+                h_flex()
+                    .id("manage-profiles")
+                    .gap_2()
+                    .px_1p5()
+                    .py_1()
+                    .rounded_md()
+                    .cursor_pointer()
+                    .hover(|style| style.bg(cx.theme().colors().element_hover))
+                    .on_click(cx.listener(|this, _, window, cx| this.open_manager(window, cx)))
+                    .child(
+                        Icon::new(IconName::Settings)
+                            .size(IconSize::Small)
+                            .color(Color::Muted),
+                    )
+                    .child(Label::new("Gerenciar perfis…")),
+            )
+    }
+
+    fn open_manager(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        cx.emit(DismissEvent);
+        let Some(workspace) = self.workspace.upgrade() else {
+            return;
+        };
+        workspace.update(cx, |workspace, cx| open_manager(workspace, window, cx));
     }
 
     fn toggle_folder_binding(&mut self, bind: bool, window: &mut Window, cx: &mut Context<Self>) {
@@ -1036,6 +1177,586 @@ impl Render for ProfilePicker {
             .p_1()
             .elevation_2(cx)
             .child(content)
+    }
+}
+
+/// Lists every profile and edits the one selected: its name, color and folders, or deletes it.
+pub struct ManageProfilesModal {
+    store: Entity<ProfileStore>,
+    workspace: WeakEntity<Workspace>,
+    selected_id: String,
+    name_editor: Entity<Editor>,
+    error: Option<SharedString>,
+    _subscriptions: Vec<gpui::Subscription>,
+}
+
+impl EventEmitter<DismissEvent> for ManageProfilesModal {}
+impl ModalView for ManageProfilesModal {}
+
+impl Focusable for ManageProfilesModal {
+    fn focus_handle(&self, cx: &App) -> FocusHandle {
+        self.name_editor.focus_handle(cx)
+    }
+}
+
+impl ManageProfilesModal {
+    fn new(
+        store: Entity<ProfileStore>,
+        workspace: WeakEntity<Workspace>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        store.update(cx, |store, cx| store.refresh(cx));
+        let name_editor = cx.new(|cx| {
+            let mut editor = Editor::single_line(window, cx);
+            editor.set_placeholder_text("Nome do perfil", window, cx);
+            editor
+        });
+        let subscriptions = vec![
+            cx.observe(&store, |_, _, cx| cx.notify()),
+            cx.subscribe(&name_editor, |this, _, event: &EditorEvent, cx| {
+                if matches!(event, EditorEvent::Blurred) {
+                    this.save_name(cx);
+                }
+            }),
+        ];
+        let mut this = Self {
+            store,
+            workspace,
+            selected_id: String::new(),
+            name_editor,
+            error: None,
+            _subscriptions: subscriptions,
+        };
+        this.select(active_profile_id().to_string(), window, cx);
+        this
+    }
+
+    fn selected(&self, cx: &App) -> Option<AppProfile> {
+        self.store
+            .read(cx)
+            .profiles
+            .iter()
+            .find(|profile| profile.id == self.selected_id)
+            .cloned()
+    }
+
+    fn select(&mut self, profile_id: String, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.selected_id.is_empty() {
+            self.save_name(cx);
+        }
+        let name = self
+            .store
+            .read(cx)
+            .profiles
+            .iter()
+            .find(|profile| profile.id == profile_id)
+            .map(|profile| profile.name.clone())
+            .unwrap_or_default();
+        self.selected_id = profile_id;
+        self.error = None;
+        self.name_editor
+            .update(cx, |editor, cx| editor.set_text(name, window, cx));
+        cx.notify();
+    }
+
+    fn save_name(&mut self, cx: &mut Context<Self>) {
+        let Some(profile) = self.selected(cx) else {
+            return;
+        };
+        let name = self.name_editor.read(cx).text(cx).trim().to_string();
+        if name.is_empty() || name == profile.name {
+            return;
+        }
+        let task = self.store.update(cx, |store, cx| {
+            store.update_profile(profile.id, move |profile| profile.name = name, cx)
+        });
+        self.report(task, cx);
+    }
+
+    fn set_color(&mut self, color: ProfileColor, cx: &mut Context<Self>) {
+        let task = self.store.update(cx, |store, cx| {
+            store.update_profile(
+                self.selected_id.clone(),
+                move |profile| profile.color = color,
+                cx,
+            )
+        });
+        self.report(task, cx);
+    }
+
+    fn remove_folder(&mut self, folder: String, cx: &mut Context<Self>) {
+        let task = self.store.update(cx, |store, cx| {
+            store.update_profile(
+                self.selected_id.clone(),
+                move |profile| profile.folders.retain(|entry| *entry != folder),
+                cx,
+            )
+        });
+        self.report(task, cx);
+    }
+
+    fn add_folder(&mut self, cx: &mut Context<Self>) {
+        let paths = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: true,
+            prompt: Some("Vincular ao perfil".into()),
+        });
+        let profile_id = self.selected_id.clone();
+        cx.spawn(async move |this, cx| {
+            let Some(paths) = paths.await.ok().and_then(|paths| paths.log_err()).flatten() else {
+                return anyhow::Ok(());
+            };
+            let home = paths::home_dir();
+            let folders: Vec<String> = paths
+                .iter()
+                .map(|path| match path.strip_prefix(home) {
+                    Ok(relative) => format!("~/{}", relative.display()),
+                    Err(_) => path.display().to_string(),
+                })
+                .collect();
+            this.update(cx, |this, cx| {
+                let task = this.store.update(cx, |store, cx| {
+                    store.set_folders_owner(folders, Some(profile_id), cx)
+                });
+                this.report(task, cx);
+            })
+        })
+        .detach_and_log_err(cx);
+    }
+
+    fn create_profile(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let taken_colors: Vec<ProfileColor> = self
+            .store
+            .read(cx)
+            .profiles
+            .iter()
+            .map(|profile| profile.color)
+            .collect();
+        let color = ProfileColor::ALL
+            .into_iter()
+            .find(|color| !taken_colors.contains(color))
+            .unwrap_or(ProfileColor::Teal);
+        let task = self
+            .store
+            .update(cx, |store, cx| store.create("Novo perfil", color, cx));
+        cx.spawn_in(window, async move |this, cx| {
+            let result = task.await;
+            this.update_in(cx, |this, window, cx| match result {
+                Ok(profile) => {
+                    this.select(profile.id, window, cx);
+                    this.name_editor.update(cx, |editor, cx| {
+                        editor.select_all(&editor::actions::SelectAll, window, cx)
+                    });
+                    this.name_editor.focus_handle(cx).focus(window, cx);
+                }
+                Err(error) => {
+                    this.error = Some(format!("{error:#}").into());
+                    cx.notify();
+                }
+            })
+        })
+        .detach_and_log_err(cx);
+    }
+
+    fn delete_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(profile) = self.selected(cx) else {
+            return;
+        };
+        let Some(workspace) = self.workspace.upgrade() else {
+            return;
+        };
+        let fs = workspace.read(cx).app_state().fs.clone();
+        let answer = window.prompt(
+            gpui::PromptLevel::Warning,
+            &format!("Excluir o perfil {}?", profile.name),
+            Some(
+                "As contas e tokens dele saem do Keychain, e a pasta de dados e o cache do navegador vão para a Lixeira.",
+            ),
+            &["Excluir", "Cancelar"],
+            cx,
+        );
+        cx.spawn_in(window, async move |this, cx| {
+            if answer.await != Ok(0) {
+                return anyhow::Ok(());
+            }
+            let task = this.update(cx, |this, cx| {
+                this.store
+                    .update(cx, |store, cx| store.delete(profile.id, fs, cx))
+            })?;
+            let result = task.await;
+            this.update_in(cx, |this, window, cx| match result {
+                Ok(()) => this.select(active_profile_id().to_string(), window, cx),
+                Err(error) => {
+                    this.error = Some(format!("{error:#}").into());
+                    cx.notify();
+                }
+            })
+        })
+        .detach_and_log_err(cx);
+    }
+
+    fn report(&mut self, task: Task<Result<()>>, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                this.error = result.err().map(|error| format!("{error:#}").into());
+                cx.notify();
+            })
+        })
+        .detach_and_log_err(cx);
+    }
+
+    fn cancel(&mut self, _: &menu::Cancel, _window: &mut Window, cx: &mut Context<Self>) {
+        self.save_name(cx);
+        cx.emit(DismissEvent);
+    }
+
+    fn confirm(&mut self, _: &menu::Confirm, _window: &mut Window, cx: &mut Context<Self>) {
+        self.save_name(cx);
+    }
+
+    fn render_section_title(title: &'static str) -> impl IntoElement {
+        Label::new(title)
+            .size(LabelSize::XSmall)
+            .weight(gpui::FontWeight::SEMIBOLD)
+            .color(Color::Muted)
+    }
+
+    fn render_nav(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let store = self.store.read(cx);
+        let rows = store.profiles.iter().enumerate().map(|(index, profile)| {
+            let is_selected = profile.id == self.selected_id;
+            let status = if profile.id == active_profile_id() {
+                "esta janela"
+            } else if store.running.contains(&profile.id) {
+                "aberto"
+            } else {
+                "fechado"
+            };
+            let profile_id = profile.id.clone();
+            h_flex()
+                .id(("manage-profile", index))
+                .gap_2()
+                .px_1p5()
+                .py_1()
+                .rounded_md()
+                .cursor_pointer()
+                .when(is_selected, |this| {
+                    this.bg(cx.theme().colors().element_selected)
+                })
+                .hover(|style| style.bg(cx.theme().colors().element_hover))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.select(profile_id.clone(), window, cx)
+                }))
+                .child(ProfilePicker::render_mark(profile, cx))
+                .child(
+                    v_flex()
+                        .min_w_0()
+                        .child(Label::new(profile.name.clone()).truncate())
+                        .child(
+                            Label::new(status)
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted),
+                        ),
+                )
+        });
+
+        v_flex()
+            .flex_none()
+            .w(rems(13.))
+            .h_full()
+            .p_2()
+            .gap_0p5()
+            .border_r_1()
+            .border_color(cx.theme().colors().border_variant)
+            .bg(cx.theme().colors().panel_background)
+            .child(
+                div()
+                    .px_1p5()
+                    .py_1()
+                    .child(Self::render_section_title("PERFIS")),
+            )
+            .children(rows)
+            .child(
+                h_flex()
+                    .id("manage-new-profile")
+                    .gap_2()
+                    .px_1p5()
+                    .py_1()
+                    .rounded_md()
+                    .cursor_pointer()
+                    .hover(|style| style.bg(cx.theme().colors().element_hover))
+                    .on_click(cx.listener(|this, _, window, cx| this.create_profile(window, cx)))
+                    .child(
+                        Icon::new(IconName::Plus)
+                            .size(IconSize::Small)
+                            .color(Color::Muted),
+                    )
+                    .child(Label::new("Novo perfil").color(Color::Muted)),
+            )
+            .child(div().flex_1())
+            .child(
+                v_flex()
+                    .gap_1()
+                    .p_2()
+                    .rounded_md()
+                    .bg(cx.theme().colors().element_background)
+                    .child(Self::render_section_title("COMPARTILHADO"))
+                    .child(
+                        Label::new(
+                            "Keymap, temas e global_settings.json valem para todos os perfis.",
+                        )
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted),
+                    ),
+            )
+    }
+
+    fn render_details(&self, profile: &AppProfile, cx: &mut Context<Self>) -> impl IntoElement {
+        let is_default = profile.id == paths::DEFAULT_PROFILE_ID;
+        let is_active = profile.id == active_profile_id();
+        let is_running = self.store.read(cx).running.contains(&profile.id);
+        let data_dir = if is_default {
+            paths::data_dir().display().to_string()
+        } else {
+            paths::profiles_dir()
+                .join(&profile.id)
+                .display()
+                .to_string()
+        };
+
+        let swatches = ProfileColor::ALL.into_iter().map(|color| {
+            let is_selected = color == profile.color;
+            div()
+                .id(color.label())
+                .size_4()
+                .rounded_full()
+                .cursor_pointer()
+                .border_2()
+                .border_color(if is_selected {
+                    cx.theme().colors().text
+                } else {
+                    gpui::transparent_black()
+                })
+                .bg(color.hsla())
+                .tooltip(Tooltip::text(color.label()))
+                .on_click(cx.listener(move |this, _, _, cx| this.set_color(color, cx)))
+        });
+
+        let folders = profile.folders.iter().enumerate().map(|(index, folder)| {
+            let removed = folder.clone();
+            h_flex()
+                .gap_2()
+                .px_2()
+                .py_1()
+                .child(
+                    Icon::new(IconName::Folder)
+                        .size(IconSize::Small)
+                        .color(Color::Custom(profile.color.hsla())),
+                )
+                .child(
+                    Label::new(folder.clone())
+                        .size(LabelSize::Small)
+                        .buffer_font(cx)
+                        .truncate()
+                        .flex_1(),
+                )
+                .child(
+                    IconButton::new(("remove-folder", index), IconName::Close)
+                        .icon_size(IconSize::XSmall)
+                        .icon_color(Color::Muted)
+                        .tooltip(Tooltip::text("Desvincular pasta"))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.remove_folder(removed.clone(), cx)
+                        })),
+                )
+        });
+
+        let delete_hint = if is_default {
+            Some("O perfil padrão é a instalação original e não pode ser excluído.")
+        } else if is_active {
+            Some("Troque para outro perfil para excluir este.")
+        } else if is_running {
+            Some("Feche o perfil para excluí-lo.")
+        } else {
+            None
+        };
+        let profile_id = profile.id.clone();
+
+        v_flex()
+            .flex_1()
+            .min_w_0()
+            .p_4()
+            .gap_4()
+            .child(
+                h_flex()
+                    .gap_3()
+                    .child(
+                        div()
+                            .flex_none()
+                            .size_9()
+                            .rounded_lg()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .bg(profile.color.hsla())
+                            .child(
+                                Label::new(profile.initial())
+                                    .weight(gpui::FontWeight::BOLD)
+                                    .color(Color::Custom(cx.theme().colors().editor_background)),
+                            ),
+                    )
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .px_2()
+                                    .py_1()
+                                    .rounded_md()
+                                    .border_1()
+                                    .border_color(cx.theme().colors().border)
+                                    .bg(cx.theme().colors().editor_background)
+                                    .child(self.name_editor.clone()),
+                            )
+                            .child(
+                                Label::new(data_dir)
+                                    .size(LabelSize::XSmall)
+                                    .buffer_font(cx)
+                                    .color(Color::Muted)
+                                    .truncate(),
+                            ),
+                    )
+                    .child(h_flex().gap_1p5().children(swatches)),
+            )
+            .child(
+                v_flex()
+                    .gap_1()
+                    .child(
+                        h_flex()
+                            .justify_between()
+                            .child(Self::render_section_title("PASTAS DO PERFIL"))
+                            .child(
+                                Button::new("add-folder", "Adicionar pasta")
+                                    .label_size(LabelSize::Small)
+                                    .start_icon(
+                                        Icon::new(IconName::Plus).size(IconSize::XSmall),
+                                    )
+                                    .on_click(cx.listener(|this, _, _, cx| this.add_folder(cx))),
+                            ),
+                    )
+                    .child(
+                        v_flex()
+                            .rounded_md()
+                            .border_1()
+                            .border_color(cx.theme().colors().border_variant)
+                            .map(|this| {
+                                if profile.folders.is_empty() {
+                                    this.child(
+                                        div().px_2().py_2().child(
+                                            Label::new(
+                                                "Nenhuma pasta. Pastas vinculadas sempre abrem neste perfil, pelo terminal, pelo Finder ou pelo File > Open.",
+                                            )
+                                            .size(LabelSize::Small)
+                                            .color(Color::Muted),
+                                        ),
+                                    )
+                                } else {
+                                    this.children(folders)
+                                }
+                            }),
+                    ),
+            )
+            .child(
+                v_flex()
+                    .gap_1()
+                    .child(Self::render_section_title("DADOS"))
+                    .child(
+                        Label::new(
+                            "settings.json, extensões, threads, histórico e as contas do Keychain são só deste perfil.",
+                        )
+                        .size(LabelSize::Small)
+                        .color(Color::Muted),
+                    )
+                    .when(is_active, |this| {
+                        this.child(
+                            h_flex().child(
+                                Button::new("open-settings", "Abrir settings.json")
+                                    .label_size(LabelSize::Small)
+                                    .on_click(|_, window, cx| {
+                                        window.dispatch_action(
+                                            Box::new(zed_actions::OpenSettingsFile),
+                                            cx,
+                                        )
+                                    }),
+                            ),
+                        )
+                    })
+                    .when(!is_active, |this| {
+                        let open_id = profile_id.clone();
+                        this.child(
+                            h_flex().child(
+                                Button::new("open-profile", "Abrir este perfil")
+                                    .label_size(LabelSize::Small)
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        open_profile(open_id.clone(), cx).detach_and_notify_err(
+                                            this.workspace.clone(),
+                                            window,
+                                            cx,
+                                        );
+                                    })),
+                            ),
+                        )
+                    }),
+            )
+            .child(div().flex_1())
+            .child(
+                h_flex()
+                    .justify_between()
+                    .gap_2()
+                    .child(match (&self.error, delete_hint) {
+                        (Some(error), _) => Label::new(error.clone())
+                            .size(LabelSize::Small)
+                            .color(Color::Error),
+                        (None, Some(hint)) => {
+                            Label::new(hint).size(LabelSize::Small).color(Color::Muted)
+                        }
+                        (None, None) => Label::new("").size(LabelSize::Small),
+                    })
+                    .child(
+                        Button::new("delete-profile", "Excluir perfil")
+                            .label_size(LabelSize::Small)
+                            .color(Color::Error)
+                            .disabled(delete_hint.is_some())
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.delete_selected(window, cx)
+                            })),
+                    ),
+            )
+    }
+}
+
+impl Render for ManageProfilesModal {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let details = self
+            .selected(cx)
+            .map(|profile| self.render_details(&profile, cx).into_any_element());
+
+        h_flex()
+            .key_context("ManageProfilesModal")
+            .on_action(cx.listener(Self::cancel))
+            .on_action(cx.listener(Self::confirm))
+            .elevation_3(cx)
+            .w(rems(46.))
+            .h(rems(32.))
+            .overflow_hidden()
+            .items_start()
+            .child(self.render_nav(cx))
+            .children(details)
     }
 }
 

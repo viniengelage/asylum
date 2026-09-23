@@ -6,6 +6,9 @@ mod cef_install;
 mod cef_paths;
 mod runtime_discovery;
 
+#[cfg(target_os = "macos")]
+pub use runtime_discovery::browser_cache_dir_for_profile;
+
 use editor::Editor;
 use gpui::{
     App, Bounds, Context, CursorStyle, Entity, EventEmitter, FocusHandle, Focusable,

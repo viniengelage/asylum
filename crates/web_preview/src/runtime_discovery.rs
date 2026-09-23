@@ -38,9 +38,13 @@ pub fn remote_debugging_port() -> u16 {
 /// Where Chromium keeps cookies, storage and caches. Two CEF instances can't share one.
 #[cfg(target_os = "macos")]
 pub fn browser_cache_dir() -> PathBuf {
-    crate::cef_paths::support_dir()
-        .join("Profiles")
-        .join(paths::active_profile_id().unwrap_or(paths::DEFAULT_PROFILE_ID))
+    browser_cache_dir_for_profile(paths::active_profile_id().unwrap_or(paths::DEFAULT_PROFILE_ID))
+}
+
+/// Where the browser of `profile_id` keeps its cookies, storage and caches.
+#[cfg(target_os = "macos")]
+pub fn browser_cache_dir_for_profile(profile_id: &str) -> PathBuf {
+    crate::cef_paths::support_dir().join("Profiles").join(profile_id)
 }
 
 /// Where the files other tools use to find and drive this browser live.

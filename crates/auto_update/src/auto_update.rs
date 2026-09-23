@@ -138,6 +138,71 @@ struct AsylumRelease {
     assets: HashMap<String, String>,
 }
 
+/// Held while a process downloads and installs an update. Every profile of the app runs from
+/// the same bundle, so two of them installing at once would overwrite each other's files.
+struct UpdateLock {
+    _file: std::fs::File,
+}
+
+impl UpdateLock {
+    fn path() -> PathBuf {
+        paths::profiles_dir().join("update.lock")
+    }
+
+    fn try_acquire() -> Result<Option<Self>> {
+        let path = if cfg!(test) {
+            std::env::temp_dir().join(format!("zed-update-lock-test-{}", std::process::id()))
+        } else {
+            Self::path()
+        };
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .context("failed to create the update lock directory")?;
+        }
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&path)
+            .with_context(|| format!("failed to open {}", path.display()))?;
+        match file.try_lock() {
+            Ok(()) => Ok(Some(Self { _file: file })),
+            Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+            Err(std::fs::TryLockError::Error(error)) => {
+                Err(error).with_context(|| format!("failed to lock {}", path.display()))
+            }
+        }
+    }
+}
+
+fn installed_release_commit_path() -> PathBuf {
+    paths::profiles_dir().join("installed-update-commit")
+}
+
+/// The commit of the last release some profile installed into the bundle.
+fn installed_release_commit() -> Option<String> {
+    // Tests must not depend on what the machine running them installed.
+    if cfg!(test) {
+        return None;
+    }
+    std::fs::read_to_string(installed_release_commit_path())
+        .ok()
+        .map(|commit| commit.trim().to_string())
+}
+
+fn record_installed_release_commit(commit: &str) {
+    if cfg!(test) {
+        return;
+    }
+    let path = installed_release_commit_path();
+    if let Err(error) = std::fs::write(&path, commit) {
+        log::warn!(
+            "Auto Update: failed to record the installed release at {}: {error}",
+            path.display()
+        );
+    }
+}
+
 impl AsylumRelease {
     fn short_commit(&self) -> &str {
         self.commit.get(..7).unwrap_or(&self.commit)
@@ -871,6 +936,25 @@ impl AutoUpdater {
             release.commit
         );
 
+        // Every profile runs from the same bundle, so once one of them installed this release the
+        // others only need a restart to run it.
+        if update.is_some()
+            && installed_release_commit().as_deref() == Some(release.commit.as_str())
+        {
+            if let Some((newer_version, _)) = update {
+                log::info!("Auto Update: another profile already installed {newer_version}");
+                this.update(cx, |this, cx| {
+                    this.set_should_show_update_notification(true, cx)
+                        .detach_and_log_err(cx);
+                    this.status = AutoUpdateStatus::Updated {
+                        version: newer_version,
+                    };
+                    cx.notify();
+                });
+            }
+            return Ok(());
+        }
+
         let Some((newer_version, asset_url)) = update else {
             this.update(cx, |this, cx| {
                 this.status = match previous_status {
@@ -882,6 +966,15 @@ impl AutoUpdater {
                         AutoUpdateStatus::Idle
                     }
                 };
+                cx.notify();
+            });
+            return Ok(());
+        };
+
+        let Some(_update_lock) = UpdateLock::try_acquire()? else {
+            log::info!("Auto Update: another profile is installing an update");
+            this.update(cx, |this, cx| {
+                this.status = AutoUpdateStatus::Idle;
                 cx.notify();
             });
             return Ok(());
@@ -959,6 +1052,7 @@ impl AutoUpdater {
         if let Some(new_binary_path) = new_binary_path {
             cx.update(|cx| cx.set_restart_path(new_binary_path));
         }
+        record_installed_release_commit(&release.commit);
 
         this.update(cx, |this, cx| {
             this.set_should_show_update_notification(true, cx)
@@ -1496,6 +1590,15 @@ mod tests {
 
     pub(super) struct InstallOverride(pub Rc<dyn Fn(&Path, &AsyncApp) -> Result<Option<PathBuf>>>);
     impl Global for InstallOverride {}
+
+    #[test]
+    fn test_update_lock_is_exclusive() {
+        let first = UpdateLock::try_acquire().unwrap();
+        assert!(first.is_some());
+        assert!(UpdateLock::try_acquire().unwrap().is_none());
+        drop(first);
+        assert!(UpdateLock::try_acquire().unwrap().is_some());
+    }
 
     #[gpui::test]
     fn test_auto_update_defaults_to_true(cx: &mut TestAppContext) {
