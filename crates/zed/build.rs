@@ -34,6 +34,9 @@ fn main() {
         println!(
             "cargo:rustc-link-arg=-Wl,-rpath,/Applications/Xcode.app/Contents/SharedFrameworks"
         );
+        // SimulatorKit ships with Xcode. Weak linking lets Asylum start on a Mac without it;
+        // the embedded simulator loads the framework itself and reports when it is missing.
+        println!("cargo:rustc-link-arg=-Wl,-weak_framework,SimulatorKit");
 
         // Register exported Objective-C selectors, protocols, etc
         println!("cargo:rustc-link-arg=-Wl,-ObjC");
