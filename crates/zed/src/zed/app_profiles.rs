@@ -2,11 +2,13 @@
 //! one process each. This is the registry of known profiles and the status bar control that
 //! shows the active one and switches to, or creates, another.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
+use agent_settings::AgentSettings;
 use anyhow::{Context as _, Result};
 use editor::{Editor, EditorEvent};
 use fs::{Fs, RemoveOptions};
@@ -14,10 +16,14 @@ use gpui::{
     Anchor, App, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, Global, Hsla,
     Task, WeakEntity, Window, prelude::*, rgb,
 };
+use language_model::LanguageModelRegistry;
+use project::context_server_store::ContextServerStatus;
+use project::project_settings::{ContextServerSettings, ProjectSettings};
 use serde::{Deserialize, Serialize};
+use settings::{Settings as _, SettingsStore};
 use ui::{
-    ButtonLike, Divider, IconButton, IconName, IconSize, Label, LabelSize, PopoverMenu,
-    PopoverMenuHandle, Tooltip, prelude::*,
+    ButtonLike, Divider, IconButton, IconName, IconSize, Indicator, Label, LabelSize, PopoverMenu,
+    PopoverMenuHandle, Switch, ToggleState, Tooltip, prelude::*,
 };
 use util::ResultExt as _;
 use util::paths::{PathMatcher, PathStyle, PathWithPosition};
@@ -379,11 +385,84 @@ fn switch_in_place(profile_id: String, window: &mut Window, cx: &mut App) {
 }
 
 /// The known profiles and which of them are running, shared by every window's indicator.
+/// What a profile is set up with, as its own process last saw it. A profile can't read the
+/// others' settings or keychain entries, so each one publishes this for the manager to show.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+struct ProfileSummary {
+    #[serde(default)]
+    ai_providers: Vec<String>,
+    default_model: Option<String>,
+    agent_profile: Option<String>,
+    #[serde(default)]
+    mcp_servers: Vec<McpServerSummary>,
+    /// `None` when the ClickUp integration isn't part of this build.
+    clickup_connected: Option<bool>,
+    git_committer: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+struct McpServerSummary {
+    id: String,
+    detail: String,
+    enabled: bool,
+}
+
+const CLICKUP_CREDENTIALS_URL: &str = "https://app.clickup.com/asylum";
+const CLICKUP_OPEN_ACTION: &str = "clickup::ToggleFocus";
+const CLICKUP_DISCONNECT_ACTION: &str = "clickup::Disconnect";
+
+fn summaries_dir() -> PathBuf {
+    paths::profiles_dir().join("summaries")
+}
+
+fn load_summaries(profiles: &[AppProfile]) -> HashMap<String, ProfileSummary> {
+    profiles
+        .iter()
+        .filter_map(|profile| {
+            let json = std::fs::read(summaries_dir().join(format!("{}.json", profile.id))).ok()?;
+            let summary = serde_json::from_slice(&json).log_err()?;
+            Some((profile.id.clone(), summary))
+        })
+        .collect()
+}
+
+fn mcp_server_detail(settings: &ContextServerSettings) -> String {
+    match settings {
+        ContextServerSettings::Stdio { command, .. } => {
+            std::iter::once(command.path.display().to_string())
+                .chain(command.args.iter().cloned())
+                .collect::<Vec<_>>()
+                .join(" ")
+        }
+        ContextServerSettings::Http { url, .. } => url.clone(),
+        ContextServerSettings::Extension { .. } => "extensão".to_string(),
+    }
+}
+
+fn mcp_server_summaries(cx: &App) -> Vec<McpServerSummary> {
+    let mut servers: Vec<McpServerSummary> = ProjectSettings::get_global(cx)
+        .context_servers
+        .iter()
+        .map(|(id, settings)| McpServerSummary {
+            id: id.to_string(),
+            detail: mcp_server_detail(settings),
+            enabled: settings.enabled(),
+        })
+        .collect();
+    servers.sort_by(|a, b| a.id.cmp(&b.id));
+    servers
+}
+
 pub struct ProfileStore {
     profiles: Vec<AppProfile>,
     running: HashSet<String>,
+    summaries: HashMap<String, ProfileSummary>,
+    clickup_connected: Option<bool>,
+    git_committer: Option<String>,
     load_error: Option<SharedString>,
     refresh_task: Option<Task<()>>,
+    publish_task: Option<Task<()>>,
+    _subscriptions: Vec<gpui::Subscription>,
 }
 
 struct GlobalProfileStore(Entity<ProfileStore>);
@@ -396,13 +475,28 @@ impl ProfileStore {
             return store.0.clone();
         }
         let store = cx.new(|cx| {
+            let subscriptions = vec![
+                cx.observe_global::<SettingsStore>(|store: &mut ProfileStore, cx| {
+                    store.publish_summary(cx)
+                }),
+                cx.subscribe(
+                    &LanguageModelRegistry::global(cx),
+                    |store, _, _: &language_model::Event, cx| store.publish_summary(cx),
+                ),
+            ];
             let mut store = ProfileStore {
                 profiles: vec![default_profile()],
                 running: HashSet::default(),
+                summaries: HashMap::default(),
+                clickup_connected: None,
+                git_committer: None,
                 load_error: None,
                 refresh_task: None,
+                publish_task: None,
+                _subscriptions: subscriptions,
             };
             store.refresh(cx);
+            store.refresh_accounts(cx);
             store
         });
         cx.set_global(GlobalProfileStore(store.clone()));
@@ -422,6 +516,86 @@ impl ProfileStore {
             })
     }
 
+    /// The summary of this process's profile, read from its live state.
+    fn current_summary(&self, cx: &App) -> ProfileSummary {
+        let registry = LanguageModelRegistry::read_global(cx);
+        let ai_providers = registry
+            .providers()
+            .iter()
+            .filter(|provider| provider.is_authenticated(cx))
+            .map(|provider| provider.name().0.to_string())
+            .collect();
+        let default_model = registry.default_model().map(|configured| {
+            format!(
+                "{} · {}",
+                configured.provider.name().0,
+                configured.model.name().0
+            )
+        });
+        let agent_settings = AgentSettings::get_global(cx);
+        let agent_profile = agent_settings
+            .profiles
+            .get(&agent_settings.default_profile)
+            .map(|profile| profile.name.to_string());
+        ProfileSummary {
+            ai_providers,
+            default_model,
+            agent_profile,
+            mcp_servers: mcp_server_summaries(cx),
+            clickup_connected: cx
+                .build_action(CLICKUP_OPEN_ACTION, None)
+                .is_ok()
+                .then_some(self.clickup_connected.unwrap_or(false)),
+            git_committer: self.git_committer.clone(),
+        }
+    }
+
+    /// Writes this profile's summary for the other profiles' managers, once changes settle.
+    fn publish_summary(&mut self, cx: &mut Context<Self>) {
+        self.publish_task = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_secs(2)).await;
+            let Ok(summary) = this.read_with(cx, |this, cx| this.current_summary(cx)) else {
+                return;
+            };
+            let path = summaries_dir().join(format!("{}.json", active_profile_id()));
+            cx.background_spawn(async move {
+                std::fs::create_dir_all(summaries_dir())?;
+                std::fs::write(&path, serde_json::to_vec_pretty(&summary)?)?;
+                anyhow::Ok(())
+            })
+            .await
+            .context("failed to publish the profile summary")
+            .log_err();
+        }));
+    }
+
+    /// Checks the accounts this process can see only asynchronously: whether ClickUp has a
+    /// token and who git commits as.
+    fn refresh_accounts(&mut self, cx: &mut Context<Self>) {
+        let credentials = zed_credentials_provider::global(cx);
+        cx.spawn(async move |this, cx| {
+            let clickup_connected = credentials
+                .read_credentials(CLICKUP_CREDENTIALS_URL, cx)
+                .await
+                .log_err()
+                .map(|credentials| credentials.is_some());
+            let committer = git::repository::get_git_committer(cx).await;
+            let git_committer = match (committer.name, committer.email) {
+                (Some(name), Some(email)) => Some(format!("{name} <{email}>")),
+                (Some(name), None) => Some(name),
+                (None, Some(email)) => Some(email),
+                (None, None) => None,
+            };
+            this.update(cx, |this, cx| {
+                this.clickup_connected = clickup_connected;
+                this.git_committer = git_committer;
+                this.publish_summary(cx);
+                cx.notify();
+            })
+        })
+        .detach_and_log_err(cx);
+    }
+
     /// Rereads the registry, which other profiles may have changed, and checks which
     /// profiles are running.
     fn refresh(&mut self, cx: &mut Context<Self>) {
@@ -438,11 +612,16 @@ impl ProfileStore {
                         .collect::<HashSet<_>>()
                 })
                 .unwrap_or_default();
-            (profiles, running)
+            let summaries = profiles
+                .as_ref()
+                .map(|profiles| load_summaries(profiles))
+                .unwrap_or_default();
+            (profiles, running, summaries)
         });
         self.refresh_task = Some(cx.spawn(async move |this, cx| {
-            let (profiles, running) = task.await;
+            let (profiles, running, summaries) = task.await;
             this.update(cx, |this, cx| {
+                this.summaries = summaries;
                 match profiles {
                     Ok(profiles) => {
                         this.profiles = profiles;
@@ -1206,7 +1385,10 @@ impl ManageProfilesModal {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        store.update(cx, |store, cx| store.refresh(cx));
+        store.update(cx, |store, cx| {
+            store.refresh(cx);
+            store.refresh_accounts(cx);
+        });
         let name_editor = cx.new(|cx| {
             let mut editor = Editor::single_line(window, cx);
             editor.set_placeholder_text("Nome do perfil", window, cx);
@@ -1514,10 +1696,495 @@ impl ManageProfilesModal {
             )
     }
 
+    fn render_card(
+        title: &'static str,
+        action: Option<AnyElement>,
+        rows: Vec<AnyElement>,
+        empty: Option<&'static str>,
+        cx: &App,
+    ) -> impl IntoElement {
+        v_flex()
+            .w_full()
+            .rounded_lg()
+            .border_1()
+            .border_color(cx.theme().colors().border_variant)
+            .bg(cx.theme().colors().element_background.opacity(0.4))
+            .child(
+                h_flex()
+                    .justify_between()
+                    .px_3()
+                    .py_1p5()
+                    .child(Self::render_section_title(title))
+                    .children(action),
+            )
+            .when(rows.is_empty(), |this| {
+                this.when_some(empty, |this, empty| {
+                    this.child(
+                        div()
+                            .px_3()
+                            .py_2()
+                            .border_t_1()
+                            .border_color(cx.theme().colors().border_variant)
+                            .child(Label::new(empty).size(LabelSize::Small).color(Color::Muted)),
+                    )
+                })
+            })
+            .children(rows.into_iter().map(|row| {
+                div()
+                    .border_t_1()
+                    .border_color(cx.theme().colors().border_variant)
+                    .child(row)
+            }))
+    }
+
+    fn render_row(
+        icon: IconName,
+        icon_color: Color,
+        title: impl Into<SharedString>,
+        detail: Option<SharedString>,
+        trailing: Option<AnyElement>,
+        mono: bool,
+        cx: &App,
+    ) -> AnyElement {
+        h_flex()
+            .gap_2p5()
+            .px_3()
+            .py_1p5()
+            .child(Icon::new(icon).size(IconSize::Small).color(icon_color))
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        Label::new(title)
+                            .size(LabelSize::Small)
+                            .when(mono, |label| label.buffer_font(cx))
+                            .truncate(),
+                    )
+                    .when_some(detail, |this, detail| {
+                        this.child(
+                            Label::new(detail)
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted)
+                                .truncate(),
+                        )
+                    }),
+            )
+            .children(trailing)
+            .into_any_element()
+    }
+
+    fn render_status(label: &'static str, ok: bool) -> AnyElement {
+        let color = if ok { Color::Success } else { Color::Muted };
+        h_flex()
+            .gap_1()
+            .child(Indicator::dot().color(color))
+            .child(Label::new(label).size(LabelSize::XSmall).color(color))
+            .into_any_element()
+    }
+
+    fn open_settings_page(page: &'static str) -> impl Fn(&gpui::ClickEvent, &mut Window, &mut App) {
+        move |_, window, cx| {
+            window.dispatch_action(
+                Box::new(zed_actions::OpenSettingsPage {
+                    page: page.to_string(),
+                    target: None,
+                }),
+                cx,
+            )
+        }
+    }
+
+    fn dispatch_by_name(name: &'static str) -> impl Fn(&gpui::ClickEvent, &mut Window, &mut App) {
+        move |_, window, cx| match cx.build_action(name, None) {
+            Ok(action) => window.dispatch_action(action, cx),
+            Err(error) => log::error!("failed to build {name}: {error:?}"),
+        }
+    }
+
+    fn toggle_mcp_server(&self, server: String, enabled: bool, cx: &mut Context<Self>) {
+        if let Some(workspace) = self.workspace.upgrade() {
+            let store = workspace.read(cx).project().read(cx).context_server_store();
+            store.update(cx, |store, cx| {
+                let Some(id) = store
+                    .server_ids()
+                    .iter()
+                    .find(|id| id.0.as_ref() == server.as_str())
+                    .cloned()
+                else {
+                    return;
+                };
+                if enabled {
+                    if let Some(server) = store.get_server(&id) {
+                        store.start_server(server, cx);
+                    }
+                } else {
+                    store.stop_server(&id, cx).log_err();
+                }
+            });
+        }
+        let fs = <dyn Fs>::global(cx);
+        settings::update_settings_file(fs, cx, move |settings, _| {
+            if let Some(server) = settings.project.context_servers.get_mut(server.as_str()) {
+                server.set_enabled(enabled);
+            }
+        });
+    }
+
+    /// Whether the MCP server `id` of this window's project is running, as a short label.
+    fn mcp_status(&self, id: &str, cx: &App) -> Option<(&'static str, bool)> {
+        let workspace = self.workspace.upgrade()?;
+        let store = workspace.read(cx).project().read(cx).context_server_store();
+        let store = store.read(cx);
+        let server_id = store
+            .server_ids()
+            .iter()
+            .find(|server| server.0.as_ref() == id)?;
+        Some(match store.status_for_server(server_id)? {
+            ContextServerStatus::Running => ("rodando", true),
+            ContextServerStatus::Starting | ContextServerStatus::Authenticating => {
+                ("iniciando", false)
+            }
+            ContextServerStatus::Stopped => ("parado", false),
+            ContextServerStatus::AuthRequired
+            | ContextServerStatus::ClientSecretRequired { .. } => ("pede login", false),
+            ContextServerStatus::Error(_) => ("erro", false),
+        })
+    }
+
+    fn render_git_card(&self, summary: &ProfileSummary, cx: &App) -> impl IntoElement {
+        let committer = Self::render_row(
+            IconName::Person,
+            Color::Default,
+            match &summary.git_committer {
+                Some(committer) => format!("Commits como {committer}"),
+                None => "Sem user.name no git".to_string(),
+            },
+            Some("git config --global, o mesmo em todos os perfis por enquanto".into()),
+            None,
+            false,
+            cx,
+        );
+        let providers = Self::render_row(
+            IconName::GitBranch,
+            Color::Muted,
+            "GitHub e Bitbucket",
+            Some("Contas por perfil chegam com o dock Repo".into()),
+            Some(
+                Label::new("em breve")
+                    .size(LabelSize::XSmall)
+                    .color(Color::Muted)
+                    .into_any_element(),
+            ),
+            false,
+            cx,
+        );
+        Self::render_card("CONTAS GIT", None, vec![committer, providers], None, cx)
+    }
+
+    fn render_ai_card(
+        &self,
+        summary: &ProfileSummary,
+        is_active: bool,
+        cx: &App,
+    ) -> impl IntoElement {
+        let mut rows: Vec<AnyElement> = summary
+            .ai_providers
+            .iter()
+            .map(|provider| {
+                Self::render_row(
+                    IconName::AiZed,
+                    Color::Default,
+                    provider.clone(),
+                    None,
+                    Some(Self::render_status("conectado", true)),
+                    false,
+                    cx,
+                )
+            })
+            .collect();
+        if rows.is_empty() {
+            rows.push(Self::render_row(
+                IconName::AiZed,
+                Color::Muted,
+                "Nenhum provedor conectado",
+                None,
+                None,
+                false,
+                cx,
+            ));
+        }
+        let text = |value: &Option<String>| {
+            Label::new(value.clone().unwrap_or_else(|| "—".to_string()))
+                .size(LabelSize::Small)
+                .color(Color::Muted)
+                .into_any_element()
+        };
+        rows.push(Self::render_row(
+            IconName::Sparkle,
+            Color::Default,
+            "Modelo padrão",
+            None,
+            Some(text(&summary.default_model)),
+            false,
+            cx,
+        ));
+        rows.push(Self::render_row(
+            IconName::Sliders,
+            Color::Default,
+            "Perfil do agente",
+            None,
+            Some(text(&summary.agent_profile)),
+            false,
+            cx,
+        ));
+        let action = is_active.then(|| {
+            Button::new("configure-ai", "Configurar")
+                .label_size(LabelSize::Small)
+                .on_click(Self::open_settings_page("AI"))
+                .into_any_element()
+        });
+        Self::render_card("IA", action, rows, None, cx)
+    }
+
+    fn render_mcp_card(
+        &self,
+        summary: &ProfileSummary,
+        is_active: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let rows = summary
+            .mcp_servers
+            .iter()
+            .enumerate()
+            .map(|(index, server)| {
+                let trailing = if is_active {
+                    let status = self
+                        .mcp_status(&server.id, cx)
+                        .filter(|_| server.enabled)
+                        .map(|(label, ok)| Self::render_status(label, ok));
+                    let toggled_server = server.id.clone();
+                    h_flex()
+                        .gap_2()
+                        .children(status)
+                        .child(
+                            Switch::new(
+                                ("mcp-toggle", index),
+                                if server.enabled {
+                                    ToggleState::Selected
+                                } else {
+                                    ToggleState::Unselected
+                                },
+                            )
+                            .on_click(cx.listener(
+                                move |this, state: &ToggleState, _, cx| {
+                                    this.toggle_mcp_server(
+                                        toggled_server.clone(),
+                                        *state == ToggleState::Selected,
+                                        cx,
+                                    )
+                                },
+                            )),
+                        )
+                        .into_any_element()
+                } else {
+                    Self::render_status(
+                        if server.enabled {
+                            "ligado"
+                        } else {
+                            "desligado"
+                        },
+                        server.enabled,
+                    )
+                };
+                Self::render_row(
+                    IconName::Server,
+                    if server.enabled {
+                        Color::Default
+                    } else {
+                        Color::Muted
+                    },
+                    server.id.clone(),
+                    Some(server.detail.clone().into()),
+                    Some(trailing),
+                    true,
+                    cx,
+                )
+            })
+            .collect();
+        let action = is_active.then(|| {
+            Button::new("add-mcp", "Adicionar")
+                .label_size(LabelSize::Small)
+                .start_icon(Icon::new(IconName::Plus).size(IconSize::XSmall))
+                .on_click(Self::open_settings_page("MCP Servers"))
+                .into_any_element()
+        });
+        Self::render_card(
+            "SERVIDORES MCP",
+            action,
+            rows,
+            Some("Nenhum servidor MCP configurado."),
+            cx,
+        )
+    }
+
+    fn render_integrations_card(
+        &self,
+        summary: &ProfileSummary,
+        is_active: bool,
+        cx: &App,
+    ) -> Option<impl IntoElement> {
+        let connected = summary.clickup_connected?;
+        let trailing = match (is_active, connected) {
+            (true, true) => Button::new("clickup-disconnect", "Desconectar")
+                .label_size(LabelSize::Small)
+                .on_click(Self::dispatch_by_name(CLICKUP_DISCONNECT_ACTION))
+                .into_any_element(),
+            (true, false) => Button::new("clickup-connect", "Conectar")
+                .label_size(LabelSize::Small)
+                .on_click(Self::dispatch_by_name(CLICKUP_OPEN_ACTION))
+                .into_any_element(),
+            (false, connected) => Self::render_status(
+                if connected {
+                    "conectado"
+                } else {
+                    "desconectado"
+                },
+                connected,
+            ),
+        };
+        let row = Self::render_row(
+            IconName::ListTodo,
+            Color::Default,
+            "ClickUp",
+            Some("token pessoal no Keychain deste perfil".into()),
+            Some(trailing),
+            false,
+            cx,
+        );
+        Some(Self::render_card("INTEGRAÇÕES", None, vec![row], None, cx))
+    }
+
+    fn render_folders_card(
+        &self,
+        profile: &AppProfile,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let rows = profile
+            .folders
+            .iter()
+            .enumerate()
+            .map(|(index, folder)| {
+                let removed = folder.clone();
+                Self::render_row(
+                    IconName::Folder,
+                    Color::Custom(profile.color.hsla()),
+                    folder.clone(),
+                    None,
+                    Some(
+                        IconButton::new(("remove-folder", index), IconName::Close)
+                            .icon_size(IconSize::XSmall)
+                            .icon_color(Color::Muted)
+                            .tooltip(Tooltip::text("Desvincular pasta"))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.remove_folder(removed.clone(), cx)
+                            }))
+                            .into_any_element(),
+                    ),
+                    true,
+                    cx,
+                )
+            })
+            .collect();
+        let action = Button::new("add-folder", "Pasta")
+            .label_size(LabelSize::Small)
+            .start_icon(Icon::new(IconName::Plus).size(IconSize::XSmall))
+            .on_click(cx.listener(|this, _, _, cx| this.add_folder(cx)))
+            .into_any_element();
+        Self::render_card(
+            "PASTAS DO PERFIL",
+            Some(action),
+            rows,
+            Some("Pastas vinculadas abrem sempre neste perfil."),
+            cx,
+        )
+    }
+
+    fn render_data_card(
+        &self,
+        profile: &AppProfile,
+        is_active: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let settings_row = Self::render_row(
+            IconName::FileCode,
+            Color::Default,
+            "settings.json do perfil",
+            Some("sobrepõe o global_settings.json compartilhado".into()),
+            is_active.then(|| {
+                Button::new("open-settings", "Abrir")
+                    .label_size(LabelSize::Small)
+                    .on_click(|_, window, cx| {
+                        window.dispatch_action(Box::new(zed_actions::OpenSettingsFile), cx)
+                    })
+                    .into_any_element()
+            }),
+            false,
+            cx,
+        );
+        let data_row = Self::render_row(
+            IconName::Thread,
+            Color::Default,
+            "Threads, histórico e workspaces",
+            Some("banco separado, nada vaza para os outros perfis".into()),
+            Some(
+                Label::new("isolado")
+                    .size(LabelSize::XSmall)
+                    .color(Color::Muted)
+                    .into_any_element(),
+            ),
+            false,
+            cx,
+        );
+        let mut rows = vec![settings_row, data_row];
+        if !is_active {
+            let open_id = profile.id.clone();
+            rows.push(Self::render_row(
+                IconName::ThisWindow,
+                Color::Default,
+                "Editar contas, IA e MCPs",
+                Some("Só o próprio perfil mexe no Keychain e nos settings dele".into()),
+                Some(
+                    Button::new("open-profile", "Abrir perfil")
+                        .label_size(LabelSize::Small)
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            open_profile(open_id.clone(), cx).detach_and_notify_err(
+                                this.workspace.clone(),
+                                window,
+                                cx,
+                            );
+                        }))
+                        .into_any_element(),
+                ),
+                false,
+                cx,
+            ));
+        }
+        Self::render_card("DADOS DO PERFIL", None, rows, None, cx)
+    }
+
     fn render_details(&self, profile: &AppProfile, cx: &mut Context<Self>) -> impl IntoElement {
         let is_default = profile.id == paths::DEFAULT_PROFILE_ID;
         let is_active = profile.id == active_profile_id();
-        let is_running = self.store.read(cx).running.contains(&profile.id);
+        let (is_running, summary) = {
+            let store = self.store.read(cx);
+            let summary = if is_active {
+                Some(store.current_summary(cx))
+            } else {
+                store.summaries.get(&profile.id).cloned()
+            };
+            (store.running.contains(&profile.id), summary)
+        };
         let data_dir = if is_default {
             paths::data_dir().display().to_string()
         } else {
@@ -1527,52 +2194,26 @@ impl ManageProfilesModal {
                 .to_string()
         };
 
-        let swatches = ProfileColor::ALL.into_iter().map(|color| {
-            let is_selected = color == profile.color;
-            div()
-                .id(color.label())
-                .size_4()
-                .rounded_full()
-                .cursor_pointer()
-                .border_2()
-                .border_color(if is_selected {
-                    cx.theme().colors().text
-                } else {
-                    gpui::transparent_black()
-                })
-                .bg(color.hsla())
-                .tooltip(Tooltip::text(color.label()))
-                .on_click(cx.listener(move |this, _, _, cx| this.set_color(color, cx)))
-        });
-
-        let folders = profile.folders.iter().enumerate().map(|(index, folder)| {
-            let removed = folder.clone();
-            h_flex()
-                .gap_2()
-                .px_2()
-                .py_1()
-                .child(
-                    Icon::new(IconName::Folder)
-                        .size(IconSize::Small)
-                        .color(Color::Custom(profile.color.hsla())),
-                )
-                .child(
-                    Label::new(folder.clone())
-                        .size(LabelSize::Small)
-                        .buffer_font(cx)
-                        .truncate()
-                        .flex_1(),
-                )
-                .child(
-                    IconButton::new(("remove-folder", index), IconName::Close)
-                        .icon_size(IconSize::XSmall)
-                        .icon_color(Color::Muted)
-                        .tooltip(Tooltip::text("Desvincular pasta"))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.remove_folder(removed.clone(), cx)
-                        })),
-                )
-        });
+        let swatches = ProfileColor::ALL
+            .into_iter()
+            .map(|color| {
+                let is_selected = color == profile.color;
+                div()
+                    .id(color.label())
+                    .size_4()
+                    .rounded_full()
+                    .cursor_pointer()
+                    .border_2()
+                    .border_color(if is_selected {
+                        cx.theme().colors().text
+                    } else {
+                        gpui::transparent_black()
+                    })
+                    .bg(color.hsla())
+                    .tooltip(Tooltip::text(color.label()))
+                    .on_click(cx.listener(move |this, _, _, cx| this.set_color(color, cx)))
+            })
+            .collect::<Vec<_>>();
 
         let delete_hint = if is_default {
             Some("O perfil padrão é a instalação original e não pode ser excluído.")
@@ -1583,11 +2224,55 @@ impl ManageProfilesModal {
         } else {
             None
         };
-        let profile_id = profile.id.clone();
+
+        let (left, right) = match &summary {
+            Some(summary) => (
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap_3()
+                    .child(self.render_git_card(summary, cx))
+                    .child(self.render_ai_card(summary, is_active, cx))
+                    .child(self.render_data_card(profile, is_active, cx))
+                    .into_any_element(),
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap_3()
+                    .child(self.render_mcp_card(summary, is_active, cx))
+                    .children(self.render_integrations_card(summary, is_active, cx))
+                    .child(self.render_folders_card(profile, cx))
+                    .into_any_element(),
+            ),
+            None => (
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap_3()
+                    .child(Self::render_card(
+                        "CONTAS, IA E MCP",
+                        None,
+                        Vec::new(),
+                        Some("Abra este perfil uma vez para ver as contas, a IA e os MCPs dele aqui."),
+                        cx,
+                    ))
+                    .child(self.render_data_card(profile, is_active, cx))
+                    .into_any_element(),
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap_3()
+                    .child(self.render_folders_card(profile, cx))
+                    .into_any_element(),
+            ),
+        };
 
         v_flex()
+            .id("profile-details")
             .flex_1()
             .min_w_0()
+            .h_full()
+            .overflow_y_scroll()
             .p_4()
             .gap_4()
             .child(
@@ -1633,87 +2318,7 @@ impl ManageProfilesModal {
                     )
                     .child(h_flex().gap_1p5().children(swatches)),
             )
-            .child(
-                v_flex()
-                    .gap_1()
-                    .child(
-                        h_flex()
-                            .justify_between()
-                            .child(Self::render_section_title("PASTAS DO PERFIL"))
-                            .child(
-                                Button::new("add-folder", "Adicionar pasta")
-                                    .label_size(LabelSize::Small)
-                                    .start_icon(
-                                        Icon::new(IconName::Plus).size(IconSize::XSmall),
-                                    )
-                                    .on_click(cx.listener(|this, _, _, cx| this.add_folder(cx))),
-                            ),
-                    )
-                    .child(
-                        v_flex()
-                            .rounded_md()
-                            .border_1()
-                            .border_color(cx.theme().colors().border_variant)
-                            .map(|this| {
-                                if profile.folders.is_empty() {
-                                    this.child(
-                                        div().px_2().py_2().child(
-                                            Label::new(
-                                                "Nenhuma pasta. Pastas vinculadas sempre abrem neste perfil, pelo terminal, pelo Finder ou pelo File > Open.",
-                                            )
-                                            .size(LabelSize::Small)
-                                            .color(Color::Muted),
-                                        ),
-                                    )
-                                } else {
-                                    this.children(folders)
-                                }
-                            }),
-                    ),
-            )
-            .child(
-                v_flex()
-                    .gap_1()
-                    .child(Self::render_section_title("DADOS"))
-                    .child(
-                        Label::new(
-                            "settings.json, extensões, threads, histórico e as contas do Keychain são só deste perfil.",
-                        )
-                        .size(LabelSize::Small)
-                        .color(Color::Muted),
-                    )
-                    .when(is_active, |this| {
-                        this.child(
-                            h_flex().child(
-                                Button::new("open-settings", "Abrir settings.json")
-                                    .label_size(LabelSize::Small)
-                                    .on_click(|_, window, cx| {
-                                        window.dispatch_action(
-                                            Box::new(zed_actions::OpenSettingsFile),
-                                            cx,
-                                        )
-                                    }),
-                            ),
-                        )
-                    })
-                    .when(!is_active, |this| {
-                        let open_id = profile_id.clone();
-                        this.child(
-                            h_flex().child(
-                                Button::new("open-profile", "Abrir este perfil")
-                                    .label_size(LabelSize::Small)
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        open_profile(open_id.clone(), cx).detach_and_notify_err(
-                                            this.workspace.clone(),
-                                            window,
-                                            cx,
-                                        );
-                                    })),
-                            ),
-                        )
-                    }),
-            )
-            .child(div().flex_1())
+            .child(h_flex().items_start().gap_3().child(left).child(right))
             .child(
                 h_flex()
                     .justify_between()
@@ -1732,9 +2337,9 @@ impl ManageProfilesModal {
                             .label_size(LabelSize::Small)
                             .color(Color::Error)
                             .disabled(delete_hint.is_some())
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.delete_selected(window, cx)
-                            })),
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.delete_selected(window, cx)),
+                            ),
                     ),
             )
     }
@@ -1751,8 +2356,8 @@ impl Render for ManageProfilesModal {
             .on_action(cx.listener(Self::cancel))
             .on_action(cx.listener(Self::confirm))
             .elevation_3(cx)
-            .w(rems(46.))
-            .h(rems(32.))
+            .w(rems(64.))
+            .h(rems(42.))
             .overflow_hidden()
             .items_start()
             .child(self.render_nav(cx))
