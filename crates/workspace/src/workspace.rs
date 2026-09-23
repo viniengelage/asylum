@@ -950,6 +950,52 @@ fn prompt_and_open_paths(
     }
 }
 
+/// Paths picked in this process that belong to another profile, and how to open them there.
+pub struct ForeignPaths {
+    pub owner_name: SharedString,
+    pub open_in_owner: Box<dyn FnOnce(&mut App) -> Task<Result<()>>>,
+}
+
+/// Lets the app tell when paths picked in this process belong to another profile, so the
+/// open prompt can offer to open them there instead.
+pub struct ForeignPathsHandler(pub Arc<dyn Fn(&[PathBuf], &App) -> Option<ForeignPaths>>);
+
+impl Global for ForeignPathsHandler {}
+
+/// Asks where to open `paths` when they belong to another profile. Returns whether they
+/// should still be opened in this process.
+async fn confirm_opening_foreign_paths(
+    paths: &[PathBuf],
+    workspace: &WeakEntity<Workspace>,
+    cx: &mut AsyncWindowContext,
+) -> Result<bool> {
+    let foreign = cx.update(|_, cx| {
+        cx.try_global::<ForeignPathsHandler>()
+            .and_then(|handler| (handler.0)(paths, cx))
+    })?;
+    let Some(foreign) = foreign else {
+        return Ok(true);
+    };
+    let open_there = format!("Abrir em {}", foreign.owner_name);
+    let answer = workspace.update_in(cx, |_, window, cx| {
+        window.prompt(
+            PromptLevel::Info,
+            &format!("Esta pasta pertence ao perfil {}", foreign.owner_name),
+            Some("Lá ela abre com as contas, a IA e os MCPs daquele perfil."),
+            &[open_there.as_str(), "Abrir aqui", "Cancelar"],
+            cx,
+        )
+    })?;
+    match answer.await {
+        Ok(0) => {
+            cx.update(|_, cx| (foreign.open_in_owner)(cx))?.await?;
+            Ok(false)
+        }
+        Ok(1) => Ok(true),
+        _ => Ok(false),
+    }
+}
+
 pub fn prompt_for_open_path_and_open(
     workspace: &mut Workspace,
     app_state: Arc<AppState>,
@@ -969,6 +1015,14 @@ pub fn prompt_for_open_path_and_open(
         let Some(paths) = paths.await.log_err().flatten() else {
             return;
         };
+        match confirm_opening_foreign_paths(&paths, &this, cx).await {
+            Ok(true) => {}
+            Ok(false) => return,
+            Err(error) => {
+                log::error!("failed to open the paths in their profile: {error:#}");
+                return;
+            }
+        }
         if !create_new_window {
             if let Some(handle) = multi_workspace_handle {
                 if let Some(task) = handle

@@ -19,8 +19,6 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-const REMOTE_DEBUGGING_PORT: i32 = 9223;
-
 /// Chromium's own name for the framework bundle location, the command line equivalent of
 /// `Settings::framework_dir_path`.
 const FRAMEWORK_DIR_PATH_SWITCH: &str = "framework-dir-path";
@@ -328,7 +326,7 @@ fn try_init_cef() -> Result<()> {
         external_message_pump: 1,
         multi_threaded_message_loop: 0,
         windowless_rendering_enabled: 1,
-        remote_debugging_port: REMOTE_DEBUGGING_PORT,
+        remote_debugging_port: i32::from(crate::runtime_discovery::remote_debugging_port()),
         persist_session_cookies: 1,
         cache_path: CefString::from(cache_path.to_str().unwrap_or("")),
         root_cache_path: CefString::from(cache_path.to_str().unwrap_or("")),
@@ -366,7 +364,8 @@ fn try_init_cef() -> Result<()> {
     CEF_READY.store(true, Ordering::Relaxed);
 
     log::info!(
-        "web_preview: CEF initialized — CDP on port {REMOTE_DEBUGGING_PORT}, {} process mode",
+        "web_preview: CEF initialized — CDP on port {}, {} process mode",
+        crate::runtime_discovery::remote_debugging_port(),
         if single_process { "single" } else { "multi" }
     );
 
@@ -374,7 +373,7 @@ fn try_init_cef() -> Result<()> {
 }
 
 fn profile_directory() -> PathBuf {
-    cef_paths::support_dir().join("Profiles/default")
+    crate::runtime_discovery::browser_cache_dir()
 }
 
 // CEF App implementation

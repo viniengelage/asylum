@@ -1,4 +1,6 @@
 mod app_menus;
+#[cfg(target_os = "macos")]
+pub(crate) mod app_profiles;
 pub mod edit_prediction_registry;
 #[cfg(target_os = "macos")]
 pub(crate) mod mac_only_instance;
@@ -638,7 +640,11 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
         let git_blame_status = cx.new(|_| git_ui::GitBlameStatus::default());
         let merge_conflict_indicator =
             cx.new(|cx| git_ui::MergeConflictIndicator::new(workspace, cx));
+        #[cfg(target_os = "macos")]
+        let profile_indicator = cx.new(|cx| app_profiles::ProfileIndicator::new(workspace, cx));
         workspace.status_bar().update(cx, |status_bar, cx| {
+            #[cfg(target_os = "macos")]
+            status_bar.add_profile_item(profile_indicator, window, cx);
             status_bar.add_dock_item(dock_toggle_buttons, window, cx);
             status_bar.add_left_item(diagnostic_summary, window, cx);
             status_bar.add_left_item(git_blame_status, window, cx);

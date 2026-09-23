@@ -1,10 +1,11 @@
-use std::collections::HashMap;
+use std::borrow::Cow;
+use std::collections::{BTreeSet, HashMap};
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::{Arc, LazyLock};
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use credentials_provider::CredentialsProvider;
 use futures::FutureExt as _;
 use gpui::{App, AsyncApp, Global};
@@ -66,7 +67,44 @@ fn new(cx: &App) -> Arc<dyn CredentialsProvider> {
 }
 
 /// A credentials provider that stores credentials in the system keychain.
+///
+/// Keychain entries are keyed by URL alone, so a non-default profile prefixes
+/// every URL with its id to keep its credentials apart from the other profiles'.
+/// The default profile keeps the bare URLs an installation already has.
 struct KeychainCredentialsProvider;
+
+fn keychain_url(url: &str) -> Cow<'_, str> {
+    match paths::active_profile_id() {
+        Some(profile_id) => Cow::Owned(format!("asylum-profile://{profile_id}/{url}")),
+        None => Cow::Borrowed(url),
+    }
+}
+
+// The keychain can't list entries by prefix, so a non-default profile keeps
+// the URLs it wrote to be able to remove them when the profile is deleted.
+fn stored_urls_file() -> Option<PathBuf> {
+    paths::active_profile_id().map(|_| paths::data_dir().join("credential_urls.json"))
+}
+
+fn update_stored_urls(url: &str, stored: bool) -> Result<()> {
+    let Some(path) = stored_urls_file() else {
+        return Ok(());
+    };
+    let mut urls: BTreeSet<String> = match std::fs::read(&path) {
+        Ok(json) => serde_json::from_slice(&json)?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => BTreeSet::new(),
+        Err(error) => return Err(error.into()),
+    };
+    let changed = if stored {
+        urls.insert(url.to_string())
+    } else {
+        urls.remove(url)
+    };
+    if changed {
+        std::fs::write(&path, serde_json::to_vec_pretty(&urls)?)?;
+    }
+    Ok(())
+}
 
 impl CredentialsProvider for KeychainCredentialsProvider {
     fn read_credentials<'a>(
@@ -74,7 +112,11 @@ impl CredentialsProvider for KeychainCredentialsProvider {
         url: &'a str,
         cx: &'a AsyncApp,
     ) -> Pin<Box<dyn Future<Output = Result<Option<(String, Vec<u8>)>>> + 'a>> {
-        async move { cx.update(|cx| cx.read_credentials(url)).await }.boxed_local()
+        async move {
+            let url = keychain_url(url);
+            cx.update(|cx| cx.read_credentials(&url)).await
+        }
+        .boxed_local()
     }
 
     fn write_credentials<'a>(
@@ -85,8 +127,10 @@ impl CredentialsProvider for KeychainCredentialsProvider {
         cx: &'a AsyncApp,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + 'a>> {
         async move {
-            cx.update(move |cx| cx.write_credentials(url, username, password))
-                .await
+            let url = keychain_url(url);
+            cx.update(|cx| cx.write_credentials(&url, username, password))
+                .await?;
+            update_stored_urls(&url, true).context("failed to record the profile's credential URL")
         }
         .boxed_local()
     }
@@ -96,7 +140,12 @@ impl CredentialsProvider for KeychainCredentialsProvider {
         url: &'a str,
         cx: &'a AsyncApp,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + 'a>> {
-        async move { cx.update(move |cx| cx.delete_credentials(url)).await }.boxed_local()
+        async move {
+            let url = keychain_url(url);
+            cx.update(|cx| cx.delete_credentials(&url)).await?;
+            update_stored_urls(&url, false).context("failed to forget the profile's credential URL")
+        }
+        .boxed_local()
     }
 }
 

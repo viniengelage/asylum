@@ -1,9 +1,14 @@
 use std::{
-    io::{Read, Write},
+    io::{BufRead, BufReader, Read, Write},
     net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener, TcpStream},
+    os::unix::net::{UnixListener, UnixStream},
+    path::PathBuf,
     thread,
     time::Duration,
 };
+
+use futures::channel::mpsc::UnboundedSender;
+use serde::{Deserialize, Serialize};
 
 use sysinfo::System;
 
@@ -85,7 +90,26 @@ pub enum IsOnlyInstance {
     No,
 }
 
-pub fn ensure_only_instance() -> IsOnlyInstance {
+/// What another process can ask a running instance for, sent as one line of JSON after the
+/// handshake.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum InstanceRequest {
+    /// Come to the front, which is how switching to a profile that is already open works.
+    Activate,
+    /// Open these paths, which belong to this instance's profile, and come to the front.
+    Open { paths: Vec<String> },
+}
+
+trait InstanceStream: Read + Write {}
+impl<T: Read + Write> InstanceStream for T {}
+
+/// Claims the instance lock of this process's profile. While this process runs, every
+/// request another process sends it arrives on `instance_requests`.
+pub fn ensure_only_instance(instance_requests: UnboundedSender<InstanceRequest>) -> IsOnlyInstance {
+    if paths::active_profile_id().is_some() {
+        return ensure_only_profile_instance(instance_requests);
+    }
+
     if check_got_handshake() {
         return IsOnlyInstance::No;
     }
@@ -118,7 +142,7 @@ pub fn ensure_only_instance() -> IsOnlyInstance {
 
                 _ = stream.set_nodelay(true);
                 _ = stream.set_read_timeout(Some(SEND_TIMEOUT));
-                _ = stream.write_all(instance_handshake().as_bytes());
+                answer_instance_request(&mut stream, &instance_requests);
             }
         })
         .unwrap();
@@ -126,26 +150,181 @@ pub fn ensure_only_instance() -> IsOnlyInstance {
     IsOnlyInstance::Yes
 }
 
+fn answer_instance_request(
+    stream: &mut impl InstanceStream,
+    instance_requests: &UnboundedSender<InstanceRequest>,
+) {
+    if stream.write_all(instance_handshake().as_bytes()).is_err() {
+        return;
+    }
+    // Most connections are a starting instance checking for this one, which hangs up
+    // right after the handshake, so a missing request is the normal case.
+    let mut line = String::new();
+    if BufReader::new(&mut *stream).read_line(&mut line).is_err() || line.is_empty() {
+        return;
+    }
+    let request = match serde_json::from_str::<InstanceRequest>(line.trim()) {
+        Ok(request) => request,
+        Err(err) => {
+            log::warn!("Ignoring an unreadable instance request: {err}");
+            return;
+        }
+    };
+    // macOS ignores a background app asking to come forward, so the requester, which
+    // is the active app, does the activating and needs this process's id for it.
+    if let Err(err) = stream.write_all(std::process::id().to_string().as_bytes()) {
+        log::warn!("Failed to send the process id to the requesting instance: {err}");
+    }
+    instance_requests.unbounded_send(request).ok();
+}
+
 fn check_got_handshake() -> bool {
     match TcpStream::connect_timeout(&address(), CONNECT_TIMEOUT) {
         Ok(mut stream) => {
-            let mut buf = vec![0u8; instance_handshake().len()];
-
             stream.set_read_timeout(Some(RECEIVE_TIMEOUT)).unwrap();
-            if let Err(err) = stream.read_exact(&mut buf) {
-                log::warn!("Connected to single instance port but failed to read: {err}");
-                return false;
-            }
-
-            if buf == instance_handshake().as_bytes() {
-                log::info!("Got instance handshake");
-                return true;
-            }
-
-            log::warn!("Got wrong instance handshake value");
-            false
+            read_handshake(&mut stream)
         }
 
         Err(_) => false,
+    }
+}
+
+fn read_handshake(stream: &mut impl InstanceStream) -> bool {
+    let mut buf = vec![0u8; instance_handshake().len()];
+    if let Err(err) = stream.read_exact(&mut buf) {
+        log::warn!("Connected to instance but failed to read the handshake: {err}");
+        return false;
+    }
+    if buf == instance_handshake().as_bytes() {
+        log::info!("Got instance handshake");
+        return true;
+    }
+    log::warn!("Got wrong instance handshake value");
+    false
+}
+
+fn profile_socket_path(profile_id: &str) -> PathBuf {
+    paths::profiles_dir().join(profile_id).join("instance.sock")
+}
+
+// Profiles run side by side, so a non-default profile can't claim the port the
+// default one uses. Its own data directory is unique to it, which makes a socket
+// there a lock that only the processes of the same profile compete for.
+fn ensure_only_profile_instance(
+    instance_requests: UnboundedSender<InstanceRequest>,
+) -> IsOnlyInstance {
+    let socket_path = paths::data_dir().join("instance.sock");
+
+    match UnixStream::connect(&socket_path) {
+        Ok(mut stream) => {
+            if let Err(err) = stream.set_read_timeout(Some(RECEIVE_TIMEOUT)) {
+                log::warn!("Failed to set profile instance socket timeout: {err}");
+            }
+            if read_handshake(&mut stream) {
+                return IsOnlyInstance::No;
+            }
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => {
+            // Nobody is listening, so the socket was left behind by a process that died.
+            if let Err(err) = std::fs::remove_file(&socket_path) {
+                log::warn!("Failed to remove stale profile instance socket: {err}");
+            }
+        }
+    }
+
+    let listener = match UnixListener::bind(&socket_path) {
+        Ok(listener) => listener,
+        Err(err) => {
+            log::warn!("Error binding profile instance socket, continuing without it: {err}");
+            return IsOnlyInstance::Yes;
+        }
+    };
+
+    let spawn_result = thread::Builder::new()
+        .name("EnsureProfileSingleton".to_string())
+        .spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else {
+                    return;
+                };
+                if let Err(err) = stream.set_read_timeout(Some(SEND_TIMEOUT)) {
+                    log::warn!("Failed to set profile instance socket timeout: {err}");
+                }
+                answer_instance_request(&mut stream, &instance_requests);
+            }
+        });
+    if let Err(err) = spawn_result {
+        log::warn!("Failed to spawn profile instance listener: {err}");
+    }
+
+    IsOnlyInstance::Yes
+}
+
+/// Connects to the running instance of `profile_id`, returning `None` when it isn't running.
+/// Blocks for a few milliseconds, so it belongs on a background thread.
+fn connect_to_profile(profile_id: &str) -> Option<Box<dyn InstanceStream>> {
+    let mut stream: Box<dyn InstanceStream> = if profile_id == paths::DEFAULT_PROFILE_ID {
+        let stream = TcpStream::connect_timeout(&address(), CONNECT_TIMEOUT).ok()?;
+        stream.set_read_timeout(Some(RECEIVE_TIMEOUT)).ok()?;
+        Box::new(stream)
+    } else {
+        let stream = UnixStream::connect(profile_socket_path(profile_id)).ok()?;
+        stream.set_read_timeout(Some(RECEIVE_TIMEOUT)).ok()?;
+        Box::new(stream)
+    };
+    read_handshake(&mut stream).then_some(stream)
+}
+
+/// Whether a process of `profile_id` is running.
+pub fn is_profile_running(profile_id: &str) -> bool {
+    connect_to_profile(profile_id).is_some()
+}
+
+/// Brings the running instance of `profile_id` to the front. Returns `false` when it isn't
+/// running.
+pub fn activate_profile(profile_id: &str) -> bool {
+    send_to_profile(profile_id, &InstanceRequest::Activate)
+}
+
+/// Sends `request` to the running instance of `profile_id` and brings it to the front.
+/// Returns `false` when it isn't running.
+pub fn send_to_profile(profile_id: &str, request: &InstanceRequest) -> bool {
+    let Some(mut stream) = connect_to_profile(profile_id) else {
+        return false;
+    };
+    let mut line = match serde_json::to_string(request) {
+        Ok(line) => line,
+        Err(err) => {
+            log::error!("Failed to encode the request for profile {profile_id}: {err}");
+            return false;
+        }
+    };
+    line.push('\n');
+    if let Err(err) = stream.write_all(line.as_bytes()) {
+        log::warn!("Failed to send the request to profile {profile_id}: {err}");
+        return false;
+    }
+    let mut pid = String::new();
+    if let Err(err) = stream.read_to_string(&mut pid) {
+        log::warn!("Failed to read the process id of profile {profile_id}: {err}");
+    }
+    match pid.trim().parse::<i32>() {
+        Ok(pid) => activate_process(pid, profile_id),
+        Err(_) => log::warn!("Profile {profile_id} answered without a process id: {pid:?}"),
+    }
+    true
+}
+
+fn activate_process(pid: i32, profile_id: &str) {
+    use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication};
+
+    let activated = NSRunningApplication::runningApplicationWithProcessIdentifier(pid).is_some_and(
+        |application| {
+            application.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows)
+        },
+    );
+    if !activated {
+        log::warn!("Failed to bring profile {profile_id} (pid {pid}) to the front");
     }
 }

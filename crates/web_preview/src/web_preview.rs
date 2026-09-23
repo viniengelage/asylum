@@ -1473,11 +1473,7 @@ impl Item for WebPreviewView {
 }
 
 fn browse_request_path() -> std::path::PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| String::from("/tmp"));
-    std::path::PathBuf::from(format!(
-        "{}/Library/Application Support/Zed Workstation/WebPreview/browse-request.txt",
-        home
-    ))
+    runtime_discovery::discovery_dir().join("browse-request.txt")
 }
 
 #[cfg(target_os = "macos")]

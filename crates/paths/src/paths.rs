@@ -123,19 +123,41 @@ pub fn config_dir() -> &'static PathBuf {
     CONFIG_DIR.get_or_init(|| {
         if let Some(custom_dir) = CUSTOM_DATA_DIR.get() {
             custom_dir.join("config")
-        } else if cfg!(target_os = "windows") {
-            dirs::config_dir()
-                .expect("failed to determine RoamingAppData directory")
-                .join(APP_NAME)
-        } else if cfg!(any(target_os = "linux", target_os = "freebsd")) {
-            if let Ok(flatpak_xdg_config) = std::env::var("FLATPAK_XDG_CONFIG_HOME") {
-                flatpak_xdg_config.into()
-            } else {
-                dirs::config_dir().expect("failed to determine XDG_CONFIG_HOME directory")
-            }
-            .join(APP_NAME_LOWERCASE)
         } else {
-            home_dir().join(".config").join(APP_NAME_LOWERCASE)
+            platform_config_dir()
+        }
+    })
+}
+
+/// The configuration directory used when no custom data directory is set,
+/// which is also the default profile's.
+fn platform_config_dir() -> PathBuf {
+    if cfg!(target_os = "windows") {
+        dirs::config_dir()
+            .expect("failed to determine RoamingAppData directory")
+            .join(APP_NAME)
+    } else if cfg!(any(target_os = "linux", target_os = "freebsd")) {
+        if let Ok(flatpak_xdg_config) = std::env::var("FLATPAK_XDG_CONFIG_HOME") {
+            flatpak_xdg_config.into()
+        } else {
+            dirs::config_dir().expect("failed to determine XDG_CONFIG_HOME directory")
+        }
+        .join(APP_NAME_LOWERCASE)
+    } else {
+        home_dir().join(".config").join(APP_NAME_LOWERCASE)
+    }
+}
+
+/// The configuration directory holding what every profile shares: the global
+/// settings, the keymap and the user themes. Non-default profiles read these
+/// from the default profile, so changing them in one profile changes them in all.
+pub fn shared_config_dir() -> &'static PathBuf {
+    static SHARED_CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
+    SHARED_CONFIG_DIR.get_or_init(|| {
+        if active_profile_id().is_some() {
+            platform_config_dir()
+        } else {
+            config_dir().clone()
         }
     })
 }
@@ -145,25 +167,92 @@ pub fn data_dir() -> &'static PathBuf {
     CURRENT_DATA_DIR.get_or_init(|| {
         if let Some(custom_dir) = CUSTOM_DATA_DIR.get() {
             custom_dir.clone()
-        } else if cfg!(target_os = "macos") {
-            home_dir()
-                .join("Library/Application Support")
-                .join(APP_NAME)
-        } else if cfg!(any(target_os = "linux", target_os = "freebsd")) {
-            if let Ok(flatpak_xdg_data) = std::env::var("FLATPAK_XDG_DATA_HOME") {
-                flatpak_xdg_data.into()
-            } else {
-                dirs::data_local_dir().expect("failed to determine XDG_DATA_HOME directory")
-            }
-            .join(APP_NAME_LOWERCASE)
-        } else if cfg!(target_os = "windows") {
-            dirs::data_local_dir()
-                .expect("failed to determine LocalAppData directory")
-                .join(APP_NAME)
         } else {
-            config_dir().clone() // Fallback
+            platform_data_dir()
         }
     })
+}
+
+/// The data directory used when no custom one is set, which is also where the
+/// default profile lives.
+fn platform_data_dir() -> PathBuf {
+    if cfg!(target_os = "macos") {
+        home_dir()
+            .join("Library/Application Support")
+            .join(APP_NAME)
+    } else if cfg!(any(target_os = "linux", target_os = "freebsd")) {
+        if let Ok(flatpak_xdg_data) = std::env::var("FLATPAK_XDG_DATA_HOME") {
+            flatpak_xdg_data.into()
+        } else {
+            dirs::data_local_dir().expect("failed to determine XDG_DATA_HOME directory")
+        }
+        .join(APP_NAME_LOWERCASE)
+    } else if cfg!(target_os = "windows") {
+        dirs::data_local_dir()
+            .expect("failed to determine LocalAppData directory")
+            .join(APP_NAME)
+    } else {
+        config_dir().clone() // Fallback
+    }
+}
+
+/// The id of the profile that keeps the platform data directory and stores
+/// credentials without a namespace, so an existing installation becomes this
+/// profile as is.
+pub const DEFAULT_PROFILE_ID: &str = "default";
+
+static ACTIVE_PROFILE_ID: OnceLock<String> = OnceLock::new();
+
+/// Whether `id` can name a profile: it becomes a directory name and part of
+/// keychain entries, so it is restricted to lowercase ASCII letters, digits,
+/// `-` and `_`.
+pub fn is_valid_profile_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-' || byte == b'_'
+        })
+}
+
+/// Returns the directory that holds the data directories of every profile
+/// other than the default one.
+pub fn profiles_dir() -> PathBuf {
+    platform_data_dir().join("profiles")
+}
+
+/// Runs this process as the profile `id`, giving it its own data directory.
+///
+/// Like [`set_custom_data_dir`], this must be called before any path that
+/// depends on the data directory is resolved. Selecting the default profile
+/// leaves every path untouched.
+///
+/// Returns the data directory of a non-default profile.
+pub fn set_active_profile(id: &str) -> Result<Option<&'static PathBuf>, String> {
+    if !is_valid_profile_id(id) {
+        return Err(format!(
+            "invalid profile id {id:?}: use lowercase letters, digits, '-' or '_'"
+        ));
+    }
+    if id == DEFAULT_PROFILE_ID {
+        return Ok(None);
+    }
+    if ACTIVE_PROFILE_ID.set(id.to_string()).is_err() {
+        return Err("the active profile was already set".to_string());
+    }
+    let directory = profiles_dir().join(id);
+    let Some(directory) = directory.to_str() else {
+        return Err(format!(
+            "profile directory is not valid UTF-8: {}",
+            directory.display()
+        ));
+    };
+    Ok(Some(set_custom_data_dir(directory)))
+}
+
+/// Returns the id of the profile this process runs as, or `None` for the
+/// default profile.
+pub fn active_profile_id() -> Option<&'static str> {
+    ACTIVE_PROFILE_ID.get().map(String::as_str)
 }
 
 pub fn state_dir() -> &'static PathBuf {
@@ -245,13 +334,22 @@ pub fn remote_server_state_dir() -> &'static PathBuf {
 /// Returns the path to the `Zed.log` file.
 pub fn log_file() -> &'static PathBuf {
     static LOG_FILE: OnceLock<PathBuf> = OnceLock::new();
-    LOG_FILE.get_or_init(|| logs_dir().join(format!("{}.log", APP_NAME)))
+    LOG_FILE.get_or_init(|| logs_dir().join(format!("{}.log", log_file_stem())))
 }
 
 /// Returns the path to the `Zed.log.old` file.
 pub fn old_log_file() -> &'static PathBuf {
     static OLD_LOG_FILE: OnceLock<PathBuf> = OnceLock::new();
-    OLD_LOG_FILE.get_or_init(|| logs_dir().join(format!("{}.log.old", APP_NAME)))
+    OLD_LOG_FILE.get_or_init(|| logs_dir().join(format!("{}.log.old", log_file_stem())))
+}
+
+// On macOS every profile shares `~/Library/Logs/Zed`, so each one writes to
+// its own file instead of rotating the others' logs away.
+fn log_file_stem() -> String {
+    match active_profile_id() {
+        Some(profile_id) => format!("{APP_NAME}-{profile_id}"),
+        None => APP_NAME.to_string(),
+    }
 }
 
 /// Returns the path to the database directory.
@@ -283,7 +381,7 @@ pub fn settings_file() -> &'static PathBuf {
 /// Returns the path to the global settings file.
 pub fn global_settings_file() -> &'static PathBuf {
     static GLOBAL_SETTINGS_FILE: OnceLock<PathBuf> = OnceLock::new();
-    GLOBAL_SETTINGS_FILE.get_or_init(|| config_dir().join("global_settings.json"))
+    GLOBAL_SETTINGS_FILE.get_or_init(|| shared_config_dir().join("global_settings.json"))
 }
 
 /// Returns the path to the `settings_backup.json` file.
@@ -295,13 +393,13 @@ pub fn settings_backup_file() -> &'static PathBuf {
 /// Returns the path to the `keymap.json` file.
 pub fn keymap_file() -> &'static PathBuf {
     static KEYMAP_FILE: OnceLock<PathBuf> = OnceLock::new();
-    KEYMAP_FILE.get_or_init(|| config_dir().join("keymap.json"))
+    KEYMAP_FILE.get_or_init(|| shared_config_dir().join("keymap.json"))
 }
 
 /// Returns the path to the `keymap_backup.json` file.
 pub fn keymap_backup_file() -> &'static PathBuf {
     static KEYMAP_FILE: OnceLock<PathBuf> = OnceLock::new();
-    KEYMAP_FILE.get_or_init(|| config_dir().join("keymap_backup.json"))
+    KEYMAP_FILE.get_or_init(|| shared_config_dir().join("keymap_backup.json"))
 }
 
 /// Returns the path to the `tasks.json` file.
@@ -371,7 +469,7 @@ pub fn remote_extensions_uploads_dir() -> &'static PathBuf {
 /// This is where themes that are not provided by extensions are stored.
 pub fn themes_dir() -> &'static PathBuf {
     static THEMES_DIR: OnceLock<PathBuf> = OnceLock::new();
-    THEMES_DIR.get_or_init(|| config_dir().join("themes"))
+    THEMES_DIR.get_or_init(|| shared_config_dir().join("themes"))
 }
 
 /// Returns the path to the snippets directory.
@@ -650,4 +748,21 @@ pub fn global_gitignore_path() -> Option<PathBuf> {
     GLOBAL_GITIGNORE_PATH
         .get_or_init(::ignore::gitignore::gitconfig_excludes_path)
         .clone()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_profile_ids() {
+        assert!(is_valid_profile_id("pessoal"));
+        assert!(is_valid_profile_id("trabalho-2"));
+        assert!(is_valid_profile_id("side_project"));
+        assert!(!is_valid_profile_id(""));
+        assert!(!is_valid_profile_id("Pessoal"));
+        assert!(!is_valid_profile_id("../trabalho"));
+        assert!(!is_valid_profile_id("dois perfis"));
+        assert!(!is_valid_profile_id(&"a".repeat(65)));
+    }
 }

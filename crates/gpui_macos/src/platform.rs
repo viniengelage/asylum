@@ -589,7 +589,10 @@ impl Platform for MacPlatform {
             })
             .unwrap_or_else(|| std::env::current_exe().unwrap());
 
-        // Wait until this process has exited and then re-open this path.
+        // Wait until this process has exited and then re-open this path. With
+        // arguments, `-n` makes `open` launch a new instance: without it, another
+        // running instance of the same bundle (such as another profile) would just be
+        // activated and the arguments dropped.
         let script = r#"
             while kill -0 $0 2> /dev/null; do
                 sleep 0.1
@@ -597,7 +600,7 @@ impl Platform for MacPlatform {
             app_path="$1"
             shift
             if (($# > 0)); then
-                open "$app_path" --args "$@"
+                open -n "$app_path" --args "$@"
             else
                 open "$app_path"
             fi

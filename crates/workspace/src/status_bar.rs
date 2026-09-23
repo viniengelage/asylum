@@ -71,6 +71,8 @@ trait StatusItemViewHandle: Send {
 /// about the editor without reading every icon.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum StatusItemZone {
+    /// The profile this process runs as, at the very start so it is the first thing read.
+    Profile,
     /// Buttons that show and hide whole docks.
     Docks,
     /// Project state: diagnostics, git and language servers. Where left items go.
@@ -87,6 +89,7 @@ pub(crate) enum StatusItemZone {
 impl StatusItemZone {
     fn id(self) -> &'static str {
         match self {
+            Self::Profile => "status-bar-profile",
             Self::Docks => "status-bar-docks",
             Self::Status => "status-bar-status",
             Self::EditorInfo => "status-bar-editor-info",
@@ -164,7 +167,14 @@ impl StatusBar {
             .gap(DynamicSpacing::Base04.rems(cx))
             .min_w_0()
             .overflow_x_hidden()
-            .children(self.render_zones(&[StatusItemZone::Docks, StatusItemZone::Status], cx))
+            .children(self.render_zones(
+                &[
+                    StatusItemZone::Profile,
+                    StatusItemZone::Docks,
+                    StatusItemZone::Status,
+                ],
+                cx,
+            ))
     }
 
     fn render_right_tools(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -350,6 +360,18 @@ impl StatusBar {
 
         self.left_items.push(Box::new(item));
         cx.notify();
+    }
+
+    /// Adds the item that shows and switches the active profile, ahead of everything else.
+    pub fn add_profile_item<T>(
+        &mut self,
+        item: Entity<T>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) where
+        T: 'static + StatusItemView,
+    {
+        self.add_zoned_item(StatusItemZone::Profile, item, window, cx);
     }
 
     /// Adds an item to the left edge, with the buttons that show and hide whole docks.

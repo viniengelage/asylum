@@ -259,14 +259,29 @@ fn main() {
         return;
     }
 
-    let restart_arguments = if let Some(directory) = args.user_data_dir.as_deref() {
-        let directory = paths::set_custom_data_dir(directory);
-        vec![
-            std::ffi::OsString::from("--user-data-dir"),
-            directory.as_os_str().to_owned(),
-        ]
-    } else {
-        Vec::new()
+    let restart_arguments = match (args.profile.as_deref(), args.user_data_dir.as_deref()) {
+        (Some(_), Some(_)) => {
+            eprintln!("--profile and --user-data-dir cannot be used together");
+            process::exit(1);
+        }
+        (Some(profile_id), None) => {
+            if let Err(error) = paths::set_active_profile(profile_id) {
+                eprintln!("{error}");
+                process::exit(1);
+            }
+            vec![
+                std::ffi::OsString::from("--profile"),
+                std::ffi::OsString::from(profile_id),
+            ]
+        }
+        (None, Some(directory)) => {
+            let directory = paths::set_custom_data_dir(directory);
+            vec![
+                std::ffi::OsString::from("--user-data-dir"),
+                directory.as_os_str().to_owned(),
+            ]
+        }
+        (None, None) => Vec::new(),
     };
 
     #[cfg(target_os = "windows")]
@@ -356,6 +371,8 @@ fn main() {
     let background_executor = app.background_executor();
 
     let (open_listener, mut open_rx) = OpenListener::new();
+    #[cfg(target_os = "macos")]
+    let (instance_requests_tx, mut instance_requests_rx) = futures::channel::mpsc::unbounded();
 
     let failed_single_instance_check = if *zed_env_vars::ZED_STATELESS
         || *release_channel::RELEASE_CHANNEL == ReleaseChannel::Dev
@@ -375,7 +392,7 @@ fn main() {
         #[cfg(target_os = "macos")]
         {
             use zed::mac_only_instance::*;
-            ensure_only_instance() != IsOnlyInstance::Yes
+            ensure_only_instance(instance_requests_tx) != IsOnlyInstance::Yes
         }
     };
     if failed_single_instance_check {
@@ -525,6 +542,8 @@ fn main() {
         git_hosting_providers::init(cx);
 
         OpenListener::set_global(cx, open_listener.clone());
+        #[cfg(target_os = "macos")]
+        zed::app_profiles::init(cx);
 
         extension::init(cx);
         let extension_host_proxy = ExtensionHostProxy::global(cx);
@@ -990,6 +1009,28 @@ fn main() {
 
         component_preview::init(app_state.clone(), cx);
 
+        #[cfg(target_os = "macos")]
+        cx.spawn({
+            let open_listener = open_listener.clone();
+            async move |cx| {
+                use zed::mac_only_instance::InstanceRequest;
+
+                while let Some(request) = instance_requests_rx.next().await {
+                    match request {
+                        InstanceRequest::Activate => cx.update(|cx| cx.activate(true)),
+                        InstanceRequest::Open { paths } => open_listener.open(RawOpenRequest {
+                            urls: paths
+                                .iter()
+                                .map(|path| format!("file://{}", urlencoding::encode(path)))
+                                .collect(),
+                            ..Default::default()
+                        }),
+                    }
+                }
+            }
+        })
+        .detach();
+
         cx.spawn(async move |cx| {
             let _first_window_subscription = _first_window_subscription;
             let first_window_placed = first_window_rx.shared();
@@ -1278,6 +1319,15 @@ fn handle_open_request(request: OpenRequest, app_state: Arc<AppState>, cx: &mut 
             open_remote_project(connection_options, paths, app_state, base_open_options, cx).await
         })
         .detach_and_log_err(cx);
+        return;
+    }
+
+    #[cfg(target_os = "macos")]
+    if request.diff_paths.is_empty()
+        && let Some(owner) = zed::app_profiles::foreign_owner(&request.open_paths)
+    {
+        log::info!("opening paths in the {} profile, which owns them", owner.id);
+        zed::app_profiles::forward_paths(owner.id, request.open_paths, cx).detach_and_log_err(cx);
         return;
     }
 
@@ -1720,6 +1770,13 @@ struct Args {
     /// On Windows, the default is `%LOCALAPPDATA%\Zed`.
     #[arg(long, value_name = "DIR", verbatim_doc_comment)]
     user_data_dir: Option<String>,
+
+    /// Runs as the given profile, with its own data directory, settings and
+    /// credentials. Profiles run side by side, one process each.
+    ///
+    /// `default` is the regular installation.
+    #[arg(long, value_name = "ID")]
+    profile: Option<String>,
 
     /// The username and WSL distribution to use when opening paths. If not specified,
     /// Zed will attempt to open the paths directly.

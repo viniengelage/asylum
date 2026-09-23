@@ -626,6 +626,38 @@ pub async fn handle_cli_connection(
                     return;
                 }
 
+                #[cfg(target_os = "macos")]
+                if diff_paths.is_empty()
+                    && let Some(owner) = super::app_profiles::foreign_owner(&paths)
+                {
+                    let forwarded = cx
+                        .update(|cx| super::app_profiles::forward_paths(owner.id, paths, cx))
+                        .await;
+                    let status = match forwarded {
+                        Ok(()) => {
+                            responses
+                                .send(CliResponse::Stdout {
+                                    message: format!("Aberto no perfil {}", owner.name),
+                                })
+                                .log_err();
+                            0
+                        }
+                        Err(error) => {
+                            responses
+                                .send(CliResponse::Stderr {
+                                    message: format!(
+                                        "Falha ao abrir no perfil {}: {error:#}",
+                                        owner.name
+                                    ),
+                                })
+                                .log_err();
+                            1
+                        }
+                    };
+                    responses.send(CliResponse::Exit { status }).log_err();
+                    return;
+                }
+
                 if open_behavior == cli::OpenBehavior::Default {
                     match resolve_open_behavior(
                         &paths,
