@@ -126,9 +126,24 @@ mod macos_build {
     fn compile_simulator_kit_bridge() {
         use std::process::{self, Command};
 
-        const SIMULATOR_KIT_FRAMEWORK_DIRECTORY: &str =
+        const DEFAULT_SIMULATOR_KIT_FRAMEWORK_DIRECTORY: &str =
             "/Applications/Xcode.app/Contents/SharedFrameworks";
         const SIMULATOR_KIT_BRIDGE_SOURCE: &str = "./src/simulator_kit_bridge.swift";
+
+        // CI runners install Xcode as `Xcode_<version>.app`, so the active developer
+        // directory is asked for instead of assuming the default install location.
+        let simulator_kit_framework_directory = Command::new("xcode-select")
+            .arg("-p")
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .and_then(|output| String::from_utf8(output.stdout).ok())
+            .map(|developer_directory| {
+                PathBuf::from(developer_directory.trim()).join("../SharedFrameworks")
+            })
+            .filter(|directory| directory.join("SimulatorKit.framework").exists())
+            .unwrap_or_else(|| PathBuf::from(DEFAULT_SIMULATOR_KIT_FRAMEWORK_DIRECTORY));
+        println!("cargo:rerun-if-env-changed=DEVELOPER_DIR");
 
         let output_directory = PathBuf::from(env::var("OUT_DIR").unwrap());
         let object_path = output_directory.join("simulator_kit_bridge.o");
@@ -143,12 +158,9 @@ mod macos_build {
                 "-target",
                 "arm64-apple-macos14.0",
                 "-F",
-                SIMULATOR_KIT_FRAMEWORK_DIRECTORY,
-                "-parse-as-library",
-                "-c",
-                SIMULATOR_KIT_BRIDGE_SOURCE,
-                "-o",
             ])
+            .arg(&simulator_kit_framework_directory)
+            .args(["-parse-as-library", "-c", SIMULATOR_KIT_BRIDGE_SOURCE, "-o"])
             .arg(&object_path)
             .output()
             .unwrap();
@@ -180,7 +192,10 @@ mod macos_build {
             "cargo:rustc-link-search=native={}",
             output_directory.display()
         );
-        println!("cargo:rustc-link-search=framework={SIMULATOR_KIT_FRAMEWORK_DIRECTORY}");
+        println!(
+            "cargo:rustc-link-search=framework={}",
+            simulator_kit_framework_directory.display()
+        );
         println!("cargo:rustc-link-lib=static=simulator_kit_bridge");
         println!("cargo:rustc-link-lib=framework=SimulatorKit");
     }
