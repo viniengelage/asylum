@@ -62,6 +62,21 @@ jobs:
 
       - uses: actions/checkout@v4
 
+      # The runner's default Xcode is older than the one the SimulatorKit bridge is written
+      # against (its private Swift symbols change between releases), so the newest installed
+      # Xcode is selected instead. Betas and release candidates are skipped: a release built
+      # against one could depend on symbols that the final Xcode changes.
+      - name: Select the newest Xcode
+        run: |
+          ls -d /Applications/Xcode_*.app
+          newest_xcode="$(ls -d /Applications/Xcode_*.app | grep -viE 'beta|_rc|release_candidate' | sort -V | tail -1)"
+          if [ -z "$newest_xcode" ]; then
+            echo "No stable Xcode found on the runner" >&2
+            exit 1
+          fi
+          sudo xcode-select -s "$newest_xcode"
+          xcodebuild -version
+
       - name: Ensure the Metal compiler is available
         run: |
           if ! xcrun -sdk macosx metal --version >/dev/null 2>&1; then

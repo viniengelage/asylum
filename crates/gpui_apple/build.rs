@@ -131,19 +131,39 @@ mod macos_build {
         const SIMULATOR_KIT_BRIDGE_SOURCE: &str = "./src/simulator_kit_bridge.swift";
 
         // CI runners install Xcode as `Xcode_<version>.app`, so the active developer
-        // directory is asked for instead of assuming the default install location.
-        let simulator_kit_framework_directory = Command::new("xcode-select")
+        // directory is asked for instead of assuming the default install location. Xcode 26
+        // and later keep SimulatorKit in `SharedFrameworks`; Xcode 16 kept it in the developer
+        // directory's `PrivateFrameworks`.
+        let developer_directory = Command::new("xcode-select")
             .arg("-p")
             .output()
             .ok()
             .filter(|output| output.status.success())
             .and_then(|output| String::from_utf8(output.stdout).ok())
-            .map(|developer_directory| {
-                PathBuf::from(developer_directory.trim()).join("../SharedFrameworks")
-            })
-            .filter(|directory| directory.join("SimulatorKit.framework").exists())
-            .unwrap_or_else(|| PathBuf::from(DEFAULT_SIMULATOR_KIT_FRAMEWORK_DIRECTORY));
+            .map(|developer_directory| PathBuf::from(developer_directory.trim()));
+        let mut candidate_directories = Vec::new();
+        if let Some(developer_directory) = &developer_directory {
+            candidate_directories.push(developer_directory.join("../SharedFrameworks"));
+            candidate_directories.push(developer_directory.join("Library/PrivateFrameworks"));
+        }
+        candidate_directories.push(PathBuf::from(DEFAULT_SIMULATOR_KIT_FRAMEWORK_DIRECTORY));
         println!("cargo:rerun-if-env-changed=DEVELOPER_DIR");
+
+        let Some(simulator_kit_framework_directory) = candidate_directories
+            .iter()
+            .find(|directory| directory.join("SimulatorKit.framework").exists())
+            .cloned()
+        else {
+            let searched = candidate_directories
+                .iter()
+                .map(|directory| format!("  {}", directory.display()))
+                .collect::<Vec<_>>()
+                .join("\n");
+            println!(
+                "cargo::error=SimulatorKit.framework not found in the active Xcode. Searched:\n{searched}"
+            );
+            process::exit(1);
+        };
 
         let output_directory = PathBuf::from(env::var("OUT_DIR").unwrap());
         let object_path = output_directory.join("simulator_kit_bridge.o");
