@@ -54,6 +54,8 @@ pub struct KeyBinding {
     vim_mode: bool,
     /// Indicates whether the keybinding is currently disabled.
     disabled: bool,
+    /// Whether each key is drawn in its own [`Keycap`].
+    keycaps: bool,
 }
 
 /// Controls how a [`KeyBinding`] is presented.
@@ -133,6 +135,7 @@ impl KeyBinding {
             vim_mode: KeyBinding::is_vim_mode(cx),
             platform_style: PlatformStyle::platform(),
             disabled: false,
+            keycaps: false,
         }
     }
 
@@ -145,6 +148,7 @@ impl KeyBinding {
             vim_mode,
             platform_style: PlatformStyle::platform(),
             disabled: false,
+            keycaps: false,
         }
     }
 
@@ -176,6 +180,13 @@ impl KeyBinding {
     /// Disabled keybinds will be rendered in a dimmed state.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
+        self
+    }
+
+    /// Draws each key in its own [`Keycap`], so a binding stands apart from the text next to it
+    /// in a dense row such as a menu entry.
+    pub fn keycaps(mut self, keycaps: bool) -> Self {
+        self.keycaps = keycaps;
         self
     }
 
@@ -279,19 +290,29 @@ impl RenderOnce for KeyBinding {
                 .gap(DynamicSpacing::Base04.rems(cx))
                 .flex_none()
                 .children(keystrokes.iter().map(|keystroke| {
+                    let keys = render_keybinding_keystroke_with_style(
+                        keystroke,
+                        color,
+                        self.size,
+                        PlatformStyle::platform(),
+                        self.vim_mode,
+                        self.style,
+                    );
                     h_flex()
                         .flex_none()
-                        .when(self.style == KeyBindingStyle::Default, |this| this.py_0p5())
-                        .rounded_xs()
                         .text_color(color.unwrap_or(Color::Muted).color(cx))
-                        .children(render_keybinding_keystroke_with_style(
-                            keystroke,
-                            color,
-                            self.size,
-                            PlatformStyle::platform(),
-                            self.vim_mode,
-                            self.style,
-                        ))
+                        .map(|this| {
+                            if self.keycaps {
+                                this.gap_0p5()
+                                    .children(keys.into_iter().map(|key| Keycap::new(key)))
+                            } else {
+                                this.when(self.style == KeyBindingStyle::Default, |this| {
+                                    this.py_0p5()
+                                })
+                                .rounded_xs()
+                                .children(keys)
+                            }
+                        })
                 }))
                 .into_any_element()
         };
@@ -310,6 +331,79 @@ impl RenderOnce for KeyBinding {
             Source::Keystrokes { keystrokes } => Some(render_keybinding(keystrokes.as_ref())),
         }
         .unwrap_or_else(|| gpui::Empty.into_any_element())
+    }
+}
+
+/// A single key drawn as a small raised cap, for a [`KeyBinding`] with
+/// [`KeyBinding::keycaps`] or for a static hint such as a menu footer's "↑↓ Navigate".
+#[derive(IntoElement)]
+pub struct Keycap {
+    key: AnyElement,
+}
+
+impl Keycap {
+    pub fn new(key: impl IntoElement) -> Self {
+        Self {
+            key: key.into_any_element(),
+        }
+    }
+}
+
+impl RenderOnce for Keycap {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let colors = cx.theme().colors();
+        h_flex()
+            .flex_none()
+            .justify_center()
+            .h(rems_from_px(18_f32))
+            .min_w(rems_from_px(18_f32))
+            .px_0p5()
+            .rounded_xs()
+            .border_1()
+            .border_color(colors.border_variant)
+            .bg(colors.element_background)
+            .child(self.key)
+    }
+}
+
+/// A static "keys + what they do" pair, such as "↑↓ Navigate", for the footers of menus and
+/// pickers that teach the keyboard.
+#[derive(IntoElement)]
+pub struct KeyboardHint {
+    keys: Vec<AnyElement>,
+    label: SharedString,
+}
+
+impl KeyboardHint {
+    pub fn new(label: impl Into<SharedString>) -> Self {
+        Self {
+            keys: Vec::new(),
+            label: label.into(),
+        }
+    }
+
+    pub fn icon_key(mut self, icon: IconName) -> Self {
+        self.keys.push(
+            Icon::new(icon)
+                .size(IconSize::XSmall)
+                .color(Color::Muted)
+                .into_any_element(),
+        );
+        self
+    }
+}
+
+impl RenderOnce for KeyboardHint {
+    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+        h_flex()
+            .flex_none()
+            .gap_1()
+            .children(self.keys.into_iter().map(Keycap::new))
+            .child(
+                Label::new(self.label)
+                    .size(LabelSize::XSmall)
+                    .color(Color::Muted),
+            )
     }
 }
 

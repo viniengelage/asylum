@@ -1,7 +1,7 @@
-use crate::{ItemHandle, MultiWorkspace, Pane};
+use crate::{ItemHandle, MultiWorkspace, Pane, dock::PanelButtons};
 use gpui::{
-    AnyView, App, Context, Entity, FocusHandle, Focusable, IntoElement, ParentElement, Render,
-    Role, SharedString, Styled, Subscription, WeakEntity, Window,
+    AnyElement, AnyView, App, Context, Entity, FocusHandle, Focusable, FontWeight, IntoElement,
+    ParentElement, Render, Role, SharedString, Styled, Subscription, WeakEntity, Window,
 };
 use settings::{SettingsContent, update_settings_file};
 use std::{any::TypeId, sync::Arc};
@@ -66,9 +66,42 @@ trait StatusItemViewHandle: Send {
     fn hide_setting(&self, cx: &App) -> Option<HideStatusItem>;
 }
 
+/// The groups the status bar is divided into, in the order they appear from left to right.
+/// Dividers between them are what let the user tell a dock toggle from a tool from a fact
+/// about the editor without reading every icon.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StatusItemZone {
+    /// Buttons that show and hide whole docks.
+    Docks,
+    /// Project state: diagnostics, git and language servers. Where left items go.
+    Status,
+    /// Facts about the active editor, such as the cursor position and language. Where right
+    /// items go.
+    EditorInfo,
+    /// One button per developer tool, under a `TOOLKIT` label.
+    Toolkit,
+    /// Buttons for the panels beside the editor, such as Device, Agent and Git.
+    Panels,
+}
+
+impl StatusItemZone {
+    fn id(self) -> &'static str {
+        match self {
+            Self::Docks => "status-bar-docks",
+            Self::Status => "status-bar-status",
+            Self::EditorInfo => "status-bar-editor-info",
+            Self::Toolkit => "status-bar-toolkit",
+            Self::Panels => "status-bar-panels",
+        }
+    }
+}
+
 pub struct StatusBar {
     left_items: Vec<Box<dyn StatusItemViewHandle>>,
     right_items: Vec<Box<dyn StatusItemViewHandle>>,
+    /// Items registered straight into a zone. They are not addressable by position, since
+    /// positions index the left and right items.
+    zoned_items: Vec<(StatusItemZone, Box<dyn StatusItemViewHandle>)>,
     active_pane: Entity<Pane>,
     focus_handle: FocusHandle,
     _observe_active_pane: Subscription,
@@ -115,9 +148,8 @@ impl Render for StatusBar {
             )
             .justify_between()
             .gap(DynamicSpacing::Base08.rems(cx))
-            .p(DynamicSpacing::Base04.rems(cx))
-            .mx_1()
-            .mb_1()
+            .px(DynamicSpacing::Base08.rems(cx))
+            .py(DynamicSpacing::Base04.rems(cx))
             .workspace_card(cx)
             .bg(cx.theme().colors().panel_background)
             .child(self.render_left_tools(cx))
@@ -127,40 +159,127 @@ impl Render for StatusBar {
 
 impl StatusBar {
     fn render_left_tools(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        h_flex().gap_1().min_w_0().overflow_x_hidden().children(
-            self.left_items.iter().enumerate().map(|(index, item)| {
-                h_flex()
-                    .min_w(px(24.0))
-                    .justify_center()
-                    .child(render_hideable_item(
-                        "status-bar-left",
-                        index,
-                        item.as_ref(),
-                        cx,
-                    ))
-            }),
-        )
+        // The left side reads as one strip, so its divider takes the zones' own gap.
+        h_flex()
+            .gap(DynamicSpacing::Base04.rems(cx))
+            .min_w_0()
+            .overflow_x_hidden()
+            .children(self.render_zones(&[StatusItemZone::Docks, StatusItemZone::Status], cx))
     }
 
     fn render_right_tools(&self, cx: &mut Context<Self>) -> impl IntoElement {
         h_flex()
             .flex_shrink_0()
-            .gap_1()
+            .gap(DynamicSpacing::Base08.rems(cx))
             .overflow_x_hidden()
-            .children(
-                self.right_items
-                    .iter()
-                    .enumerate()
-                    .rev()
-                    .map(|(index, item)| {
-                        render_hideable_item("status-bar-right", index, item.as_ref(), cx)
-                    }),
-            )
+            .children(self.render_zones(
+                &[
+                    StatusItemZone::EditorInfo,
+                    StatusItemZone::Toolkit,
+                    StatusItemZone::Panels,
+                ],
+                cx,
+            ))
+    }
+
+    /// Renders each zone that has items, with a divider between neighbours.
+    fn render_zones(&self, zones: &[StatusItemZone], cx: &App) -> Vec<AnyElement> {
+        let mut elements = Vec::new();
+        for &zone in zones {
+            let items = self.items_in_zone(zone, cx);
+            if items.is_empty() {
+                continue;
+            }
+            if !elements.is_empty() {
+                elements.push(render_zone_divider(cx));
+            }
+            elements.push(render_zone(zone, &items, cx));
+        }
+        elements
+    }
+
+    /// The items shown in `zone`, in the order they are rendered.
+    fn items_in_zone(&self, zone: StatusItemZone, cx: &App) -> Vec<&dyn StatusItemViewHandle> {
+        let mut items: Vec<&dyn StatusItemViewHandle> = self
+            .zoned_items
+            .iter()
+            .filter(|(item_zone, _)| *item_zone == zone)
+            .map(|(_, item)| item.as_ref())
+            .collect();
+        items.extend(
+            self.left_items
+                .iter()
+                .map(|item| item.as_ref())
+                .filter(|item| zone_of(*item, StatusItemZone::Status, cx) == zone),
+        );
+        let right_items = self
+            .right_items
+            .iter()
+            .map(|item| item.as_ref())
+            .filter(|item| zone_of(*item, StatusItemZone::EditorInfo, cx) == zone);
+        if zone == StatusItemZone::EditorInfo {
+            // Editor info keeps the reversed order right items have always had, so the
+            // first one added sits at its right end.
+            items.extend(right_items.rev());
+        } else {
+            items.extend(right_items);
+        }
+        items
     }
 }
 
+/// The zone an item added to the left or right lands in. Dock panel buttons are registered
+/// as plain left and right items but belong with the zone that matches their dock.
+fn zone_of(item: &dyn StatusItemViewHandle, side_zone: StatusItemZone, cx: &App) -> StatusItemZone {
+    item.to_any()
+        .downcast::<PanelButtons>()
+        .map(|panel_buttons| panel_buttons.read(cx).status_bar_zone(cx))
+        .unwrap_or(side_zone)
+}
+
+fn render_zone(zone: StatusItemZone, items: &[&dyn StatusItemViewHandle], cx: &App) -> AnyElement {
+    h_flex()
+        .id(zone.id())
+        // Only the status zone gives way when the bar is too narrow; the rest are buttons
+        // that would be clipped mid-icon.
+        .map(|this| {
+            if zone == StatusItemZone::Status {
+                this.min_w_0().overflow_x_hidden()
+            } else {
+                this.flex_none()
+            }
+        })
+        .h(DynamicSpacing::Base24.rems(cx))
+        .gap(DynamicSpacing::Base04.rems(cx))
+        .when(zone == StatusItemZone::Toolkit, |this| {
+            this.child(
+                Label::new("TOOLKIT")
+                    .size(LabelSize::XSmall)
+                    .weight(FontWeight::SEMIBOLD)
+                    .color(Color::Placeholder)
+                    .mr(DynamicSpacing::Base04.rems(cx)),
+            )
+        })
+        .children(
+            items
+                .iter()
+                .enumerate()
+                .map(|(index, item)| render_hideable_item(zone.id(), index, *item, cx)),
+        )
+        .into_any_element()
+}
+
+fn render_zone_divider(cx: &App) -> AnyElement {
+    div()
+        .flex_none()
+        .w_px()
+        .h(DynamicSpacing::Base16.rems(cx))
+        .bg(cx.theme().colors().border_selected)
+        .into_any_element()
+}
+
 fn render_hideable_item(
-    side: &'static str,
+    group_id: &'static str,
     index: usize,
     item: &dyn StatusItemViewHandle,
     cx: &App,
@@ -170,7 +289,7 @@ fn render_hideable_item(
         return view.into_any_element();
     };
 
-    let menu_id: SharedString = format!("{side}-item-menu-{index}").into();
+    let menu_id: SharedString = format!("{group_id}-item-menu-{index}").into();
     right_click_menu(menu_id)
         .trigger(move |_is_active, _window, _cx| view)
         .menu(move |window, cx| {
@@ -203,6 +322,7 @@ impl StatusBar {
         let mut this = Self {
             left_items: Default::default(),
             right_items: Default::default(),
+            zoned_items: Default::default(),
             active_pane: active_pane.clone(),
             focus_handle: cx.focus_handle(),
             _observe_active_pane: cx.observe_in(active_pane, window, |this, _, window, cx| {
@@ -232,10 +352,47 @@ impl StatusBar {
         cx.notify();
     }
 
+    /// Adds an item to the left edge, with the buttons that show and hide whole docks.
+    pub fn add_dock_item<T>(&mut self, item: Entity<T>, window: &mut Window, cx: &mut Context<Self>)
+    where
+        T: 'static + StatusItemView,
+    {
+        self.add_zoned_item(StatusItemZone::Docks, item, window, cx);
+    }
+
+    /// Adds a developer tool's button to the toolkit group on the right.
+    pub fn add_toolkit_item<T>(
+        &mut self,
+        item: Entity<T>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) where
+        T: 'static + StatusItemView,
+    {
+        self.add_zoned_item(StatusItemZone::Toolkit, item, window, cx);
+    }
+
+    fn add_zoned_item<T>(
+        &mut self,
+        zone: StatusItemZone,
+        item: Entity<T>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) where
+        T: 'static + StatusItemView,
+    {
+        let active_pane_item = self.active_pane.read(cx).active_item();
+        item.set_active_pane_item(active_pane_item.as_deref(), window, cx);
+
+        self.zoned_items.push((zone, Box::new(item)));
+        cx.notify();
+    }
+
     pub fn item_of_type<T: StatusItemView>(&self) -> Option<Entity<T>> {
         self.left_items
             .iter()
             .chain(self.right_items.iter())
+            .chain(self.zoned_items.iter().map(|(_, item)| item))
             .find_map(|item| item.to_any().downcast().ok())
     }
 
@@ -316,7 +473,12 @@ impl StatusBar {
 
     fn update_active_pane_item(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let active_pane_item = self.active_pane.read(cx).active_item();
-        for item in self.left_items.iter().chain(&self.right_items) {
+        for item in self
+            .left_items
+            .iter()
+            .chain(&self.right_items)
+            .chain(self.zoned_items.iter().map(|(_, item)| item))
+        {
             item.set_active_pane_item(active_pane_item.as_deref(), window, cx);
         }
     }

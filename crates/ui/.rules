@@ -9,7 +9,14 @@ call sites keep re-deriving values that already exist.
   `pane_corner_radius()` (or `pane_corner_radius_px(window)` at paint time) for the pane, its
   tab strip, and any content clipped against those corners.
 
-* A selected `Tab` must be told the surface it covers, via `Tab::surface`. Without it the tab
+* Island strips (a pane's document tabs, the right dock's panel switcher, a panel's own
+  sub-tabs) use `TabStyle::Pill` on both the `TabBar` and every `Tab` in it. Continuity with
+  the content was too subtle to tell which tab was active; the pill marks it with fill, accent
+  border and accent icon instead. A pill strip hugs its tabs, so whatever must span the rest of
+  the bar (a pane's "after the last tab" drop target) goes in `TabBar::after_tabs`, not in the
+  strip. `TabStyle::Surface` is only for a tab that has to continue its content.
+
+* A selected `Surface` `Tab` must be told the surface it covers, via `Tab::surface`. Without it the tab
   falls back to `tab_active_background`, which is continuous with the content only in themes
   that set the two equal — Zed's bundled themes do, many third-party ones (Tokyo Night Storm,
   for one) do not, and the tab then reads as a chip floating above unrelated content. A pane

@@ -799,11 +799,14 @@ fn show_ref_picker(
     });
 }
 
+/// `show_counts` renders the ahead/behind counts inside the button. Callers that already show
+/// them next to the branch name pass `false`, which gives the button an icon instead.
 fn render_remote_button(
     id: impl Into<SharedString>,
     branch: &Branch,
     keybinding_target: Option<FocusHandle>,
     show_fetch_button: bool,
+    show_counts: bool,
     in_progress_operation: Option<RemoteOperationKind>,
     menu_handle: PopoverMenuHandle<ContextMenu>,
 ) -> Option<impl IntoElement> {
@@ -825,6 +828,7 @@ fn render_remote_button(
                 keybinding_target,
                 id,
                 ahead,
+                show_counts,
                 in_progress_operation,
                 menu_handle,
             )),
@@ -833,6 +837,7 @@ fn render_remote_button(
                 id,
                 ahead,
                 behind,
+                show_counts,
                 in_progress_operation,
                 menu_handle,
             )),
@@ -856,11 +861,11 @@ fn render_remote_button(
 }
 
 mod remote_button {
-    use crate::git_panel::RemoteOperationKind;
+    use crate::{IslandSplitButton, IslandSplitButtonStyle, git_panel::RemoteOperationKind};
     use gpui::{Action, Anchor, AnyView, ClickEvent, FocusHandle};
     use ui::{
         ButtonLike, CommonAnimationExt, ContextMenu, ElevationIndex, PopoverMenu,
-        PopoverMenuHandle, SplitButton, Tooltip, prelude::*,
+        PopoverMenuHandle, Tooltip, prelude::*,
     };
 
     pub fn render_fetch_button(
@@ -868,7 +873,7 @@ mod remote_button {
         id: SharedString,
         in_progress_operation: Option<RemoteOperationKind>,
         menu_handle: PopoverMenuHandle<ContextMenu>,
-    ) -> SplitButton {
+    ) -> IslandSplitButton {
         split_button(
             id,
             "Fetch",
@@ -897,15 +902,16 @@ mod remote_button {
         keybinding_target: Option<FocusHandle>,
         id: SharedString,
         ahead: u32,
+        show_counts: bool,
         in_progress_operation: Option<RemoteOperationKind>,
         menu_handle: PopoverMenuHandle<ContextMenu>,
-    ) -> SplitButton {
+    ) -> IslandSplitButton {
         split_button(
             id,
             "Push",
             ahead as usize,
             0,
-            None,
+            (!show_counts).then_some(IconName::ArrowUp),
             keybinding_target.clone(),
             in_progress_operation,
             menu_handle,
@@ -929,15 +935,16 @@ mod remote_button {
         id: SharedString,
         ahead: u32,
         behind: u32,
+        show_counts: bool,
         in_progress_operation: Option<RemoteOperationKind>,
         menu_handle: PopoverMenuHandle<ContextMenu>,
-    ) -> SplitButton {
+    ) -> IslandSplitButton {
         split_button(
             id,
             "Pull",
             ahead as usize,
             behind as usize,
-            None,
+            (!show_counts).then_some(IconName::ArrowCircle),
             keybinding_target.clone(),
             in_progress_operation,
             menu_handle,
@@ -961,7 +968,7 @@ mod remote_button {
         id: SharedString,
         in_progress_operation: Option<RemoteOperationKind>,
         menu_handle: PopoverMenuHandle<ContextMenu>,
-    ) -> SplitButton {
+    ) -> IslandSplitButton {
         split_button(
             id,
             "Publish",
@@ -991,7 +998,7 @@ mod remote_button {
         id: SharedString,
         in_progress_operation: Option<RemoteOperationKind>,
         menu_handle: PopoverMenuHandle<ContextMenu>,
-    ) -> SplitButton {
+    ) -> IslandSplitButton {
         split_button(
             id,
             "Republish",
@@ -1049,9 +1056,10 @@ mod remote_button {
         let menu_open = menu_handle.is_deployed();
 
         PopoverMenu::new(id.into())
-            .trigger(crate::render_split_button_chevron_trigger(
+            .trigger(crate::render_island_split_button_chevron_trigger(
                 "split-button-right",
                 menu_open,
+                IslandSplitButtonStyle::Secondary,
             ))
             .with_handle(menu_handle)
             .menu(move |window, cx| {
@@ -1089,7 +1097,7 @@ mod remote_button {
         menu_handle: PopoverMenuHandle<ContextMenu>,
         left_on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
         tooltip: impl Fn(&mut Window, &mut App) -> AnyView + 'static,
-    ) -> SplitButton {
+    ) -> IslandSplitButton {
         fn count(count: usize) -> impl IntoElement {
             h_flex()
                 .ml_neg_px()
@@ -1157,11 +1165,132 @@ mod remote_button {
             format!("split-button-right-{}", id),
             keybinding_target,
             menu_handle,
-        )
-        .into_any_element();
+        );
 
-        SplitButton::new(left, right)
+        IslandSplitButton::new(left, right)
     }
+}
+
+/// Corner radius of a control that sits inside an island: selectors, inputs, split buttons.
+///
+/// It is deliberately smaller than `pane_corner_radius()` so the control's corners nest inside
+/// the island's instead of mirroring them.
+pub(crate) const ISLAND_CONTROL_RADIUS: Pixels = px(8.);
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IslandSplitButtonStyle {
+    /// The island's single primary action, filled with the strong accent.
+    Primary,
+    /// A secondary action, on the elevated surface with a border.
+    Secondary,
+}
+
+impl IslandSplitButtonStyle {
+    // The primary fill is the accent itself, so a subtle hover fill would paint a neutral
+    // grey over it; its halves stay transparent instead.
+    fn button_style(self) -> ButtonStyle {
+        match self {
+            IslandSplitButtonStyle::Primary => ButtonStyle::Transparent,
+            IslandSplitButtonStyle::Secondary => ButtonStyle::Subtle,
+        }
+    }
+
+    fn icon_color(self) -> Color {
+        match self {
+            IslandSplitButtonStyle::Primary => Color::Default,
+            IslandSplitButtonStyle::Secondary => Color::Muted,
+        }
+    }
+}
+
+/// An action and a menu chevron joined into one control, sized and rounded like the other
+/// controls inside an island (`ui::SplitButton` uses the smaller editor-toolbar metrics).
+#[derive(IntoElement)]
+pub(crate) struct IslandSplitButton {
+    left: ButtonLike,
+    right: AnyElement,
+    style: IslandSplitButtonStyle,
+    dimmed: bool,
+}
+
+impl IslandSplitButton {
+    pub(crate) fn new(left: ButtonLike, right: impl IntoElement) -> Self {
+        Self {
+            left,
+            right: right.into_any_element(),
+            style: IslandSplitButtonStyle::Secondary,
+            dimmed: false,
+        }
+    }
+
+    pub(crate) fn style(mut self, style: IslandSplitButtonStyle) -> Self {
+        self.style = style;
+        self
+    }
+
+    /// Fades the whole control, for a primary action whose fill would otherwise read as
+    /// available while its action is disabled.
+    pub(crate) fn dimmed(mut self, dimmed: bool) -> Self {
+        self.dimmed = dimmed;
+        self
+    }
+}
+
+impl RenderOnce for IslandSplitButton {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let colors = cx.theme().colors();
+        let (background, border, divider) = match self.style {
+            IslandSplitButtonStyle::Primary => (
+                colors.border_focused,
+                colors.border_focused,
+                colors.text.opacity(0.25),
+            ),
+            IslandSplitButtonStyle::Secondary => (
+                colors.elevated_surface_background,
+                colors.border,
+                colors.border,
+            ),
+        };
+
+        h_flex()
+            .flex_none()
+            .rounded(ISLAND_CONTROL_RADIUS)
+            .border_1()
+            .border_color(border)
+            .bg(background)
+            .overflow_hidden()
+            .when(self.dimmed, |this| this.opacity(0.5))
+            .child(
+                self.left
+                    .size(ButtonSize::Medium)
+                    .style(self.style.button_style()),
+            )
+            .child(div().w_px().h(ButtonSize::Medium.rems()).bg(divider))
+            .child(self.right)
+    }
+}
+
+pub(crate) fn render_island_split_button_chevron_trigger(
+    id: impl Into<ElementId>,
+    menu_open: bool,
+    style: IslandSplitButtonStyle,
+) -> ButtonLike {
+    let size = ButtonSize::Medium;
+    let chevron_icon = if menu_open {
+        IconName::ChevronUp
+    } else {
+        IconName::ChevronDown
+    };
+
+    ButtonLike::new_rounded_right(id)
+        .size(size)
+        .width(size.rems())
+        .style(style.button_style())
+        .child(
+            Icon::new(chevron_icon)
+                .size(IconSize::XSmall)
+                .color(style.icon_color()),
+        )
 }
 
 pub(crate) fn render_split_button_chevron_trigger(

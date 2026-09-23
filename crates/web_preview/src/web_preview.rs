@@ -1011,7 +1011,9 @@ impl WebPreviewView {
         }
     }
 
-    fn set_browser_hidden(&mut self, hidden: bool) {
+    /// Stops (or resumes) painting the page, for hosts that take the view off screen without
+    /// the pane deactivating it, such as the Devices panel switching to another platform.
+    pub fn set_browser_hidden(&mut self, hidden: bool) {
         if self.hidden == hidden {
             return;
         }

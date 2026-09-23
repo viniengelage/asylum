@@ -42,8 +42,9 @@ use std::time::Duration;
 use theme::ActiveTheme;
 use title_bar_settings::TitleBarSettings;
 use ui::{
-    Avatar, ButtonLike, ContextMenu, ContextMenuEntry, IconWithIndicator, Indicator, PopoverMenu,
-    PopoverMenuHandle, TintColor, Tooltip, prelude::*, utils::platform_title_bar_height,
+    Avatar, ButtonLike, ContextMenu, ContextMenuEntry, HeaderBar, IconWithIndicator, Indicator,
+    PopoverMenu, PopoverMenuHandle, TintColor, Tooltip, prelude::*,
+    utils::platform_title_bar_height,
 };
 use update_version::UpdateVersion;
 use util::ResultExt;
@@ -57,6 +58,36 @@ use zed_actions::OpenRemote;
 pub use onboarding_banner::restore_banner;
 
 const MAX_PROJECT_NAME_LENGTH: usize = 40;
+
+/// The project switcher at the head of the left island: the project name set in the header's
+/// weight with a chevron that always shows, since the menu opens on any project count.
+fn project_name_trigger(display_name: String, is_project_selected: bool, cx: &App) -> ButtonLike {
+    ButtonLike::new("project_name_trigger")
+        .size(ButtonSize::Medium)
+        .tab_index(0isize)
+        .selected_style(ButtonStyle::Tinted(TintColor::Accent))
+        .child(
+            h_flex()
+                .pl(DynamicSpacing::Base08.px(cx))
+                .pr(DynamicSpacing::Base06.px(cx))
+                .gap(DynamicSpacing::Base04.px(cx))
+                .child(
+                    Label::new(display_name)
+                        .size(LabelSize::Small)
+                        .weight(gpui::FontWeight::SEMIBOLD)
+                        .color(if is_project_selected {
+                            Color::Default
+                        } else {
+                            Color::Muted
+                        }),
+                )
+                .child(
+                    Icon::new(IconName::ChevronDown)
+                        .size(IconSize::Small)
+                        .color(Color::Muted),
+                ),
+        )
+}
 
 actions!(
     collab,
@@ -284,8 +315,8 @@ impl Render for TitleBar {
 
         children.push(
             h_flex()
-                .pr_1()
-                .gap_1()
+                .pr(DynamicSpacing::Base08.px(cx))
+                .gap(DynamicSpacing::Base04.px(cx))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(self.render_call_controls(window, cx))
                 .children(self.render_connection_status(status, cx))
@@ -313,6 +344,24 @@ impl Render for TitleBar {
                 .when(TitleBarSettings::get_global(cx).show_user_menu, |this| {
                     this.child(self.render_user_menu_button(cx))
                 })
+                .child(
+                    IconButton::new("title-bar-search", IconName::MagnifyingGlass)
+                        .icon_size(IconSize::Medium)
+                        .icon_color(Color::Muted)
+                        .tooltip(|_window, cx| {
+                            Tooltip::for_action(
+                                "Search Files",
+                                &workspace::ToggleFileFinder::default(),
+                                cx,
+                            )
+                        })
+                        .on_click(|_, window, cx| {
+                            window.dispatch_action(
+                                workspace::ToggleFileFinder::default().boxed_clone(),
+                                cx,
+                            );
+                        }),
+                )
                 .into_any_element(),
         );
 
@@ -345,8 +394,11 @@ impl Render for TitleBar {
                 )
                 .into_any_element()
         } else {
-            self.platform_titlebar.update(cx, |this, _| {
+            self.platform_titlebar.update(cx, |this, cx| {
                 this.set_button_layout(button_layout);
+                // The title bar is the header of the left island, so it takes the island
+                // header's height instead of the platform's.
+                this.set_height(Some(HeaderBar::height(cx)));
                 this.set_children(children);
             });
             self.platform_titlebar.clone().into_any_element()
@@ -446,10 +498,6 @@ impl TitleBar {
         this.observe_diagnostics(cx);
 
         this
-    }
-
-    fn worktree_count(&self, cx: &App) -> usize {
-        self.project.read(cx).visible_worktrees(cx).count()
     }
 
     fn toggle_update_simulation(&mut self, cx: &mut Context<Self>) {
@@ -726,18 +774,7 @@ impl TitleBar {
                 ))
             })
             .trigger_with_tooltip(
-                Button::new("project_name_trigger", display_name)
-                    .label_size(LabelSize::Small)
-                    .tab_index(0isize)
-                    .when(self.worktree_count(cx) > 1, |this| {
-                        this.end_icon(
-                            Icon::new(IconName::ChevronDown)
-                                .size(IconSize::XSmall)
-                                .color(Color::Muted),
-                        )
-                    })
-                    .selected_style(ButtonStyle::Tinted(TintColor::Accent))
-                    .when(!is_project_selected, |s| s.color(Color::Muted)),
+                project_name_trigger(display_name, is_project_selected, cx),
                 move |_window, cx| {
                     Tooltip::for_action("Recent Projects", &zed_actions::OpenRecent::default(), cx)
                 },
@@ -778,18 +815,7 @@ impl TitleBar {
                 ))
             })
             .trigger_with_tooltip(
-                Button::new("project_name_trigger", display_name)
-                    .label_size(LabelSize::Small)
-                    .tab_index(0isize)
-                    .when(self.worktree_count(cx) > 1, |this| {
-                        this.end_icon(
-                            Icon::new(IconName::ChevronDown)
-                                .size(IconSize::XSmall)
-                                .color(Color::Muted),
-                        )
-                    })
-                    .selected_style(ButtonStyle::Tinted(TintColor::Accent))
-                    .when(!is_project_selected, |s| s.color(Color::Muted)),
+                project_name_trigger(display_name, is_project_selected, cx),
                 move |_window, cx| {
                     Tooltip::for_action("Recent Projects", &zed_actions::OpenRecent::default(), cx)
                 },

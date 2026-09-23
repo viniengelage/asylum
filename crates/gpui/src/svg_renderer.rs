@@ -261,6 +261,39 @@ impl SvgRenderer {
         }
     }
 
+    /// Rasterizes the SVG with its own colors into a BGRA buffer `params.size` wide, for
+    /// [`crate::Window::paint_polychrome_svg`]. The size is taken as exact device pixels, with
+    /// no supersampling: a bitmap that the GPU has to shrink by a non-integer factor is what
+    /// made colored icons blurry on 1x displays.
+    pub(crate) fn render_bgra(
+        &self,
+        params: &RenderSvgParams,
+        bytes: Option<&[u8]>,
+    ) -> Result<Option<(Size<DevicePixels>, Vec<u8>)>> {
+        anyhow::ensure!(!params.size.is_zero(), "can't render at a zero size");
+
+        let render_pixmap = |bytes| {
+            let pixmap = self.render_pixmap(bytes, SvgSize::Size(params.size))?;
+            let size = Size::new(
+                DevicePixels(pixmap.width() as i32),
+                DevicePixels(pixmap.height() as i32),
+            );
+            let mut data = pixmap.take();
+            for pixel in data.chunks_exact_mut(4) {
+                swap_rgba_pa_to_bgra(pixel);
+            }
+            Ok(Some((size, data)))
+        };
+
+        if let Some(bytes) = bytes {
+            render_pixmap(bytes)
+        } else if let Some(bytes) = self.asset_source.load(&params.path)? {
+            render_pixmap(&bytes)
+        } else {
+            Ok(None)
+        }
+    }
+
     fn render_pixmap(&self, bytes: &[u8], size: SvgSize) -> Result<Pixmap, usvg::Error> {
         let tree = usvg::Tree::from_data(bytes, &self.usvg_options)?;
         rasterize_tree(&tree, size)
@@ -356,11 +389,31 @@ fn fix_generic_font_families(db: &mut usvg::fontdb::Database) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
     use usvg::fontdb::{Database, Family, Query};
 
     const IBM_PLEX_REGULAR: &[u8] =
         include_bytes!("../../../assets/fonts/ibm-plex-sans/IBMPlexSans-Regular.ttf");
     const LILEX_REGULAR: &[u8] = include_bytes!("../../../assets/fonts/lilex/Lilex-Regular.ttf");
+
+    #[test]
+    fn renders_polychrome_svg_at_exact_size_with_its_colors() -> Result<()> {
+        let renderer = SvgRenderer::new(Arc::new(()));
+        let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="#ff0000"/></svg>"##;
+        let params = RenderSvgParams {
+            path: "red.svg".into(),
+            size: Size::new(DevicePixels(14), DevicePixels(14)),
+        };
+
+        let (size, bytes) = renderer
+            .render_bgra(&params, Some(svg))?
+            .context("the SVG should rasterize")?;
+
+        assert_eq!(size, params.size);
+        assert_eq!(bytes.len(), 14 * 14 * 4);
+        assert_eq!(&bytes[..4], &[0, 0, 255, 255], "pixels are straight-alpha BGRA");
+        Ok(())
+    }
 
     #[test]
     fn renders_parsed_svg_at_requested_size() -> Result<()> {

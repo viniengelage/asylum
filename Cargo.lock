@@ -17085,6 +17085,7 @@ dependencies = [
  "ui",
  "unicode-segmentation",
  "util",
+ "web_preview",
  "workspace",
  "zed_actions",
 ]
@@ -19128,6 +19129,7 @@ dependencies = [
  "language",
  "serde_json",
  "ui",
+ "util",
  "workspace",
 ]
 

@@ -20,6 +20,7 @@ pub struct Svg {
     external_path: Option<SharedString>,
     data: Option<Arc<[u8]>>,
     data_path: Option<SharedString>,
+    polychrome: bool,
 }
 
 /// Create a new SVG element.
@@ -32,6 +33,7 @@ pub fn svg() -> Svg {
         external_path: None,
         data: None,
         data_path: None,
+        polychrome: false,
     }
 }
 
@@ -45,6 +47,15 @@ impl Svg {
     /// Set the path to the SVG file for this element.
     pub fn external_path(mut self, path: impl Into<SharedString>) -> Self {
         self.external_path = Some(path.into());
+        self
+    }
+
+    /// Paint the SVG with its own colors instead of as a mask tinted with the text color.
+    ///
+    /// The SVG is rasterized at the exact device-pixel size of the element, so it stays sharp
+    /// at any scale factor. Transformations are not applied in this mode.
+    pub fn polychrome(mut self) -> Self {
+        self.polychrome = true;
         self
     }
 
@@ -146,7 +157,32 @@ impl Element for Svg {
                     })
                     .unwrap_or_default();
 
-                if let Some((data, path)) = self.data.as_ref().zip(self.data_path.as_ref()) {
+                if self.polychrome {
+                    let path = self
+                        .data_path
+                        .as_ref()
+                        .or(self.external_path.as_ref())
+                        .or(self.path.as_ref());
+                    let Some(path) = path else {
+                        return;
+                    };
+                    let data = if let Some(data) = self.data.as_ref() {
+                        Some(data.clone())
+                    } else if let Some(external_path) = self.external_path.as_ref() {
+                        let Some(bytes) = window
+                            .use_asset::<SvgAsset>(external_path, cx)
+                            .and_then(|asset| asset.log_err())
+                        else {
+                            return;
+                        };
+                        Some(bytes)
+                    } else {
+                        None
+                    };
+                    window
+                        .paint_polychrome_svg(bounds, path.clone(), data.as_deref(), cx)
+                        .log_err();
+                } else if let Some((data, path)) = self.data.as_ref().zip(self.data_path.as_ref()) {
                     if let Some(color) = style.text.color {
                         window
                             .paint_svg(

@@ -8,7 +8,7 @@ use gpui::{
 };
 use http_client::{HttpClient, HttpClientWithUrl};
 use paths::remote_servers_dir;
-use release_channel::{AppCommitSha, ReleaseChannel};
+use release_channel::{AppCommitSha, AppCommitTimestamp, ReleaseChannel};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use settings::{RegisterSetting, Settings, SettingsStore};
@@ -19,6 +19,7 @@ use smol::{
 };
 use std::mem;
 use std::{
+    collections::HashMap,
     env::{
         self,
         consts::{ARCH, OS},
@@ -108,6 +109,100 @@ actions!(
         ViewReleaseNotes,
     ]
 );
+
+/// The repository whose GitHub Releases Asylum updates from. The release workflow sets
+/// `ASYLUM_RELEASES_REPO` to the repository it publishes to, so a build always checks the same
+/// place it came from; the default is what a local build checks.
+const DEFAULT_ASYLUM_RELEASES_REPO: &str = "viniengelage/asylum";
+
+/// The manifest the release workflow attaches to every release, next to the installers.
+const ASYLUM_RELEASE_MANIFEST: &str = "asylum-release.json";
+
+fn asylum_releases_repo() -> &'static str {
+    option_env!("ASYLUM_RELEASES_REPO").unwrap_or(DEFAULT_ASYLUM_RELEASES_REPO)
+}
+
+/// What the latest GitHub Release contains, as described by its [`ASYLUM_RELEASE_MANIFEST`].
+///
+/// Releases are told apart by commit rather than by version: the version is Zed's own, which
+/// extensions check compatibility against, so every Asylum build of an upstream release shares
+/// it.
+#[derive(Deserialize, Debug, Clone)]
+struct AsylumRelease {
+    version: String,
+    tag: String,
+    commit: String,
+    /// Seconds since the Unix epoch.
+    commit_timestamp: i64,
+    /// Installer file names keyed by `{os}-{arch}`, e.g. `macos-aarch64`.
+    assets: HashMap<String, String>,
+}
+
+impl AsylumRelease {
+    fn short_commit(&self) -> &str {
+        self.commit.get(..7).unwrap_or(&self.commit)
+    }
+
+    /// The version shown while downloading, with the commit as build metadata so that two
+    /// builds of the same upstream version can be told apart.
+    fn display_version(&self) -> Result<Version> {
+        let mut version: Version = self
+            .version
+            .parse()
+            .with_context(|| format!("invalid version in release manifest: {}", self.version))?;
+        version.build = semver::BuildMetadata::new(self.short_commit())?;
+        Ok(version)
+    }
+
+    fn asset_url(&self, os: &str, arch: &str) -> Option<String> {
+        let file_name = self.assets.get(&format!("{os}-{arch}"))?;
+        Some(format!(
+            "https://github.com/{}/releases/download/{}/{file_name}",
+            asylum_releases_repo(),
+            self.tag
+        ))
+    }
+
+    /// Whether this release should replace the running build. A build newer than the release
+    /// (typically one made locally from a later commit) is left alone.
+    fn should_replace(
+        &self,
+        installed_commit: Option<&str>,
+        installed_commit_timestamp: Option<i64>,
+        status: &AutoUpdateStatus,
+    ) -> bool {
+        if let AutoUpdateStatus::Updated { version } = status {
+            return version.build.as_str() != self.short_commit();
+        }
+        if installed_commit == Some(self.commit.as_str()) {
+            return false;
+        }
+        installed_commit_timestamp.is_none_or(|installed| self.commit_timestamp > installed)
+    }
+}
+
+async fn fetch_asylum_release(client: &HttpClientWithUrl) -> Result<AsylumRelease> {
+    // The `latest/download` URL is served by github.com rather than the REST API, so polling it
+    // isn't subject to the API's rate limit for unauthenticated clients.
+    let url = format!(
+        "https://github.com/{}/releases/latest/download/{ASYLUM_RELEASE_MANIFEST}",
+        asylum_releases_repo()
+    );
+    let mut response = client.get(&url, Default::default(), true).await?;
+    let mut body = Vec::new();
+    response.body_mut().read_to_end(&mut body).await?;
+    anyhow::ensure!(
+        response.status().is_success(),
+        "failed to fetch the latest release from {url}: {}",
+        response.status()
+    );
+    serde_json::from_slice(&body).with_context(|| {
+        format!(
+            "error deserializing release manifest {:?}",
+            String::from_utf8_lossy(&body)
+        )
+    })
+}
 
 #[derive(Serialize, Debug)]
 pub struct AssetQuery<'a> {
@@ -346,14 +441,7 @@ pub fn release_notes_url(cx: &mut App) -> Option<String> {
     let release_channel = ReleaseChannel::try_global(cx)?;
     let url = match release_channel {
         ReleaseChannel::Stable | ReleaseChannel::Preview => {
-            let auto_updater = AutoUpdater::get(cx)?;
-            let auto_updater = auto_updater.read(cx);
-            let mut current_version = auto_updater.current_version.clone();
-            current_version.pre = semver::Prerelease::EMPTY;
-            current_version.build = semver::BuildMetadata::EMPTY;
-            let release_channel = release_channel.dev_name();
-            let path = format!("/releases/{release_channel}/{current_version}");
-            auto_updater.client.http_client().build_url(&path)
+            format!("https://github.com/{}/releases", asylum_releases_repo())
         }
         ReleaseChannel::Nightly => {
             "https://github.com/zed-industries/zed/commits/nightly/".to_string()
@@ -738,15 +826,13 @@ impl AutoUpdater {
     }
 
     async fn update(this: Entity<Self>, cx: &mut AsyncApp) -> Result<()> {
-        let (client, installed_version, previous_status, release_channel) =
-            this.read_with(cx, |this, cx| {
-                (
-                    this.client.http_client(),
-                    this.current_version.clone(),
-                    this.status.clone(),
-                    ReleaseChannel::try_global(cx).unwrap_or(ReleaseChannel::Stable),
-                )
-            });
+        let (client, installed_version, previous_status) = this.read_with(cx, |this, _| {
+            (
+                this.client.http_client(),
+                this.current_version.clone(),
+                this.status.clone(),
+            )
+        });
 
         Self::check_dependencies()?;
 
@@ -756,19 +842,36 @@ impl AutoUpdater {
             cx.notify();
         });
 
-        let fetched_release_data =
-            Self::get_release_asset(&this, release_channel, None, "zed", OS, ARCH, cx).await?;
-        let fetched_version = fetched_release_data.clone().version;
-        let app_commit_sha = Ok(cx.update(|cx| AppCommitSha::try_global(cx).map(|sha| sha.full())));
-        let newer_version = Self::check_if_fetched_version_is_newer(
-            release_channel,
-            app_commit_sha,
-            installed_version,
-            fetched_version,
-            previous_status.clone(),
-        )?;
+        let release = fetch_asylum_release(&client).await?;
+        let (installed_commit, installed_commit_timestamp) = cx.update(|cx| {
+            (
+                AppCommitSha::try_global(cx).map(|sha| sha.full()),
+                AppCommitTimestamp::try_global(cx).map(|timestamp| timestamp.0),
+            )
+        });
+        let asset_url = release.asset_url(OS, ARCH);
+        if asset_url.is_none() {
+            log::info!("Auto Update: the latest release has no installer for {OS}-{ARCH}");
+        }
+        let update = match asset_url {
+            Some(url)
+                if release.should_replace(
+                    installed_commit.as_deref(),
+                    installed_commit_timestamp,
+                    &previous_status,
+                ) =>
+            {
+                Some((release.display_version()?, url))
+            }
+            _ => None,
+        };
+        log::debug!(
+            "Auto Update: installed {installed_version} ({installed_commit:?}), latest release {} ({})",
+            release.version,
+            release.commit
+        );
 
-        let Some(newer_version) = newer_version else {
+        let Some((newer_version, asset_url)) = update else {
             this.update(cx, |this, cx| {
                 this.status = match previous_status {
                     AutoUpdateStatus::Updated { .. } => previous_status,
@@ -800,7 +903,10 @@ impl AutoUpdater {
         let mut progress_cx = cx.clone();
         download_release(
             &target_path,
-            fetched_release_data,
+            ReleaseAsset {
+                version: newer_version.to_string(),
+                url: asset_url,
+            },
             client,
             move |progress| {
                 progress_entity.update(&mut progress_cx, |this, cx| {
@@ -865,6 +971,9 @@ impl AutoUpdater {
         Ok(())
     }
 
+    // Zed's own release endpoints are no longer polled for the app (see `fetch_asylum_release`);
+    // kept, with its tests, so that merges from upstream apply cleanly.
+    #[cfg_attr(not(test), expect(dead_code))]
     fn check_if_fetched_version_is_newer(
         release_channel: ReleaseChannel,
         app_commit_sha: Result<Option<String>>,
@@ -1208,11 +1317,16 @@ async fn install_release_macos(
     let mut mounted_app_path: OsString = mount_path.join(running_app_filename).into();
 
     mounted_app_path.push("/");
+    // Mount at a fixed path rather than under a mount root: the volume is named after the app
+    // ("Asylum"), not "Zed", so its path under a mount root isn't known in advance.
+    fs::create_dir_all(&mount_path)
+        .await
+        .context("failed to create the disk image mount point")?;
     let mut cmd = new_command("hdiutil");
     cmd.args(["attach", "-nobrowse"])
         .arg(&downloaded_dmg)
-        .arg("-mountroot")
-        .arg(temp_dir.path());
+        .arg("-mountpoint")
+        .arg(&mount_path);
     let output = cmd
         .output()
         .await
@@ -1411,6 +1525,8 @@ mod tests {
 
             let current_version = semver::Version::new(0, 100, 0);
             release_channel::init_test(current_version, ReleaseChannel::Stable, cx);
+            AppCommitSha::set_global(AppCommitSha::new("a".repeat(40)), cx);
+            AppCommitTimestamp::set_global(AppCommitTimestamp(100), cx);
 
             let clock = Arc::new(FakeSystemClock::new());
             let release_available = Arc::clone(&release_available);
@@ -1419,23 +1535,33 @@ mod tests {
                 let release_available = release_available.load(atomic::Ordering::Relaxed);
                 let dmg_rx = dmg_rx.clone();
                 async move {
-                if req.uri().path() == "/releases/stable/latest/asset" {
-                    if release_available {
-                        return Ok(Response::builder().status(200).body(
-                            r#"{"version":"0.100.1","url":"https://test.example/new-download"}"#.into()
-                        ).unwrap());
-                    } else {
-                        return Ok(Response::builder().status(200).body(
-                            r#"{"version":"0.100.0","url":"https://test.example/old-download"}"#.into()
-                        ).unwrap());
+                    if req.uri().path().ends_with(ASYLUM_RELEASE_MANIFEST) {
+                        let (version, commit, timestamp) = if release_available {
+                            ("0.100.1", "b".repeat(40), 200)
+                        } else {
+                            ("0.100.0", "a".repeat(40), 100)
+                        };
+                        let manifest = serde_json::json!({
+                            "version": version,
+                            "tag": "asylum-v-test",
+                            "commit": commit,
+                            "commit_timestamp": timestamp,
+                            "assets": { format!("{OS}-{ARCH}"): "new-download" },
+                        });
+                        return Ok(Response::builder()
+                            .status(200)
+                            .body(manifest.to_string().into())
+                            .unwrap());
+                    } else if req.uri().path().ends_with("/new-download") {
+                        return Ok(Response::builder()
+                            .status(200)
+                            .body({
+                                let dmg_rx = dmg_rx.lock().take().unwrap();
+                                dmg_rx.await.unwrap().into()
+                            })
+                            .unwrap());
                     }
-                } else if req.uri().path() == "/new-download" {
-                    return Ok(Response::builder().status(200).body({
-                        let dmg_rx = dmg_rx.lock().take().unwrap();
-                        dmg_rx.await.unwrap().into()
-                    }).unwrap());
-                }
-                Ok(Response::builder().status(404).body("".into()).unwrap())
+                    Ok(Response::builder().status(404).body("".into()).unwrap())
                 }
             });
             let client = Client::new(clock, fake_client_http, cx);
@@ -1464,10 +1590,11 @@ mod tests {
             }
         }
         let status = auto_updater.read_with(cx, |updater, _| updater.status());
+        let fetched_version: semver::Version = "0.100.1+bbbbbbb".parse().unwrap();
         assert_eq!(
             status,
             AutoUpdateStatus::Downloading {
-                version: semver::Version::new(0, 100, 1),
+                version: fetched_version.clone(),
                 progress: None,
             }
         );
@@ -1498,7 +1625,7 @@ mod tests {
         assert_eq!(
             status,
             AutoUpdateStatus::Updated {
-                version: semver::Version::new(0, 100, 1)
+                version: fetched_version
             }
         );
         let will_restart = cx.expect_restart();
@@ -1508,6 +1635,67 @@ mod tests {
         let path = path.unwrap();
         assert_eq!(path, tmp_dir.path().join("zed"));
         assert_eq!(std::fs::read_to_string(path).unwrap(), "<fake-zed-update>");
+    }
+
+    fn asylum_release(commit: &str, commit_timestamp: i64) -> AsylumRelease {
+        AsylumRelease {
+            version: "1.22.0".into(),
+            tag: "asylum-v1.22.0-1".into(),
+            commit: commit.into(),
+            commit_timestamp,
+            assets: HashMap::from_iter([("macos-aarch64".into(), "Asylum-aarch64.dmg".into())]),
+        }
+    }
+
+    #[test]
+    fn test_asylum_release_replaces_only_older_builds() {
+        let release = asylum_release(&"b".repeat(40), 200);
+        let idle = AutoUpdateStatus::Idle;
+
+        assert!(release.should_replace(Some(&"a".repeat(40)), Some(100), &idle));
+        assert!(
+            !release.should_replace(Some(&"b".repeat(40)), Some(100), &idle),
+            "the same commit is never reinstalled"
+        );
+        assert!(
+            !release.should_replace(Some(&"c".repeat(40)), Some(300), &idle),
+            "a local build newer than the release is left alone"
+        );
+        assert!(
+            release.should_replace(None, None, &idle),
+            "a build that doesn't know its commit takes the release"
+        );
+
+        let already_downloaded = AutoUpdateStatus::Updated {
+            version: release.display_version().unwrap(),
+        };
+        assert!(!release.should_replace(Some(&"a".repeat(40)), Some(100), &already_downloaded));
+        let newer_release = asylum_release(&"d".repeat(40), 400);
+        assert!(newer_release.should_replace(
+            Some(&"a".repeat(40)),
+            Some(100),
+            &already_downloaded
+        ));
+    }
+
+    #[test]
+    fn test_asylum_release_asset_url_points_at_the_release_tag() {
+        let release = asylum_release(&"b".repeat(40), 200);
+        assert_eq!(
+            release.asset_url("macos", "aarch64").as_deref(),
+            Some(
+                format!(
+                    "https://github.com/{}/releases/download/asylum-v1.22.0-1/Asylum-aarch64.dmg",
+                    asylum_releases_repo()
+                )
+                .as_str()
+            )
+        );
+        assert_eq!(release.asset_url("linux", "x86_64"), None);
+        assert_eq!(
+            release.display_version().unwrap().to_string(),
+            "1.22.0+bbbbbbb"
+        );
     }
 
     #[gpui::test]

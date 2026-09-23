@@ -1573,8 +1573,19 @@ impl Item for TerminalView {
                     }
                 }
             },
-            None => (IconName::Terminal, Color::Muted, None),
+            None => (
+                IconName::Terminal,
+                if params.selected {
+                    Color::Accent
+                } else {
+                    Color::Muted
+                },
+                None,
+            ),
         };
+        let task_is_running = terminal
+            .task()
+            .is_some_and(|task| task.status == TaskStatus::Running);
 
         let self_handle = self.self_handle.clone();
         h_flex()
@@ -1596,7 +1607,7 @@ impl Item for TerminalView {
                             .when(rerun_button.is_some(), |this| {
                                 this.hover(|style| style.invisible().w_0())
                             })
-                            .child(Icon::new(icon).color(icon_color)),
+                            .child(Icon::new(icon).size(IconSize::Small).color(icon_color)),
                     )
                     .when_some(rerun_button, |this, rerun_button| {
                         this.child(
@@ -1643,6 +1654,15 @@ impl Item for TerminalView {
                         )
                     }),
             )
+            .when(task_is_running, |this| {
+                this.child(
+                    div()
+                        .flex_none()
+                        .size(px(6.))
+                        .rounded_full()
+                        .bg(Color::Success.color(cx)),
+                )
+            })
             .into_any()
     }
 

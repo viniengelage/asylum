@@ -9,6 +9,26 @@ use crate::prelude::*;
 /// centred; they used to differ by 2px, which shifted every centred label off-centre.
 const TAB_SLOT_SIZE: Pixels = px(14.);
 
+/// A pill sits inside a strip rounded to [`TAB_STRIP_RADIUS`] with a 3px inset, so its own
+/// radius has to be smaller or the two sets of corners collide.
+const TAB_PILL_RADIUS: Pixels = px(6.);
+
+/// Radius of the rounded strip that holds [`TabStyle::Pill`] tabs.
+pub const TAB_STRIP_RADIUS: Pixels = px(8.);
+
+/// How a [`Tab`] marks itself as selected.
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
+pub enum TabStyle {
+    /// The selected tab is painted with the surface of the content below it, so the two read
+    /// as one plane. Needs [`Tab::surface`].
+    #[default]
+    Surface,
+    /// The selected tab is a raised pill inside a rounded strip: elevated fill, accent border
+    /// and accent icon. This is the style for every island's strip, where continuity with the
+    /// content was too subtle to tell which tab was active.
+    Pill,
+}
+
 /// The position of a [`Tab`] within a list of tabs.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum TabPosition {
@@ -37,6 +57,7 @@ pub struct Tab {
     position: TabPosition,
     close_side: TabCloseSide,
     full_width: bool,
+    style: TabStyle,
     surface: Option<Hsla>,
     start_slot: Option<AnyElement>,
     end_slot: Option<AnyElement>,
@@ -54,6 +75,7 @@ impl Tab {
             position: TabPosition::First,
             close_side: TabCloseSide::End,
             full_width: false,
+            style: TabStyle::Surface,
             surface: None,
             start_slot: None,
             end_slot: None,
@@ -90,6 +112,11 @@ impl Tab {
         self
     }
 
+    pub fn style(mut self, style: TabStyle) -> Self {
+        self.style = style;
+        self
+    }
+
     pub fn close_side(mut self, close_side: TabCloseSide) -> Self {
         self.close_side = close_side;
         self
@@ -111,6 +138,77 @@ impl Tab {
 
     pub fn container_height(cx: &App) -> Pixels {
         DynamicSpacing::Base32.px(cx)
+    }
+
+    /// Height of a [`TabStyle::Pill`] tab.
+    pub fn pill_height(cx: &App) -> Pixels {
+        DynamicSpacing::Base26.px(cx)
+    }
+
+    fn render_pill(self, cx: &App) -> Stateful<Div> {
+        let colors = cx.theme().colors();
+        let selected = self.selected;
+        let full_width = self.full_width;
+        let close_side = self.close_side;
+        let text_color = if selected {
+            colors.text
+        } else {
+            colors.text_muted
+        };
+
+        // The close button only shows where it is unambiguous what it closes: on the selected
+        // tab, or on the tab under the pointer.
+        let action_slot = self.end_slot.map(|end_slot| {
+            h_flex()
+                .size(TAB_SLOT_SIZE)
+                .flex_none()
+                .justify_center()
+                .when(!selected, |this| this.visible_on_hover(""))
+                .child(end_slot)
+        });
+        let icon_slot = self.start_slot.map(|start_slot| {
+            h_flex()
+                .size(TAB_SLOT_SIZE)
+                .flex_none()
+                .justify_center()
+                .child(start_slot)
+        });
+        let (leading_action, trailing_action) = match close_side {
+            TabCloseSide::Start => (action_slot, None),
+            TabCloseSide::End => (None, action_slot),
+        };
+
+        self.div
+            .flex_none()
+            .h(Tab::pill_height(cx))
+            .when(full_width, |this| this.w_full())
+            .rounded(TAB_PILL_RADIUS)
+            .border_1()
+            .map(|this| {
+                if selected {
+                    this.bg(colors.element_selected)
+                        .border_color(colors.border_focused.opacity(0.55))
+                } else {
+                    this.border_color(gpui::transparent_black())
+                        .hover(|style| style.bg(colors.ghost_element_hover))
+                        .active(|style| style.bg(colors.ghost_element_active))
+                }
+            })
+            .cursor_pointer()
+            .child(
+                h_flex()
+                    .group("")
+                    .relative()
+                    .h_full()
+                    .px(DynamicSpacing::Base10.px(cx))
+                    .gap(DynamicSpacing::Base06.px(cx))
+                    .when(full_width, |this| this.w_full().justify_center())
+                    .text_color(text_color)
+                    .children(leading_action)
+                    .children(icon_slot)
+                    .children(self.children)
+                    .children(trailing_action),
+            )
     }
 }
 
@@ -138,6 +236,10 @@ impl ParentElement for Tab {
 impl RenderOnce for Tab {
     #[allow(refining_impl_trait)]
     fn render(self, _: &mut Window, cx: &mut App) -> Stateful<Div> {
+        if self.style == TabStyle::Pill {
+            return self.render_pill(cx);
+        }
+
         let (text_color, tab_bg) = match self.selected {
             false => (
                 cx.theme().colors().text_muted,

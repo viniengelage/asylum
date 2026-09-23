@@ -213,7 +213,7 @@ impl Transformable for Icon {
 }
 
 impl RenderOnce for Icon {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         match self.source {
             IconSource::Embedded(path) => svg()
                 .with_transformation(self.transformation)
@@ -229,6 +229,21 @@ impl RenderOnce for Icon {
                 .flex_none()
                 .text_color(self.color.color(cx))
                 .into_any_element(),
+            // Icon themes ship colored SVGs. Going through `img` would rasterize them once at
+            // twice their intrinsic size and let the GPU shrink that bitmap, which is visibly
+            // blurry on 1x displays; `polychrome` rasterizes at the exact device size instead.
+            IconSource::External(path)
+                if path
+                    .extension()
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("svg")) =>
+            {
+                svg()
+                    .external_path(SharedString::from(path.to_string_lossy().into_owned()))
+                    .polychrome()
+                    .size(icon_theme_glyph_size(self.size, window))
+                    .flex_none()
+                    .into_any_element()
+            }
             IconSource::External(path) => img(path)
                 .size(self.size)
                 .flex_none()
@@ -236,6 +251,26 @@ impl RenderOnce for Icon {
                 .into_any_element(),
         }
     }
+}
+
+/// Icon themes draw their glyphs on a 16px grid, with strokes on half-pixel offsets that land
+/// exactly on device pixels at 16px. On a 1x display a 14px icon falls between the grid lines
+/// and every stroke gets smeared across two pixels, so a size just under the grid is bumped up
+/// to it there. Denser displays have enough pixels for the requested size to stay sharp.
+fn icon_theme_glyph_size(size: Rems, window: &Window) -> Rems {
+    let rem_size = window.rem_size().as_f32();
+    snap_to_icon_theme_grid(
+        size.to_pixels(window.rem_size()).as_f32(),
+        window.scale_factor(),
+    )
+    .map_or(size, |logical_pixels| rems(logical_pixels / rem_size))
+}
+
+/// The logical size to draw an icon-theme glyph at instead of `logical_pixels`, if any.
+fn snap_to_icon_theme_grid(logical_pixels: f32, scale_factor: f32) -> Option<f32> {
+    const GRID: f32 = 16.;
+    let device_pixels = logical_pixels * scale_factor;
+    (scale_factor < 1.5 && (GRID - 2.0..GRID).contains(&device_pixels)).then(|| GRID / scale_factor)
 }
 
 #[derive(IntoElement)]
@@ -351,5 +386,30 @@ impl Component for Icon {
                 )]),
             ])
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn icon_theme_glyphs_snap_to_their_grid_only_on_low_density_displays() {
+        assert_eq!(snap_to_icon_theme_grid(14., 1.), Some(16.));
+        assert_eq!(
+            snap_to_icon_theme_grid(16., 1.),
+            None,
+            "already on the grid"
+        );
+        assert_eq!(
+            snap_to_icon_theme_grid(12., 1.),
+            None,
+            "too far from the grid to bump"
+        );
+        assert_eq!(
+            snap_to_icon_theme_grid(14., 2.),
+            None,
+            "dense enough to stay sharp"
+        );
     }
 }

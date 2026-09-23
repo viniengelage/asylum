@@ -14860,6 +14860,20 @@ async fn test_discard_mixed_workspace_draft_closes_only_archived_worktree_items(
     );
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn test_ios_runtime_version() {
+    assert_eq!(
+        ios_runtime_version("com.apple.CoreSimulator.SimRuntime.iOS-26-0"),
+        Some("iOS 26.0".to_string())
+    );
+    assert_eq!(
+        ios_runtime_version("com.apple.CoreSimulator.SimRuntime.iOS-18-6-1"),
+        Some("iOS 18.6.1".to_string())
+    );
+    assert_eq!(ios_runtime_version("unexpected"), None);
+}
+
 #[test]
 fn test_worktree_info_branch_names_for_main_worktrees() {
     let folder_paths = PathList::new(&[PathBuf::from("/projects/myapp")]);

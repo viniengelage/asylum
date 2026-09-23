@@ -97,9 +97,9 @@ pub trait StyledExt: Styled + Sized {
     /// The fill is left to the caller, since it says which step of the surface ladder the card
     /// sits on: `panel_background` for a dock, `editor_background` for a pane.
     ///
-    /// Sets `rounded_lg()`, `border_1()`, `border_color()`, `overflow_hidden()`.
+    /// Sets `rounded(pane_corner_radius())`, `border_1()`, `border_color()`, `overflow_hidden()`.
     fn workspace_card(self, cx: &App) -> Self {
-        self.rounded_lg()
+        self.rounded(pane_corner_radius())
             .border_1()
             .border_color(cx.theme().colors().border)
             .overflow_hidden()

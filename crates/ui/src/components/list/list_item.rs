@@ -380,8 +380,21 @@ impl RenderOnce for ListItem {
                             this.hover(|style| style.bg(cx.theme().colors().ghost_element_hover))
                                 .active(|style| style.bg(cx.theme().colors().ghost_element_active))
                                 .when(self.selected, |this| {
-                                    this.bg(cx.theme().colors().ghost_element_selected)
+                                    this.bg(cx.theme().colors().element_selected)
                                 })
+                        })
+                        // Inset items are the rows of menus and pickers, where the keyboard
+                        // selection and the row under the pointer are both visible at once. A
+                        // fill alone makes them indistinguishable, so the selection also gets
+                        // the accent border of a selected pill tab. The border is always there
+                        // so that selecting an item doesn't shift its content by a pixel.
+                        .when(self.focused.is_none(), |this| {
+                            let selected = self.selected && self.selectable && !self.disabled;
+                            this.border_1().border_color(if selected {
+                                cx.theme().colors().border_focused.opacity(0.55)
+                            } else {
+                                gpui::transparent_black()
+                            })
                         })
                     })
                     .when_some(

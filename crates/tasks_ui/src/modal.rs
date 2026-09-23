@@ -404,6 +404,11 @@ impl PickerDelegate for TasksModalDelegate {
                     .map(|candidates| candidates[ix].clone())
             });
         let Some((task_source_kind, mut task)) = task else {
+            // Nothing matched, so the query can only be meant as a command. Running it on enter
+            // turns the empty state into the obvious next step instead of a dead end.
+            if self.matches.is_empty() && !self.prompt.trim().is_empty() {
+                self.confirm_input(omit_history_entry, window, cx);
+            }
             return;
         };
         if let Some(TaskOverrides {
@@ -623,6 +628,22 @@ impl PickerDelegate for TasksModalDelegate {
         cx.emit(DismissEvent);
     }
 
+    fn no_matches_text(&self, _window: &mut Window, _cx: &mut App) -> Option<SharedString> {
+        if self.prompt.trim().is_empty() {
+            Some("No tasks in this project".into())
+        } else {
+            Some(format!("No task matches “{}”", self.prompt.trim()).into())
+        }
+    }
+
+    fn no_matches_hint(&self, _window: &mut Window, _cx: &mut App) -> Option<SharedString> {
+        if self.prompt.trim().is_empty() {
+            Some("Type a command to run it, or add tasks to .zed/tasks.json".into())
+        } else {
+            Some("Press enter to run it as a command".into())
+        }
+    }
+
     fn separators_after_indices(&self) -> Vec<usize> {
         if let Some(i) = self.divider_index {
             vec![i]
@@ -674,10 +695,18 @@ impl PickerDelegate for TasksModalDelegate {
                 .map(|this| {
                     if (current_modifiers.alt || self.matches.is_empty()) && !self.prompt.is_empty()
                     {
-                        let action = picker::ConfirmInput {
-                            secondary: current_modifiers.secondary(),
-                        }
-                        .boxed_clone();
+                        // With no matches enter already runs the query, so show the key people
+                        // will actually press rather than the alt-enter chord.
+                        let action = if current_modifiers.alt {
+                            picker::ConfirmInput {
+                                secondary: current_modifiers.secondary(),
+                            }
+                            .boxed_clone()
+                        } else if current_modifiers.secondary() {
+                            menu::SecondaryConfirm.boxed_clone()
+                        } else {
+                            menu::Confirm.boxed_clone()
+                        };
                         this.child({
                             let spawn_oneshot_label = if current_modifiers.secondary() {
                                 "Spawn Oneshot Without History"

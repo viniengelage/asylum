@@ -69,6 +69,22 @@ fn main() {
         }
     };
 
+    // The auto-updater compares this against the commit time of the latest release, so a local
+    // build that is newer than the release is never replaced by it.
+    let commit_timestamp = std::env::var("ZED_COMMIT_TIMESTAMP").ok().or_else(|| {
+        let output = Command::new("git")
+            .args(["show", "-s", "--format=%ct", "HEAD"])
+            .output()
+            .ok()?;
+        output
+            .status
+            .success()
+            .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+    });
+    if let Some(commit_timestamp) = commit_timestamp {
+        println!("cargo:rustc-env=ZED_COMMIT_TIMESTAMP={commit_timestamp}");
+    }
+
     if let Some(git_sha) = git_sha {
         println!("cargo:rustc-env=ZED_COMMIT_SHA={git_sha}");
 

@@ -60,7 +60,7 @@ use std::{
 use theme_settings::ThemeSettings;
 use ui::{
     ContextMenu, DecoratedIcon, IconDecoration, IconDecorationKind, IndentGuideColors,
-    IndentGuideLayout, Indicator, KeyBinding, ListItem, ListItemSpacing, ProjectEmptyState,
+    IndentGuideLayout, KeyBinding, ListItem, ListItemSpacing, ProjectEmptyState,
     ScrollAxes, ScrollableHandle, Scrollbars, StickyCandidate, Tooltip, WithScrollbar, prelude::*,
 };
 use util::{
@@ -649,27 +649,45 @@ struct ItemColors {
     hover: Hsla,
     drag_over: Hsla,
     marked: Hsla,
+    marked_border: Hsla,
     focused: Hsla,
 }
 
 fn get_item_color(is_sticky: bool, cx: &App) -> ItemColors {
     let colors = cx.theme().colors();
+    let default = if is_sticky {
+        colors.panel_overlay_background
+    } else {
+        colors.panel_background
+    };
 
     ItemColors {
-        default: if is_sticky {
-            colors.panel_overlay_background
-        } else {
-            colors.panel_background
-        },
+        default,
         hover: if is_sticky {
             colors.panel_overlay_hover
         } else {
-            colors.element_hover
+            colors.ghost_element_hover
         },
-        marked: colors.element_selected,
+        // Blended onto the row's own surface rather than left translucent: icon decorations
+        // knock out their outline with this colour, and a translucent knockout would show the
+        // icon through it.
+        marked: default.blend(colors.text_accent.opacity(0.2)),
+        marked_border: colors.border_focused.opacity(0.6),
         focused: colors.panel_focused_border,
         drag_over: colors.drop_target_background,
     }
+}
+
+/// Horizontal inset of every row, so a selected row reads as a rounded chip inside the panel
+/// instead of a band running into its edges.
+fn entry_row_inset(cx: &App) -> Pixels {
+    DynamicSpacing::Base06.px(cx)
+}
+
+/// Where an indent guide sits within a row. The shared offset centres a guide under a 16px
+/// disclosure; rows here draw a 12px chevron, and are inset by [`entry_row_inset`].
+fn indent_guide_left_offset(cx: &App) -> Pixels {
+    ui::LIST_ITEM_INDENT_GUIDE_LEFT_OFFSET - px(2.) + entry_row_inset(cx)
 }
 
 enum DeleteEntryOutcome {
@@ -6028,6 +6046,8 @@ impl ProjectPanel {
                 Some((color, _)) => color,
                 None => item_colors.focused,
             }
+        } else if is_marked {
+            item_colors.marked_border
         } else {
             bg_color
         };
@@ -6037,8 +6057,23 @@ impl ProjectPanel {
                 Some((color, _)) => color,
                 None => item_colors.focused,
             }
+        } else if is_marked {
+            item_colors.marked_border
         } else {
             bg_hover_color
+        };
+
+        let icon_color = if is_marked {
+            Color::Accent
+        } else {
+            Color::Muted
+        };
+        let label_weight = if settings.bold_folder_labels && kind.is_dir() {
+            Some(FontWeight::SEMIBOLD)
+        } else if is_marked {
+            Some(FontWeight::MEDIUM)
+        } else {
+            None
         };
 
         let folded_directory_drag_target = self.folded_directory_drag_target;
@@ -6068,8 +6103,8 @@ impl ProjectPanel {
                 false
             }
         };
-        let git_indicator = settings
-            .git_status_indicator
+        // The root row summarises the whole worktree, which the status bar already does.
+        let git_indicator = (settings.git_status_indicator && !details.path.is_empty())
             .then(|| git_status_indicator(details.git_status))
             .flatten();
 
@@ -6113,22 +6148,13 @@ impl ProjectPanel {
                 },
             )
             .cursor_pointer()
-            .rounded_none()
-            .bg(bg_color)
-            .border_1()
-            .border_r_2()
-            .border_color(border_color)
-            .hover(|style| style.bg(bg_hover_color).border_color(border_hover_color))
+            // The row itself stays opaque and full-width so that a sticky row covers what
+            // scrolls under it; the rounded, inset chip inside it carries the row's state.
+            .bg(item_colors.default)
+            .px(entry_row_inset(cx))
             .when(is_sticky, |this| this.block_mouse_except_scroll())
             .when(!is_sticky, |this| {
-                this.when(
-                    is_highlighted && folded_directory_drag_target.is_none(),
-                    |this| {
-                        this.border_color(transparent_white())
-                            .bg(item_colors.drag_over)
-                    },
-                )
-                .when(settings.drag_and_drop, |this| {
+                this.when(settings.drag_and_drop, |this| {
                     let path_for_external_paths = path.clone();
                     let path_for_dragged_selection = path.clone();
                     let dragged_selection = DraggedSelection {
@@ -6460,219 +6486,269 @@ impl ProjectPanel {
                 }),
             )
             .child(
-                ListItem::new(id)
-                    .indent_level(depth)
-                    .indent_step_size(px(settings.indent_size))
-                    .spacing(match settings.entry_spacing {
-                        ProjectPanelEntrySpacing::Comfortable => ListItemSpacing::Dense,
-                        ProjectPanelEntrySpacing::Standard => ListItemSpacing::ExtraDense,
+                div()
+                    .rounded_md()
+                    .bg(bg_color)
+                    .border_1()
+                    .border_color(border_color)
+                    .group_hover(GROUP_NAME, |style| {
+                        style.bg(bg_hover_color).border_color(border_hover_color)
                     })
-                    .selectable(false)
                     .when(
-                        canonical_path.is_some()
-                            || diagnostic_count.is_some()
-                            || git_indicator.is_some(),
+                        !is_sticky && is_highlighted && folded_directory_drag_target.is_none(),
                         |this| {
-                            let symlink_element = canonical_path.map(|path| {
-                                div()
-                                    .id("symlink_icon")
-                                    .tooltip(move |_window, cx| {
-                                        Tooltip::with_meta(
-                                            path.to_string_lossy().into_owned(),
-                                            None,
-                                            "Symbolic Link",
-                                            cx,
-                                        )
-                                    })
-                                    .child(
-                                        Icon::new(IconName::ArrowUpRight)
-                                            .size(IconSize::Indicator)
-                                            .color(filename_text_color),
-                                    )
-                            });
-                            this.end_slot::<AnyElement>(
-                                h_flex()
-                                    .gap_1()
-                                    .flex_none()
-                                    .pr_3()
-                                    .when_some(diagnostic_count, |this, count| {
-                                        this.when(count.error_count > 0, |this| {
-                                            this.child(
-                                                Label::new(count.capped_error_count())
-                                                    .size(LabelSize::Small)
-                                                    .color(Color::Error),
-                                            )
-                                        })
-                                        .when(
-                                            count.warning_count > 0,
-                                            |this| {
-                                                this.child(
-                                                    Label::new(count.capped_warning_count())
-                                                        .size(LabelSize::Small)
-                                                        .color(Color::Warning),
-                                                )
-                                            },
-                                        )
-                                    })
-                                    .when_some(git_indicator, |this, (label, color)| {
-                                        let git_indicator = if kind.is_dir() {
-                                            Indicator::dot()
-                                                .color(Color::Custom(color.color(cx).opacity(0.5)))
-                                                .into_any_element()
-                                        } else {
-                                            Label::new(label)
-                                                .size(LabelSize::Small)
-                                                .color(color)
-                                                .into_any_element()
-                                        };
-
-                                        this.child(git_indicator)
-                                    })
-                                    .when_some(symlink_element, |this, el| this.child(el))
-                                    .into_any_element(),
-                            )
+                            this.border_color(transparent_white())
+                                .bg(item_colors.drag_over)
                         },
                     )
-                    .map(|this| {
-                        let decoration_color =
-                            entry_diagnostic_aware_icon_decoration_and_color(diagnostic_severity)
-                                .map(|(_, color)| color);
-                        let decorated = |glyph: SharedString,
-                                         decoration_kind: IconDecorationKind,
-                                         color: Color| {
-                            DecoratedIcon::new(
-                                Icon::from_path(glyph).color(Color::Muted),
-                                Some(
-                                    IconDecoration::new(decoration_kind, bg_color, cx)
-                                        .group_name(Some(GROUP_NAME.into()))
-                                        .knockout_hover_color(bg_hover_color)
-                                        .color(color.color(cx))
-                                        .position(Point {
-                                            x: px(-2.),
-                                            y: px(-2.),
-                                        }),
-                                ),
-                            )
-                            .into_any_element()
-                        };
-
-                        let icon_slot = if let Some(icon) = &icon {
-                            Some(match diagnostic_mark.zip(decoration_color) {
-                                Some((DiagnosticMark::OnIcon(decoration_kind), color)) => {
-                                    div().child(decorated(icon.clone(), decoration_kind, color))
-                                }
-                                _ => h_flex()
-                                    .child(Icon::from_path(icon.to_string()).color(Color::Muted)),
+                    .child(
+                        ListItem::new(id)
+                            .indent_level(depth)
+                            .indent_step_size(px(settings.indent_size))
+                            .spacing(match settings.entry_spacing {
+                                ProjectPanelEntrySpacing::Comfortable => ListItemSpacing::Dense,
+                                ProjectPanelEntrySpacing::Standard => ListItemSpacing::ExtraDense,
                             })
-                        } else if let Some(DiagnosticMark::Standalone(icon_name)) = diagnostic_mark
-                        {
-                            let color =
-                                entry_diagnostic_aware_icon_name_and_color(diagnostic_severity)
-                                    .map_or(Color::Error, |(_, color)| color);
-                            Some(
-                                h_flex()
-                                    .size(IconSize::default().rems())
-                                    .child(Icon::new(icon_name).color(color).size(IconSize::Small)),
-                            )
-                        } else if chevron.is_some() {
-                            // The chevron already fills this slot; a spacer would double its width.
-                            None
-                        } else {
-                            Some(
-                                h_flex()
-                                    .size(IconSize::default().rems())
-                                    .invisible()
-                                    .flex_none(),
-                            )
-                        };
-
-                        let chevron =
-                            chevron.map(|chevron| match diagnostic_mark.zip(decoration_color) {
-                                Some((DiagnosticMark::OnChevron(decoration_kind), color)) => {
-                                    decorated(chevron, decoration_kind, color)
-                                }
-                                _ => Icon::from_path(chevron)
-                                    .color(Color::Muted)
-                                    .into_any_element(),
-                            });
-
-                        match (chevron, icon_slot) {
-                            (Some(chevron), Some(icon_slot)) => {
-                                this.child(h_flex().gap_0p5().child(chevron).child(icon_slot))
-                            }
-                            (Some(chevron), None) => this.child(h_flex().child(chevron)),
-                            (None, Some(icon_slot)) if reserves_chevron_slot => this.child(
-                                h_flex()
-                                    .gap_0p5()
-                                    .child(
+                            .selectable(false)
+                            .when(
+                                canonical_path.is_some()
+                                    || diagnostic_count.is_some()
+                                    || git_indicator.is_some(),
+                                |this| {
+                                    let symlink_element = canonical_path.map(|path| {
+                                        div()
+                                            .id("symlink_icon")
+                                            .tooltip(move |_window, cx| {
+                                                Tooltip::with_meta(
+                                                    path.to_string_lossy().into_owned(),
+                                                    None,
+                                                    "Symbolic Link",
+                                                    cx,
+                                                )
+                                            })
+                                            .child(
+                                                Icon::new(IconName::ArrowUpRight)
+                                                    .size(IconSize::Indicator)
+                                                    .color(filename_text_color),
+                                            )
+                                    });
+                                    this.end_slot::<AnyElement>(
                                         h_flex()
-                                            .size(IconSize::default().rems())
-                                            .invisible()
-                                            .flex_none(),
+                                            .gap_1()
+                                            .flex_none()
+                                            .pr_3()
+                                            .when_some(diagnostic_count, |this, count| {
+                                                this.when(count.error_count > 0, |this| {
+                                                    this.child(
+                                                        Label::new(count.capped_error_count())
+                                                            .size(LabelSize::Small)
+                                                            .color(Color::Error),
+                                                    )
+                                                })
+                                                .when(count.warning_count > 0, |this| {
+                                                    this.child(
+                                                        Label::new(count.capped_warning_count())
+                                                            .size(LabelSize::Small)
+                                                            .color(Color::Warning),
+                                                    )
+                                                })
+                                            })
+                                            .when_some(git_indicator, |this, (label, color)| {
+                                                this.child(
+                                                    Label::new(label)
+                                                        .size(LabelSize::Custom(rems_from_px(
+                                                            11_f32,
+                                                        )))
+                                                        .buffer_font(cx)
+                                                        .weight(FontWeight::SEMIBOLD)
+                                                        .color(color),
+                                                )
+                                            })
+                                            .when_some(symlink_element, |this, el| this.child(el))
+                                            .into_any_element(),
                                     )
-                                    .child(icon_slot),
-                            ),
-                            (None, Some(icon_slot)) => this.child(icon_slot),
-                            (None, None) => this,
-                        }
-                    })
-                    .child(if show_editor {
-                        h_flex().h_6().w_full().child(self.filename_editor.clone())
-                    } else {
-                        h_flex()
-                            .h_6()
-                            .map(|this| match self.state.ancestors.get(&entry_id) {
-                                Some(folded_ancestors) => {
-                                    this.children(self.render_folder_elements(
-                                        folded_ancestors,
-                                        entry_id,
-                                        file_name,
-                                        path_style,
-                                        is_sticky,
-                                        kind.is_file(),
-                                        is_active || is_marked,
-                                        settings.drag_and_drop,
-                                        settings.bold_folder_labels,
-                                        item_colors.drag_over,
-                                        folded_directory_drag_target,
-                                        filename_text_color,
-                                        cx,
-                                    ))
-                                }
-
-                                None => this.child(
-                                    Label::new(file_name)
-                                        .single_line()
-                                        .color(filename_text_color)
-                                        .when(
-                                            settings.bold_folder_labels && kind.is_dir(),
-                                            |this| this.weight(FontWeight::SEMIBOLD),
+                                },
+                            )
+                            .map(|this| {
+                                let decoration_color =
+                                    entry_diagnostic_aware_icon_decoration_and_color(
+                                        diagnostic_severity,
+                                    )
+                                    .map(|(_, color)| color);
+                                let icon_slot_size = IconSize::Small.rems();
+                                let chevron_slot_size = IconSize::XSmall.rems();
+                                let decorated =
+                                    |glyph: SharedString,
+                                     glyph_size: IconSize,
+                                     glyph_color: Color,
+                                     decoration_kind: IconDecorationKind,
+                                     color: Color| {
+                                        DecoratedIcon::new(
+                                            Icon::from_path(glyph)
+                                                .size(glyph_size)
+                                                .color(glyph_color),
+                                            Some(
+                                                IconDecoration::new(decoration_kind, bg_color, cx)
+                                                    .group_name(Some(GROUP_NAME.into()))
+                                                    .knockout_hover_color(bg_hover_color)
+                                                    .color(color.color(cx))
+                                                    .position(Point {
+                                                        x: px(-2.),
+                                                        y: px(-2.),
+                                                    }),
+                                            ),
                                         )
-                                        .into_any_element(),
-                                ),
+                                        .into_any_element()
+                                    };
+
+                                let icon_slot = if let Some(icon) = &icon {
+                                    Some(match diagnostic_mark.zip(decoration_color) {
+                                        Some((DiagnosticMark::OnIcon(decoration_kind), color)) => {
+                                            div().child(decorated(
+                                                icon.clone(),
+                                                IconSize::Small,
+                                                icon_color,
+                                                decoration_kind,
+                                                color,
+                                            ))
+                                        }
+                                        _ => h_flex().child(
+                                            Icon::from_path(icon.to_string())
+                                                .size(IconSize::Small)
+                                                .color(icon_color),
+                                        ),
+                                    })
+                                } else if let Some(DiagnosticMark::Standalone(icon_name)) =
+                                    diagnostic_mark
+                                {
+                                    let color = entry_diagnostic_aware_icon_name_and_color(
+                                        diagnostic_severity,
+                                    )
+                                    .map_or(Color::Error, |(_, color)| color);
+                                    Some(h_flex().size(icon_slot_size).child(
+                                        Icon::new(icon_name).color(color).size(IconSize::Small),
+                                    ))
+                                } else if chevron.is_some() {
+                                    // The chevron already fills this slot; a spacer would double its width.
+                                    None
+                                } else {
+                                    Some(h_flex().size(icon_slot_size).invisible().flex_none())
+                                };
+
+                                let chevron = chevron.map(|chevron| {
+                                    match diagnostic_mark.zip(decoration_color) {
+                                        Some((
+                                            DiagnosticMark::OnChevron(decoration_kind),
+                                            color,
+                                        )) => decorated(
+                                            chevron,
+                                            IconSize::XSmall,
+                                            Color::Muted,
+                                            decoration_kind,
+                                            color,
+                                        ),
+                                        _ => Icon::from_path(chevron)
+                                            .size(IconSize::XSmall)
+                                            .color(Color::Muted)
+                                            .into_any_element(),
+                                    }
+                                });
+                                let chevron_to_icon_gap = DynamicSpacing::Base06.rems(cx);
+
+                                match (chevron, icon_slot) {
+                                    (Some(chevron), Some(icon_slot)) => this.child(
+                                        h_flex()
+                                            .gap(chevron_to_icon_gap)
+                                            .child(
+                                                h_flex()
+                                                    .size(chevron_slot_size)
+                                                    .flex_none()
+                                                    .justify_center()
+                                                    .child(chevron),
+                                            )
+                                            .child(icon_slot),
+                                    ),
+                                    // A chevron standing in for the icon takes the icon's
+                                    // slot, so it lines up with the files' icons beside it.
+                                    (Some(chevron), None) => this.child(
+                                        h_flex()
+                                            .size(icon_slot_size)
+                                            .flex_none()
+                                            .justify_center()
+                                            .child(chevron),
+                                    ),
+                                    (None, Some(icon_slot)) if reserves_chevron_slot => this.child(
+                                        h_flex()
+                                            .gap(chevron_to_icon_gap)
+                                            .child(
+                                                h_flex()
+                                                    .size(chevron_slot_size)
+                                                    .invisible()
+                                                    .flex_none(),
+                                            )
+                                            .child(icon_slot),
+                                    ),
+                                    (None, Some(icon_slot)) => this.child(icon_slot),
+                                    (None, None) => this,
+                                }
                             })
-                    })
-                    .on_secondary_mouse_down(cx.listener(
-                        move |this, event: &MouseDownEvent, window, cx| {
-                            // Stop propagation to prevent the catch-all context menu for the project
-                            // panel from being deployed.
-                            cx.stop_propagation();
-                            // Some context menu actions apply to all marked entries. If the user
-                            // right-clicks on an entry that is not marked, they may not realize the
-                            // action applies to multiple entries. To avoid inadvertent changes, all
-                            // entries are unmarked.
-                            if !this.marked_entries.contains(&selection) {
-                                this.marked_entries.clear();
-                            }
-                            this.deploy_context_menu(
-                                ContextMenuPlacement::AtMouse(event.position),
-                                entry_id,
-                                window,
-                                cx,
-                            );
-                        },
-                    ))
-                    .overflow_x(),
+                            .child(if show_editor {
+                                h_flex().h_6().w_full().child(self.filename_editor.clone())
+                            } else {
+                                h_flex().h_6().map(|this| {
+                                    match self.state.ancestors.get(&entry_id) {
+                                        Some(folded_ancestors) => {
+                                            this.children(self.render_folder_elements(
+                                                folded_ancestors,
+                                                entry_id,
+                                                file_name,
+                                                path_style,
+                                                is_sticky,
+                                                kind.is_file(),
+                                                is_active || is_marked,
+                                                settings.drag_and_drop,
+                                                label_weight,
+                                                item_colors.drag_over,
+                                                folded_directory_drag_target,
+                                                filename_text_color,
+                                                cx,
+                                            ))
+                                        }
+
+                                        None => this.child(
+                                            Label::new(file_name)
+                                                .single_line()
+                                                .color(filename_text_color)
+                                                .when_some(label_weight, |this, weight| {
+                                                    this.weight(weight)
+                                                })
+                                                .into_any_element(),
+                                        ),
+                                    }
+                                })
+                            })
+                            .on_secondary_mouse_down(cx.listener(
+                                move |this, event: &MouseDownEvent, window, cx| {
+                                    // Stop propagation to prevent the catch-all context menu for the project
+                                    // panel from being deployed.
+                                    cx.stop_propagation();
+                                    // Some context menu actions apply to all marked entries. If the user
+                                    // right-clicks on an entry that is not marked, they may not realize the
+                                    // action applies to multiple entries. To avoid inadvertent changes, all
+                                    // entries are unmarked.
+                                    if !this.marked_entries.contains(&selection) {
+                                        this.marked_entries.clear();
+                                    }
+                                    this.deploy_context_menu(
+                                        ContextMenuPlacement::AtMouse(event.position),
+                                        entry_id,
+                                        window,
+                                        cx,
+                                    );
+                                },
+                            ))
+                            .overflow_x(),
+                    ),
             )
             .when_some(validation_color_and_message, |this, (color, message)| {
                 this.relative().child(deferred(
@@ -6680,8 +6756,8 @@ impl ProjectPanel {
                         .occlude()
                         .absolute()
                         .top_full()
-                        .left(px(-1.)) // Used px over rem so that it doesn't change with font size
-                        .right(px(-0.5))
+                        .left(entry_row_inset(cx))
+                        .right(entry_row_inset(cx))
                         .py_1()
                         .px_2()
                         .border_1()
@@ -6706,7 +6782,7 @@ impl ProjectPanel {
         is_file: bool,
         is_active_or_marked: bool,
         drag_and_drop_enabled: bool,
-        bold_folder_labels: bool,
+        label_weight: Option<FontWeight>,
         drag_over_color: Hsla,
         folded_directory_drag_target: Option<FoldedDirectoryDragTarget>,
         filename_text_color: Color,
@@ -6815,9 +6891,7 @@ impl ProjectPanel {
                             Label::new(component)
                                 .single_line()
                                 .color(filename_text_color)
-                                .when(bold_folder_labels && !is_file, |this| {
-                                    this.weight(FontWeight::SEMIBOLD)
-                                })
+                                .when_some(label_weight, |this, weight| this.weight(weight))
                                 .when(index == active_index && is_active_or_marked, |this| {
                                     this.underline()
                                 }),
@@ -6915,9 +6989,13 @@ impl ProjectPanel {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> EntryDetails {
-        let (show_file_icons, folder_indicator) = {
+        let (show_file_icons, folder_indicator, git_status_indicator) = {
             let settings = ProjectPanelSettings::get_global(cx);
-            (settings.file_icons, settings.folder_indicator)
+            (
+                settings.file_icons,
+                settings.folder_indicator,
+                settings.git_status_indicator,
+            )
         };
 
         let expanded_entry_ids = self
@@ -7009,8 +7087,15 @@ impl ProjectPanel {
         let reserves_chevron_slot =
             chevron.is_none() && folder_indicator.shows_chevron() && folder_indicator.shows_icon();
 
+        // With the status letter shown at the end of the row, tinting the name as well would
+        // say the same thing twice and turn most of a busy tree yellow.
+        let label_git_status = if git_status_indicator {
+            GitSummary::default()
+        } else {
+            git_status
+        };
         let filename_text_color =
-            entry_git_aware_label_color(git_status, entry.is_ignored, is_marked);
+            entry_git_aware_label_color(label_git_status, entry.is_ignored, is_marked);
 
         let is_cut = self
             .clipboard
@@ -7614,8 +7699,7 @@ impl Render for ProjectPanel {
                                     .with_render_fn(
                                         cx.entity(),
                                         move |this, params, _, cx| {
-                                            const LEFT_OFFSET: Pixels =
-                                                ui::LIST_ITEM_INDENT_GUIDE_LEFT_OFFSET;
+                                            let left_offset = indent_guide_left_offset(cx);
                                             const PADDING_Y: Pixels = px(4.);
                                             const HITBOX_OVERDRAW: Pixels = px(3.);
 
@@ -7641,7 +7725,7 @@ impl Render for ProjectPanel {
                                                     let bounds = Bounds::new(
                                                         point(
                                                             layout.offset.x * indent_size
-                                                                + LEFT_OFFSET,
+                                                                + left_offset,
                                                             layout.offset.y * item_height + offset,
                                                         ),
                                                         size(
@@ -7710,9 +7794,8 @@ impl Render for ProjectPanel {
                                         )
                                         .with_render_fn(
                                             cx.entity(),
-                                            move |_, params, _, _| {
-                                                const LEFT_OFFSET: Pixels =
-                                                    ui::LIST_ITEM_INDENT_GUIDE_LEFT_OFFSET;
+                                            move |_, params, _, cx| {
+                                                let left_offset = indent_guide_left_offset(cx);
 
                                                 let indent_size = params.indent_size;
                                                 let item_height = params.item_height;
@@ -7724,7 +7807,7 @@ impl Render for ProjectPanel {
                                                         let bounds = Bounds::new(
                                                             point(
                                                                 layout.offset.x * indent_size
-                                                                    + LEFT_OFFSET,
+                                                                    + left_offset,
                                                                 layout.offset.y * item_height,
                                                             ),
                                                             size(

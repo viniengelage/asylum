@@ -1,11 +1,12 @@
 use crate::{
-    ButtonCommon, ButtonStyle, IconButtonShape, KeyBinding, List, ListItem, ListSeparator,
-    ListSubHeader, Tooltip, prelude::*, utils::WithRemSize,
+    ButtonCommon, ButtonStyle, HighlightedLabel, IconButtonShape, KeyBinding, KeyboardHint, List,
+    ListItem, ListItemSpacing, ListSeparator, ListSubHeader, Tooltip, prelude::*,
+    utils::WithRemSize,
 };
 use gpui::{
     Action, Anchor, AnyElement, App, Bounds, DismissEvent, Entity, EventEmitter, FocusHandle,
-    Focusable, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Role,
-    Size, Subscription, TaskExt, anchored, canvas, prelude::*, px, relative,
+    Focusable, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels,
+    Point, Role, Size, Subscription, TaskExt, anchored, canvas, prelude::*, px, relative,
 };
 use menu::{SelectChild, SelectFirst, SelectLast, SelectNext, SelectParent, SelectPrevious};
 use std::{
@@ -66,7 +67,41 @@ pub enum ContextMenuItem {
     },
 }
 
+/// Matches `query` against `label` as a case-insensitive subsequence, the way the pickers'
+/// fuzzy search does, and returns the byte offsets of the matched characters in `label`.
+fn fuzzy_match_positions(label: &str, query: &str) -> Option<Vec<usize>> {
+    let mut positions = Vec::new();
+    let mut query_chars = query.chars().flat_map(char::to_lowercase).peekable();
+    for (offset, character) in label.char_indices() {
+        let Some(&wanted) = query_chars.peek() else {
+            break;
+        };
+        if character.to_lowercase().eq(std::iter::once(wanted)) {
+            positions.push(offset);
+            query_chars.next();
+        }
+    }
+    query_chars.peek().is_none().then_some(positions)
+}
+
 impl ContextMenuItem {
+    /// Whether the entry draws something in front of its label, which makes every other entry
+    /// in the menu reserve that column.
+    fn has_leading_icon(&self) -> bool {
+        match self {
+            ContextMenuItem::Entry(entry) => {
+                let has_icon = entry.icon.is_some()
+                    || entry.custom_icon_path.is_some()
+                    || entry.custom_icon_svg.is_some();
+                let has_start_icon = has_icon && entry.icon_position == IconPosition::Start;
+                let has_start_toggle = matches!(entry.toggle, Some((IconPosition::Start, _)));
+                has_start_icon || has_start_toggle
+            }
+            ContextMenuItem::Submenu { icon, .. } => icon.is_some(),
+            _ => false,
+        }
+    }
+
     pub fn custom_entry(
         entry_render: impl Fn(&mut Window, &mut App) -> AnyElement + 'static,
         handler: impl Fn(&mut Window, &mut App) + 'static,
@@ -99,6 +134,7 @@ pub struct ContextMenuEntry {
     end_slot_title: Option<SharedString>,
     end_slot_handler: Option<Rc<dyn Fn(Option<&FocusHandle>, &mut Window, &mut App)>>,
     show_end_slot_on_hover: bool,
+    description: Option<SharedString>,
 }
 
 impl ContextMenuEntry {
@@ -121,6 +157,7 @@ impl ContextMenuEntry {
             end_slot_title: None,
             end_slot_handler: None,
             show_end_slot_on_hover: false,
+            description: None,
         }
     }
 
@@ -188,6 +225,13 @@ impl ContextMenuEntry {
         self
     }
 
+    /// A second, muted line under the label that says what the entry does, for menus whose
+    /// labels are names rather than actions (the agents in "New Thread", for example).
+    pub fn description(mut self, description: impl Into<SharedString>) -> Self {
+        self.description = Some(description.into());
+        self
+    }
+
     pub fn documentation_aside(
         mut self,
         side: DocumentationSide,
@@ -240,6 +284,10 @@ pub struct ContextMenu {
     /// on_hover(false) returns focus to the main menu and on_focus_in
     /// re-selects the first item before the next on_hover(true) clears it.
     suppress_focus_selection: bool,
+    keyboard_hints: bool,
+    /// What the user has typed while the menu is open. Non-empty hides every entry whose label
+    /// doesn't fuzzy-match it, along with headers and separators.
+    filter_query: String,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -362,6 +410,8 @@ impl ContextMenu {
                     submenu_trigger_mouse_down: false,
                     ignore_blur_until: None,
                     suppress_focus_selection: false,
+                    keyboard_hints: false,
+                    filter_query: String::new(),
                 },
                 window,
                 cx,
@@ -432,6 +482,8 @@ impl ContextMenu {
                 submenu_trigger_mouse_down: false,
                 ignore_blur_until: None,
                 suppress_focus_selection: false,
+                keyboard_hints: false,
+                filter_query: String::new(),
             },
             window,
             cx,
@@ -509,6 +561,7 @@ impl ContextMenu {
             end_slot_title: None,
             end_slot_handler: None,
             show_end_slot_on_hover: false,
+            description: None,
         }));
         self
     }
@@ -540,6 +593,7 @@ impl ContextMenu {
             end_slot_title: Some(end_slot_title),
             end_slot_handler: Some(Rc::new(move |_, window, cx| end_slot_handler(window, cx))),
             show_end_slot_on_hover: false,
+            description: None,
         }));
         self
     }
@@ -571,6 +625,7 @@ impl ContextMenu {
             end_slot_title: Some(end_slot_title),
             end_slot_handler: Some(Rc::new(move |_, window, cx| end_slot_handler(window, cx))),
             show_end_slot_on_hover: true,
+            description: None,
         }));
         self
     }
@@ -615,6 +670,7 @@ impl ContextMenu {
             end_slot_title: None,
             end_slot_handler: None,
             show_end_slot_on_hover: false,
+            description: None,
         }));
         self
     }
@@ -724,6 +780,7 @@ impl ContextMenu {
             end_slot_title: None,
             end_slot_handler: None,
             show_end_slot_on_hover: false,
+            description: None,
         }));
         self
     }
@@ -757,6 +814,7 @@ impl ContextMenu {
             end_slot_title: None,
             end_slot_handler: None,
             show_end_slot_on_hover: false,
+            description: None,
         }));
         self
     }
@@ -792,6 +850,7 @@ impl ContextMenu {
             end_slot_title: None,
             end_slot_handler: None,
             show_end_slot_on_hover: false,
+            description: None,
         }));
         self
     }
@@ -857,6 +916,14 @@ impl ContextMenu {
             return;
         };
         handler(None, window, cx);
+    }
+
+    /// Shows a footer that teaches the keyboard: arrows to move and return to confirm. Meant for
+    /// menus people open often from a toolbar button, where they would otherwise never learn
+    /// that the menu can be driven without the pointer.
+    pub fn keyboard_hints(mut self) -> Self {
+        self.keyboard_hints = true;
+        self
     }
 
     pub fn fixed_width(mut self, width: DefiniteLength) -> Self {
@@ -1025,13 +1092,94 @@ impl ContextMenu {
         cx.notify();
     }
 
+    fn is_navigable(&self, item: &ContextMenuItem) -> bool {
+        item.is_selectable() && self.filter_match(item).is_some()
+    }
+
+    /// The byte offsets of the label characters that match the filter, or `None` when the item
+    /// is hidden by it. Items are only ever hidden while the user is typing.
+    fn filter_match(&self, item: &ContextMenuItem) -> Option<Vec<usize>> {
+        if self.filter_query.is_empty() {
+            return Some(Vec::new());
+        }
+        let label = match item {
+            ContextMenuItem::Entry(entry) => &entry.label,
+            ContextMenuItem::Submenu { label, .. } => label,
+            _ => return None,
+        };
+        fuzzy_match_positions(label, &self.filter_query)
+    }
+
+    fn set_filter_query(&mut self, query: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.filter_query = query;
+        if self
+            .selected_index
+            .and_then(|ix| self.items.get(ix))
+            .is_none_or(|item| !self.is_navigable(item))
+        {
+            self.select_first(&SelectFirst, window, cx);
+        }
+        cx.notify();
+    }
+
+    fn handle_filter_key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let keystroke = &event.keystroke;
+        let modifiers = &keystroke.modifiers;
+        if modifiers.control || modifiers.platform || modifiers.alt || modifiers.function {
+            return;
+        }
+
+        if keystroke.key == "backspace" {
+            if !self.filter_query.is_empty() {
+                let mut query = std::mem::take(&mut self.filter_query);
+                query.pop();
+                self.set_filter_query(query, window, cx);
+                cx.stop_propagation();
+            }
+            return;
+        }
+
+        let Some(text) = keystroke.key_char.as_ref() else {
+            return;
+        };
+        // A leading space is left alone so it can keep confirming the selected entry.
+        if text.chars().any(char::is_control) || (self.filter_query.is_empty() && text == " ") {
+            return;
+        }
+        let mut query = std::mem::take(&mut self.filter_query);
+        query.push_str(text);
+        self.set_filter_query(query, window, cx);
+        cx.stop_propagation();
+    }
+
+    /// Escape first gives up the filter, so a mistyped query doesn't cost the whole menu.
+    fn handle_cancel(
+        &mut self,
+        action: &menu::Cancel,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.filter_query.is_empty() {
+            self.cancel(action, window, cx);
+        } else {
+            self.set_filter_query(String::new(), window, cx);
+        }
+    }
+
     pub fn clear_selected(&mut self) {
         self.selected_index = None;
     }
 
     pub fn select_first(&mut self, _: &SelectFirst, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(ix) = self.items.iter().position(|item| item.is_selectable()) {
+        if let Some(ix) = self.items.iter().position(|item| self.is_navigable(item)) {
             self.select_index(ix, window, cx);
+        } else {
+            self.clear_selected();
         }
         cx.notify();
     }
@@ -1064,7 +1212,7 @@ impl ContextMenu {
 
     pub fn select_last(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<usize> {
         for (ix, item) in self.items.iter().enumerate().rev() {
-            if item.is_selectable() {
+            if self.is_navigable(item) {
                 return self.select_index(ix, window, cx);
             }
         }
@@ -1085,7 +1233,7 @@ impl ContextMenu {
                 return;
             } else {
                 for (ix, item) in self.items.iter().enumerate().skip(next_index) {
-                    if item.is_selectable() {
+                    if self.is_navigable(item) {
                         self.select_index(ix, window, cx);
                         cx.notify();
                         return;
@@ -1104,7 +1252,7 @@ impl ContextMenu {
     ) {
         if let Some(ix) = self.selected_index {
             for (ix, item) in self.items.iter().enumerate().take(ix).rev() {
-                if item.is_selectable() {
+                if self.is_navigable(item) {
                     self.select_index(ix, window, cx);
                     cx.notify();
                     return;
@@ -1188,7 +1336,7 @@ impl ContextMenu {
     ) -> Option<usize> {
         self.documentation_aside = None;
         let item = self.items.get(ix)?;
-        if item.is_selectable() {
+        if self.is_navigable(item) {
             self.selected_index = Some(ix);
             match item {
                 ContextMenuItem::Entry(entry) => {
@@ -1269,6 +1417,8 @@ impl ContextMenu {
                 submenu_trigger_mouse_down: false,
                 ignore_blur_until: None,
                 suppress_focus_selection: false,
+                keyboard_hints: false,
+                filter_query: String::new(),
             };
 
             menu = (builder)(menu, window, cx);
@@ -1395,6 +1545,8 @@ impl ContextMenu {
         &self,
         ix: usize,
         item: &ContextMenuItem,
+        reserve_icon_column: bool,
+        highlights: &[usize],
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
@@ -1405,7 +1557,7 @@ impl ContextMenu {
         let is_active_descendant = |selectable: bool| selectable && Some(ix) == self.selected_index;
         match item {
             ContextMenuItem::Separator => ListSeparator.into_any_element(),
-            ContextMenuItem::Header(header) => ListSubHeader::new(header.clone())
+            ContextMenuItem::Header(header) => ListSubHeader::new(header.to_uppercase())
                 .inset(true)
                 .into_any_element(),
             ContextMenuItem::HeaderWithLink(header, label, url) => {
@@ -1433,7 +1585,15 @@ impl ContextMenu {
                 .child(Label::new(label.clone()))
                 .into_any_element(),
             ContextMenuItem::Entry(entry) => self
-                .render_menu_entry(ix, entry, is_active_descendant(true), window, cx)
+                .render_menu_entry(
+                    ix,
+                    entry,
+                    is_active_descendant(true),
+                    reserve_icon_column,
+                    highlights,
+                    window,
+                    cx,
+                )
                 .into_any_element(),
             ContextMenuItem::CustomEntry {
                 entry_render,
@@ -1522,6 +1682,7 @@ impl ContextMenu {
                     *icon,
                     *icon_color,
                     is_active_descendant(true),
+                    reserve_icon_column,
                     cx,
                 )
                 .into_any_element(),
@@ -1535,6 +1696,7 @@ impl ContextMenu {
         icon: Option<IconName>,
         icon_color: Option<Color>,
         is_active_descendant: bool,
+        reserve_icon_column: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let toggle_state = Some(ix) == self.selected_index
@@ -1568,6 +1730,7 @@ impl ContextMenu {
             .child(
                 ListItem::new(ix)
                     .inset(true)
+                    .spacing(ListItemSpacing::Sparse)
                     .aria_role(Role::MenuItem)
                     .when(is_active_descendant, |item| item.aria_active_descendant())
                     .aria_label(label.clone())
@@ -1671,6 +1834,9 @@ impl ContextMenu {
                                                 .color(icon_color.unwrap_or(Color::Muted)),
                                         )
                                     })
+                                    .when(icon.is_none() && reserve_icon_column, |this| {
+                                        this.child(div().flex_none().size(IconSize::Small.rems()))
+                                    })
                                     .child(Label::new(label).color(Color::Default)),
                             )
                             .child(
@@ -1679,6 +1845,60 @@ impl ContextMenu {
                                     .color(Color::Muted),
                             ),
                     ),
+            )
+    }
+
+    fn render_filter_row(&self, cx: &App) -> impl IntoElement + use<> {
+        let has_matches = self.items.iter().any(|item| self.is_navigable(item));
+        v_flex()
+            .child(
+                h_flex()
+                    .px(DynamicSpacing::Base08.rems(cx))
+                    .py(DynamicSpacing::Base04.rems(cx))
+                    .gap(DynamicSpacing::Base06.rems(cx))
+                    .child(
+                        Icon::new(IconName::MagnifyingGlass)
+                            .size(IconSize::Small)
+                            .color(Color::Muted),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(Label::new(self.filter_query.clone()).truncate()),
+                    )
+                    .child(KeyboardHint::new("Clear").icon_key(IconName::Escape)),
+            )
+            .child(ListSeparator)
+            .when(!has_matches, |this| {
+                this.child(
+                    div()
+                        .px(DynamicSpacing::Base08.rems(cx))
+                        .py(DynamicSpacing::Base04.rems(cx))
+                        .child(Label::new("No matches").color(Color::Muted)),
+                )
+            })
+    }
+
+    fn render_keyboard_hints(cx: &App) -> impl IntoElement + use<> {
+        h_flex()
+            .mt(DynamicSpacing::Base04.rems(cx))
+            .px(DynamicSpacing::Base08.rems(cx))
+            .py(DynamicSpacing::Base06.rems(cx))
+            .gap(DynamicSpacing::Base12.rems(cx))
+            .border_t_1()
+            .border_color(cx.theme().colors().border_variant)
+            .child(
+                KeyboardHint::new("Navigate")
+                    .icon_key(IconName::ArrowUp)
+                    .icon_key(IconName::ArrowDown),
+            )
+            .child(KeyboardHint::new("Open").icon_key(IconName::Return))
+            .child(div().flex_1())
+            .child(
+                Label::new("Type to filter")
+                    .size(LabelSize::XSmall)
+                    .color(Color::Muted),
             )
     }
 
@@ -1752,6 +1972,8 @@ impl ContextMenu {
         ix: usize,
         entry: &ContextMenuEntry,
         is_active_descendant: bool,
+        reserve_icon_column: bool,
+        highlights: &[usize],
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
@@ -1773,6 +1995,7 @@ impl ContextMenu {
             end_slot_handler,
             show_end_slot_on_hover,
             secondary_handler: _,
+            description,
         } = entry;
         let this = cx.weak_entity();
         // Report the item's keyboard shortcut to assistive technology, resolving
@@ -1824,61 +2047,59 @@ impl ContextMenu {
             icon_color.unwrap_or(Color::Default)
         };
 
-        let label_element = if let Some(custom_path) = custom_icon_path {
-            h_flex()
-                .gap_1p5()
-                .when(renders_start_icon, |flex| {
-                    flex.child(
-                        Icon::from_path(custom_path.clone())
-                            .size(*icon_size)
-                            .color(icon_color),
-                    )
-                })
-                .child(Label::new(label.clone()).color(label_color).truncate())
-                .when(*icon_position == IconPosition::End, |flex| {
-                    flex.child(
-                        Icon::from_path(custom_path.clone())
-                            .size(*icon_size)
-                            .color(icon_color),
-                    )
-                })
-                .into_any_element()
+        let entry_icon = if let Some(custom_path) = custom_icon_path {
+            Some(Icon::from_path(custom_path.clone()))
         } else if let Some(custom_icon_svg) = custom_icon_svg {
-            h_flex()
-                .gap_1p5()
-                .when(renders_start_icon, |flex| {
-                    flex.child(
-                        Icon::from_external_svg(custom_icon_svg.clone())
-                            .size(*icon_size)
-                            .color(icon_color),
-                    )
-                })
-                .child(Label::new(label.clone()).color(label_color).truncate())
-                .when(*icon_position == IconPosition::End, |flex| {
-                    flex.child(
-                        Icon::from_external_svg(custom_icon_svg.clone())
-                            .size(*icon_size)
-                            .color(icon_color),
-                    )
-                })
-                .into_any_element()
-        } else if let Some(icon_name) = icon {
-            h_flex()
-                .gap_1p5()
-                .when(renders_start_icon, |flex| {
-                    flex.child(Icon::new(*icon_name).size(*icon_size).color(icon_color))
-                })
-                .child(Label::new(label.clone()).color(label_color).truncate())
-                .when(*icon_position == IconPosition::End, |flex| {
-                    flex.child(Icon::new(*icon_name).size(*icon_size).color(icon_color))
-                })
-                .into_any_element()
+            Some(Icon::from_external_svg(custom_icon_svg.clone()))
         } else {
+            icon.map(Icon::new)
+        }
+        .map(|icon| icon.size(*icon_size).color(icon_color));
+        let (start_icon, end_icon) = match icon_position {
+            IconPosition::Start if renders_start_icon => (entry_icon, None),
+            IconPosition::Start => (None, None),
+            IconPosition::End => (None, entry_icon),
+        };
+        // Once any entry has a leading icon, entries without one keep the column empty so that
+        // every label in the menu starts at the same x.
+        let reserves_start_column =
+            reserve_icon_column && start_icon.is_none() && !start_slot_taken_by_toggle;
+
+        let label_text = if highlights.is_empty() {
             Label::new(label.clone())
                 .color(label_color)
                 .truncate()
                 .into_any_element()
+        } else {
+            HighlightedLabel::new(label.clone(), highlights.to_vec())
+                .color(label_color)
+                .truncate()
+                .into_any_element()
         };
+        let label_element = h_flex()
+            .min_w_0()
+            .gap_1p5()
+            .children(start_icon)
+            .when(reserves_start_column, |this| {
+                this.child(div().flex_none().size(icon_size.rems()))
+            })
+            .map(|this| match description {
+                Some(description) => this.child(
+                    v_flex().min_w_0().child(label_text).child(
+                        Label::new(description.clone())
+                            .size(LabelSize::Small)
+                            .color(if *disabled {
+                                Color::Disabled
+                            } else {
+                                Color::Muted
+                            })
+                            .truncate(),
+                    ),
+                ),
+                None => this.child(label_text),
+            })
+            .children(end_icon)
+            .into_any_element();
 
         let aside_trigger_bounds = self.aside_trigger_bounds.clone();
 
@@ -1916,6 +2137,7 @@ impl ContextMenu {
                 ListItem::new(ix)
                     .group_name("label_container")
                     .inset(true)
+                    .spacing(ListItemSpacing::Sparse)
                     .disabled(*disabled)
                     .aria_role(if toggle.is_some() {
                         Role::MenuItemCheckBox
@@ -2031,7 +2253,7 @@ impl ContextMenu {
 
                                 div()
                                     .ml_4()
-                                    .child(binding.disabled(*disabled))
+                                    .child(binding.disabled(*disabled).keycaps(true))
                                     .when(*disabled && documentation_aside.is_some(), |parent| {
                                         parent.invisible()
                                     })
@@ -2185,6 +2407,8 @@ impl ContextMenu {
             submenu_trigger_mouse_down: false,
             ignore_blur_until: None,
             suppress_focus_selection: false,
+            keyboard_hints: false,
+            filter_query: String::new(),
         }
     }
 }
@@ -2272,6 +2496,7 @@ impl Render for ContextMenu {
                 .child((aside.render)(cx))
         };
 
+        let reserve_icon_column = self.items.iter().any(ContextMenuItem::has_leading_icon);
         let render_menu = |cx: &mut Context<Self>, window: &mut Window| {
             let bounds_cell = self.main_menu_observed_bounds.clone();
             let menu_bounds_measure = canvas(
@@ -2319,7 +2544,8 @@ impl Render for ContextMenu {
                         .on_action(cx.listener(ContextMenu::select_submenu_parent))
                         .on_action(cx.listener(ContextMenu::confirm))
                         .on_action(cx.listener(ContextMenu::secondary_confirm))
-                        .on_action(cx.listener(ContextMenu::cancel))
+                        .on_action(cx.listener(ContextMenu::handle_cancel))
+                        .on_key_down(cx.listener(ContextMenu::handle_filter_key))
                         .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
                             if *hovered {
                                 this.hover_target = HoverTarget::MainMenu;
@@ -2373,14 +2599,27 @@ impl Render for ContextMenu {
                             }
                             el
                         })
+                        .when(!self.filter_query.is_empty(), |this| {
+                            this.child(self.render_filter_row(cx))
+                        })
                         .child(
-                            List::new().children(
-                                self.items
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(ix, item)| self.render_menu_item(ix, item, window, cx)),
-                            ),
-                        ),
+                            List::new().children(self.items.iter().enumerate().filter_map(
+                                |(ix, item)| {
+                                    let highlights = self.filter_match(item)?;
+                                    Some(self.render_menu_item(
+                                        ix,
+                                        item,
+                                        reserve_icon_column,
+                                        &highlights,
+                                        window,
+                                        cx,
+                                    ))
+                                },
+                            )),
+                        )
+                        .when(self.keyboard_hints, |this| {
+                            this.child(Self::render_keyboard_hints(cx))
+                        }),
                 )
         };
 
@@ -2456,6 +2695,63 @@ mod tests {
     use gpui::TestAppContext;
 
     use super::*;
+
+    #[test]
+    fn fuzzy_match_positions_matches_subsequences_case_insensitively() {
+        assert_eq!(fuzzy_match_positions("New Thread", "nt"), Some(vec![0, 4]));
+        assert_eq!(
+            fuzzy_match_positions("Terminal", "TER"),
+            Some(vec![0, 1, 2])
+        );
+        assert_eq!(fuzzy_match_positions("Árvore", "ár"), Some(vec![0, 2]));
+        assert_eq!(fuzzy_match_positions("Terminal", "zed"), None);
+    }
+
+    #[gpui::test]
+    fn filtering_hides_non_matching_entries_from_navigation(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let context_menu = cx.update(|window, cx| {
+            ContextMenu::build(window, cx, |menu, _, _| {
+                menu.header("Agents")
+                    .entry("Zed Agent", None, |_, _| {})
+                    .entry("Terminal", None, |_, _| {})
+                    .separator()
+                    .entry("Add More Agents", None, |_, _| {})
+            })
+        });
+
+        context_menu.update_in(cx, |context_menu, window, cx| {
+            context_menu.select_first(&SelectFirst, window, cx);
+            assert_eq!(Some(1), context_menu.selected_index);
+
+            context_menu.set_filter_query("ter".into(), window, cx);
+            assert_eq!(
+                Some(2),
+                context_menu.selected_index,
+                "The selection should move to the only entry that still matches"
+            );
+
+            context_menu.select_next(&SelectNext, window, cx);
+            assert_eq!(
+                Some(2),
+                context_menu.selected_index,
+                "Navigation should skip the entries the filter hides"
+            );
+
+            context_menu.set_filter_query("agents".into(), window, cx);
+            assert_eq!(Some(4), context_menu.selected_index);
+
+            context_menu.set_filter_query("xyz".into(), window, cx);
+            assert_eq!(None, context_menu.selected_index, "Nothing matches");
+
+            context_menu.handle_cancel(&menu::Cancel, window, cx);
+            assert!(
+                context_menu.filter_query.is_empty(),
+                "Escape should clear the filter before it closes the menu"
+            );
+            assert_eq!(Some(1), context_menu.selected_index);
+        });
+    }
 
     #[gpui::test]
     fn can_navigate_back_over_headers(cx: &mut TestAppContext) {

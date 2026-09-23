@@ -1,6 +1,6 @@
 use gpui::{Anchor, AnyView, Entity, Pixels, Point, Role};
 
-use crate::{ButtonLike, ContextMenu, PopoverMenu, prelude::*};
+use crate::{ButtonLike, ContextMenu, PopoverMenu, TintColor, prelude::*};
 
 use super::PopoverMenuHandle;
 
@@ -237,6 +237,8 @@ impl RenderOnce for DropdownMenu {
                         .when_some(aria_value, |this, value| this.aria_value(value))
                         .aria_expanded(expanded)
                         .style(button_style)
+                        .toggle_state(expanded)
+                        .selected_style(ButtonStyle::Tinted(TintColor::Accent))
                         .when_some(self.trigger_icon.filter(|_| self.chevron), |this, icon| {
                             this.end_icon(
                                 Icon::new(icon).size(IconSize::XSmall).color(Color::Muted),
@@ -262,6 +264,8 @@ impl RenderOnce for DropdownMenu {
                         .aria_expanded(expanded)
                         .child(element)
                         .style(button_style)
+                        .toggle_state(expanded)
+                        .selected_style(ButtonStyle::Tinted(TintColor::Accent))
                         .when(self.chevron, |this| {
                             this.child(
                                 Icon::new(IconName::ChevronUpDown)

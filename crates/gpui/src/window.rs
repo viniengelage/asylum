@@ -6,8 +6,8 @@ use crate::Inspector;
 use crate::profiler;
 use crate::{
     Action, AnyDrag, AnyElement, AnyImageCache, AnyTooltip, AnyView, App, AppContext, Arena, Asset,
-    AsyncWindowContext, AtlasTile, AvailableSpace, Background, BorderStyle, Bounds, BoxShadow,
-    Capslock, Context, Corners, CursorHideMode, CursorStyle, Decorations, DevicePixels,
+    AsyncWindowContext, AtlasKey, AtlasTile, AvailableSpace, Background, BorderStyle, Bounds,
+    BoxShadow, Capslock, Context, Corners, CursorHideMode, CursorStyle, Decorations, DevicePixels,
     DispatchActionListener, DispatchNodeId, DispatchTree, DisplayId, Edges, Effect, Entity,
     EntityId, EventEmitter, FileDropEvent, FontId, Global, GlobalElementId, GlyphId, GpuSpecs,
     Hsla, InputHandler, IsZero, KeyBinding, KeyContext, KeyDownEvent, KeyEvent, Keystroke,
@@ -964,11 +964,7 @@ pub(crate) struct TooltipRequest {
 /// The area a slice of the scene actually covered, in window coordinates, or `None` when the
 /// slice painted nothing visible.
 #[cfg(target_os = "macos")]
-fn painted_bounds(
-    scene: &Scene,
-    range: Range<usize>,
-    scale_factor: f32,
-) -> Option<Bounds<Pixels>> {
+fn painted_bounds(scene: &Scene, range: Range<usize>, scale_factor: f32) -> Option<Bounds<Pixels>> {
     let mut painted: Option<Bounds<ScaledPixels>> = None;
     for operation in scene.paint_operations.get(range)? {
         let crate::scene::PaintOperation::Primitive(primitive) = operation else {
@@ -3689,14 +3685,19 @@ impl Window {
         let scale_factor = self.scale_factor;
         let scene = &self.next_frame.scene;
         let mut occlusions = Vec::new();
-        occlusions.extend(self.next_frame.deferred_draws.iter().filter_map(|deferred_draw| {
-            painted_bounds(
-                scene,
-                deferred_draw.paint_range.start.scene_index
-                    ..deferred_draw.paint_range.end.scene_index,
-                scale_factor,
-            )
-        }));
+        occlusions.extend(
+            self.next_frame
+                .deferred_draws
+                .iter()
+                .filter_map(|deferred_draw| {
+                    painted_bounds(
+                        scene,
+                        deferred_draw.paint_range.start.scene_index
+                            ..deferred_draw.paint_range.end.scene_index,
+                        scale_factor,
+                    )
+                }),
+        );
         occlusions.extend(painted_bounds(scene, trailing_overlays, scale_factor));
 
         if occlusions != self.native_subview_occlusions {
@@ -4948,6 +4949,69 @@ impl Window {
             transformation,
         });
 
+        Ok(())
+    }
+
+    /// Paint an SVG with its own colors, rasterized at the exact device-pixel size of `bounds`
+    /// and centered in them (the SVG keeps its aspect ratio).
+    ///
+    /// Unlike [`Self::paint_image`] with an SVG source, which rasterizes once at twice the SVG's
+    /// intrinsic size and lets the GPU scale that bitmap, the result is sharp at any scale
+    /// factor. Use it for small colored glyphs such as file icons.
+    ///
+    /// This method should only be called as part of the paint phase of element drawing.
+    pub fn paint_polychrome_svg(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        path: SharedString,
+        data: Option<&[u8]>,
+        cx: &App,
+    ) -> Result<()> {
+        self.invalidator.debug_assert_paint();
+
+        let bounds = self.snap_bounds(bounds);
+        let params = RenderSvgParams {
+            path,
+            size: bounds
+                .size
+                .map(|pixels| DevicePixels::from(pixels.0.round() as i32)),
+        };
+        if params.size.is_zero() {
+            return Ok(());
+        }
+
+        let Some(tile) = self.sprite_atlas.get_or_insert_with(
+            AtlasKey::PolychromeSvg(params.clone()),
+            &mut || {
+                let Some((size, bytes)) = cx.svg_renderer.render_bgra(&params, data)? else {
+                    return Ok(None);
+                };
+                Ok(Some((size, Cow::Owned(bytes))))
+            },
+        )?
+        else {
+            return Ok(());
+        };
+
+        let tile_size = tile.bounds.size.map(|value| ScaledPixels(value.0 as f32));
+        let origin = bounds.center() - point(tile_size.width / 2., tile_size.height / 2.);
+        let sprite_bounds = Bounds {
+            origin: origin.map(|value| ScaledPixels(value.0.round())),
+            size: tile_size,
+        };
+        let content_mask = self.snapped_content_mask();
+        let opacity = self.element_opacity();
+
+        self.next_frame.scene.insert_primitive(PolychromeSprite {
+            order: 0,
+            pad: 0,
+            grayscale: false.into(),
+            bounds: sprite_bounds,
+            content_mask,
+            corner_radii: Corners::default(),
+            tile,
+            opacity,
+        });
         Ok(())
     }
 

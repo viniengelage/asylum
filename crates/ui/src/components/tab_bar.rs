@@ -2,7 +2,7 @@ use gpui::{AnyElement, ScrollHandle};
 use smallvec::SmallVec;
 
 use crate::prelude::*;
-use crate::{HeaderBar, HeaderBarLevel, Tab, TabPosition};
+use crate::{HeaderBar, HeaderBarLevel, TAB_STRIP_RADIUS, Tab, TabPosition, TabStyle};
 
 /// How a [`TabBar`] distributes its tabs.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -22,8 +22,10 @@ pub enum TabBarLayout {
 pub struct TabBar {
     id: ElementId,
     layout: TabBarLayout,
+    style: TabStyle,
     start_children: SmallVec<[AnyElement; 2]>,
     children: SmallVec<[AnyElement; 2]>,
+    after_tabs: Option<AnyElement>,
     end_children: SmallVec<[AnyElement; 2]>,
     scroll_handle: Option<ScrollHandle>,
 }
@@ -33,8 +35,10 @@ impl TabBar {
         Self {
             id: id.into(),
             layout: TabBarLayout::Scrollable,
+            style: TabStyle::Surface,
             start_children: SmallVec::new(),
             children: SmallVec::new(),
+            after_tabs: None,
             end_children: SmallVec::new(),
             scroll_handle: None,
         }
@@ -48,6 +52,24 @@ impl TabBar {
             layout: TabBarLayout::Segmented,
             ..Self::new(id)
         }
+    }
+
+    /// Wraps the tabs in the rounded strip that [`TabStyle::Pill`] tabs sit in.
+    ///
+    /// The tabs themselves still need [`Tab::style`] set to the same value.
+    pub fn style(mut self, style: TabStyle) -> Self {
+        self.style = style;
+        self
+    }
+
+    /// An element that fills the space between the tabs and the end children.
+    ///
+    /// With [`TabStyle::Pill`] the strip hugs its tabs, so anything that should span the rest
+    /// of the bar — a pane's drop target for "after the last tab" — goes here instead of into
+    /// the strip.
+    pub fn after_tabs(mut self, element: impl IntoElement) -> Self {
+        self.after_tabs = Some(element.into_any_element());
+        self
     }
 
     pub fn track_scroll(mut self, scroll_handle: &ScrollHandle) -> Self {
@@ -115,8 +137,101 @@ impl ParentElement for TabBar {
     }
 }
 
+impl TabBar {
+    fn render_pill(self, cx: &App) -> AnyElement {
+        let border_color = HeaderBarLevel::Pane.border(cx);
+        let slot_gap = HeaderBar::slot_gap(cx);
+        let segmented = self.layout == TabBarLayout::Segmented;
+
+        let tabs = match self.layout {
+            TabBarLayout::Scrollable => h_flex()
+                .id("tabs")
+                .min_w_0()
+                .gap(DynamicSpacing::Base02.px(cx))
+                .overflow_x_scroll()
+                .when_some(self.scroll_handle, |this, scroll_handle| {
+                    this.track_scroll(&scroll_handle)
+                })
+                .children(self.children),
+            TabBarLayout::Segmented => h_flex()
+                .id("tabs")
+                .w_full()
+                .gap(DynamicSpacing::Base02.px(cx))
+                .children(
+                    self.children
+                        .into_iter()
+                        .map(|tab| div().flex_1().min_w_0().child(tab)),
+                ),
+        };
+
+        let strip = h_flex()
+            .min_w_0()
+            .when(segmented, |this| this.flex_1())
+            .p(DynamicSpacing::Base03.px(cx))
+            .rounded(TAB_STRIP_RADIUS)
+            .border_1()
+            .border_color(border_color)
+            .bg(cx.theme().colors().editor_background)
+            .overflow_hidden()
+            .child(tabs);
+
+        h_flex()
+            .id(self.id)
+            .group("tab_bar")
+            .flex_none()
+            .w_full()
+            .h(HeaderBar::height(cx))
+            .px(DynamicSpacing::Base08.px(cx))
+            .gap(DynamicSpacing::Base06.px(cx))
+            .rounded_t(pane_corner_radius())
+            .bg(HeaderBarLevel::Pane.background(cx))
+            .border_b_1()
+            .border_color(border_color)
+            .when(!self.start_children.is_empty(), |this| {
+                this.child(
+                    h_flex()
+                        .flex_none()
+                        .gap(slot_gap)
+                        .children(self.start_children),
+                )
+            })
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .child(strip)
+                    .map(|this| match self.after_tabs {
+                        Some(after_tabs) => this.child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .h_full()
+                                .flex()
+                                .items_center()
+                                .child(after_tabs),
+                        ),
+                        None => this,
+                    }),
+            )
+            .when(!self.end_children.is_empty(), |this| {
+                this.child(
+                    h_flex()
+                        .flex_none()
+                        .gap(slot_gap)
+                        .children(self.end_children),
+                )
+            })
+            .into_any_element()
+    }
+}
+
 impl RenderOnce for TabBar {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        if self.style == TabStyle::Pill {
+            return self.render_pill(cx);
+        }
+
         let border_color = HeaderBarLevel::Pane.border(cx);
         let slot_gap = HeaderBar::slot_gap(cx);
         let slot_padding = HeaderBar::slot_padding(cx);
@@ -128,7 +243,7 @@ impl RenderOnce for TabBar {
             .flex()
             .flex_none()
             .w_full()
-            .h(HeaderBar::height(cx))
+            .h(Tab::container_height(cx))
             .rounded_t(pane_corner_radius())
             .bg(HeaderBarLevel::Pane.background(cx))
             .when(!self.start_children.is_empty(), |this| {
@@ -170,15 +285,14 @@ impl RenderOnce for TabBar {
                                 this.track_scroll(&scroll_handle)
                             })
                             .children(self.children),
-                        TabBarLayout::Segmented => h_flex()
-                            .id("tabs")
-                            .w_full()
-                            .h_full()
-                            .children(self.children.into_iter().map(|tab| {
-                                div().flex_1().min_w_0().h_full().child(tab)
-                            })),
+                        TabBarLayout::Segmented => h_flex().id("tabs").w_full().h_full().children(
+                            self.children
+                                .into_iter()
+                                .map(|tab| div().flex_1().min_w_0().h_full().child(tab)),
+                        ),
                     }),
             )
+            .children(self.after_tabs)
             .when(!self.end_children.is_empty(), |this| {
                 this.child(
                     h_flex()
@@ -191,6 +305,7 @@ impl RenderOnce for TabBar {
                         .children(self.end_children),
                 )
             })
+            .into_any_element()
     }
 }
 

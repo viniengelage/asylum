@@ -94,9 +94,14 @@ impl RenderOnce for MentionCrease {
         let button_height = DefiniteLength::Absolute(AbsoluteLength::Pixels(
             px(window.line_height().into()) - px(1.),
         ));
+        let chip_background = cx.theme().colors().ghost_element_hover;
+        let chip_hover_background = cx.theme().colors().ghost_element_active;
 
-        ButtonLike::new(self.id)
-            .style(ButtonStyle::Outlined)
+        // The chip fill is on a wrapper because no `ButtonStyle` rests on the hover colour. An
+        // outlined chip can vanish on the composer, whose fill themes may set equal to the
+        // outline's `border_variant`.
+        let chip = ButtonLike::new(self.id)
+            .style(ButtonStyle::Transparent)
             .size(ButtonSize::Compact)
             .height(button_height)
             .selected_style(ButtonStyle::Tinted(TintColor::Accent))
@@ -144,7 +149,16 @@ impl RenderOnce for MentionCrease {
                         this.tooltip(Tooltip::text(tooltip_text))
                     })
                 }
-            })
+            });
+
+        // The editor measures crease placeholders at min-content width; a block wrapper lets the
+        // button shrink below its label, so the label paints over the icon.
+        h_flex()
+            .flex_none()
+            .rounded_md()
+            .bg(chip_background)
+            .hover(|style| style.bg(chip_hover_background))
+            .child(chip)
     }
 }
 

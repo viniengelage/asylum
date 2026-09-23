@@ -33,6 +33,7 @@ pub struct PlatformTitleBar {
     system_window_tabs: Entity<SystemWindowTabs>,
     button_layout: Option<WindowButtonLayout>,
     multi_workspace: Option<WeakEntity<MultiWorkspace>>,
+    height: Option<Pixels>,
 }
 
 impl PlatformTitleBar {
@@ -48,7 +49,14 @@ impl PlatformTitleBar {
             system_window_tabs,
             button_layout: None,
             multi_workspace: None,
+            height: None,
         }
+    }
+
+    /// Overrides the platform's title bar height, for a title bar that doubles as the header
+    /// of an island and has to line up with the headers of its neighbours.
+    pub fn set_height(&mut self, height: Option<Pixels>) {
+        self.height = height;
     }
 
     pub fn with_multi_workspace(mut self, multi_workspace: WeakEntity<MultiWorkspace>) -> Self {
@@ -238,7 +246,9 @@ impl Render for PlatformTitleBar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let supported_controls = window.window_controls();
         let decorations = window.window_decorations();
-        let height = platform_title_bar_height(window);
+        let height = self
+            .height
+            .unwrap_or_else(|| platform_title_bar_height(window));
         let titlebar_color = self.title_bar_color(window, cx);
         let close_action = Box::new(workspace::CloseWindow);
         let children = mem::take(&mut self.children);

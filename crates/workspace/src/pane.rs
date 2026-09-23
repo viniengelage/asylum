@@ -48,7 +48,7 @@ use theme_settings::ThemeSettings;
 use ui::{
     ContextMenu, ContextMenuEntry, ContextMenuItem, DecoratedIcon, IconButtonShape, IconDecoration,
     IconDecorationKind, Indicator, PopoverMenu, PopoverMenuHandle, Tab, TabBar, TabPosition,
-    Tooltip, prelude::*, right_click_menu,
+    TabStyle, Tooltip, prelude::*, right_click_menu,
 };
 use util::{
     ResultExt, debug_panic, markdown::MarkdownInlineCode, maybe, paths::PathStyle,
@@ -594,6 +594,8 @@ impl Render for DraggedPane {
             .unwrap_or_else(|| "Pane".into());
         let ui_font = ThemeSettings::get_global(cx).ui_font.clone();
         ui::Tab::new("dragged-pane")
+            .style(TabStyle::Pill)
+            .toggle_state(true)
             .child(ui::Label::new(title).size(ui::LabelSize::Small))
             .render(window, cx)
             .font(ui_font)
@@ -2906,7 +2908,11 @@ impl Pane {
         let icon = item
             .tab_icon(window, cx)?
             .size(IconSize::Small)
-            .color(Color::Muted);
+            .color(if is_active {
+                Color::Accent
+            } else {
+                Color::Muted
+            });
 
         let item_diagnostic = item
             .project_path(cx)
@@ -2916,12 +2922,12 @@ impl Pane {
             return Some(icon.into_any_element());
         };
 
-        // The knockout has to match the fill the icon actually sits on, which for an unselected
-        // tab is `tab_inactive_background` — not the strip behind it.
+        // The knockout has to match the fill the icon actually sits on: the selected pill's
+        // fill, or the strip showing through an unselected one.
         let knockout_item_color = if is_active {
-            cx.theme().colors().tab_active_background
+            cx.theme().colors().element_selected
         } else {
-            cx.theme().colors().tab_inactive_background
+            cx.theme().colors().editor_background
         };
 
         let (icon_decoration, icon_color) = if matches!(diagnostic, &DiagnosticSeverity::ERROR) {
@@ -3022,6 +3028,7 @@ impl Pane {
             .content_background(cx)
             .unwrap_or_else(|| cx.theme().colors().editor_background);
         let tab = Tab::new(ix)
+            .style(TabStyle::Pill)
             .surface(tab_surface)
             .position(if is_first_item {
                 TabPosition::First
@@ -3726,7 +3733,7 @@ impl Pane {
     ) -> AnyElement {
         let tab_bar = self
             .configure_tab_bar_start(
-                TabBar::new("tab_bar"),
+                TabBar::new("tab_bar").style(TabStyle::Pill),
                 navigate_backward,
                 navigate_forward,
                 window,
@@ -3741,6 +3748,8 @@ impl Pane {
                 let is_scrollable = max_scroll > px(2.0);
                 let has_active_unpinned_tab = self.active_item_index >= self.pinned_tab_count;
                 h_flex()
+                    .flex_none()
+                    .gap(DynamicSpacing::Base02.px(cx))
                     .children(pinned_tabs)
                     .when(is_scrollable && is_scrolled, |this| {
                         this.when(has_active_unpinned_tab, |this| this.border_r_2())
@@ -3748,7 +3757,8 @@ impl Pane {
                             .border_color(cx.theme().colors().border)
                     })
             }))
-            .child(self.render_unpinned_tabs_container(unpinned_tabs, tab_count, cx));
+            .child(self.render_unpinned_tabs_container(unpinned_tabs, cx))
+            .after_tabs(self.render_tab_bar_drop_target(tab_count, cx));
         tab_bar.into_any_element()
     }
 
@@ -3764,7 +3774,7 @@ impl Pane {
     ) -> AnyElement {
         let pinned_tab_bar = self
             .configure_tab_bar_start(
-                TabBar::new("pinned_tab_bar"),
+                TabBar::new("pinned_tab_bar").style(TabStyle::Pill),
                 navigate_backward,
                 navigate_forward,
                 window,
@@ -3784,11 +3794,10 @@ impl Pane {
             .flex_none()
             .child(pinned_tab_bar)
             .child(
-                TabBar::new("unpinned_tab_bar").child(self.render_unpinned_tabs_container(
-                    unpinned_tabs,
-                    tab_count,
-                    cx,
-                )),
+                TabBar::new("unpinned_tab_bar")
+                    .style(TabStyle::Pill)
+                    .child(self.render_unpinned_tabs_container(unpinned_tabs, cx))
+                    .after_tabs(self.render_tab_bar_drop_target(tab_count, cx)),
             )
             .into_any_element()
     }
@@ -3796,19 +3805,18 @@ impl Pane {
     fn render_unpinned_tabs_container(
         &mut self,
         unpinned_tabs: Vec<AnyElement>,
-        tab_count: usize,
         cx: &mut Context<Pane>,
     ) -> impl IntoElement {
         h_flex()
             .id("unpinned tabs")
+            .min_w_0()
+            .gap(DynamicSpacing::Base02.px(cx))
             .overflow_x_scroll()
-            .w_full()
             .track_scroll(&self.tab_bar_scroll_handle)
             .on_scroll_wheel(cx.listener(|this, _, _, _| {
                 this.suppress_scroll = true;
             }))
             .children(unpinned_tabs)
-            .child(self.render_tab_bar_drop_target(tab_count, cx))
     }
 
     fn render_tab_bar_drop_target(
@@ -3819,7 +3827,7 @@ impl Pane {
         div()
             .id("tab_bar_drop_target")
             .min_w_6()
-            .h(Tab::container_height(cx))
+            .h_full()
             .flex_grow_1()
             // HACK: This empty child is currently necessary to force the drop target to appear
             // despite us setting a min width above.
@@ -3881,7 +3889,7 @@ impl Pane {
             .id("pinned_tabs_border")
             .debug_selector(|| "pinned_tabs_border".into())
             .min_w_6()
-            .h(Tab::container_height(cx))
+            .h(Tab::pill_height(cx))
             .flex_grow_1()
             .border_l_1()
             .border_color(cx.theme().colors().border)
@@ -5266,6 +5274,7 @@ impl Render for DraggedTab {
                 .read(cx)
                 .tab_icon_element(self.item.as_ref(), self.is_active, window, cx);
         Tab::new("")
+            .style(TabStyle::Pill)
             .toggle_state(self.is_active)
             .children(icon)
             .child(label)
@@ -8710,7 +8719,8 @@ mod tests {
         // Assert
         let tab_bar_scroll_handle =
             pane.update_in(cx, |pane, _window, _cx| pane.tab_bar_scroll_handle.clone());
-        assert_eq!(tab_bar_scroll_handle.children_count(), 6);
+        // Only the tabs: the drop target after them sits outside the pill strip.
+        assert_eq!(tab_bar_scroll_handle.children_count(), 5);
         let tab_bounds = cx.debug_bounds("TAB-4").unwrap();
         let new_tab_button_bounds = cx.debug_bounds("ICON-Plus").unwrap();
         let scroll_bounds = tab_bar_scroll_handle.bounds();

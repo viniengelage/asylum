@@ -146,7 +146,7 @@ impl Render for AndroidDeviceModal {
                         h_flex()
                             .gap_1p5()
                             .child(
-                                Icon::new(IconName::Screen)
+                                Icon::new(IconName::Smartphone)
                                     .size(IconSize::Small)
                                     .color(Color::Muted),
                             )

@@ -2092,8 +2092,11 @@ impl MultiWorkspace {
 
 impl Render for MultiWorkspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // The traffic lights sit in the left island's header: the island starts one card gap
+        // (8px) plus its 1px border in from the window, and the lights are inset 14px from
+        // there and centred in the 44px header.
         #[cfg(target_os = "macos")]
-        window.set_traffic_light_position(point(px(24.0), px(23.0)));
+        window.set_traffic_light_position(point(px(23.0), px(24.0)));
 
         let render_sidebar = |id: &'static str, sidebar: &dyn SidebarHandle| {
             div()
@@ -2209,8 +2212,9 @@ impl Render for MultiWorkspace {
                 .child(
                     h_flex()
                         .size_full()
-                        .p_2()
-                        .gap_2()
+                        // Each card insets itself by half the card gap, so padding the window
+                        // by the other half makes every seam, edges included, one full gap.
+                        .p(crate::pane_group::workspace_card_gap(cx) / 2.)
                         .bg(cx.theme().colors().background)
                         .children(left_sidebar)
                         .child(

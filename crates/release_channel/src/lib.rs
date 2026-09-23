@@ -44,10 +44,10 @@ pub static RELEASE_CHANNEL: LazyLock<ReleaseChannel> =
 #[cfg(target_os = "windows")]
 pub fn app_identifier() -> &'static str {
     match *RELEASE_CHANNEL {
-        ReleaseChannel::Dev => "Zed-Editor-Dev",
-        ReleaseChannel::Nightly => "Zed-Editor-Nightly",
-        ReleaseChannel::Preview => "Zed-Editor-Preview",
-        ReleaseChannel::Stable => "Zed-Editor-Stable",
+        ReleaseChannel::Dev => "Asylum-Editor-Dev",
+        ReleaseChannel::Nightly => "Asylum-Editor-Nightly",
+        ReleaseChannel::Preview => "Asylum-Editor-Preview",
+        ReleaseChannel::Stable => "Asylum-Editor-Stable",
     }
 }
 
@@ -84,6 +84,27 @@ impl AppCommitSha {
     /// Returns the short (7 character) commit SHA.
     pub fn short(&self) -> String {
         self.0.chars().take(7).collect()
+    }
+}
+
+/// The commit time of the build, as seconds since the Unix epoch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AppCommitTimestamp(pub i64);
+
+struct GlobalAppCommitTimestamp(AppCommitTimestamp);
+
+impl Global for GlobalAppCommitTimestamp {}
+
+impl AppCommitTimestamp {
+    /// Returns the global [`AppCommitTimestamp`], if one is set.
+    pub fn try_global(cx: &App) -> Option<AppCommitTimestamp> {
+        cx.try_global::<GlobalAppCommitTimestamp>()
+            .map(|timestamp| timestamp.0)
+    }
+
+    /// Sets the global [`AppCommitTimestamp`].
+    pub fn set_global(timestamp: AppCommitTimestamp, cx: &mut App) {
+        cx.set_global(GlobalAppCommitTimestamp(timestamp))
     }
 }
 
@@ -205,10 +226,10 @@ impl ReleaseChannel {
     /// Returns the display name for this [`ReleaseChannel`].
     pub fn display_name(&self) -> &'static str {
         match self {
-            ReleaseChannel::Dev => "Zed Dev",
-            ReleaseChannel::Nightly => "Zed Nightly",
-            ReleaseChannel::Preview => "Zed Preview",
-            ReleaseChannel::Stable => "Zed",
+            ReleaseChannel::Dev => "Asylum Dev",
+            ReleaseChannel::Nightly => "Asylum Nightly",
+            ReleaseChannel::Preview => "Asylum Preview",
+            ReleaseChannel::Stable => "Asylum",
         }
     }
 
@@ -227,10 +248,10 @@ impl ReleaseChannel {
     /// This also has to match the bundle identifier for Zed on macOS.
     pub fn app_id(&self) -> &'static str {
         match self {
-            ReleaseChannel::Dev => "dev.zed.Zed-Dev",
-            ReleaseChannel::Nightly => "dev.zed.Zed-Nightly",
-            ReleaseChannel::Preview => "dev.zed.Zed-Preview",
-            ReleaseChannel::Stable => "dev.zed.Zed",
+            ReleaseChannel::Dev => "dev.asylum.Asylum-Dev",
+            ReleaseChannel::Nightly => "dev.asylum.Asylum-Nightly",
+            ReleaseChannel::Preview => "dev.asylum.Asylum-Preview",
+            ReleaseChannel::Stable => "dev.asylum.Asylum",
         }
     }
 

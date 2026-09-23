@@ -223,6 +223,13 @@ pub trait PickerDelegate: Sized + 'static {
     fn no_matches_text(&self, _window: &mut Window, _cx: &mut App) -> Option<SharedString> {
         Some("No matches".into())
     }
+
+    /// A second line under [`Self::no_matches_text`] that tells the user what they can do
+    /// instead, e.g. "Press enter to run it as a command". An empty result shouldn't be a dead
+    /// end when the picker can act on the query itself.
+    fn no_matches_hint(&self, _window: &mut Window, _cx: &mut App) -> Option<SharedString> {
+        None
+    }
     fn update_matches(
         &mut self,
         query: String,

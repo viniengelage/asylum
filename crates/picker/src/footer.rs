@@ -1,10 +1,13 @@
 use std::rc::Rc;
 
 use gpui::{Action, FocusHandle, Focusable};
-use ui::{ContextMenu, Divider, FluentBuilder, KeyBinding, PopoverMenu, Tooltip, prelude::*};
+use ui::{
+    ContextMenu, Divider, FluentBuilder, KeyBinding, KeyboardHint, PopoverMenu, Tooltip, prelude::*,
+};
 
 use crate::Picker;
 use crate::PickerDelegate;
+use crate::Presentation;
 use crate::SetPreviewBelow;
 use crate::SetPreviewRight;
 use crate::ToggleActionsMenu;
@@ -100,7 +103,7 @@ impl<D: PickerDelegate> Picker<D> {
         let actions = self.delegate.actions_menu(window, cx);
 
         if self.preview.is_none() && actions.is_empty() {
-            return None;
+            return self.render_keyboard_hints(cx);
         }
 
         let focus_handle = self.focus_handle(cx);
@@ -118,6 +121,32 @@ impl<D: PickerDelegate> Picker<D> {
                 .when(!actions.is_empty(), |this| {
                     this.child(self.render_actions_button(actions.into(), focus_handle, window, cx))
                 })
+                .into_any_element(),
+        )
+    }
+
+    /// Modals are opened from the keyboard and mostly driven from it, so a modal without a
+    /// footer of its own gets one that names the keys. Popovers stay compact.
+    fn render_keyboard_hints(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !matches!(self.presentation, Presentation::Modal { .. }) {
+            return None;
+        }
+
+        Some(
+            h_flex()
+                .w_full()
+                .px(DynamicSpacing::Base08.rems(cx))
+                .py(DynamicSpacing::Base06.rems(cx))
+                .gap(DynamicSpacing::Base12.rems(cx))
+                .border_t_1()
+                .border_color(cx.theme().colors().border_variant)
+                .child(
+                    KeyboardHint::new("Navigate")
+                        .icon_key(IconName::ArrowUp)
+                        .icon_key(IconName::ArrowDown),
+                )
+                .child(KeyboardHint::new("Select").icon_key(IconName::Return))
+                .child(KeyboardHint::new("Close").icon_key(IconName::Escape))
                 .into_any_element(),
         )
     }

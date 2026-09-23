@@ -1,0 +1,244 @@
+#!/usr/bin/env python3
+"""Write the Asylum UI icons to assets/icons from script/asylum-icons.json.
+
+The glyphs are drawn in the Penpot file "Desktop", board "Icons — Asylum": one
+main component per icon under the `asylum` path, named after the icon's
+`IconName` file (`chevron_down`, `file_code`, ...). The manifest is the
+checked-in copy of that board. To refresh it after editing the board, run
+PENPOT_DUMP_SNIPPET through the Penpot MCP `execute_code` tool, save the result
+as JSON and pass it with `--penpot-dump`.
+
+Glyphs live on a 16x16 canvas with a 1.5 stroke and round caps and joins, so
+every SVG is a single plain path: no masks or transforms. Icons missing from
+the manifest (brand logos, generic window controls, unused glyphs) keep their
+current SVG.
+
+Usage: script/export-asylum-icons [--dry-run] [--penpot-dump FILE]
+"""
+
+import argparse
+import json
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+MANIFEST = ROOT / "script" / "asylum-icons.json"
+ICONS_DIR = ROOT / "assets" / "icons"
+ICON_NAME_SOURCE = ROOT / "crates" / "icons" / "src" / "icons.rs"
+
+CANVAS = 16
+STROKE_WIDTH = 1.5
+
+PENPOT_DUMP_SNIPPET = """
+return penpot.library.local.components
+  .filter(component => component.path === 'asylum')
+  .map(component => {
+    const main = component.mainInstance();
+    const paths = penpotUtils.findShapes(shape => shape.type === 'path', main);
+    return {
+      name: component.name,
+      x: main.x,
+      y: main.y,
+      paths: paths.map(path => ({ d: path.content, filled: path.fills.length > 0 })),
+    };
+  });
+"""
+
+ARGUMENT_COUNTS = {"M": 2, "L": 2, "H": 1, "V": 1, "C": 6, "S": 4, "Q": 4, "T": 2, "A": 7, "Z": 0}
+TOKEN = re.compile(r"[A-Za-z]|-?(?:\d*\.\d+|\d+\.?\d*)(?:[eE][-+]?\d+)?")
+
+
+def parse_path(d: str) -> list[tuple[str, list[float]]]:
+    tokens = TOKEN.findall(d)
+    commands = []
+    index = 0
+    command = None
+    while index < len(tokens):
+        if tokens[index].isalpha():
+            command = tokens[index]
+            index += 1
+            if command.upper() not in ARGUMENT_COUNTS:
+                raise ValueError(f"unsupported path command {command!r}")
+            if command.upper() == "Z":
+                commands.append((command, []))
+                continue
+        if command is None:
+            raise ValueError("path data does not start with a command")
+        count = ARGUMENT_COUNTS[command.upper()]
+        arguments = tokens[index : index + count]
+        if len(arguments) != count or any(argument.isalpha() for argument in arguments):
+            raise ValueError(f"command {command!r} is missing arguments")
+        commands.append((command, [float(argument) for argument in arguments]))
+        index += count
+        # Extra coordinate pairs after a moveto are implicit linetos.
+        if command == "M":
+            command = "L"
+        elif command == "m":
+            command = "l"
+    return commands
+
+
+def format_number(value: float) -> str:
+    text = f"{round(value, 3):.3f}".rstrip("0").rstrip(".")
+    return "0" if text == "-0" else text
+
+
+def format_path(commands: list[tuple[str, list[float]]]) -> str:
+    return "".join(command + " ".join(format_number(value) for value in values) for command, values in commands)
+
+
+def absolute_points(commands: list[tuple[str, list[float]]]) -> list[tuple[float, float]]:
+    """Returns every endpoint and control point of the path in absolute coordinates."""
+    points = []
+    x = y = start_x = start_y = 0.0
+    for command, values in commands:
+        relative = command.islower()
+        kind = command.upper()
+        origin_x, origin_y = (x, y) if relative else (0.0, 0.0)
+        if kind == "Z":
+            x, y = start_x, start_y
+            continue
+        if kind == "H":
+            x = origin_x + values[0]
+        elif kind == "V":
+            y = origin_y + values[0]
+        elif kind == "A":
+            x, y = origin_x + values[5], origin_y + values[6]
+        else:
+            pairs = list(zip(values[0::2], values[1::2]))
+            points.extend((origin_x + px, origin_y + py) for px, py in pairs[:-1])
+            x, y = origin_x + pairs[-1][0], origin_y + pairs[-1][1]
+        if kind == "M":
+            start_x, start_y = x, y
+        points.append((x, y))
+    return points
+
+
+def translate_absolute(commands: list[tuple[str, list[float]]], dx: float, dy: float):
+    """Moves a path made only of absolute commands, which is what Penpot stores."""
+    moved = []
+    for command, values in commands:
+        if command.islower() and command != "z":
+            raise ValueError(f"expected absolute commands from Penpot, got {command!r}")
+        kind = command.upper()
+        if kind == "H":
+            values = [values[0] + dx]
+        elif kind == "V":
+            values = [values[0] + dy]
+        elif kind == "A":
+            values = values[:5] + [values[5] + dx, values[6] + dy]
+        else:
+            values = [value + (dx if position % 2 == 0 else dy) for position, value in enumerate(values)]
+        moved.append((command, values))
+    return moved
+
+
+def icon_file_names() -> set[str]:
+    source = ICON_NAME_SOURCE.read_text()
+    match = re.search(r"pub enum IconName \{(.*?)\n\}", source, re.DOTALL)
+    if match is None:
+        sys.exit(f"could not find `enum IconName` in {ICON_NAME_SOURCE}")
+    variants = re.findall(r"^\s+([A-Z][A-Za-z0-9]*),", match.group(1), re.MULTILINE)
+    return {re.sub(r"(?<!^)(?=[A-Z])", "_", variant).lower() for variant in variants}
+
+
+def manifest_from_penpot_dump(dump_path: Path, manifest: dict) -> dict:
+    refreshed = {}
+    for component in json.loads(dump_path.read_text()):
+        name = component["name"]
+        paths = component["paths"]
+        if not paths:
+            sys.exit(f"Penpot component {name} has no path")
+        if len({path["filled"] for path in paths}) != 1:
+            sys.exit(f"Penpot component {name} mixes filled and stroked paths")
+        commands = []
+        for path in paths:
+            commands += translate_absolute(parse_path(path["d"]), -component["x"], -component["y"])
+        refreshed[name] = {
+            "motif": manifest.get(name, {}).get("motif", "base"),
+            "d": format_path(commands),
+            "filled": paths[0]["filled"],
+        }
+    return dict(sorted(refreshed.items()))
+
+
+def render_svg(entry: dict) -> str:
+    fill = ' fill="black"' if entry["filled"] else ""
+    return (
+        f'<svg width="{CANVAS}" height="{CANVAS}" viewBox="0 0 {CANVAS} {CANVAS}" fill="none" '
+        f'xmlns="http://www.w3.org/2000/svg"><path d="{entry["d"]}"{fill} stroke="black" '
+        f'stroke-width="{format_number(STROKE_WIDTH)}" stroke-linecap="round" stroke-linejoin="round"/></svg>\n'
+    )
+
+
+def rasterize(svgs: dict[str, str]) -> list[str]:
+    """Renders every SVG with resvg (the renderer GPUI uses) or rsvg-convert, returning failures."""
+    renderer = shutil.which("resvg") or shutil.which("rsvg-convert")
+    if renderer is None:
+        print("warning: neither resvg nor rsvg-convert is installed; skipping the render check")
+        return []
+    failures = []
+    with tempfile.TemporaryDirectory() as directory:
+        for name, svg in svgs.items():
+            source = Path(directory) / f"{name}.svg"
+            output = Path(directory) / f"{name}.png"
+            source.write_text(svg)
+            if Path(renderer).name == "resvg":
+                arguments = [renderer, "-w", "64", str(source), str(output)]
+            else:
+                arguments = [renderer, "-w", "64", "-o", str(output), str(source)]
+            result = subprocess.run(arguments, capture_output=True, text=True)
+            if result.returncode != 0 or not output.exists() or output.stat().st_size == 0:
+                failures.append(f"{name}: {result.stderr.strip() or 'no output'}")
+    return failures
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--penpot-dump", type=Path, help="JSON produced by PENPOT_DUMP_SNIPPET")
+    args = parser.parse_args()
+
+    manifest = json.loads(MANIFEST.read_text())
+    if args.penpot_dump:
+        manifest = manifest_from_penpot_dump(args.penpot_dump, manifest)
+
+    unknown = sorted(set(manifest) - icon_file_names())
+    if unknown:
+        sys.exit(f"not an IconName variant (add it to {ICON_NAME_SOURCE.name}): {', '.join(unknown)}")
+
+    errors = []
+    for name, entry in manifest.items():
+        try:
+            commands = parse_path(entry["d"])
+        except ValueError as error:
+            errors.append(f"{name}: {error}")
+            continue
+        entry["d"] = format_path(commands)
+        outside = [(x, y) for x, y in absolute_points(commands) if not (0 <= x <= CANVAS and 0 <= y <= CANVAS)]
+        if outside:
+            errors.append(f"{name}: points outside the {CANVAS}x{CANVAS} canvas: {outside[:3]}")
+    if errors:
+        sys.exit("\n".join(errors))
+
+    svgs = {name: render_svg(entry) for name, entry in manifest.items()}
+    failures = rasterize(svgs)
+    if failures:
+        sys.exit("render check failed:\n" + "\n".join(failures))
+
+    changed = [name for name, svg in svgs.items() if not (ICONS_DIR / f"{name}.svg").exists() or (ICONS_DIR / f"{name}.svg").read_text() != svg]
+    for name in changed:
+        print(f"{'would write' if args.dry_run else 'wrote'} icons/{name}.svg")
+        if not args.dry_run:
+            (ICONS_DIR / f"{name}.svg").write_text(svgs[name])
+    if not args.dry_run:
+        MANIFEST.write_text(json.dumps(manifest, indent=1, ensure_ascii=False) + "\n")
+    print(f"{len(changed)} of {len(svgs)} icons changed")
+
+
+if __name__ == "__main__":
+    main()

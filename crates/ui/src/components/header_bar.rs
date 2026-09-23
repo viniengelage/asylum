@@ -1,7 +1,6 @@
 use gpui::{AnyElement, Div, Hsla};
 use smallvec::SmallVec;
 
-use crate::Tab;
 use crate::prelude::*;
 
 /// Which edge of a bar carries its dividing rule.
@@ -100,9 +99,16 @@ impl HeaderBar {
         self
     }
 
-    /// The height every header strip shares, matching a tab so tab bars and plain headers align.
+    /// The height every island strip shares, so a pill tab bar and a plain header on
+    /// neighbouring islands line up.
     pub fn height(cx: &App) -> Pixels {
-        Tab::container_height(cx)
+        DynamicSpacing::Base44.px(cx)
+    }
+
+    /// The height of a [`HeaderBarLevel::Content`] strip, such as breadcrumbs, which sits
+    /// below an island's header and is deliberately shorter than it.
+    pub fn content_height(cx: &App) -> Pixels {
+        DynamicSpacing::Base32.px(cx)
     }
 
     /// Gap between adjacent items within one slot of a header.
@@ -147,7 +153,10 @@ impl HeaderBar {
         self
     }
 
-    pub fn end_children(mut self, end_children: impl IntoIterator<Item = impl IntoElement>) -> Self {
+    pub fn end_children(
+        mut self,
+        end_children: impl IntoIterator<Item = impl IntoElement>,
+    ) -> Self {
         self.end_children_mut().extend(
             end_children
                 .into_iter()
@@ -170,19 +179,22 @@ impl RenderOnce for HeaderBar {
 
         let wrapping = self.wrapping;
         // A wrapping bar has no definite height, so its slots cannot stretch to one.
-        let slot = move |slot: Div| {
-            slot.gap(slot_gap)
-                .when(!wrapping, |slot| slot.h_full())
-        };
+        let slot = move |slot: Div| slot.gap(slot_gap).when(!wrapping, |slot| slot.h_full());
 
         h_flex()
             .id(self.id)
             .group("header_bar")
             .flex_none()
             .w_full()
-            .map(|this| match wrapping {
-                false => this.h(HeaderBar::height(cx)),
-                true => this.min_h(HeaderBar::height(cx)),
+            .map(|this| {
+                let height = match self.level {
+                    HeaderBarLevel::Pane => HeaderBar::height(cx),
+                    HeaderBarLevel::Content => HeaderBar::content_height(cx),
+                };
+                match wrapping {
+                    false => this.h(height),
+                    true => this.min_h(height),
+                }
             })
             .px(slot_padding)
             .gap(slot_gap)

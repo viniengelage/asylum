@@ -40,8 +40,16 @@ function Get-VSArch {
     }
 }
 
+# GitHub's hosted runners ship Visual Studio Enterprise, not Community, so ask vswhere where
+# Visual Studio lives instead of assuming an edition.
+$vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+$vsInstallPath = if (Test-Path $vswhere) {
+    & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+} else {
+    "C:\Program Files\Microsoft Visual Studio\2022\Community"
+}
 Push-Location
-& "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\Launch-VsDevShell.ps1" -Arch (Get-VSArch -Arch $Architecture) -HostArch (Get-VSArch -Arch $OSArchitecture)
+& "$vsInstallPath\Common7\Tools\Launch-VsDevShell.ps1" -Arch (Get-VSArch -Arch $Architecture) -HostArch (Get-VSArch -Arch $OSArchitecture)
 Pop-Location
 
 $target = "$Architecture-pc-windows-msvc"
@@ -207,9 +215,16 @@ function MakeAppx {
         }
     }
     Copy-Item -Path "$manifestFile" -Destination "$innoDir\make_appx\AppxManifest.xml"
-    # Add makeAppx.exe to Path
-    $sdk = "C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64"
-    $env:Path += ';' + $sdk
+    # Add makeAppx.exe to Path, from the newest Windows SDK that has one; runner images do
+    # not all carry the same SDK version.
+    $makeAppx = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\makeappx.exe" -ErrorAction SilentlyContinue |
+        Sort-Object { [version]$_.Directory.Parent.Name } -Descending |
+        Select-Object -First 1
+    if (-not $makeAppx) {
+        Write-Error "makeappx.exe not found in any Windows SDK"
+        exit 1
+    }
+    $env:Path += ';' + $makeAppx.DirectoryName
     makeAppx.exe pack /d "$innoDir\make_appx" /p "$innoDir\zed_explorer_command_injector.appx" /nv
 }
 
@@ -265,59 +280,67 @@ function BuildInstaller {
     $issFilePath = "$innoDir\zed.iss"
     switch ($channel) {
         "stable" {
-            $appId = "{{2DB0DA96-CA55-49BB-AF4F-64AF36A86712}"
+            $appId = "{{9D3B033D-F6BB-471A-A510-C4FCC67CC427}"
             $appIconName = "app-icon"
-            $appName = "Zed"
-            $appDisplayName = "Zed"
-            $appSetupName = "Zed-$Architecture"
-            # The mutex name here should match the mutex name in crates\zed\src\zed\windows_only_instance.rs
-            $appMutex = "Zed-Stable-Instance-Mutex"
+            $appName = "Asylum"
+            $appDisplayName = "Asylum"
+            $appSetupName = "Asylum-$Architecture"
+            # The mutex name has to be `release_channel::app_identifier()` + "-Instance-Mutex",
+            # as created in crates\zed\src\zed\windows_only_instance.rs.
+            $appMutex = "Asylum-Editor-Stable-Instance-Mutex"
             $appExeName = "Zed"
-            $regValueName = "Zed"
-            $appUserId = "ZedIndustries.Zed"
-            $appShellNameShort = "Z&ed"
+            $regValueName = "Asylum"
+            $appUserId = "Asylum.Asylum"
+            $appShellNameShort = "&Asylum"
+            # The Explorer command injector still ships Zed's package identity.
             $appAppxFullName = "ZedIndustries.Zed_1.0.0.0_neutral__japxn1gcva8rg"
         }
         "preview" {
-            $appId = "{{F70E4811-D0E2-4D88-AC99-D63752799F95}"
+            $appId = "{{4B1DAB5D-7A91-4ABC-B315-D437F3FFD31F}"
             $appIconName = "app-icon-preview"
-            $appName = "Zed Preview"
-            $appDisplayName = "Zed Preview"
-            $appSetupName = "Zed-$Architecture"
-            # The mutex name here should match the mutex name in crates\zed\src\zed\windows_only_instance.rs
-            $appMutex = "Zed-Preview-Instance-Mutex"
+            $appName = "Asylum Preview"
+            $appDisplayName = "Asylum Preview"
+            $appSetupName = "Asylum-$Architecture"
+            # The mutex name has to be `release_channel::app_identifier()` + "-Instance-Mutex",
+            # as created in crates\zed\src\zed\windows_only_instance.rs.
+            $appMutex = "Asylum-Editor-Preview-Instance-Mutex"
             $appExeName = "Zed"
-            $regValueName = "ZedPreview"
-            $appUserId = "ZedIndustries.Zed.Preview"
-            $appShellNameShort = "Z&ed Preview"
+            $regValueName = "AsylumPreview"
+            $appUserId = "Asylum.Asylum.Preview"
+            $appShellNameShort = "&Asylum Preview"
+            # The Explorer command injector still ships Zed's package identity.
             $appAppxFullName = "ZedIndustries.Zed.Preview_1.0.0.0_neutral__japxn1gcva8rg"
         }
         "nightly" {
-            $appId = "{{1BDB21D3-14E7-433C-843C-9C97382B2FE0}"
+            $appId = "{{1B76922D-3029-4DDA-96B2-F1AECABF42BF}"
             $appIconName = "app-icon-nightly"
-            $appName = "Zed Nightly"
-            $appDisplayName = "Zed Nightly"
-            $appSetupName = "Zed-$Architecture"
-            # The mutex name here should match the mutex name in crates\zed\src\zed\windows_only_instance.rs
-            $appMutex = "Zed-Nightly-Instance-Mutex"
+            $appName = "Asylum Nightly"
+            $appDisplayName = "Asylum Nightly"
+            $appSetupName = "Asylum-$Architecture"
+            # The mutex name has to be `release_channel::app_identifier()` + "-Instance-Mutex",
+            # as created in crates\zed\src\zed\windows_only_instance.rs.
+            $appMutex = "Asylum-Editor-Nightly-Instance-Mutex"
             $appExeName = "Zed"
-            $regValueName = "ZedNightly"
-            $appUserId = "ZedIndustries.Zed.Nightly"
-            $appShellNameShort = "Z&ed Editor Nightly"
+            $regValueName = "AsylumNightly"
+            $appUserId = "Asylum.Asylum.Nightly"
+            $appShellNameShort = "&Asylum Nightly"
+            # The Explorer command injector still ships Zed's package identity.
             $appAppxFullName = "ZedIndustries.Zed.Nightly_1.0.0.0_neutral__japxn1gcva8rg"
         }
         "dev" {
-            $appId = "{{8357632E-24A4-4F32-BA97-E575B4D1FE5D}"
+            $appId = "{{621B79EE-C8AE-4E8D-B102-DF767DE70C7C}"
             $appIconName = "app-icon-dev"
-            $appName = "Zed Dev"
-            $appDisplayName = "Zed Dev"
-            $appSetupName = "Zed-$Architecture"
-            # The mutex name here should match the mutex name in crates\zed\src\zed\windows_only_instance.rs
-            $appMutex = "Zed-Dev-Instance-Mutex"
+            $appName = "Asylum Dev"
+            $appDisplayName = "Asylum Dev"
+            $appSetupName = "Asylum-$Architecture"
+            # The mutex name has to be `release_channel::app_identifier()` + "-Instance-Mutex",
+            # as created in crates\zed\src\zed\windows_only_instance.rs.
+            $appMutex = "Asylum-Editor-Dev-Instance-Mutex"
             $appExeName = "Zed"
-            $regValueName = "ZedDev"
-            $appUserId = "ZedIndustries.Zed.Dev"
-            $appShellNameShort = "Z&ed Dev"
+            $regValueName = "AsylumDev"
+            $appUserId = "Asylum.Asylum.Dev"
+            $appShellNameShort = "&Asylum Dev"
+            # The Explorer command injector still ships Zed's package identity.
             $appAppxFullName = "ZedIndustries.Zed.Dev_1.0.0.0_neutral__japxn1gcva8rg"
         }
         default {
@@ -402,8 +425,8 @@ if($env:CI) {
 if ($buildSuccess) {
     Write-Output "Build successful"
     if ($Install) {
-        Write-Output "Installing Zed..."
-        Start-Process -FilePath "$env:ZED_WORKSPACE/target/ZedEditorUserSetup-x64-$env:RELEASE_VERSION.exe"
+        Write-Output "Installing Asylum..."
+        Start-Process -FilePath "$env:ZED_WORKSPACE/target/Asylum-$Architecture.exe"
     }
     exit 0
 }

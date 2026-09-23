@@ -7,7 +7,7 @@ use gpui::{Pixels, Rems, Window, rems};
 /// `rounded_lg` calls and one literal `px(8.)` in a `paint_quad` — so changing one of them
 /// silently left the others behind. Read the radius from here instead of restating it.
 pub fn pane_corner_radius() -> Rems {
-    rems(0.5)
+    rems(0.75)
 }
 
 /// [`pane_corner_radius`] resolved against the window's rem size, for paint-time callers that

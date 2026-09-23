@@ -48,7 +48,7 @@ use node_runtime::{NodeBinaryOptions, NodeRuntime};
 use parking_lot::Mutex;
 use project::{project_settings::ProjectSettings, trusted_worktrees};
 use recent_projects::{RemoteSettings, open_remote_project};
-use release_channel::{AppCommitSha, AppVersion, ReleaseChannel};
+use release_channel::{AppCommitSha, AppCommitTimestamp, AppVersion, ReleaseChannel};
 use session::{AppSession, Session};
 use settings::{BaseKeymap, Settings, SettingsStore, watch_config_file};
 use smol::future::poll_once;
@@ -493,6 +493,11 @@ fn main() {
         gpui_tokio::init(cx);
         if let Some(app_commit_sha) = app_commit_sha {
             AppCommitSha::set_global(app_commit_sha, cx);
+        }
+        if let Some(timestamp) =
+            option_env!("ZED_COMMIT_TIMESTAMP").and_then(|timestamp| timestamp.parse().ok())
+        {
+            AppCommitTimestamp::set_global(AppCommitTimestamp(timestamp), cx);
         }
         settings::init(cx);
         zlog_settings::init(cx);

@@ -75,7 +75,7 @@ use fs::Fs;
 use futures::FutureExt as _;
 use gpui::{
     Action, Anchor, Animation, AnimationExt, AnyElement, App, AsyncWindowContext, ClipboardItem,
-    Entity, EventEmitter, ExternalPaths, FocusHandle, Focusable, KeyContext, Pixels,
+    Entity, EventEmitter, ExternalPaths, FocusHandle, Focusable, FontWeight, KeyContext, Pixels,
     PlatformDisplay, Subscription, Task, TaskExt, WeakEntity, WindowHandle, prelude::*,
     pulsating_between,
 };
@@ -5522,20 +5522,20 @@ impl AgentPanel {
             .child(content)
             .when(self.should_show_title_edit(window, cx), |this| {
                 this.child(
-                        h_flex()
-                            .visible_on_hover("title_editor")
-                            .absolute()
-                            .right_0()
-                            .h_full()
-                            // Knocks out the title behind it, so it has to match the fill of the
-                            // toolbar this sits in.
-                            .bg(HeaderBarLevel::Content.background(cx))
-                            .child(
-                                IconButton::new("edit_tile", IconName::Pencil)
-                                    .icon_size(IconSize::Small)
-                                    .tooltip(Tooltip::text("Edit Thread Title")),
-                            ),
-                    )
+                    h_flex()
+                        .visible_on_hover("title_editor")
+                        .absolute()
+                        .right_0()
+                        .h_full()
+                        // Knocks out the title behind it, so it has to match the fill of the
+                        // toolbar this sits in.
+                        .bg(HeaderBarLevel::Content.background(cx))
+                        .child(
+                            IconButton::new("edit_tile", IconName::Pencil)
+                                .icon_size(IconSize::Small)
+                                .tooltip(Tooltip::text("Edit Thread Title")),
+                        ),
+                )
             })
             .into_any()
     }
@@ -5863,8 +5863,11 @@ impl AgentPanel {
             Rc::new(move |window, cx| {
                 Some(ContextMenu::build(window, cx, |menu, _window, cx| {
                     menu.context(focus_handle.clone())
+                        .keyboard_hints()
+                        .header("New Thread")
                         .item(
                             ContextMenuEntry::new("Zed Agent")
+                                .description("Built-in agent")
                                 .when(
                                     !showing_terminal && is_agent_selected(Agent::NativeAgent),
                                     |this| this.action(Box::new(NewThread)),
@@ -5897,6 +5900,7 @@ impl AgentPanel {
                         .when(supports_terminal, |menu| {
                             menu.item(
                                 ContextMenuEntry::new("Terminal")
+                                    .description("Terminal thread")
                                     .when(showing_terminal, |this| this.action(Box::new(NewThread)))
                                     .when(!showing_terminal, |this| {
                                         this.action(Box::new(NewTerminalThread))
@@ -6056,7 +6060,7 @@ impl AgentPanel {
             })
             .when(!has_custom_icon, |this| {
                 this.when_some(selected_agent_builtin_icon, |this, icon| {
-                    this.child(Icon::new(icon).color(Color::Muted))
+                    this.child(Icon::new(icon).size(IconSize::Small).color(Color::Muted))
                 })
             })
             .tooltip(move |_, cx| {
@@ -6122,10 +6126,21 @@ impl AgentPanel {
 
         let empty_thread_title = matches!(mode, ToolbarMode::EmptyThread).then(|| {
             Label::new(format!("New {} Thread", selected_agent_label))
-                .color(Color::Muted)
+                .size(LabelSize::Custom(rems_from_px(13_f32)))
+                .weight(FontWeight::MEDIUM)
                 .truncate()
                 .into_any_element()
         });
+
+        // The threads sidebar is where past threads live, so it stands in for the history view.
+        let history_button = IconButton::new("toggle-thread-history", IconName::HistoryRerun)
+            .icon_size(IconSize::Small)
+            .tooltip(|_, cx| {
+                Tooltip::for_action("Toggle Threads Sidebar", &ToggleWorkspaceSidebar, cx)
+            })
+            .on_click(|_, window, cx| {
+                window.dispatch_action(ToggleWorkspaceSidebar.boxed_clone(), cx);
+            });
 
         let toolbar_content = {
             let new_thread_menu = PopoverMenu::new("new_thread_menu")
@@ -6155,13 +6170,14 @@ impl AgentPanel {
                 });
 
             base_container
+                .gap(DynamicSpacing::Base06.rems(cx))
                 .child(
                     h_flex()
                         .relative()
                         .flex_1()
                         .min_w_0()
                         .overflow_hidden()
-                        .gap(DynamicSpacing::Base08.rems(cx))
+                        .gap(DynamicSpacing::Base06.rems(cx))
                         .child(selected_agent.into_any_element())
                         .child(match empty_thread_title {
                             Some(title) => title,
@@ -6171,9 +6187,10 @@ impl AgentPanel {
                 .child(
                     h_flex()
                         .flex_none()
-                        .gap(DynamicSpacing::Base08.rems(cx))
+                        .gap(HeaderBar::slot_gap(cx))
                         .children(sandbox_status)
                         .when(can_create_entries, |this| this.child(new_thread_menu))
+                        .child(history_button)
                         .child(full_screen_button)
                         .child(self.render_panel_options_menu(window, cx)),
                 )
@@ -6181,9 +6198,21 @@ impl AgentPanel {
         };
 
         // Carries the thread title and its actions, so it belongs to the panel's content the same
-        // way the editor's breadcrumb toolbar does — not to the chrome above it.
-        HeaderBar::new("agent-panel-toolbar")
-            .level(HeaderBarLevel::Content)
+        // way the editor's breadcrumb toolbar does — not to the chrome above it. It sits between
+        // the dock header and the content-level strips in height, which `HeaderBar` has no level
+        // for, so the shell is spelled out with the same fill, rule and slot metrics.
+        let level = HeaderBarLevel::Content;
+        h_flex()
+            .id("agent-panel-toolbar")
+            .group("header_bar")
+            .flex_none()
+            .w_full()
+            .h(DynamicSpacing::Base40.px(cx))
+            .pl(HeaderBar::slot_padding(cx) + DynamicSpacing::Base08.px(cx))
+            .pr(DynamicSpacing::Base08.px(cx))
+            .bg(level.background(cx))
+            .border_b_1()
+            .border_color(level.border(cx))
             .child(toolbar_content)
     }
 

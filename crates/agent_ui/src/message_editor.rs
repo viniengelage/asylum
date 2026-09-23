@@ -207,6 +207,7 @@ pub struct MessageEditor {
     local_commands: SharedLocalCommands,
     agent_id: AgentId,
     thread_store: Option<Entity<ThreadStore>>,
+    on_elevated_surface: bool,
     _subscriptions: Vec<Subscription>,
     _parse_slash_command_task: Task<()>,
 }
@@ -609,9 +610,17 @@ impl MessageEditor {
             local_commands,
             agent_id,
             thread_store,
+            on_elevated_surface: false,
             _subscriptions: subscriptions,
             _parse_slash_command_task: Task::ready(()),
         }
+    }
+
+    /// Paints the editor with the elevated surface fill instead of the editor background, for
+    /// an editor that sits inside a card (the thread composer) rather than on the content.
+    pub fn set_on_elevated_surface(&mut self, on_elevated_surface: bool, cx: &mut Context<Self>) {
+        self.on_elevated_surface = on_elevated_surface;
+        cx.notify();
     }
 
     pub fn set_local_commands(&self, commands: Vec<PromptLocalCommand>) {
@@ -2028,10 +2037,16 @@ impl Render for MessageEditor {
                     ..Default::default()
                 };
 
+                let background = if self.on_elevated_surface {
+                    cx.theme().colors().elevated_surface_background
+                } else {
+                    cx.theme().colors().editor_background
+                };
+
                 EditorElement::new(
                     &self.editor,
                     EditorStyle {
-                        background: cx.theme().colors().editor_background,
+                        background,
                         local_player: cx.theme().players().local(),
                         text: text_style,
                         syntax: cx.theme().syntax().clone(),

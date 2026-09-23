@@ -27,7 +27,7 @@ use agent_ui::{
 };
 use agent_ui::{MessageEditorEvent, StateChange, thread_worktree_archive};
 use android_device_modal::AndroidDeviceModal;
-use android_sdk::{AndroidAvd, AndroidSdkManager, AndroidSdkState, emulator_key_for_keystroke};
+use android_sdk::{AndroidSdkManager, AndroidSdkState, emulator_key_for_keystroke};
 use anyhow::Context as _;
 use chrono::{DateTime, Utc};
 use editor::Editor;
@@ -38,11 +38,11 @@ use fs::Fs;
 
 use gpui::{
     Action as _, AnyElement, App, AsyncApp, Bounds, ClickEvent, ClipboardItem, Context,
-    DismissEvent, Entity, EntityId, FocusHandle, Focusable, Hsla, KeyContext, KeyDownEvent,
-    ListState, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit,
-    Pixels, Point, Render, SharedString, StyledImage as _, Task, TaskExt, WeakEntity, Window,
-    WindowBackgroundAppearance, WindowHandle, canvas, img, linear_color_stop, linear_gradient,
-    list, prelude::*, px,
+    DismissEvent, Entity, EntityId, FocusHandle, Focusable, FontWeight, Hsla, KeyContext,
+    KeyDownEvent, ListState, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    ObjectFit, Pixels, Point, Render, Role, SharedString, Stateful, StyledImage as _, Task,
+    TaskExt, WeakEntity, Window, WindowBackgroundAppearance, WindowHandle, canvas, img,
+    linear_color_stop, linear_gradient, list, prelude::*, px,
 };
 use itertools::Itertools;
 use language_model::LanguageModelRegistry;
@@ -71,11 +71,10 @@ use task::{
 
 use theme::ActiveTheme;
 use ui::{
-    AgentThreadStatus, CommonAnimationExt, ContextMenu, ContextMenuEntry, DropdownMenu,
-    DropdownStyle, GradientFade, HeaderBar, HeaderBarLevel, HighlightedLabel, IconPosition,
-    KeyBinding,
-    PopoverMenu, PopoverMenuHandle, ProjectEmptyState, ScrollAxes, Scrollbars, Tab, TabBar,
-    TabPosition, ThreadItem, ThreadItemWorktreeInfo, TintColor, Tooltip, WithScrollbar, prelude::*,
+    AgentThreadStatus, ButtonLike, CommonAnimationExt, ContextMenu, ContextMenuEntry, GradientFade,
+    HeaderBar, HighlightedLabel, IconPosition, KeyBinding, PopoverMenu, PopoverMenuHandle,
+    ProjectEmptyState, ScrollAxes, Scrollbars, TAB_STRIP_RADIUS, Tab, TabBar, TabPosition,
+    TabStyle, ThreadItem, ThreadItemWorktreeInfo, TintColor, Tooltip, WithScrollbar, prelude::*,
     render_modifiers, right_click_menu,
 };
 use unicode_segmentation::UnicodeSegmentation as _;
@@ -85,7 +84,7 @@ use workspace::{
     CloseWindow, FocusWorkspaceSidebar, MoveProjectDown, MoveProjectUp, MultiWorkspace,
     MultiWorkspaceEvent, NextProject, NextThread, Open, OpenDevices, OpenMode, PreviousProject,
     PreviousThread, ProjectGroupKey, RemovalIntent, SaveIntent, Sidebar as WorkspaceSidebar,
-    SidebarSide, Toast, ToggleWorkspaceSidebar, Workspace,
+    SidebarSide, Toast, ToggleWorkspaceSidebar, Workspace, WorkspaceSettings,
     dock::{DockPosition, Panel, PanelEvent, PanelSizeState},
     notifications::NotificationId,
     sidebar_side_context_menu,
@@ -169,12 +168,66 @@ struct IosSimulatorDevice {
     name: String,
     udid: String,
     state: String,
+    /// Read from the runtime the device is listed under, e.g. `iOS 26.0`, since simctl does
+    /// not repeat it on the device itself.
+    #[serde(skip)]
+    os_version: Option<String>,
 }
 
 impl IosSimulatorDevice {
     fn is_booted(&self) -> bool {
         self.state == "Booted"
     }
+
+    fn status(&self) -> DeviceStatus {
+        match self.state.as_str() {
+            "Booted" => DeviceStatus::Running,
+            "Booting" => DeviceStatus::Booting,
+            _ => DeviceStatus::Shutdown,
+        }
+    }
+}
+
+/// Turns a simctl runtime identifier such as `com.apple.CoreSimulator.SimRuntime.iOS-26-0`
+/// into the `iOS 26.0` shown next to the device name.
+#[cfg(target_os = "macos")]
+fn ios_runtime_version(runtime: &str) -> Option<String> {
+    let (_, version) = runtime.rsplit_once("SimRuntime.")?;
+    let (platform, number) = version.split_once('-')?;
+    Some(format!("{platform} {}", number.replace('-', ".")))
+}
+
+/// Where a device is in its lifecycle, as shown by the chip in the device picker.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DeviceStatus {
+    Running,
+    Booting,
+    Shutdown,
+}
+
+impl DeviceStatus {
+    fn label(self) -> &'static str {
+        match self {
+            DeviceStatus::Running => "Running",
+            DeviceStatus::Booting => "Booting",
+            DeviceStatus::Shutdown => "Shutdown",
+        }
+    }
+
+    fn color(self) -> Color {
+        match self {
+            DeviceStatus::Running => Color::Success,
+            DeviceStatus::Booting => Color::Warning,
+            DeviceStatus::Shutdown => Color::Muted,
+        }
+    }
+}
+
+/// What the device picker shows for the device it is set to.
+struct DevicePickerSummary {
+    name: SharedString,
+    os_version: Option<SharedString>,
+    status: Option<DeviceStatus>,
 }
 
 #[derive(Deserialize)]
@@ -194,6 +247,222 @@ fn sidebar_row_background(cx: &App) -> Hsla {
 /// The fill of a hovered sidebar row.
 fn sidebar_row_hover_background(cx: &App) -> Hsla {
     cx.theme().colors().element_hover
+}
+
+/// The fill of the selected thread row: the accent tinted over the island.
+///
+/// Themes have no key for an accent-tinted selection, so it is mixed here. It is kept opaque
+/// because the row's [`GradientFade`] has to fade into it.
+fn sidebar_row_selected_background(cx: &App) -> Hsla {
+    let colors = cx.theme().colors();
+    colors
+        .panel_background
+        .blend(colors.text_accent.opacity(0.2))
+}
+
+/// Marks a list row as selected with a rounded accent fill and accent border, and as
+/// keyboard-focused with a full-strength accent border.
+///
+/// `ThreadItem` paints both states as flat, square-cornered fills of its own, so callers turn
+/// those off and frame the row here instead. The border is an overlay rather than a border of
+/// the frame so that framing a row does not change its height.
+fn sidebar_row_frame(row: AnyElement, is_selected: bool, is_focused: bool, cx: &App) -> AnyElement {
+    let colors = cx.theme().colors();
+    let border_color = if is_focused {
+        Some(colors.border_focused)
+    } else if is_selected {
+        Some(colors.border_focused.opacity(0.6))
+    } else {
+        None
+    };
+
+    div()
+        .w_full()
+        .px(DynamicSpacing::Base06.px(cx))
+        .child(
+            div()
+                .relative()
+                .w_full()
+                .rounded_md()
+                .overflow_hidden()
+                .when(is_selected, |this| {
+                    this.bg(sidebar_row_selected_background(cx))
+                })
+                .child(row)
+                .when_some(border_color, |this, border_color| {
+                    this.child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .rounded_md()
+                            .border_1()
+                            .border_color(border_color),
+                    )
+                }),
+        )
+        .into_any_element()
+}
+
+/// The shell of an island's single primary action: filled with the accent so it outranks the
+/// grouped secondary controls around it.
+///
+/// Callers attach the click handler only while the action is available; without one the
+/// button reads as disabled.
+fn primary_action_button(id: impl Into<ElementId>, enabled: bool, cx: &App) -> Stateful<Div> {
+    let colors = cx.theme().colors();
+    let fill = colors.border_focused;
+    h_flex()
+        .id(id)
+        .role(Role::Button)
+        .flex_none()
+        .h(DynamicSpacing::Base28.px(cx))
+        .justify_center()
+        .gap(DynamicSpacing::Base06.px(cx))
+        .rounded(TAB_STRIP_RADIUS)
+        .bg(fill)
+        .text_color(colors.text)
+        .map(|this| {
+            if enabled {
+                this.cursor_pointer()
+                    .hover(|style| style.bg(fill.opacity(0.85)))
+                    .active(|style| style.bg(fill.opacity(0.7)))
+            } else {
+                this.opacity(0.5).cursor_not_allowed()
+            }
+        })
+}
+
+/// A group of related secondary controls, set on a raised plate so the grouping reads without
+/// loose dividers.
+fn control_cluster(cx: &App) -> Div {
+    let colors = cx.theme().colors();
+    h_flex()
+        .flex_none()
+        .p(DynamicSpacing::Base02.px(cx))
+        .gap(DynamicSpacing::Base02.px(cx))
+        .rounded(TAB_STRIP_RADIUS)
+        .border_1()
+        .border_color(colors.border)
+        .bg(colors.elevated_surface_background)
+}
+
+fn render_device_status_chip(status: DeviceStatus, cx: &App) -> Div {
+    let color = status.color();
+    let tint = color.color(cx);
+    h_flex()
+        .flex_none()
+        .h(DynamicSpacing::Base20.px(cx))
+        .px(DynamicSpacing::Base08.px(cx))
+        .gap(DynamicSpacing::Base06.px(cx))
+        .rounded_full()
+        .bg(tint.opacity(0.12))
+        .child(
+            div()
+                .flex_none()
+                .size(DynamicSpacing::Base06.px(cx))
+                .rounded_full()
+                .bg(tint),
+        )
+        .child(
+            Label::new(status.label())
+                .size(LabelSize::XSmall)
+                .weight(FontWeight::MEDIUM)
+                .color(color),
+        )
+}
+
+/// The device picker of the devices panel: which device is shown, on what OS, and whether it
+/// is up, with the list of devices behind it.
+fn render_device_picker(
+    id: &'static str,
+    aria_label: &'static str,
+    summary: Option<DevicePickerSummary>,
+    placeholder: &'static str,
+    menu: Entity<ContextMenu>,
+    disabled: bool,
+    cx: &App,
+) -> impl IntoElement {
+    let colors = cx.theme().colors();
+    let handle = PopoverMenuHandle::default();
+    let expanded = handle.is_deployed();
+    let hover_fill = colors.ghost_element_hover;
+
+    let trigger = ButtonLike::new(id)
+        .style(ButtonStyle::Transparent)
+        .size(ButtonSize::None)
+        .height(DynamicSpacing::Base28.px(cx).into())
+        .full_width()
+        .disabled(disabled)
+        .aria_role(Role::ComboBox)
+        .aria_label(aria_label)
+        .aria_expanded(expanded)
+        .child(
+            h_flex()
+                .size_full()
+                .min_w_0()
+                .px(DynamicSpacing::Base10.px(cx))
+                .gap(DynamicSpacing::Base08.px(cx))
+                .rounded(TAB_STRIP_RADIUS)
+                .border_1()
+                .border_color(colors.border)
+                .bg(colors.elevated_surface_background)
+                .when(!disabled, |this| {
+                    this.group_hover("", |style| style.bg(hover_fill))
+                })
+                .child(
+                    Icon::new(IconName::Smartphone)
+                        .size(IconSize::Small)
+                        .color(Color::Muted),
+                )
+                .map(|this| match summary {
+                    Some(summary) => this
+                        .child(
+                            h_flex()
+                                .flex_1()
+                                .min_w_0()
+                                .gap(DynamicSpacing::Base08.px(cx))
+                                .child(
+                                    Label::new(summary.name)
+                                        .weight(FontWeight::MEDIUM)
+                                        .truncate(),
+                                )
+                                .when_some(summary.os_version, |this, os_version| {
+                                    this.child(
+                                        Label::new(os_version)
+                                            .size(LabelSize::Small)
+                                            .color(Color::Placeholder)
+                                            .single_line(),
+                                    )
+                                }),
+                        )
+                        .when_some(summary.status, |this, status| {
+                            this.child(render_device_status_chip(status, cx))
+                        }),
+                    None => this.child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(Label::new(placeholder).color(Color::Muted).truncate()),
+                    ),
+                })
+                .child(
+                    Icon::new(IconName::ChevronDown)
+                        .size(IconSize::Small)
+                        .color(Color::Placeholder),
+                ),
+        );
+
+    let menu_for_open = menu.clone();
+    PopoverMenu::new((ElementId::from(id), "popover"))
+        .full_width(true)
+        .with_handle(handle)
+        .on_open(Rc::new(move |window, cx| {
+            menu_for_open.update(cx, |menu, cx| {
+                menu.select_toggled_or_first(window, cx);
+            });
+        }))
+        .menu(move |_window, _cx| Some(menu.clone()))
+        .trigger(trigger)
 }
 
 fn ios_simulator_label(device: &IosSimulatorDevice) -> String {
@@ -905,6 +1174,11 @@ pub struct Sidebar {
     view: SidebarView,
     devices_only: bool,
     device_platform: DevicePlatform,
+    /// Whether the Devices panel shows the browser instead of `device_platform`'s device.
+    browser_active: bool,
+    /// Created the first time the Browser tab is opened, and kept so the page survives
+    /// switching to a device and back.
+    browser_view: Option<Entity<web_preview::WebPreviewView>>,
     android_sdk_manager: Option<Entity<AndroidSdkManager>>,
     android_screen_bounds: Option<Bounds<Pixels>>,
     android_pointer_down: Option<AndroidPointerDown>,
@@ -1094,6 +1368,8 @@ impl Sidebar {
             view: SidebarView::default(),
             devices_only: false,
             device_platform: DevicePlatform::default(),
+            browser_active: false,
+            browser_view: None,
             android_sdk_manager: None,
             android_screen_bounds: None,
             android_pointer_down: None,
@@ -6423,7 +6699,11 @@ impl Sidebar {
 
         let id = SharedString::from(format!("thread-entry-{}", ix));
 
-        let sidebar_bg = sidebar_row_background(cx);
+        let sidebar_bg = if is_selected {
+            sidebar_row_selected_background(cx)
+        } else {
+            sidebar_row_background(cx)
+        };
 
         let timestamp: SharedString = if is_empty_draft {
             SharedString::default()
@@ -6455,6 +6735,9 @@ impl Sidebar {
             .when(is_draft, |this| {
                 this.icon_color(Color::Custom(cx.theme().colors().icon_muted.opacity(0.2)))
             })
+            .when(is_selected && !is_draft, |this| {
+                this.icon_color(Color::Accent)
+            })
             .status(thread.status)
             .is_remote(is_remote)
             .when_some(icon_svg, |this, svg| {
@@ -6471,8 +6754,6 @@ impl Sidebar {
             .when(thread.diff_stats.lines_removed > 0, |this| {
                 this.removed(thread.diff_stats.lines_removed as usize)
             })
-            .selected(is_selected)
-            .focused(is_focused)
             .hovered(is_hovered)
             .on_hover(cx.listener(move |this, is_hovered: &bool, _window, cx| {
                 if *is_hovered {
@@ -6603,11 +6884,11 @@ impl Sidebar {
             });
 
         if is_draft || thread.metadata.session_id.is_none() {
-            return thread_item.into_any_element();
+            return sidebar_row_frame(thread_item.into_any_element(), is_selected, is_focused, cx);
         }
 
         let Some(session_id) = thread.metadata.session_id.clone() else {
-            return thread_item.into_any_element();
+            return sidebar_row_frame(thread_item.into_any_element(), is_selected, is_focused, cx);
         };
 
         let context_menu_id = SharedString::from(format!("thread-context-menu-{}", ix));
@@ -6623,7 +6904,7 @@ impl Sidebar {
         let can_open_as_markdown = thread.is_live || is_zed_thread;
         let folder_paths = thread.metadata.folder_paths().clone();
 
-        right_click_menu(context_menu_id)
+        let thread_row = right_click_menu(context_menu_id)
             .trigger(move |_, _, _| thread_item)
             .menu({
                 let thread_id = thread.metadata.thread_id;
@@ -6728,8 +7009,9 @@ impl Sidebar {
                         })
                     })
                 }
-            })
-            .into_any_element()
+            });
+
+        sidebar_row_frame(thread_row.into_any_element(), is_selected, is_focused, cx)
     }
 
     fn render_terminal(
@@ -6743,7 +7025,11 @@ impl Sidebar {
         let id = ElementId::from(format!("terminal-{}", terminal.metadata.terminal_id));
         let timestamp = format_history_entry_timestamp(terminal.metadata.created_at);
         let is_hovered = self.hovered_thread_index == Some(ix);
-        let sidebar_bg = sidebar_row_background(cx);
+        let sidebar_bg = if is_active {
+            sidebar_row_selected_background(cx)
+        } else {
+            sidebar_row_background(cx)
+        };
         let metadata = terminal.metadata.clone();
         let workspace = terminal.workspace.clone();
         let focus_handle = self.focus_handle.clone();
@@ -6772,8 +7058,7 @@ impl Sidebar {
             .timestamp(timestamp)
             .notified(terminal.has_notification)
             .highlight_positions(highlight_positions)
-            .selected(is_active)
-            .focused(is_focused)
+            .when(is_active, |this| this.icon_color(Color::Accent))
             .hovered(is_hovered)
             .on_hover(cx.listener(move |this, is_hovered: &bool, _window, cx| {
                 if *is_hovered {
@@ -6827,7 +7112,7 @@ impl Sidebar {
         let rename_title = terminal.metadata.editable_title();
         let sidebar = cx.weak_entity();
 
-        right_click_menu(context_menu_id)
+        let terminal_row = right_click_menu(context_menu_id)
             .trigger(move |_, _, _| terminal_item)
             .menu(move |window, cx| {
                 let sidebar = sidebar.clone();
@@ -6847,8 +7132,9 @@ impl Sidebar {
                             .ok();
                     })
                 })
-            })
-            .into_any_element()
+            });
+
+        sidebar_row_frame(terminal_row.into_any_element(), is_active, is_focused, cx)
     }
 
     fn render_filter_input(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -7511,36 +7797,78 @@ impl Sidebar {
             cx,
         );
 
+        let filter_focused = self.filter_editor.focus_handle(cx).is_focused(window);
+        let colors = cx.theme().colors();
+        let field_border = if filter_focused {
+            colors.border_focused
+        } else {
+            colors.border
+        };
+        let field_background = colors.elevated_surface_background;
+
         v_flex()
             .flex_none()
             .children(window_controls)
             .when(!no_open_projects, |this| {
                 this.child(
                     HeaderBar::new("sidebar-search-header")
-                        .start_child(
-                            Icon::new(IconName::MagnifyingGlass)
-                                .size(IconSize::Small)
-                                .color(Color::Muted),
+                        .child(
+                            h_flex()
+                                .flex_1()
+                                .min_w_0()
+                                .h(DynamicSpacing::Base28.px(cx))
+                                .pl(DynamicSpacing::Base10.px(cx))
+                                .pr(DynamicSpacing::Base04.px(cx))
+                                .gap(DynamicSpacing::Base08.px(cx))
+                                .rounded(TAB_STRIP_RADIUS)
+                                .border_1()
+                                .border_color(field_border)
+                                .bg(field_background)
+                                .child(
+                                    Icon::new(IconName::MagnifyingGlass)
+                                        .size(IconSize::Small)
+                                        .color(Color::Muted),
+                                )
+                                .child(self.render_filter_input(cx))
+                                .when(!has_query && !filter_focused, |this| {
+                                    this.child(KeyBinding::for_action(&FocusSidebarFilter, cx))
+                                })
+                                .when(has_query, |this| {
+                                    this.child(
+                                        IconButton::new("clear_filter", IconName::Close)
+                                            .icon_size(IconSize::Small)
+                                            .tooltip(Tooltip::text("Clear Search"))
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.reset_filter_editor_text(window, cx);
+                                                this.update_entries(cx);
+                                            })),
+                                    )
+                                }),
                         )
-                        .child(self.render_filter_input(cx))
-                        .when(
-                            self.selection.is_some()
-                                && !self.filter_editor.focus_handle(cx).is_focused(window),
-                            |this| this.end_child(KeyBinding::for_action(&FocusSidebarFilter, cx)),
-                        )
-                        .when(has_query, |this| {
-                            this.end_child(
-                                IconButton::new("clear_filter", IconName::Close)
-                                    .icon_size(IconSize::Small)
-                                    .tooltip(Tooltip::text("Clear Search"))
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.reset_filter_editor_text(window, cx);
-                                        this.update_entries(cx);
-                                    })),
-                            )
-                        }),
+                        .end_child(self.render_header_new_thread_button(cx)),
                 )
             })
+    }
+
+    /// The thread list's primary action. It creates the thread where `NewThreadInGroup` would:
+    /// in the selected project group, or the active workspace when nothing is selected.
+    fn render_header_new_thread_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let focus_handle = self.focus_handle.clone();
+        let side = DynamicSpacing::Base28.px(cx);
+        primary_action_button("sidebar-header-new-thread", true, cx)
+            .w(side)
+            .aria_label("New Thread")
+            .child(
+                Icon::new(IconName::Plus)
+                    .size(IconSize::Small)
+                    .color(Color::Custom(cx.theme().colors().text)),
+            )
+            .tooltip(move |_window, cx| {
+                Tooltip::for_action_in("New Thread", &NewThreadInGroup, &focus_handle, cx)
+            })
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.new_thread_in_group(&NewThreadInGroup, window, cx);
+            }))
     }
 
     fn render_sidebar_toggle_button(&self, _cx: &mut Context<Self>) -> impl IntoElement {
@@ -7599,7 +7927,8 @@ impl Sidebar {
 
     fn render_sidebar_bottom_bar(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let is_archive = matches!(self.view, SidebarView::Archive(..));
-        let is_devices = matches!(self.view, SidebarView::Devices);
+        // The device toolbar drives the emulator or simulator; the browser brings its own bar.
+        let is_devices = matches!(self.view, SidebarView::Devices) && !self.browser_active;
         let on_right = self.side(cx) == SidebarSide::Right;
 
         v_flex()
@@ -7635,10 +7964,34 @@ impl Sidebar {
                     true => (recent_projects, view_controls),
                 };
 
+                // Collapsed groups do not load their threads, so this counts the threads
+                // the list is showing rather than every thread the groups hold.
+                let shown_thread_count = (!is_archive).then(|| {
+                    self.contents
+                        .entries
+                        .iter()
+                        .filter(|entry| {
+                            matches!(entry, ListEntry::Thread(thread) if thread.draft.is_none())
+                        })
+                        .count()
+                });
+
                 this.child(
                     HeaderBar::footer("sidebar-bottom-bar")
-                        .level(HeaderBarLevel::Content)
                         .start_child(start)
+                        .when_some(shown_thread_count, |this, count| {
+                            let label = if count == 1 {
+                                "1 thread".to_string()
+                            } else {
+                                format!("{count} threads")
+                            };
+                            this.child(
+                                Label::new(label)
+                                    .size(LabelSize::Small)
+                                    .color(Color::Placeholder)
+                                    .single_line(),
+                            )
+                        })
                         .end_child(end),
                 )
             })
@@ -7666,146 +8019,146 @@ impl Sidebar {
             self.ios_device_discovery_task.is_none() && self.selected_ios_device_udid.is_some()
         };
 
+        let start_expo = primary_action_button("device-start-expo", device_ready, cx)
+            .px(DynamicSpacing::Base12.px(cx))
+            .aria_label("Iniciar Expo")
+            .tooltip(Tooltip::text("Iniciar Expo"))
+            .child(
+                Icon::new(IconName::PlayFilled)
+                    .size(IconSize::XSmall)
+                    .color(Color::Custom(cx.theme().colors().text)),
+            )
+            .child(
+                Label::new("Run")
+                    .size(LabelSize::Small)
+                    .weight(FontWeight::SEMIBOLD)
+                    .color(Color::Custom(cx.theme().colors().text)),
+            )
+            .when(device_ready, |this| {
+                this.on_click(cx.listener(move |this, _, window, cx| {
+                    let Some(workspace) = this.active_workspace(cx) else {
+                        return;
+                    };
+                    if is_android {
+                        this.start_expo_android(&workspace, window, cx);
+                    } else {
+                        this.start_expo_ios(&workspace, window, cx);
+                    }
+                }))
+            });
+
+        let build = device_toolbar_button(
+            "device-build",
+            IconName::ToolHammer,
+            "Compilar app",
+            device_ready,
+        )
+        .on_click(cx.listener(move |this, _, window, cx| {
+            let Some(workspace) = this.active_workspace(cx) else {
+                return;
+            };
+            if is_android {
+                this.build_expo_android(&workspace, window, cx);
+            } else {
+                this.build_expo_ios(&workspace, window, cx);
+            }
+        }));
+
+        let home = device_toolbar_button("device-home", IconName::Circle, "Home", device_ready)
+            .on_click(cx.listener(move |this, _, window, cx| {
+                if is_android {
+                    this.with_android_sdk_manager(cx, |manager, cx| {
+                        manager.send_keyevent(android_sdk::KEYCODE_HOME, cx)
+                    });
+                } else if let Some(workspace) = this.active_workspace(cx) {
+                    this.return_ios_simulator_to_home(&workspace, window, cx);
+                }
+            }));
+
+        let screenshot = device_toolbar_button(
+            "device-screenshot",
+            IconName::Image,
+            "Screenshot",
+            device_ready,
+        )
+        .on_click(cx.listener(move |this, _, window, cx| {
+            let Some(workspace) = this.active_workspace(cx) else {
+                return;
+            };
+            if is_android {
+                this.screenshot_android_emulator(&workspace, cx);
+            } else {
+                this.screenshot_ios_simulator(&workspace, window, cx);
+            }
+        }));
+
+        let copy_identifier = device_toolbar_button(
+            "device-copy-id",
+            IconName::Copy,
+            "Copiar ID do device",
+            device_ready && self.device_identifier(cx).is_some(),
+        )
+        .on_click(cx.listener(|this, _, _, cx| {
+            this.copy_device_identifier(cx);
+        }));
+
+        let open_installed_app = device_toolbar_button(
+            "device-open-installed-app",
+            IconName::ArrowUpRight,
+            "Abrir app instalado",
+            device_ready,
+        )
+        .on_click(cx.listener(move |this, _, window, cx| {
+            let Some(workspace) = this.active_workspace(cx) else {
+                return;
+            };
+            if is_android {
+                this.launch_installed_expo_android(&workspace, cx);
+            } else {
+                this.launch_installed_expo_ios(&workspace, window, cx);
+            }
+        }));
+
+        // Power is destructive, so it stays out of the clusters, on the far side of the bar.
+        let power = device_toolbar_button(
+            "device-power",
+            IconName::Power,
+            "Desligar device",
+            device_ready,
+        )
+        .icon_color(Color::Error)
+        .on_click(cx.listener(move |this, _, window, cx| {
+            if is_android {
+                this.with_android_sdk_manager(cx, |manager, cx| manager.stop_emulator(cx));
+            } else {
+                this.shutdown_ios_simulator(window, cx);
+            }
+        }));
+
         HeaderBar::footer("device-toolbar")
-            .level(HeaderBarLevel::Content)
             // The panel can be dragged down to `MIN_WIDTH`, which is narrower than the row of
             // tools, so the row is allowed to wrap and the bar to grow with it.
             .wrapping(true)
             .child(
                 h_flex()
-                    .gap(HeaderBar::slot_gap(cx))
+                    .py(DynamicSpacing::Base04.px(cx))
+                    .gap(DynamicSpacing::Base08.px(cx))
                     .flex_wrap()
+                    .child(start_expo)
+                    .child(control_cluster(cx).child(build))
+                    .child(control_cluster(cx).child(home).child(screenshot))
                     .child(
-                        device_toolbar_button(
-                            "device-home",
-                            IconName::Circle,
-                            "Home",
-                            device_ready,
-                        )
-                        .on_click(cx.listener(
-                            move |this, _, window, cx| {
-                                if is_android {
-                                    this.with_android_sdk_manager(cx, |manager, cx| {
-                                        manager.send_keyevent(android_sdk::KEYCODE_HOME, cx)
-                                    });
-                                } else if let Some(workspace) = this.active_workspace(cx) {
-                                    this.return_ios_simulator_to_home(&workspace, window, cx);
-                                }
-                            },
-                        )),
-                    )
-                    .child(
-                        device_toolbar_button(
-                            "device-open-installed-app",
-                            IconName::ArrowUpRight,
-                            "Abrir app instalado",
-                            device_ready,
-                        )
-                        .on_click(cx.listener(
-                            move |this, _, window, cx| {
-                                let Some(workspace) = this.active_workspace(cx) else {
-                                    return;
-                                };
-                                if is_android {
-                                    this.launch_installed_expo_android(&workspace, cx);
-                                } else {
-                                    this.launch_installed_expo_ios(&workspace, window, cx);
-                                }
-                            },
-                        )),
-                    )
-                    .child(
-                        device_toolbar_button(
-                            "device-build",
-                            IconName::ToolHammer,
-                            "Compilar app",
-                            device_ready,
-                        )
-                        .on_click(cx.listener(
-                            move |this, _, window, cx| {
-                                let Some(workspace) = this.active_workspace(cx) else {
-                                    return;
-                                };
-                                if is_android {
-                                    this.build_expo_android(&workspace, window, cx);
-                                } else {
-                                    this.build_expo_ios(&workspace, window, cx);
-                                }
-                            },
-                        )),
-                    )
-                    .child(
-                        device_toolbar_button(
-                            "device-start-expo",
-                            IconName::PlayFilled,
-                            "Iniciar Expo",
-                            device_ready,
-                        )
-                        .on_click(cx.listener(
-                            move |this, _, window, cx| {
-                                let Some(workspace) = this.active_workspace(cx) else {
-                                    return;
-                                };
-                                if is_android {
-                                    this.start_expo_android(&workspace, window, cx);
-                                } else {
-                                    this.start_expo_ios(&workspace, window, cx);
-                                }
-                            },
-                        )),
-                    )
-                    .child(
-                        device_toolbar_button(
-                            "device-screenshot",
-                            IconName::Image,
-                            "Screenshot",
-                            device_ready,
-                        )
-                        .on_click(cx.listener(
-                            move |this, _, window, cx| {
-                                let Some(workspace) = this.active_workspace(cx) else {
-                                    return;
-                                };
-                                if is_android {
-                                    this.screenshot_android_emulator(&workspace, cx);
-                                } else {
-                                    this.screenshot_ios_simulator(&workspace, window, cx);
-                                }
-                            },
-                        )),
-                    )
-                    .child(
-                        device_toolbar_button(
-                            "device-copy-id",
-                            IconName::Copy,
-                            "Copiar ID do device",
-                            device_ready && self.device_identifier(cx).is_some(),
-                        )
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.copy_device_identifier(cx);
-                        })),
-                    )
-                    .child(
-                        device_toolbar_button(
-                            "device-power",
-                            IconName::Power,
-                            "Desligar device",
-                            device_ready,
-                        )
-                        .on_click(cx.listener(
-                            move |this, _, window, cx| {
-                                if is_android {
-                                    this.with_android_sdk_manager(cx, |manager, cx| {
-                                        manager.stop_emulator(cx)
-                                    });
-                                } else {
-                                    this.shutdown_ios_simulator(window, cx);
-                                }
-                            },
-                        )),
+                        control_cluster(cx)
+                            .child(copy_identifier)
+                            .child(open_installed_app),
                     ),
             )
-            .end_child(self.render_device_settings_menu(device_ready, cx))
+            .end_child(
+                h_flex()
+                    .gap(DynamicSpacing::Base08.px(cx))
+                    .child(power)
+                    .child(self.render_device_settings_menu(device_ready, cx)),
+            )
     }
 
     /// How the platform's own tools address the running device: the adb serial on Android
@@ -7878,6 +8231,11 @@ impl Sidebar {
             .trigger_with_tooltip(
                 IconButton::new("device-settings", IconName::Settings)
                     .icon_size(IconSize::Medium)
+                    .size(ButtonSize::Medium)
+                    .width(ButtonSize::Medium.rems())
+                    // The popover toggles the button while its menu is open; this is what
+                    // makes the open state read as the active tool.
+                    .selected_style(ButtonStyle::Tinted(TintColor::Accent))
                     .disabled(!device_ready),
                 Tooltip::text("Configurações do device"),
             )
@@ -8396,6 +8754,9 @@ impl Sidebar {
             Some(cx.observe_in(&dock, window, |this, dock, window, cx| {
                 if !dock.read(cx).is_open() {
                     this.hide_ios_simulator_view(window);
+                    this.set_browser_visible(false, cx);
+                } else if this.browser_active {
+                    this.set_browser_visible(true, cx);
                 }
             }));
         self.observed_devices_dock = Some(dock.entity_id());
@@ -8533,7 +8894,7 @@ impl Sidebar {
                 .justify_center()
                 .gap_2()
                 .p_4()
-                .child(Icon::new(IconName::Screen).size(IconSize::XLarge))
+                .child(Icon::new(IconName::Smartphone).size(IconSize::XLarge))
                 .child(Label::new("Simulador iOS"))
                 .child(
                     Label::new("Clique no botão abaixo para inicializar o simulador iOS.")
@@ -8552,12 +8913,22 @@ impl Sidebar {
                 .into_any_element();
         }
 
-        let selected_label = self
+        let is_discovering_devices = self.ios_device_discovery_task.is_some();
+        let selected_summary = self
             .selected_ios_device_udid
             .as_ref()
-            .and_then(|udid| self.ios_devices.iter().find(|device| &device.udid == udid))
-            .map(ios_simulator_label)
-            .unwrap_or_else(|| "Selecione um simulador iOS inicializado".to_owned());
+            .and_then(|udid| self.ios_device(udid))
+            .map(|device| DevicePickerSummary {
+                name: device.name.clone().into(),
+                os_version: device.os_version.clone().map(SharedString::from),
+                // A discovery pass boots the selected device when it is not up yet, so while
+                // one runs a device that is not booted is on its way there.
+                status: Some(if !device.is_booted() && is_discovering_devices {
+                    DeviceStatus::Booting
+                } else {
+                    device.status()
+                }),
+            });
         let devices = self.ios_devices.clone();
         let selected_udid = self.selected_ios_device_udid.clone();
         let sidebar = cx.weak_entity();
@@ -8583,7 +8954,6 @@ impl Sidebar {
             }
             menu
         });
-        let is_discovering_devices = self.ios_device_discovery_task.is_some();
         let busy_message = self.ios_busy_message.clone();
         let has_devices = !self.ios_devices.is_empty();
         let error = self.ios_simulator_error.clone();
@@ -8595,13 +8965,15 @@ impl Sidebar {
             .min_h_0()
             .child(
                 HeaderBar::new("ios-device-header")
-                    .level(HeaderBarLevel::Content)
-                    .child(
-                        DropdownMenu::new("ios-simulator-selector", selected_label, device_menu)
-                            .style(DropdownStyle::Subtle)
-                            .full_width(true)
-                            .disabled(is_discovering_devices || !has_devices),
-                    )
+                    .child(render_device_picker(
+                        "ios-simulator-selector",
+                        "Simulador iOS",
+                        selected_summary,
+                        "Selecione um simulador iOS inicializado",
+                        device_menu,
+                        is_discovering_devices || !has_devices,
+                        cx,
+                    ))
                     .end_child(
                         IconButton::new("refresh-ios-simulators", IconName::RotateCw)
                             .icon_size(IconSize::Small)
@@ -8646,7 +9018,7 @@ impl Sidebar {
                                 )
                             })
                             .when(!is_discovering_devices && !has_devices, |this| {
-                                this.child(Icon::new(IconName::Screen).size(IconSize::XLarge))
+                                this.child(Icon::new(IconName::Smartphone).size(IconSize::XLarge))
                                     .child(Label::new("Nenhum simulador iOS disponível"))
                                     .child(
                                         Label::new(
@@ -8704,7 +9076,7 @@ impl Sidebar {
             .justify_center()
             .gap_2()
             .p_4()
-            .child(Icon::new(IconName::Screen).size(IconSize::XLarge))
+            .child(Icon::new(IconName::Smartphone).size(IconSize::XLarge))
             .child(Label::new(
                 "O simulador iOS integrado está disponível apenas no macOS.",
             ))
@@ -9003,11 +9375,20 @@ impl Sidebar {
             state,
             AndroidSdkState::Installing(_) | AndroidSdkState::EmulatorBooting
         );
-        let selected_label = selected_avd
+        let status = match state {
+            AndroidSdkState::EmulatorRunning { .. } => Some(DeviceStatus::Running),
+            AndroidSdkState::EmulatorBooting => Some(DeviceStatus::Booting),
+            AndroidSdkState::Installing(_) => None,
+            _ => Some(DeviceStatus::Shutdown),
+        };
+        let selected_summary = selected_avd
             .as_ref()
             .and_then(|name| avds.iter().find(|avd| &avd.name == name))
-            .map(AndroidAvd::label)
-            .unwrap_or_else(|| "Selecione um dispositivo virtual".to_owned());
+            .map(|avd| DevicePickerSummary {
+                name: avd.label().into(),
+                os_version: None,
+                status,
+            });
 
         let sidebar = cx.weak_entity();
         let menu_avds = avds.clone();
@@ -9046,13 +9427,15 @@ impl Sidebar {
 
         Some(
             HeaderBar::new("android-device-header")
-                .level(HeaderBarLevel::Content)
-                .child(
-                    DropdownMenu::new("android-avd-selector", selected_label, device_menu)
-                        .style(DropdownStyle::Subtle)
-                        .full_width(true)
-                        .disabled(is_busy || avds.is_empty()),
-                )
+                .child(render_device_picker(
+                    "android-avd-selector",
+                    "Dispositivo virtual Android",
+                    selected_summary,
+                    "Selecione um dispositivo virtual",
+                    device_menu,
+                    is_busy || avds.is_empty(),
+                    cx,
+                ))
                 .end_child(
                     IconButton::new("add-android-device", IconName::Plus)
                         .icon_size(IconSize::Small)
@@ -9150,7 +9533,7 @@ impl Sidebar {
                 .child(spinner())
                 .child(Label::new("Verificando o Android SDK…")),
             AndroidSdkState::NotInstalled => base
-                .child(Icon::new(IconName::Screen).size(IconSize::XLarge))
+                .child(Icon::new(IconName::Smartphone).size(IconSize::XLarge))
                 .child(Label::new("Emulador Android não instalado"))
                 .child(
                     Label::new(
@@ -9186,7 +9569,7 @@ impl Sidebar {
                     })
             }
             AndroidSdkState::Installed => base
-                .child(Icon::new(IconName::Screen).size(IconSize::XLarge))
+                .child(Icon::new(IconName::Smartphone).size(IconSize::XLarge))
                 .child(Label::new("Android SDK instalado"))
                 .child(
                     Label::new("Falta criar o dispositivo virtual para usar o emulador.")
@@ -9201,7 +9584,7 @@ impl Sidebar {
                         })),
                 ),
             AndroidSdkState::AvdReady => base
-                .child(Icon::new(IconName::Screen).size(IconSize::XLarge))
+                .child(Icon::new(IconName::Smartphone).size(IconSize::XLarge))
                 .child(Label::new("Dispositivo virtual pronto"))
                 .child(
                     Button::new("boot-android-emulator", "Iniciar emulador")
@@ -9237,8 +9620,45 @@ impl Sidebar {
         }
     }
 
+    fn set_browser_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
+        if let Some(browser_view) = &self.browser_view {
+            browser_view.update(cx, |browser_view, _cx| {
+                browser_view.set_browser_hidden(!visible);
+            });
+        }
+    }
+
     fn render_devices_view(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let is_android = self.device_platform == DevicePlatform::Android;
+        let browser_active = self.browser_active;
+        let is_android = !browser_active && self.device_platform == DevicePlatform::Android;
+        let is_ios = !browser_active && self.device_platform == DevicePlatform::Ios;
+
+        let platform_tab = |id: &'static str,
+                            label: &'static str,
+                            icon: IconName,
+                            position: TabPosition,
+                            selected: bool| {
+            Tab::new(id)
+                .style(TabStyle::Pill)
+                .position(position)
+                .full_width(true)
+                .toggle_state(selected)
+                .start_slot(Icon::new(icon).size(IconSize::Small).color(if selected {
+                    Color::Accent
+                } else {
+                    Color::Muted
+                }))
+                .child(
+                    Label::new(label)
+                        .size(LabelSize::Small)
+                        .weight(if selected {
+                            FontWeight::SEMIBOLD
+                        } else {
+                            FontWeight::MEDIUM
+                        })
+                        .when(!selected, |label| label.color(Color::Muted)),
+                )
+        };
 
         v_flex()
             .flex_1()
@@ -9246,61 +9666,74 @@ impl Sidebar {
             .overflow_hidden()
             .child(
                 TabBar::segmented("device-platform-tabs")
+                    .style(TabStyle::Pill)
                     .child(
-                        Tab::new("device-tab-android")
-                            .position(TabPosition::First)
-                            .full_width(true)
-                            .surface(sidebar_row_background(cx))
-                            .toggle_state(is_android)
-                            .start_slot(
-                                Icon::new(IconName::Screen)
-                                    .size(IconSize::Small)
-                                    .when(!is_android, |icon| icon.color(Color::Muted)),
-                            )
-                            .child(
-                                Label::new("Android")
-                                    .when(!is_android, |label| label.color(Color::Muted)),
-                            )
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.hide_ios_simulator_view(window);
-                                this.device_platform = DevicePlatform::Android;
-                                this.ensure_android_sdk_manager(cx);
-                                cx.notify();
-                            })),
+                        platform_tab(
+                            "device-tab-android",
+                            "Android",
+                            IconName::Smartphone,
+                            TabPosition::First,
+                            is_android,
+                        )
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.hide_ios_simulator_view(window);
+                            this.browser_active = false;
+                            this.set_browser_visible(false, cx);
+                            this.device_platform = DevicePlatform::Android;
+                            this.ensure_android_sdk_manager(cx);
+                            cx.notify();
+                        })),
                     )
                     .child(
-                        Tab::new("device-tab-ios")
-                            .position(TabPosition::Last)
-                            .full_width(true)
-                            .surface(sidebar_row_background(cx))
-                            .toggle_state(!is_android)
-                            .start_slot(
-                                Icon::new(IconName::Screen)
-                                    .size(IconSize::Small)
-                                    .when(is_android, |icon| icon.color(Color::Muted)),
-                            )
-                            .child(
-                                Label::new("iOS")
-                                    .when(is_android, |label| label.color(Color::Muted)),
-                            )
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.device_platform = DevicePlatform::Ios;
-                                if this.ios_simulator_started {
-                                    this.refresh_ios_devices(window, cx);
-                                }
-                                cx.notify();
-                            })),
+                        platform_tab(
+                            "device-tab-ios",
+                            "iOS",
+                            IconName::Smartphone,
+                            TabPosition::Middle(std::cmp::Ordering::Equal),
+                            is_ios,
+                        )
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.browser_active = false;
+                            this.set_browser_visible(false, cx);
+                            this.device_platform = DevicePlatform::Ios;
+                            if this.ios_simulator_started {
+                                this.refresh_ios_devices(window, cx);
+                            }
+                            cx.notify();
+                        })),
+                    )
+                    .child(
+                        platform_tab(
+                            "device-tab-browser",
+                            "Browser",
+                            IconName::ToolWeb,
+                            TabPosition::Last,
+                            browser_active,
+                        )
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            // The simulator is a native view drawn over the panel; it has to
+                            // go before the page can be seen.
+                            this.hide_ios_simulator_view(window);
+                            this.browser_active = true;
+                            if this.browser_view.is_none() {
+                                this.browser_view =
+                                    Some(cx.new(|cx| web_preview::WebPreviewView::new(window, cx)));
+                            }
+                            this.set_browser_visible(true, cx);
+                            cx.notify();
+                        })),
                     ),
             )
             .child(
                 v_flex()
                     .flex_1()
                     .min_h_0()
-                    .when(is_android, |this| {
-                        this.child(self.render_android_devices(window, cx))
-                    })
-                    .when(!is_android, |this| {
-                        this.child(self.render_ios_simulator(window, cx))
+                    .map(|this| match &self.browser_view {
+                        Some(browser_view) if browser_active => {
+                            this.child(div().flex_1().min_h_0().child(browser_view.clone()))
+                        }
+                        _ if is_android => this.child(self.render_android_devices(window, cx)),
+                        _ => this.child(self.render_ios_simulator(window, cx)),
                     }),
             )
     }
@@ -10037,7 +10470,13 @@ async fn list_ios_simulators() -> anyhow::Result<Vec<IosSimulatorDevice>> {
         .devices
         .into_iter()
         .filter(|(runtime, _)| runtime.contains("SimRuntime.iOS"))
-        .flat_map(|(_, devices)| devices)
+        .flat_map(|(runtime, devices)| {
+            let os_version = ios_runtime_version(&runtime);
+            devices.into_iter().map(move |mut device| {
+                device.os_version = os_version.clone();
+                device
+            })
+        })
         .collect();
     available_devices.sort_by(|left, right| {
         let booted = right.is_booted().cmp(&left.is_booted());
@@ -10145,6 +10584,8 @@ fn device_toolbar_button(
 ) -> IconButton {
     IconButton::new(id, icon)
         .icon_size(IconSize::Medium)
+        .size(ButtonSize::Medium)
+        .width(ButtonSize::Medium.rems())
         .aria_label(tooltip)
         .tooltip(Tooltip::text(tooltip))
         .disabled(!device_ready)
@@ -10520,7 +10961,7 @@ impl Panel for Sidebar {
     }
 
     fn icon(&self, _window: &Window, _cx: &App) -> Option<IconName> {
-        self.devices_only.then_some(IconName::Screen)
+        self.devices_only.then_some(IconName::Smartphone)
     }
 
     fn icon_tooltip(&self, _window: &Window, _cx: &App) -> Option<&'static str> {
@@ -10551,6 +10992,11 @@ impl Render for Sidebar {
         let ui_font = theme_settings::setup_ui_font(window, cx);
         self.track_android_rendered_frame(window, cx);
         let sticky_header = self.render_sticky_header(window, cx);
+
+        // The devices-only instance lives in a dock, which already draws the card around it.
+        let is_island = !self.devices_only;
+
+        let island_half_gap = px(WorkspaceSettings::get_global(cx).card_gap.max(0.0)) / 2.;
 
         let color = cx.theme().colors();
 
@@ -10590,69 +11036,75 @@ impl Render for Sidebar {
             }))
             .font(ui_font)
             .size_full()
-            .overflow_hidden()
-            // The devices view hosts a device screen rather than rows, so it reads as part of
-            // the editing surface instead of as a panel.
-            .bg(match &self.view {
-                SidebarView::Devices => color.editor_background,
-                _ => color.panel_background,
-            })
-            .map(|this| match &self.view {
-                SidebarView::ThreadList => this
-                    .child(self.render_sidebar_header(no_open_projects, window, cx))
-                    .map(|this| {
-                        if no_open_projects {
-                            this.child(self.render_empty_state(cx))
-                        } else {
-                            this.child(
-                                v_flex()
-                                    .relative()
-                                    .flex_1()
-                                    .overflow_hidden()
-                                    .child(
-                                        list(
-                                            self.list_state.clone(),
-                                            cx.processor(Self::render_list_entry),
-                                        )
-                                        .flex_1()
-                                        .size_full(),
+            // Like every workspace card, the island is inset by half the card gap; the window
+            // container adds the other half at the edges.
+            .when(is_island, |this| this.p(island_half_gap))
+            .child(
+                v_flex()
+                    .size_full()
+                    .overflow_hidden()
+                    .bg(color.panel_background)
+                    .when(is_island, |this| this.workspace_card(cx))
+                    .map(|this| match &self.view {
+                        SidebarView::ThreadList => this
+                            .child(self.render_sidebar_header(no_open_projects, window, cx))
+                            .map(|this| {
+                                if no_open_projects {
+                                    this.child(self.render_empty_state(cx))
+                                } else {
+                                    this.child(
+                                        v_flex()
+                                            .relative()
+                                            .flex_1()
+                                            .overflow_hidden()
+                                            .child(
+                                                list(
+                                                    self.list_state.clone(),
+                                                    cx.processor(Self::render_list_entry),
+                                                )
+                                                .flex_1()
+                                                .size_full(),
+                                            )
+                                            .when(no_search_results, |this| {
+                                                this.child(self.render_no_results(cx))
+                                            })
+                                            .when_some(sticky_header, |this, header| {
+                                                this.child(header)
+                                            })
+                                            .custom_scrollbars(
+                                                Scrollbars::new(ScrollAxes::Vertical)
+                                                    .tracked_scroll_handle(&self.list_state),
+                                                window,
+                                                cx,
+                                            ),
                                     )
-                                    .when(no_search_results, |this| {
-                                        this.child(self.render_no_results(cx))
-                                    })
-                                    .when_some(sticky_header, |this, header| this.child(header))
-                                    .custom_scrollbars(
-                                        Scrollbars::new(ScrollAxes::Vertical)
-                                            .tracked_scroll_handle(&self.list_state),
-                                        window,
-                                        cx,
-                                    ),
-                            )
+                                }
+                            }),
+                        SidebarView::Archive(archive_view) => this.child(archive_view.clone()),
+                        SidebarView::Devices => this.child(self.render_devices_view(window, cx)),
+                    })
+                    .map(|this| {
+                        if matches!(self.view, SidebarView::Devices) {
+                            return this;
                         }
-                    }),
-                SidebarView::Archive(archive_view) => this.child(archive_view.clone()),
-                SidebarView::Devices => this.child(self.render_devices_view(window, cx)),
-            })
-            .map(|this| {
-                if matches!(self.view, SidebarView::Devices) {
-                    return this;
-                }
 
-                let show_acp = self.should_render_acp_import_onboarding(cx);
-                let show_cross_channel = self.should_render_cross_channel_import_onboarding(cx);
+                        let show_acp = self.should_render_acp_import_onboarding(cx);
+                        let show_cross_channel =
+                            self.should_render_cross_channel_import_onboarding(cx);
 
-                let verbose = *self
-                    .import_banners_use_verbose_labels
-                    .get_or_insert(show_acp && show_cross_channel);
+                        let verbose = *self
+                            .import_banners_use_verbose_labels
+                            .get_or_insert(show_acp && show_cross_channel);
 
-                this.when(show_acp, |this| {
-                    this.child(self.render_acp_import_onboarding(verbose, cx))
-                })
-                .when(show_cross_channel, |this| {
-                    this.child(self.render_cross_channel_import_onboarding(verbose, cx))
-                })
-            })
-            .child(self.render_sidebar_bottom_bar(cx))
+                        this.when(show_acp, |this| {
+                            this.child(self.render_acp_import_onboarding(verbose, cx))
+                        })
+                        .when(show_cross_channel, |this| {
+                            this.child(self.render_cross_channel_import_onboarding(verbose, cx))
+                        })
+                    })
+                    .child(self.render_sidebar_bottom_bar(cx)),
+            )
     }
 }
 

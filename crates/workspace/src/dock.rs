@@ -1,6 +1,6 @@
 use crate::focus_follows_mouse::FocusFollowsMouse as _;
 use crate::persistence::model::DockData;
-use crate::status_bar::HideStatusItem;
+use crate::status_bar::{HideStatusItem, StatusItemZone};
 use crate::{DraggedDock, Event, FocusFollowsMouse, ModalLayer, Pane, WorkspaceSettings};
 use crate::{Workspace, status_bar::StatusItemView};
 use anyhow::Context as _;
@@ -8,18 +8,18 @@ use client::proto;
 use db::kvp::KeyValueStore;
 
 use gpui::{
-    Action, Anchor, AnyView, App, Axis, ClickEvent, Context, Entity, EntityId, EventEmitter,
-    FocusHandle, Focusable, IntoElement, KeyContext, MouseButton, MouseDownEvent, MouseUpEvent,
-    ParentElement, Render, SharedString, StyleRefinement, Styled, Subscription, WeakEntity, Window,
-    deferred, div, px,
+    Action, Anchor, AnyView, App, Axis, ClickEvent, Context, ElementId, Entity, EntityId,
+    EventEmitter, FocusHandle, Focusable, IntoElement, KeyContext, MouseButton, MouseDownEvent,
+    MouseUpEvent, ParentElement, Radians, Render, SharedString, StyleRefinement, Styled,
+    Subscription, Transformation, WeakEntity, Window, deferred, div, percentage, px, svg,
 };
 use serde::{Deserialize, Serialize};
 use settings::{Settings, SettingsStore, TerminalDockPosition};
 use std::collections::HashSet;
 use std::sync::Arc;
 use ui::{
-    ContextMenu, CountBadge, Divider, DividerColor, Icon, IconButton, IconSize, Tab, TabBar,
-    TabPosition, Tooltip, prelude::*, right_click_menu,
+    ButtonLike, ContextMenu, CountBadge, Icon, IconButton, IconSize, Tab, TabBar, TabPosition,
+    Tooltip, prelude::*, right_click_menu,
 };
 use util::ResultExt as _;
 
@@ -450,13 +450,21 @@ pub struct PanelButtons {
 
 pub(crate) const PANEL_SIZE_STATE_KEY: &str = "dock_panel_size";
 
-fn panel_uses_flexible_width(
+/// Whether `panel`, docked at `position`, is sized as a share of the workspace width rather
+/// than in pixels.
+///
+/// The right dock's panels (Agent, Git, JSON) share one width, so resizing one resizes them
+/// all and switching tabs never jumps. That only holds if they share one sizing mode too, and
+/// only some panels support flexible sizing, so the right dock always sizes in pixels.
+pub(crate) fn panel_uses_flexible_width(
     position: DockPosition,
     panel: &dyn PanelHandle,
     window: &Window,
     cx: &App,
 ) -> bool {
-    position.axis() == Axis::Horizontal && panel.has_flexible_size(window, cx)
+    position.axis() == Axis::Horizontal
+        && position != DockPosition::Right
+        && panel.has_flexible_size(window, cx)
 }
 
 fn resize_panel_entry(
@@ -1028,10 +1036,15 @@ impl Dock {
         cx: &mut Context<Self>,
     ) {
         if Some(panel_ix) != self.active_panel_index {
-            // For the right dock, preserve the current width when switching tabs.
+            // For the right dock, preserve the current width when switching tabs. A panel that
+            // was never resized has no stored size but is still showing its default one.
             let previous_size = if self.position == DockPosition::Right {
-                self.active_panel_entry()
-                    .and_then(|entry| entry.size_state.size)
+                self.active_panel_entry().map(|entry| {
+                    entry
+                        .size_state
+                        .size
+                        .unwrap_or_else(|| entry.panel.default_size(window, cx))
+                })
             } else {
                 None
             };
@@ -1166,7 +1179,8 @@ impl Dock {
         // the narrowest strip on screen. `agent::NewAgentTab` still works from the command
         // palette for trying it out.
         Some(
-            TabBar::segmented("right-dock-tabs")
+            TabBar::new("right-dock-tabs")
+                .style(ui::TabStyle::Pill)
                 .children(visible_entries.into_iter().enumerate().map(
                     |(visible_index, (panel_index, entry))| {
                         let icon = entry.panel.icon(window, cx);
@@ -1188,14 +1202,17 @@ impl Dock {
                         };
 
                         Tab::new(("right-dock-tab", panel_index))
+                            .style(ui::TabStyle::Pill)
                             .position(tab_position)
-                            .full_width(true)
-                            .surface(cx.theme().colors().panel_background)
                             .toggle_state(is_active)
                             .start_slot::<AnyElement>(icon.map(|icon| {
                                 Icon::new(icon)
                                     .size(IconSize::Small)
-                                    .when(!is_active, |i| i.color(Color::Muted))
+                                    .color(if is_active {
+                                        Color::Accent
+                                    } else {
+                                        Color::Muted
+                                    })
                                     .into_any_element()
                             }))
                             .child(
@@ -1706,6 +1723,206 @@ impl PanelButtons {
             _settings_subscription: settings_subscription,
         }
     }
+
+    /// The bottom dock holds the terminal and the debugger, which sit with the other
+    /// developer tools rather than with the panels beside the editor.
+    pub(crate) fn status_bar_zone(&self, cx: &App) -> StatusItemZone {
+        match self.dock.read(cx).position() {
+            DockPosition::Left => StatusItemZone::Docks,
+            DockPosition::Bottom => StatusItemZone::Toolkit,
+            DockPosition::Devices | DockPosition::Right => StatusItemZone::Panels,
+        }
+    }
+}
+
+/// A 24px status bar button for a dock, panel or tool. While the thing it opens is visible
+/// it is filled with the accent tint and its icon turns accent, so the open ones can be
+/// told apart at a glance.
+#[derive(IntoElement)]
+pub struct StatusBarButton {
+    button: ButtonLike,
+    icon: IconName,
+    icon_rotation: Option<Radians>,
+    active: bool,
+}
+
+impl StatusBarButton {
+    pub fn new(id: impl Into<ElementId>, icon: IconName, active: bool) -> Self {
+        Self {
+            button: ButtonLike::new(id),
+            icon,
+            icon_rotation: None,
+            active,
+        }
+    }
+
+    /// Rotates the icon clockwise, for a glyph that only exists facing another way.
+    pub fn icon_rotation(mut self, rotation: impl Into<Radians>) -> Self {
+        self.icon_rotation = Some(rotation.into());
+        self
+    }
+
+    pub fn aria_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.button = self.button.aria_label(label);
+        self
+    }
+
+    pub fn tab_index(mut self, tab_index: impl Into<isize>) -> Self {
+        self.button = self.button.tab_index(tab_index);
+        self
+    }
+
+    pub fn tooltip(mut self, tooltip: impl Fn(&mut Window, &mut App) -> AnyView + 'static) -> Self {
+        self.button = self.button.tooltip(tooltip);
+        self
+    }
+
+    pub fn on_click(
+        mut self,
+        handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.button = self.button.on_click(handler);
+        self
+    }
+}
+
+impl RenderOnce for StatusBarButton {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let size = DynamicSpacing::Base24.rems(cx);
+        let icon_color = if self.active {
+            Color::Accent
+        } else {
+            Color::Muted
+        };
+        let icon = match self.icon_rotation {
+            // `Icon` keeps its transform to the `ui` crate, so a rotated glyph is drawn as
+            // the same svg `Icon` would produce.
+            Some(rotation) => svg()
+                .path(self.icon.path())
+                .size(IconSize::Small.rems())
+                .flex_none()
+                .text_color(icon_color.color(cx))
+                .with_transformation(Transformation::rotate(rotation))
+                .into_any_element(),
+            None => Icon::new(self.icon)
+                .size(IconSize::Small)
+                .color(icon_color)
+                .into_any_element(),
+        };
+        let accent_soft = cx.theme().colors().text_accent.opacity(0.2);
+
+        // `ButtonStyle` has no accent-tinted selection, so the fill sits behind a subtle
+        // button, and the clip rounds the button's own hover to the same corners.
+        div()
+            .flex_none()
+            .size(size)
+            .rounded_md()
+            .overflow_hidden()
+            .when(self.active, |this| this.bg(accent_soft))
+            .child(
+                self.button
+                    .size(ButtonSize::None)
+                    .width(size)
+                    .height(size.into())
+                    .toggle_state(self.active)
+                    .child(icon),
+            )
+    }
+}
+
+/// The status bar buttons that show and hide the left, bottom and right docks as a whole,
+/// whichever panel each of them is showing.
+pub struct DockToggleButtons {
+    workspace: WeakEntity<Workspace>,
+    docks: Vec<Entity<Dock>>,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl DockToggleButtons {
+    pub fn new(workspace: &Workspace, cx: &mut Context<Self>) -> Self {
+        let docks = vec![
+            workspace.left_dock().clone(),
+            workspace.bottom_dock().clone(),
+            workspace.right_dock().clone(),
+        ];
+        let subscriptions = docks
+            .iter()
+            .map(|dock| cx.observe(dock, |_, _, cx| cx.notify()))
+            .collect();
+        Self {
+            workspace: workspace.weak_handle(),
+            docks,
+            _subscriptions: subscriptions,
+        }
+    }
+}
+
+impl Render for DockToggleButtons {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let buttons = self.docks.iter().filter_map(|dock| {
+            let dock = dock.read(cx);
+            // A dock without panels has nothing to show, so toggling it would do nothing.
+            if dock.panels_len() == 0 {
+                return None;
+            }
+            let position = dock.position();
+            let action = dock.toggle_action();
+            let label: SharedString = format!("Toggle {} Dock", position.label()).into();
+            // The `Closed` glyphs are the plain outlines; whether the dock is open is shown
+            // by the button's fill instead.
+            let (icon, rotation) = match position {
+                DockPosition::Left => (IconName::ThreadsSidebarLeftClosed, None),
+                // There is no bottom-panel glyph; the left one turned a quarter
+                // counterclockwise puts its bar along the bottom edge.
+                DockPosition::Bottom => {
+                    (IconName::ThreadsSidebarLeftClosed, Some(percentage(0.75)))
+                }
+                DockPosition::Devices | DockPosition::Right => {
+                    (IconName::ThreadsSidebarRightClosed, None)
+                }
+            };
+            let workspace = self.workspace.clone();
+
+            Some(
+                StatusBarButton::new(
+                    SharedString::from(format!("toggle-{}-dock", position.label())),
+                    icon,
+                    dock.is_open(),
+                )
+                .when_some(rotation, |button, rotation| button.icon_rotation(rotation))
+                .tab_index(0isize)
+                .aria_label(label.clone())
+                .tooltip(move |_window, cx| Tooltip::for_action(label.clone(), &*action, cx))
+                .on_click(move |_, window, cx| {
+                    workspace
+                        .update(cx, |workspace, cx| {
+                            workspace.toggle_dock(position, window, cx)
+                        })
+                        .log_err();
+                }),
+            )
+        });
+
+        h_flex()
+            .gap(DynamicSpacing::Base04.rems(cx))
+            .children(buttons)
+    }
+}
+
+impl StatusItemView for DockToggleButtons {
+    fn set_active_pane_item(
+        &mut self,
+        _active_pane_item: Option<&dyn crate::ItemHandle>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) {
+    }
+
+    fn hide_setting(&self, _: &App) -> Option<HideStatusItem> {
+        // There is no setting to hide these: they are the only buttons that show a dock
+        // whatever panel it holds.
+        None
+    }
 }
 
 impl Render for PanelButtons {
@@ -1724,7 +1941,7 @@ impl Render for PanelButtons {
 
         let dock_entity = self.dock.clone();
         let workspace = dock.workspace.clone();
-        let mut buttons: Vec<_> = dock
+        let buttons: Vec<_> = dock
             .panel_entries
             .iter()
             .enumerate()
@@ -1746,7 +1963,9 @@ impl Render for PanelButtons {
                     .log_err()?;
                 let name = entry.panel.persistent_name();
                 let panel = entry.panel.clone();
-                let supports_flexible = panel.supports_flexible_size(cx);
+                // The right dock always sizes in pixels, so the choice would have no effect.
+                let supports_flexible =
+                    dock_position != DockPosition::Right && panel.supports_flexible_size(cx);
                 let currently_flexible = panel.has_flexible_size(window, cx);
                 let dock_for_menu = dock_entity.clone();
                 let workspace_for_menu = workspace.clone();
@@ -1864,23 +2083,25 @@ impl Render for PanelButtons {
                         .trigger(move |is_active, _window, _cx| {
                             // Include active state in element ID to invalidate the cached
                             // tooltip when panel state changes (e.g., via keyboard shortcut)
-                            let button = IconButton::new((name, is_active_button as u64), icon)
-                                .icon_size(IconSize::Small)
-                                .toggle_state(is_active_button)
-                                .tab_index(0isize)
-                                .aria_label(icon_tooltip)
-                                .on_click({
-                                    let action = action.boxed_clone();
-                                    move |_, window, cx| {
-                                        window.focus(&focus_handle, cx);
-                                        window.dispatch_action(action.boxed_clone(), cx)
-                                    }
+                            let button = StatusBarButton::new(
+                                (name, is_active_button as u64),
+                                icon,
+                                is_active_button,
+                            )
+                            .tab_index(0isize)
+                            .aria_label(icon_tooltip)
+                            .on_click({
+                                let action = action.boxed_clone();
+                                move |_, window, cx| {
+                                    window.focus(&focus_handle, cx);
+                                    window.dispatch_action(action.boxed_clone(), cx)
+                                }
+                            })
+                            .when(!is_active, |this| {
+                                this.tooltip(move |_window, cx| {
+                                    Tooltip::for_action(tooltip.clone(), &*action, cx)
                                 })
-                                .when(!is_active, |this| {
-                                    this.tooltip(move |_window, cx| {
-                                        Tooltip::for_action(tooltip.clone(), &*action, cx)
-                                    })
-                                });
+                            });
 
                             div().relative().child(button).when_some(
                                 icon_label
@@ -1894,26 +2115,11 @@ impl Render for PanelButtons {
             })
             .collect();
 
-        if matches!(dock_position, DockPosition::Devices | DockPosition::Right) {
-            buttons.reverse();
-        }
-
-        let has_buttons = !buttons.is_empty();
-
+        // The status bar draws the dividers between its zones, and each zone reads left
+        // to right, so the buttons keep the dock's own order.
         h_flex()
-            .gap_1()
-            .when(
-                has_buttons
-                    && matches!(
-                        dock.position,
-                        DockPosition::Bottom | DockPosition::Devices | DockPosition::Right
-                    ),
-                |this| this.child(Divider::vertical().color(DividerColor::Border)),
-            )
+            .gap(DynamicSpacing::Base04.rems(cx))
             .children(buttons)
-            .when(has_buttons && dock.position == DockPosition::Left, |this| {
-                this.child(Divider::vertical().color(DividerColor::Border))
-            })
     }
 }
 

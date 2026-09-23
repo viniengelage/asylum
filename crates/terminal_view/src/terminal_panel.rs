@@ -128,6 +128,7 @@ impl TerminalPanel {
         cx: &mut Context<Self>,
     ) {
         let assistant_enabled = self.assistant_enabled;
+        let workspace = self.workspace.clone();
         terminal_pane.update(cx, |pane, cx| {
             pane.set_render_tab_bar_buttons(cx, move |pane, window, cx| {
                 let split_context = pane
@@ -150,7 +151,7 @@ impl TerminalPanel {
                     .child(
                         PopoverMenu::new("terminal-tab-bar-popover-menu")
                             .trigger_with_tooltip(
-                                IconButton::new("plus", IconName::Plus).icon_size(IconSize::Small),
+                                header_icon_button("plus", IconName::Plus),
                                 Tooltip::text("New…"),
                             )
                             .anchor(Anchor::TopRight)
@@ -183,8 +184,7 @@ impl TerminalPanel {
                     .child(
                         PopoverMenu::new("terminal-pane-tab-bar-split")
                             .trigger_with_tooltip(
-                                IconButton::new("terminal-pane-split", IconName::Split)
-                                    .icon_size(IconSize::Small),
+                                header_icon_button("terminal-pane-split", IconName::Split),
                                 Tooltip::text("Split Pane"),
                             )
                             .anchor(Anchor::TopRight)
@@ -207,8 +207,7 @@ impl TerminalPanel {
                     )
                     .child({
                         let zoomed = pane.is_zoomed();
-                        IconButton::new("toggle_zoom", IconName::Maximize)
-                            .icon_size(IconSize::Small)
+                        header_icon_button("toggle_zoom", IconName::Maximize)
                             .toggle_state(zoomed)
                             .selected_icon(IconName::Minimize)
                             .on_click(cx.listener(|pane, _, window, cx| {
@@ -222,6 +221,20 @@ impl TerminalPanel {
                                 )
                             })
                     })
+                    .child(
+                        header_icon_button("close_terminal_panel", IconName::Close)
+                            .tooltip(Tooltip::text("Close Panel"))
+                            .on_click({
+                                let workspace = workspace.clone();
+                                move |_, window, cx| {
+                                    workspace
+                                        .update(cx, |workspace, cx| {
+                                            workspace.close_panel::<TerminalPanel>(window, cx);
+                                        })
+                                        .log_err();
+                                }
+                            }),
+                    )
                     .into_any_element()
                     .into();
                 (None, right_children)
@@ -1870,6 +1883,15 @@ impl workspace::TerminalProvider for TerminalProvider {
     }
 }
 
+/// A square 28px target, the size of every island's header buttons, so the terminal's header
+/// lines up with the editor pane's above it.
+fn header_icon_button(id: impl Into<ElementId>, icon: IconName) -> IconButton {
+    IconButton::new(id, icon)
+        .icon_size(IconSize::Small)
+        .size(ButtonSize::Medium)
+        .width(rems_from_px(28_f32))
+}
+
 #[derive(IntoElement)]
 struct InlineAssistTabBarButton {
     focus_handle: FocusHandle,
@@ -1878,8 +1900,7 @@ struct InlineAssistTabBarButton {
 impl RenderOnce for InlineAssistTabBarButton {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let focus_handle = self.focus_handle;
-        IconButton::new("terminal_inline_assistant", IconName::ZedAssistant)
-            .icon_size(IconSize::Small)
+        header_icon_button("terminal_inline_assistant", IconName::ZedAssistant)
             .on_click({
                 let focus_handle = focus_handle.clone();
                 move |_, window, cx| {

@@ -53,6 +53,12 @@ use super::elicitation::{
 };
 use super::*;
 
+const EMPTY_THREAD_SUGGESTIONS: [(IconName, &str); 3] = [
+    (IconName::Sparkle, "Explain the active file"),
+    (IconName::Debug, "Investigate a crash"),
+    (IconName::GitBranch, "Summarize uncommitted changes"),
+];
+
 const DATA_RETENTION_LEARN_MORE_URL: &str = "https://support.claude.com/en/articles/15425996-data-retention-practices-for-mythos-class-models";
 
 #[derive(Default)]
@@ -823,6 +829,7 @@ impl ThreadView {
                 window,
                 cx,
             );
+            editor.set_on_elevated_surface(true, cx);
             if let Some(content) = initial_content {
                 match content {
                     AgentInitialContent::ThreadSummary { session_id, title } => {
@@ -887,6 +894,11 @@ impl ThreadView {
             let editor = cx.new(|cx| {
                 let mut editor = Editor::single_line(window, cx);
                 editor.set_text(initial_title, window, cx);
+                editor.set_text_style_refinement(gpui::TextStyleRefinement {
+                    font_size: Some(rems_from_px(13_f32).into()),
+                    font_weight: Some(gpui::FontWeight::MEDIUM),
+                    ..Default::default()
+                });
                 editor
             });
             subscriptions.push(cx.subscribe_in(&editor, window, Self::handle_title_editor_event));
@@ -4352,6 +4364,7 @@ impl ThreadView {
 
     pub(crate) fn render_message_editor(
         &mut self,
+        attached_to_activity_bar: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -4360,7 +4373,8 @@ impl ThreadView {
         }
 
         let focus_handle = self.message_editor.focus_handle(cx);
-        let editor_bg_color = cx.theme().colors().editor_background;
+        let composer_background = cx.theme().colors().elevated_surface_background;
+        let composer_border = cx.theme().colors().border_selected;
 
         let editor_expanded = self.editor_expanded;
         let (expand_icon, expand_tooltip) = if editor_expanded {
@@ -4371,42 +4385,45 @@ impl ThreadView {
 
         let max_content_width = AgentSettings::get_global(cx).max_content_width;
         let has_messages = self.list_state.item_count() > 0;
-        let fills_container = !has_messages || editor_expanded;
 
         h_flex()
-            .py_2()
-            .bg(editor_bg_color)
+            .px(DynamicSpacing::Base08.rems(cx))
+            .pb(DynamicSpacing::Base08.rems(cx))
             .justify_center()
             .on_action(cx.listener(Self::handle_message_editor_move_up))
-            .map(|this| {
-                if has_messages {
-                    this.on_action(cx.listener(Self::expand_message_editor))
-                        .border_t_1()
-                        .border_color(cx.theme().colors().border)
-                        .when(editor_expanded, |this| this.h(vh(0.8, window)))
-                } else {
-                    this.flex_1().size_full()
-                }
+            .when(has_messages, |this| {
+                this.on_action(cx.listener(Self::expand_message_editor))
+                    .when(editor_expanded, |this| this.h(vh(0.8, window)))
             })
             .child(
                 v_flex()
                     .when_some(max_content_width, |this, max_w| this.flex_basis(max_w))
                     .when(max_content_width.is_none(), |this| this.w_full())
                     .min_w_0()
-                    .when(fills_container, |this| this.h_full())
-                    .px_2()
+                    .when(editor_expanded, |this| this.h_full())
                     .flex_shrink_1()
                     .flex_grow_0()
                     .justify_between()
-                    .gap_2()
+                    .gap(DynamicSpacing::Base10.rems(cx))
+                    .pt(DynamicSpacing::Base12.rems(cx))
+                    .px(DynamicSpacing::Base12.rems(cx))
+                    .pb(DynamicSpacing::Base08.rems(cx))
+                    .bg(composer_background)
+                    .border_1()
+                    .border_color(composer_border)
+                    .rounded_xl()
+                    // The activity bar is a tab resting on the composer's top edge; rounded
+                    // corners there would leave notches under its square bottom corners.
+                    .when(attached_to_activity_bar, |this| this.rounded_t_none())
                     .child(
                         v_flex()
                             .relative()
                             .w_full()
                             .min_h_0()
-                            .when(fills_container, |this| this.flex_1())
-                            .pt_1()
-                            .pr_2p5()
+                            .when(editor_expanded, |this| this.flex_1())
+                            .when(has_messages, |this| {
+                                this.pr(DynamicSpacing::Base10.rems(cx))
+                            })
                             .child(self.message_editor.clone())
                             .when(has_messages, |this| {
                                 this.child(
@@ -4448,21 +4465,22 @@ impl ThreadView {
                             .flex_none()
                             .flex_wrap()
                             .justify_between()
+                            .gap(DynamicSpacing::Base04.rems(cx))
                             .child(
                                 h_flex()
                                     .min_w_0()
                                     .flex_wrap()
-                                    .gap_0p5()
+                                    .gap(DynamicSpacing::Base04.rems(cx))
                                     .child(self.render_add_context_button(cx))
+                                    .child(self.render_mention_button(cx))
                                     .child(self.render_follow_toggle(cx))
-                                    .children(self.render_fast_mode_control(cx))
-                                    .children(self.render_thinking_control(cx)),
+                                    .children(self.render_fast_mode_control(cx)),
                             )
                             .child(
                                 h_flex()
                                     .min_w_0()
                                     .flex_wrap()
-                                    .gap_1()
+                                    .gap(DynamicSpacing::Base04.rems(cx))
                                     .children(self.render_token_usage(cx))
                                     .children(self.profile_selector.clone())
                                     .map(|this| match self.config_options_view.clone() {
@@ -4471,6 +4489,7 @@ impl ThreadView {
                                             .children(self.mode_selector.clone())
                                             .children(self.model_selector.clone()),
                                     })
+                                    .children(self.render_thinking_control(cx))
                                     .child(self.render_send_button(cx)),
                             ),
                     ),
@@ -5437,6 +5456,9 @@ impl ThreadView {
                 .into_any_element()
         } else if is_generating && is_editor_empty {
             IconButton::new("stop-generation", IconName::Stop)
+                .size(ButtonSize::Medium)
+                .width(DynamicSpacing::Base28.rems(cx))
+                .icon_size(IconSize::Small)
                 .icon_color(Color::Error)
                 .style(ButtonStyle::Tinted(TintColor::Error))
                 .tooltip(move |_window, cx| {
@@ -5450,56 +5472,138 @@ impl ThreadView {
             } else {
                 IconName::Send
             };
-            IconButton::new("send-message", send_icon)
-                .style(ButtonStyle::Filled)
-                .map(|this| {
-                    if is_editor_empty && !is_generating {
-                        this.disabled(true).icon_color(Color::Muted)
-                    } else {
-                        this.icon_color(Color::Accent)
-                    }
-                })
-                .tooltip(move |_window, cx| {
-                    if is_editor_empty && !is_generating {
-                        Tooltip::for_action("Type to Send", &Chat, cx)
-                    } else if is_generating {
-                        let focus_handle = focus_handle.clone();
+            let is_disabled = is_editor_empty && !is_generating;
+            let primary_background = cx.theme().colors().border_focused;
 
-                        Tooltip::element(move |_window, cx| {
-                            v_flex()
-                                .gap_1()
-                                .child(
-                                    h_flex()
-                                        .gap_2()
-                                        .justify_between()
-                                        .child(Label::new("Queue and Send"))
-                                        .child(KeyBinding::for_action_in(&Chat, &focus_handle, cx)),
-                                )
-                                .child(
-                                    h_flex()
-                                        .pt_1()
-                                        .gap_2()
-                                        .justify_between()
-                                        .border_t_1()
-                                        .border_color(cx.theme().colors().border_variant)
-                                        .child(Label::new("Send Immediately"))
-                                        .child(KeyBinding::for_action_in(
-                                            &SendImmediately,
-                                            &focus_handle,
-                                            cx,
-                                        )),
-                                )
-                                .into_any_element()
-                        })(_window, cx)
-                    } else {
-                        Tooltip::for_action("Send Message", &Chat, cx)
-                    }
+            // The primary fill lives on a wrapper because no `ButtonStyle` paints the accent
+            // colour; the button itself stays transparent so its hover does not cover it.
+            div()
+                .flex_none()
+                .rounded_lg()
+                .bg(primary_background)
+                .when(is_disabled, |this| this.opacity(0.5))
+                .when(!is_disabled, |this| {
+                    this.hover(|style| style.bg(primary_background.opacity(0.85)))
                 })
-                .on_click(cx.listener(|this, _, window, cx| {
-                    this.send(window, cx);
-                }))
+                .child(
+                    IconButton::new("send-message", send_icon)
+                        .size(ButtonSize::Medium)
+                        .width(DynamicSpacing::Base28.rems(cx))
+                        .style(ButtonStyle::Transparent)
+                        .icon_size(IconSize::Small)
+                        .icon_color(Color::Default)
+                        .disabled(is_disabled)
+                        .tooltip(move |_window, cx| {
+                            if is_editor_empty && !is_generating {
+                                Tooltip::for_action("Type to Send", &Chat, cx)
+                            } else if is_generating {
+                                let focus_handle = focus_handle.clone();
+
+                                Tooltip::element(move |_window, cx| {
+                                    v_flex()
+                                        .gap_1()
+                                        .child(
+                                            h_flex()
+                                                .gap_2()
+                                                .justify_between()
+                                                .child(Label::new("Queue and Send"))
+                                                .child(KeyBinding::for_action_in(
+                                                    &Chat,
+                                                    &focus_handle,
+                                                    cx,
+                                                )),
+                                        )
+                                        .child(
+                                            h_flex()
+                                                .pt_1()
+                                                .gap_2()
+                                                .justify_between()
+                                                .border_t_1()
+                                                .border_color(cx.theme().colors().border_variant)
+                                                .child(Label::new("Send Immediately"))
+                                                .child(KeyBinding::for_action_in(
+                                                    &SendImmediately,
+                                                    &focus_handle,
+                                                    cx,
+                                                )),
+                                        )
+                                        .into_any_element()
+                                })(_window, cx)
+                            } else {
+                                Tooltip::for_action("Send Message", &Chat, cx)
+                            }
+                        })
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.send(window, cx);
+                        })),
+                )
                 .into_any_element()
         }
+    }
+
+    fn render_empty_thread_suggestions(&self, cx: &Context<Self>) -> impl IntoElement {
+        let card_background = cx.theme().colors().elevated_surface_background;
+        let card_border = cx.theme().colors().border;
+        let card_hover_background = cx.theme().colors().ghost_element_hover;
+
+        v_flex()
+            .flex_1()
+            .min_h_0()
+            .justify_end()
+            .p(DynamicSpacing::Base16.rems(cx))
+            .gap(DynamicSpacing::Base12.rems(cx))
+            .child(
+                Label::new("Suggestions")
+                    .size(LabelSize::Custom(rems_from_px(10.5_f32)))
+                    .weight(gpui::FontWeight::SEMIBOLD)
+                    .color(Color::Placeholder),
+            )
+            .children(EMPTY_THREAD_SUGGESTIONS.iter().enumerate().map(
+                |(index, (icon, suggestion))| {
+                    let message_editor = self.message_editor.clone();
+                    let suggestion = *suggestion;
+
+                    h_flex()
+                        .id(("empty-thread-suggestion", index))
+                        .w_full()
+                        .h(rems_from_px(36_f32))
+                        .px(DynamicSpacing::Base12.rems(cx))
+                        .gap(DynamicSpacing::Base10.rems(cx))
+                        .bg(card_background)
+                        .border_1()
+                        .border_color(card_border)
+                        .rounded_lg()
+                        .cursor_pointer()
+                        .hover(|style| style.bg(card_hover_background))
+                        .child(Icon::new(*icon).size(IconSize::Small).color(Color::Accent))
+                        .child(
+                            Label::new(suggestion)
+                                .size(LabelSize::Custom(rems_from_px(13_f32)))
+                                .truncate(),
+                        )
+                        .on_click(move |_, window, cx| {
+                            message_editor.focus_handle(cx).focus(window, cx);
+                            message_editor.update(cx, |editor, cx| {
+                                editor.insert_text(suggestion, window, cx);
+                            });
+                        })
+                },
+            ))
+    }
+
+    fn render_mention_button(&self, _cx: &mut Context<Self>) -> impl IntoElement {
+        let message_editor = self.message_editor.clone();
+
+        IconButton::new("mention-context", IconName::AtSign)
+            .icon_size(IconSize::Small)
+            .icon_color(Color::Muted)
+            .tooltip(Tooltip::text("Mention Context"))
+            .on_click(move |_, window, cx| {
+                message_editor.focus_handle(cx).focus(window, cx);
+                message_editor.update(cx, |editor, cx| {
+                    editor.trigger_completion_menu(window, cx);
+                });
+            })
     }
 
     fn render_add_context_button(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -7278,23 +7382,18 @@ impl ThreadView {
 
     pub(crate) fn sync_editor_mode(&mut self, cx: &mut Context<Self>) {
         let has_messages = self.list_state.item_count() > 0;
-        let v2_empty_state = !has_messages;
 
         if !has_messages {
             self.editor_expanded = false;
         }
 
+        // An empty thread keeps the composer at its compact height too, so the space above it
+        // is left to the suggestions rather than to a panel-tall editor.
         let mode = if self.editor_expanded {
             EditorMode::Full {
                 scale_ui_elements_with_buffer_font_size: false,
                 show_active_line_background: false,
                 sizing_behavior: SizingBehavior::ExcludeOverscrollMargin,
-            }
-        } else if v2_empty_state {
-            EditorMode::Full {
-                scale_ui_elements_with_buffer_font_size: false,
-                show_active_line_background: false,
-                sizing_behavior: SizingBehavior::Default,
             }
         } else {
             EditorMode::AutoHeight {
@@ -12214,6 +12313,8 @@ impl Render for ThreadView {
 
         let has_messages = self.list_state.item_count() > 0;
         let list_state = self.list_state.clone();
+        let activity_bar = self.render_activity_bar(window, cx);
+        let has_activity_bar = activity_bar.is_some();
 
         let conversation = v_flex()
             .when(self.resumed_without_history, |this| {
@@ -12227,7 +12328,15 @@ impl Render for ThreadView {
                         .vertical_scrollbar_for(&list_state, window, cx)
                         .into_any()
                 } else {
-                    this.into_any()
+                    // Takes the room the composer used to fill, keeping the composer at the
+                    // bottom of the panel.
+                    this.flex_1()
+                        .min_h_0()
+                        .when(
+                            !self.is_subagent() && !self.resumed_without_history,
+                            |this| this.child(self.render_empty_thread_suggestions(cx)),
+                        )
+                        .into_any()
                 }
             });
 
@@ -12541,7 +12650,7 @@ impl Render for ThreadView {
             )
             .child(conversation)
             .children(self.render_multi_root_callout(cx))
-            .children(self.render_activity_bar(window, cx))
+            .children(activity_bar)
             .when(self.show_external_source_prompt_warning, |this| {
                 this.child(self.render_external_source_prompt_warning(cx))
             })
@@ -12560,7 +12669,7 @@ impl Render for ThreadView {
             )
             .children(self.render_token_limit_callout(cx))
             .children(self.render_request_elicitations(cx))
-            .child(self.render_message_editor(window, cx))
+            .child(self.render_message_editor(has_activity_bar, window, cx))
     }
 }
 
