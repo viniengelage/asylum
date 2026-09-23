@@ -362,6 +362,37 @@ async fn launch_profile(
     Ok(())
 }
 
+/// Runs `action` in the process of `profile_id`, starting it when it isn't running. A profile
+/// only edits its own settings and keychain entries, so another profile's manager asks it to
+/// open them instead.
+fn run_in_profile(
+    profile_id: String,
+    action: &'static str,
+    data: Option<serde_json::Value>,
+    cx: &App,
+) -> Task<Result<()>> {
+    let app_path = cx.app_path().ok();
+    let executor = cx.background_executor().clone();
+    cx.background_spawn(async move {
+        let request = mac_only_instance::InstanceRequest::Dispatch {
+            action: action.to_string(),
+            data,
+        };
+        if mac_only_instance::send_to_profile(&profile_id, &request) {
+            return Ok(());
+        }
+        launch_profile(&profile_id, Vec::new(), app_path).await?;
+        // A profile that was just started takes a moment to claim its socket.
+        for _ in 0..80 {
+            executor.timer(Duration::from_millis(250)).await;
+            if mac_only_instance::send_to_profile(&profile_id, &request) {
+                return Ok(());
+            }
+        }
+        anyhow::bail!("o perfil abriu, mas não respondeu a tempo")
+    })
+}
+
 /// Replaces this process with `profile_id`: its windows close and the profile opens in
 /// their place, or comes to the front when it is already running.
 fn switch_in_place(profile_id: String, window: &mut Window, cx: &mut App) {
@@ -398,6 +429,10 @@ struct ProfileSummary {
     /// `None` when the ClickUp integration isn't part of this build.
     clickup_connected: Option<bool>,
     git_committer: Option<String>,
+    #[serde(default)]
+    git_name: Option<String>,
+    #[serde(default)]
+    git_email: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -552,6 +587,8 @@ impl ProfileStore {
                 .is_ok()
                 .then_some(self.clickup_connected.unwrap_or(false)),
             git_committer: self.git_committer.clone(),
+            git_name: self.git_identity.name.clone(),
+            git_email: self.git_identity.email.clone(),
         }
     }
 
@@ -602,32 +639,78 @@ impl ProfileStore {
         .detach_and_log_err(cx);
     }
 
-    /// Sets who this profile commits as. For a profile other than the default one, git's global
-    /// config is the profile's own file, so this leaves the other profiles untouched.
+    /// Sets who `profile_id` commits as. A profile other than the default one has a global git
+    /// config of its own, so this leaves the other profiles untouched. That file holds no
+    /// secret, so any profile's manager may edit it.
     fn set_git_identity(
         &mut self,
+        profile_id: String,
         name: String,
         email: String,
         cx: &mut Context<Self>,
     ) -> Task<Result<()>> {
+        let (name, email) = (name.trim().to_string(), email.trim().to_string());
         cx.spawn(async move |this, cx| {
-            for (key, value) in [("user.name", name), ("user.email", email)] {
+            let config_file = if profile_id == active_profile_id() {
+                None
+            } else if profile_id == paths::DEFAULT_PROFILE_ID {
+                // This process may have pointed `--global` at its own profile's file.
+                Some(paths::home_dir().join(".gitconfig"))
+            } else {
+                let file = paths::profiles_dir().join(&profile_id).join("gitconfig");
+                if !file.exists() {
+                    std::fs::write(&file, crate::profile_git_config_template(&profile_id))
+                        .with_context(|| format!("failed to create {}", file.display()))?;
+                }
+                Some(file)
+            };
+            for (key, value) in [("user.name", &name), ("user.email", &email)] {
                 let mut command = util::command::new_command("git");
-                if value.trim().is_empty() {
-                    command.args(["config", "--global", "--unset", key]);
+                command.arg("config");
+                match &config_file {
+                    Some(file) => command.arg("--file").arg(file),
+                    None => command.arg("--global"),
+                };
+                if value.is_empty() {
+                    command.args(["--unset", key]);
                 } else {
-                    command.args(["config", "--global", key, value.trim()]);
+                    command.args([key, value.as_str()]);
                 }
                 let output = command.output().await.context("failed to run git")?;
                 // `--unset` of a key that isn't set exits with 5, which is what we wanted anyway.
-                let unset_missing = value.trim().is_empty() && output.status.code() == Some(5);
+                let unset_missing = value.is_empty() && output.status.code() == Some(5);
                 anyhow::ensure!(
                     output.status.success() || unset_missing,
                     "git config {key} falhou: {}",
                     String::from_utf8_lossy(&output.stderr).trim()
                 );
             }
-            this.update(cx, |this, cx| this.refresh_accounts(cx))
+            this.update(cx, |this, cx| {
+                if profile_id == active_profile_id() {
+                    this.refresh_accounts(cx);
+                    return;
+                }
+                // The other profile republishes its summary only when something changes there,
+                // so the new identity is written into it here.
+                let summary = this.summaries.entry(profile_id.clone()).or_default();
+                summary.git_name = (!name.is_empty()).then(|| name.clone());
+                summary.git_email = (!email.is_empty()).then(|| email.clone());
+                summary.git_committer = match (&summary.git_name, &summary.git_email) {
+                    (Some(name), Some(email)) => Some(format!("{name} <{email}>")),
+                    (Some(name), None) => Some(name.clone()),
+                    (None, Some(email)) => Some(email.clone()),
+                    (None, None) => None,
+                };
+                let summary = summary.clone();
+                let path = summaries_dir().join(format!("{profile_id}.json"));
+                cx.background_spawn(async move {
+                    std::fs::create_dir_all(summaries_dir())?;
+                    std::fs::write(&path, serde_json::to_vec_pretty(&summary)?)?;
+                    anyhow::Ok(())
+                })
+                .detach_and_log_err(cx);
+                cx.notify();
+            })
         })
     }
 
@@ -1822,31 +1905,50 @@ impl ManageProfilesModal {
             .into_any_element()
     }
 
-    fn open_settings_page(page: &'static str) -> impl Fn(&gpui::ClickEvent, &mut Window, &mut App) {
+    /// A click handler that runs `action` in `profile_id`: here when it is this window's
+    /// profile, or in that profile's own process otherwise.
+    fn profile_action(
+        &self,
+        profile_id: &str,
+        action: &'static str,
+        data: Option<serde_json::Value>,
+    ) -> impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static {
+        let profile_id = profile_id.to_string();
+        let workspace = self.workspace.clone();
         move |_, window, cx| {
-            window.dispatch_action(
-                Box::new(zed_actions::OpenSettingsPage {
-                    page: page.to_string(),
-                    target: None,
-                }),
-                cx,
-            )
-        }
-    }
-
-    fn dispatch_by_name(name: &'static str) -> impl Fn(&gpui::ClickEvent, &mut Window, &mut App) {
-        move |_, window, cx| match cx.build_action(name, None) {
-            Ok(action) => window.dispatch_action(action, cx),
-            Err(error) => log::error!("failed to build {name}: {error:?}"),
+            if profile_id == active_profile_id() {
+                match cx.build_action(action, data.clone()) {
+                    Ok(action) => window.dispatch_action(action, cx),
+                    Err(error) => log::error!("failed to build {action}: {error:?}"),
+                }
+            } else {
+                run_in_profile(profile_id.clone(), action, data.clone(), cx).detach_and_notify_err(
+                    workspace.clone(),
+                    window,
+                    cx,
+                );
+            }
         }
     }
 
     fn start_editing_git_identity(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let identity = &self.store.read(cx).git_identity;
-        let (name, email) = (
-            identity.name.clone().unwrap_or_default(),
-            identity.email.clone().unwrap_or_default(),
-        );
+        let store = self.store.read(cx);
+        let (name, email) = if self.selected_id == active_profile_id() {
+            (
+                store.git_identity.name.clone().unwrap_or_default(),
+                store.git_identity.email.clone().unwrap_or_default(),
+            )
+        } else {
+            let summary = store.summaries.get(&self.selected_id);
+            (
+                summary
+                    .and_then(|summary| summary.git_name.clone())
+                    .unwrap_or_default(),
+                summary
+                    .and_then(|summary| summary.git_email.clone())
+                    .unwrap_or_default(),
+            )
+        };
         let new_editor =
             |text: String, placeholder: &str, window: &mut Window, cx: &mut Context<Self>| {
                 cx.new(|cx| {
@@ -1869,9 +1971,10 @@ impl ManageProfilesModal {
         };
         let name = name_editor.read(cx).text(cx);
         let email = email_editor.read(cx).text(cx);
-        let task = self
-            .store
-            .update(cx, |store, cx| store.set_git_identity(name, email, cx));
+        let profile_id = self.selected_id.clone();
+        let task = self.store.update(cx, |store, cx| {
+            store.set_git_identity(profile_id, name, email, cx)
+        });
         self.report(task, cx);
         cx.notify();
     }
@@ -1935,7 +2038,6 @@ impl ManageProfilesModal {
         &self,
         profile: &AppProfile,
         summary: &ProfileSummary,
-        is_active: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let is_default = profile.id == paths::DEFAULT_PROFILE_ID;
@@ -1944,8 +2046,8 @@ impl ManageProfilesModal {
         } else {
             "gitconfig deste perfil, herda o ~/.gitconfig"
         };
-        let committer = match (&self.git_identity_editors, is_active) {
-            (Some((name_editor, email_editor)), true) => {
+        let committer = match &self.git_identity_editors {
+            Some((name_editor, email_editor)) => {
                 let field = |editor: &Entity<Editor>, cx: &App| {
                     div()
                         .flex_1()
@@ -2005,14 +2107,14 @@ impl ManageProfilesModal {
                     None => "Sem user.name no git".to_string(),
                 },
                 Some(source.into()),
-                is_active.then(|| {
+                Some(
                     Button::new("edit-git-identity", "Editar")
                         .label_size(LabelSize::Small)
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.start_editing_git_identity(window, cx)
                         }))
-                        .into_any_element()
-                }),
+                        .into_any_element(),
+                ),
                 false,
                 cx,
             ),
@@ -2090,12 +2192,23 @@ impl ManageProfilesModal {
             false,
             cx,
         ));
-        let action = is_active.then(|| {
-            Button::new("configure-ai", "Configurar")
-                .label_size(LabelSize::Small)
-                .on_click(Self::open_settings_page("AI"))
-                .into_any_element()
-        });
+        let action = Some(
+            Button::new(
+                "configure-ai",
+                if is_active {
+                    "Configurar"
+                } else {
+                    "Configurar lá"
+                },
+            )
+            .label_size(LabelSize::Small)
+            .on_click(self.profile_action(
+                &self.selected_id,
+                "zed::OpenSettingsPage",
+                Some(serde_json::json!({ "page": "AI" })),
+            ))
+            .into_any_element(),
+        );
         Self::render_card("IA", action, rows, None, cx)
     }
 
@@ -2164,13 +2277,24 @@ impl ManageProfilesModal {
                 )
             })
             .collect();
-        let action = is_active.then(|| {
-            Button::new("add-mcp", "Adicionar")
-                .label_size(LabelSize::Small)
-                .start_icon(Icon::new(IconName::Plus).size(IconSize::XSmall))
-                .on_click(Self::open_settings_page("MCP Servers"))
-                .into_any_element()
-        });
+        let action = Some(
+            Button::new(
+                "add-mcp",
+                if is_active {
+                    "Adicionar"
+                } else {
+                    "Adicionar lá"
+                },
+            )
+            .label_size(LabelSize::Small)
+            .start_icon(Icon::new(IconName::Plus).size(IconSize::XSmall))
+            .on_click(self.profile_action(
+                &self.selected_id,
+                "zed::OpenSettingsPage",
+                Some(serde_json::json!({ "page": "MCP Servers" })),
+            ))
+            .into_any_element(),
+        );
         Self::render_card(
             "SERVIDORES MCP",
             action,
@@ -2187,24 +2311,29 @@ impl ManageProfilesModal {
         cx: &App,
     ) -> Option<impl IntoElement> {
         let connected = summary.clickup_connected?;
-        let trailing = match (is_active, connected) {
-            (true, true) => Button::new("clickup-disconnect", "Desconectar")
-                .label_size(LabelSize::Small)
-                .on_click(Self::dispatch_by_name(CLICKUP_DISCONNECT_ACTION))
-                .into_any_element(),
-            (true, false) => Button::new("clickup-connect", "Conectar")
-                .label_size(LabelSize::Small)
-                .on_click(Self::dispatch_by_name(CLICKUP_OPEN_ACTION))
-                .into_any_element(),
-            (false, connected) => Self::render_status(
-                if connected {
-                    "conectado"
-                } else {
-                    "desconectado"
-                },
-                connected,
-            ),
+        let (label, action) = if connected {
+            ("Desconectar", CLICKUP_DISCONNECT_ACTION)
+        } else {
+            ("Conectar", CLICKUP_OPEN_ACTION)
         };
+        let trailing = h_flex()
+            .gap_2()
+            .when(!is_active, |this| {
+                this.child(Self::render_status(
+                    if connected {
+                        "conectado"
+                    } else {
+                        "desconectado"
+                    },
+                    connected,
+                ))
+            })
+            .child(
+                Button::new("clickup-connection", label)
+                    .label_size(LabelSize::Small)
+                    .on_click(self.profile_action(&self.selected_id, action, None)),
+            )
+            .into_any_element();
         let row = Self::render_row(
             IconName::ListTodo,
             Color::Default,
@@ -2273,14 +2402,15 @@ impl ManageProfilesModal {
             Color::Default,
             "settings.json do perfil",
             Some("sobrepõe o global_settings.json compartilhado".into()),
-            is_active.then(|| {
-                Button::new("open-settings", "Abrir")
-                    .label_size(LabelSize::Small)
-                    .on_click(|_, window, cx| {
-                        window.dispatch_action(Box::new(zed_actions::OpenSettingsFile), cx)
-                    })
-                    .into_any_element()
-            }),
+            Some(
+                Button::new(
+                    "open-settings",
+                    if is_active { "Abrir" } else { "Abrir lá" },
+                )
+                .label_size(LabelSize::Small)
+                .on_click(self.profile_action(&profile.id, "zed::OpenSettingsFile", None))
+                .into_any_element(),
+            ),
             false,
             cx,
         );
@@ -2383,7 +2513,7 @@ impl ManageProfilesModal {
                     .flex_1()
                     .min_w_0()
                     .gap_3()
-                    .child(self.render_git_card(profile, summary, is_active, cx))
+                    .child(self.render_git_card(profile, summary, cx))
                     .child(self.render_ai_card(summary, is_active, cx))
                     .child(self.render_data_card(profile, is_active, cx))
                     .into_any_element(),

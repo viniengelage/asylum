@@ -98,6 +98,12 @@ pub enum InstanceRequest {
     Activate,
     /// Open these paths, which belong to this instance's profile, and come to the front.
     Open { paths: Vec<String> },
+    /// Run an action in this instance's active workspace and come to the front. It's how one
+    /// profile's manager opens another profile's settings without touching them itself.
+    Dispatch {
+        action: String,
+        data: Option<serde_json::Value>,
+    },
 }
 
 trait InstanceStream: Read + Write {}

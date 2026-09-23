@@ -60,7 +60,7 @@ use std::{
     process,
     rc::Rc,
     sync::{Arc, LazyLock, OnceLock},
-    time::Instant,
+    time::{Duration, Instant},
 };
 use theme::{ActiveTheme, GlobalTheme, ThemeRegistry};
 use theme_settings::load_user_theme;
@@ -1030,6 +1030,58 @@ fn main() {
                                 .collect(),
                             ..Default::default()
                         }),
+                        InstanceRequest::Dispatch { action, data } => {
+                            cx.update(|cx| cx.activate(true));
+                            let action = match cx.update(|cx| cx.build_action(&action, data)) {
+                                Ok(action) => action,
+                                Err(error) => {
+                                    log::error!(
+                                        "can't run {action} for another profile: {error:?}"
+                                    );
+                                    continue;
+                                }
+                            };
+                            // A profile started for this request answers before its first
+                            // window exists, so give the window a moment to appear.
+                            let mut window = None;
+                            for _ in 0..50 {
+                                window = cx.update(|cx| {
+                                    cx.active_window()
+                                        .and_then(|window| window.downcast::<MultiWorkspace>())
+                                        .or_else(|| {
+                                            cx.windows().into_iter().find_map(|window| {
+                                                window.downcast::<MultiWorkspace>()
+                                            })
+                                        })
+                                });
+                                if window.is_some() {
+                                    break;
+                                }
+                                cx.background_executor()
+                                    .timer(Duration::from_millis(200))
+                                    .await;
+                            }
+                            let Some(window) = window else {
+                                log::error!("no window to run an action another profile sent");
+                                continue;
+                            };
+                            window
+                                .update(cx, |multi_workspace, window, cx| {
+                                    window.activate_window();
+                                    // These actions are registered on the workspace, and focus
+                                    // can sit outside it (in the sidebar, say), where they
+                                    // would never reach their handler.
+                                    let pane =
+                                        multi_workspace.workspace().read(cx).active_pane().clone();
+                                    window.focus(
+                                        &gpui::Focusable::focus_handle(pane.read(cx), cx),
+                                        cx,
+                                    );
+                                    log::info!("running {} for another profile", action.name());
+                                    window.dispatch_action(action, cx);
+                                })
+                                .log_err();
+                        }
                     }
                 }
             }
@@ -1729,20 +1781,24 @@ pub(crate) async fn restorable_workspace_locations(
 fn use_profile_git_config(profile_id: &str, profile_dir: &Path) {
     let git_config = profile_dir.join("gitconfig");
     if !git_config.exists() {
-        let contents = format!(
-            "# Global git config of the Asylum profile \"{profile_id}\". git reads this file instead\n\
-             # of ~/.gitconfig, which is included below, so only what this file sets differs.\n\
-             [include]\n\
-             \tpath = ~/.gitconfig\n\
-             \tpath = ~/.config/git/config\n"
-        );
-        if let Err(error) = std::fs::write(&git_config, contents) {
+        if let Err(error) = std::fs::write(&git_config, profile_git_config_template(profile_id)) {
             eprintln!("failed to create {}: {error}", git_config.display());
             return;
         }
     }
     // SAFETY: called from `main` before the process starts any other thread.
     unsafe { std::env::set_var("GIT_CONFIG_GLOBAL", &git_config) };
+}
+
+/// The global git config a profile other than the default one starts with.
+pub(crate) fn profile_git_config_template(profile_id: &str) -> String {
+    format!(
+        "# Global git config of the Asylum profile \"{profile_id}\". git reads this file instead\n\
+         # of ~/.gitconfig, which is included below, so only what this file sets differs.\n\
+         [include]\n\
+         \tpath = ~/.gitconfig\n\
+         \tpath = ~/.config/git/config\n"
+    )
 }
 
 fn init_paths() -> HashMap<io::ErrorKind, Vec<&'static Path>> {
