@@ -1372,13 +1372,15 @@ pub async fn get_git_committer(cx: &AsyncApp) -> GitCommitter {
         true,
     );
 
+    // `--global` alone ignores `[include]`s, but a commit honors them, so they are followed to
+    // read the identity a commit would actually carry.
     cx.background_spawn(async move {
         let name = git
-            .run(&["config", "--global", "user.name"])
+            .run(&["config", "--global", "--includes", "user.name"])
             .await
             .log_err();
         let email = git
-            .run(&["config", "--global", "user.email"])
+            .run(&["config", "--global", "--includes", "user.email"])
             .await
             .log_err();
         GitCommitter { name, email }

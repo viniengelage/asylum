@@ -459,6 +459,7 @@ pub struct ProfileStore {
     summaries: HashMap<String, ProfileSummary>,
     clickup_connected: Option<bool>,
     git_committer: Option<String>,
+    git_identity: git::repository::GitCommitter,
     load_error: Option<SharedString>,
     refresh_task: Option<Task<()>>,
     publish_task: Option<Task<()>>,
@@ -490,6 +491,10 @@ impl ProfileStore {
                 summaries: HashMap::default(),
                 clickup_connected: None,
                 git_committer: None,
+                git_identity: git::repository::GitCommitter {
+                    name: None,
+                    email: None,
+                },
                 load_error: None,
                 refresh_task: None,
                 publish_task: None,
@@ -580,20 +585,50 @@ impl ProfileStore {
                 .log_err()
                 .map(|credentials| credentials.is_some());
             let committer = git::repository::get_git_committer(cx).await;
-            let git_committer = match (committer.name, committer.email) {
+            let git_committer = match (&committer.name, &committer.email) {
                 (Some(name), Some(email)) => Some(format!("{name} <{email}>")),
-                (Some(name), None) => Some(name),
-                (None, Some(email)) => Some(email),
+                (Some(name), None) => Some(name.clone()),
+                (None, Some(email)) => Some(email.clone()),
                 (None, None) => None,
             };
             this.update(cx, |this, cx| {
                 this.clickup_connected = clickup_connected;
                 this.git_committer = git_committer;
+                this.git_identity = committer;
                 this.publish_summary(cx);
                 cx.notify();
             })
         })
         .detach_and_log_err(cx);
+    }
+
+    /// Sets who this profile commits as. For a profile other than the default one, git's global
+    /// config is the profile's own file, so this leaves the other profiles untouched.
+    fn set_git_identity(
+        &mut self,
+        name: String,
+        email: String,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<()>> {
+        cx.spawn(async move |this, cx| {
+            for (key, value) in [("user.name", name), ("user.email", email)] {
+                let mut command = util::command::new_command("git");
+                if value.trim().is_empty() {
+                    command.args(["config", "--global", "--unset", key]);
+                } else {
+                    command.args(["config", "--global", key, value.trim()]);
+                }
+                let output = command.output().await.context("failed to run git")?;
+                // `--unset` of a key that isn't set exits with 5, which is what we wanted anyway.
+                let unset_missing = value.trim().is_empty() && output.status.code() == Some(5);
+                anyhow::ensure!(
+                    output.status.success() || unset_missing,
+                    "git config {key} falhou: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                );
+            }
+            this.update(cx, |this, cx| this.refresh_accounts(cx))
+        })
     }
 
     /// Rereads the registry, which other profiles may have changed, and checks which
@@ -1365,6 +1400,8 @@ pub struct ManageProfilesModal {
     workspace: WeakEntity<Workspace>,
     selected_id: String,
     name_editor: Entity<Editor>,
+    /// The editors for who git commits as, while that identity is being edited.
+    git_identity_editors: Option<(Entity<Editor>, Entity<Editor>)>,
     error: Option<SharedString>,
     _subscriptions: Vec<gpui::Subscription>,
 }
@@ -1407,6 +1444,7 @@ impl ManageProfilesModal {
             workspace,
             selected_id: String::new(),
             name_editor,
+            git_identity_editors: None,
             error: None,
             _subscriptions: subscriptions,
         };
@@ -1436,6 +1474,7 @@ impl ManageProfilesModal {
             .map(|profile| profile.name.clone())
             .unwrap_or_default();
         self.selected_id = profile_id;
+        self.git_identity_editors = None;
         self.error = None;
         self.name_editor
             .update(cx, |editor, cx| editor.set_text(name, window, cx));
@@ -1802,6 +1841,46 @@ impl ManageProfilesModal {
         }
     }
 
+    fn start_editing_git_identity(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let identity = &self.store.read(cx).git_identity;
+        let (name, email) = (
+            identity.name.clone().unwrap_or_default(),
+            identity.email.clone().unwrap_or_default(),
+        );
+        let new_editor =
+            |text: String, placeholder: &str, window: &mut Window, cx: &mut Context<Self>| {
+                cx.new(|cx| {
+                    let mut editor = Editor::single_line(window, cx);
+                    editor.set_placeholder_text(placeholder, window, cx);
+                    editor.set_text(text, window, cx);
+                    editor
+                })
+            };
+        let name_editor = new_editor(name, "Nome", window, cx);
+        let email_editor = new_editor(email, "E-mail", window, cx);
+        name_editor.focus_handle(cx).focus(window, cx);
+        self.git_identity_editors = Some((name_editor, email_editor));
+        cx.notify();
+    }
+
+    fn save_git_identity(&mut self, cx: &mut Context<Self>) {
+        let Some((name_editor, email_editor)) = self.git_identity_editors.take() else {
+            return;
+        };
+        let name = name_editor.read(cx).text(cx);
+        let email = email_editor.read(cx).text(cx);
+        let task = self
+            .store
+            .update(cx, |store, cx| store.set_git_identity(name, email, cx));
+        self.report(task, cx);
+        cx.notify();
+    }
+
+    fn cancel_git_identity(&mut self, cx: &mut Context<Self>) {
+        self.git_identity_editors = None;
+        cx.notify();
+    }
+
     fn toggle_mcp_server(&self, server: String, enabled: bool, cx: &mut Context<Self>) {
         if let Some(workspace) = self.workspace.upgrade() {
             let store = workspace.read(cx).project().read(cx).context_server_store();
@@ -1852,19 +1931,92 @@ impl ManageProfilesModal {
         })
     }
 
-    fn render_git_card(&self, summary: &ProfileSummary, cx: &App) -> impl IntoElement {
-        let committer = Self::render_row(
-            IconName::Person,
-            Color::Default,
-            match &summary.git_committer {
-                Some(committer) => format!("Commits como {committer}"),
-                None => "Sem user.name no git".to_string(),
-            },
-            Some("git config --global, o mesmo em todos os perfis por enquanto".into()),
-            None,
-            false,
-            cx,
-        );
+    fn render_git_card(
+        &self,
+        profile: &AppProfile,
+        summary: &ProfileSummary,
+        is_active: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let is_default = profile.id == paths::DEFAULT_PROFILE_ID;
+        let source = if is_default {
+            "~/.gitconfig, que os outros perfis herdam"
+        } else {
+            "gitconfig deste perfil, herda o ~/.gitconfig"
+        };
+        let committer = match (&self.git_identity_editors, is_active) {
+            (Some((name_editor, email_editor)), true) => {
+                let field = |editor: &Entity<Editor>, cx: &App| {
+                    div()
+                        .flex_1()
+                        .px_2()
+                        .py_0p5()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(cx.theme().colors().border)
+                        .bg(cx.theme().colors().editor_background)
+                        .child(editor.clone())
+                };
+                v_flex()
+                    .gap_1p5()
+                    .px_3()
+                    .py_2()
+                    .child(
+                        h_flex()
+                            .gap_1p5()
+                            .child(field(name_editor, cx))
+                            .child(field(email_editor, cx)),
+                    )
+                    .child(
+                        h_flex()
+                            .justify_between()
+                            .child(
+                                Label::new(format!("Grava em {source}"))
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted),
+                            )
+                            .child(
+                                h_flex()
+                                    .gap_1()
+                                    .child(
+                                        Button::new("cancel-git-identity", "Cancelar")
+                                            .label_size(LabelSize::Small)
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.cancel_git_identity(cx)
+                                            })),
+                                    )
+                                    .child(
+                                        Button::new("save-git-identity", "Salvar")
+                                            .label_size(LabelSize::Small)
+                                            .style(ButtonStyle::Filled)
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.save_git_identity(cx)
+                                            })),
+                                    ),
+                            ),
+                    )
+                    .into_any_element()
+            }
+            _ => Self::render_row(
+                IconName::Person,
+                Color::Default,
+                match &summary.git_committer {
+                    Some(committer) => format!("Commits como {committer}"),
+                    None => "Sem user.name no git".to_string(),
+                },
+                Some(source.into()),
+                is_active.then(|| {
+                    Button::new("edit-git-identity", "Editar")
+                        .label_size(LabelSize::Small)
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.start_editing_git_identity(window, cx)
+                        }))
+                        .into_any_element()
+                }),
+                false,
+                cx,
+            ),
+        };
         let providers = Self::render_row(
             IconName::GitBranch,
             Color::Muted,
@@ -2231,7 +2383,7 @@ impl ManageProfilesModal {
                     .flex_1()
                     .min_w_0()
                     .gap_3()
-                    .child(self.render_git_card(summary, cx))
+                    .child(self.render_git_card(profile, summary, is_active, cx))
                     .child(self.render_ai_card(summary, is_active, cx))
                     .child(self.render_data_card(profile, is_active, cx))
                     .into_any_element(),

@@ -265,9 +265,13 @@ fn main() {
             process::exit(1);
         }
         (Some(profile_id), None) => {
-            if let Err(error) = paths::set_active_profile(profile_id) {
-                eprintln!("{error}");
-                process::exit(1);
+            match paths::set_active_profile(profile_id) {
+                Ok(Some(profile_dir)) => use_profile_git_config(profile_id, profile_dir),
+                Ok(None) => {}
+                Err(error) => {
+                    eprintln!("{error}");
+                    process::exit(1);
+                }
             }
             vec![
                 std::ffi::OsString::from("--profile"),
@@ -1714,6 +1718,30 @@ pub(crate) async fn restorable_workspace_locations(
         }
         _ => None,
     }
+}
+
+/// Points git at a global config of the profile's own, so commits made from this profile, by
+/// the app or its terminals, carry the profile's identity. The file includes the user's global
+/// config, so everything else (aliases, credential helpers, signing) stays as it is.
+///
+/// Must run before any thread starts, since it changes the process environment.
+fn use_profile_git_config(profile_id: &str, profile_dir: &Path) {
+    let git_config = profile_dir.join("gitconfig");
+    if !git_config.exists() {
+        let contents = format!(
+            "# Global git config of the Asylum profile \"{profile_id}\". git reads this file instead\n\
+             # of ~/.gitconfig, which is included below, so only what this file sets differs.\n\
+             [include]\n\
+             \tpath = ~/.gitconfig\n\
+             \tpath = ~/.config/git/config\n"
+        );
+        if let Err(error) = std::fs::write(&git_config, contents) {
+            eprintln!("failed to create {}: {error}", git_config.display());
+            return;
+        }
+    }
+    // SAFETY: called from `main` before the process starts any other thread.
+    unsafe { std::env::set_var("GIT_CONFIG_GLOBAL", &git_config) };
 }
 
 fn init_paths() -> HashMap<io::ErrorKind, Vec<&'static Path>> {
