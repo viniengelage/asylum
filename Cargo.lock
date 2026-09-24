@@ -832,6 +832,40 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
+name = "api_client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "chrono",
+ "collections",
+ "credentials_provider",
+ "db",
+ "editor",
+ "fs",
+ "futures 0.3.34",
+ "gpui",
+ "http_client",
+ "jsonschema",
+ "language",
+ "log",
+ "menu",
+ "parking_lot",
+ "pretty_assertions",
+ "project",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "ui",
+ "ui_input",
+ "urlencoding",
+ "util",
+ "uuid",
+ "workspace",
+ "zed_credentials_provider",
+]
+
+[[package]]
 name = "approx"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -23154,6 +23188,7 @@ dependencies = [
  "agent_skills",
  "agent_ui",
  "anyhow",
+ "api_client",
  "ashpd",
  "askpass",
  "assets",

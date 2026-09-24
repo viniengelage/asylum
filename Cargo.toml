@@ -13,6 +13,7 @@ members = [
     "crates/ai_onboarding",
     "crates/android_sdk",
     "crates/anthropic",
+    "crates/api_client",
     "crates/askpass",
     "crates/assets",
     "crates/audio",
@@ -292,6 +293,7 @@ agent_ui = { path = "crates/agent_ui" }
 ai_onboarding = { path = "crates/ai_onboarding" }
 android_sdk = { path = "crates/android_sdk" }
 anthropic = { path = "crates/anthropic" }
+api_client = { path = "crates/api_client" }
 askpass = { path = "crates/askpass" }
 assets = { path = "crates/assets" }
 audio = { path = "crates/audio" }
