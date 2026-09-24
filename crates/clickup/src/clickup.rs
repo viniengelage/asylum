@@ -17,10 +17,7 @@ use std::{
 };
 use ui::{Tooltip, prelude::*};
 use util::ResultExt as _;
-use workspace::{
-    HideStatusItem, ItemHandle, StatusItemView, Workspace,
-    dock::StatusBarButton,
-};
+use workspace::{HideStatusItem, ItemHandle, StatusItemView, Workspace, dock::StatusBarButton};
 
 actions!(
     clickup,
@@ -106,7 +103,9 @@ pub enum Connection {
     /// The saved token stopped working, usually because it was regenerated on ClickUp.
     Rejected,
     /// The saved token could not be checked; it is kept for the next attempt.
-    Unreachable { message: SharedString },
+    Unreachable {
+        message: SharedString,
+    },
 }
 
 /// The assigned tasks of the selected workspace, as of the last sync.
@@ -206,9 +205,9 @@ impl ClickUpStore {
             return Task::ready(Err(anyhow::anyhow!("ClickUp não está conectado")));
         };
         cx.spawn(async move |this, cx| {
-            cx.background_spawn(
-                async move { api::stop_timer(&http_client, &token, &workspace_id).await },
-            )
+            cx.background_spawn(async move {
+                api::stop_timer(&http_client, &token, &workspace_id).await
+            })
             .await?;
             this.update(cx, |this, cx| this.sync(cx))
         })
@@ -274,8 +273,7 @@ impl ClickUpStore {
                                 user_id,
                                 closed_since,
                             );
-                            let timer =
-                                api::get_running_timer(&http_client, &token, &workspace_id);
+                            let timer = api::get_running_timer(&http_client, &token, &workspace_id);
                             let (open, closed, timer) = futures::join!(open, closed, timer);
                             // A timer that can't be read shouldn't hide the tasks.
                             let timer = timer
@@ -335,7 +333,7 @@ impl ClickUpStore {
             }
             Err(error) => {
                 log::warn!("ClickUp: falha ao sincronizar as tarefas: {error:#}");
-                self.tasks.error = Some(error.to_string().into());
+                self.tasks.error = Some(format!("{error:#}").into());
                 true
             }
         };
@@ -373,12 +371,7 @@ impl ClickUpStore {
         let token = account.token.clone();
         cx.spawn(async move |this, cx| {
             credentials_provider
-                .write_credentials(
-                    CREDENTIALS_URL,
-                    CREDENTIALS_USERNAME,
-                    token.as_bytes(),
-                    cx,
-                )
+                .write_credentials(CREDENTIALS_URL, CREDENTIALS_USERNAME, token.as_bytes(), cx)
                 .await?;
             this.update(cx, |this, cx| this.set_connected(account, cx))
         })
@@ -550,12 +543,13 @@ mod tests {
     use super::*;
     use http_client::{FakeHttpClient, Response};
 
-    fn fake_client(
-        user_status: u16,
-    ) -> Arc<dyn HttpClient> {
+    fn fake_client(user_status: u16) -> Arc<dyn HttpClient> {
         FakeHttpClient::create(move |request| async move {
             assert_eq!(
-                request.headers().get("Authorization").map(|value| value.as_bytes()),
+                request
+                    .headers()
+                    .get("Authorization")
+                    .map(|value| value.as_bytes()),
                 Some(b"pk_123_ABCD".as_slice()),
                 "personal tokens go in the header without a Bearer prefix"
             );
@@ -564,7 +558,9 @@ mod tests {
                     r#"{"user":{"id":7,"username":"Vinicios","email":"v@example.com"}}"#
                 }
                 "/api/v2/user" => r#"{"err":"Token invalid","ECODE":"OAUTH_025"}"#,
-                "/api/v2/team" => r#"{"teams":[{"id":"1","name":"Trix"},{"id":"2","name":"Pessoal"}]}"#,
+                "/api/v2/team" => {
+                    r#"{"teams":[{"id":"1","name":"Trix"},{"id":"2","name":"Pessoal"}]}"#
+                }
                 path => panic!("unexpected request to {path}"),
             };
             let status = if request.uri().path() == "/api/v2/user" {

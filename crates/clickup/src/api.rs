@@ -146,7 +146,11 @@ pub async fn get_assigned_tasks(
     }
     // The filter above is the one that keeps the query small, but ClickUp has answered it
     // with every task of the workspace before, so the tasks are checked here as well.
-    tasks.retain(|task| task.assignees.iter().any(|assignee| assignee.id == user_id));
+    tasks.retain(|task| {
+        task.assignees
+            .iter()
+            .any(|assignee| assignee.id == Some(user_id))
+    });
     Ok(tasks)
 }
 
@@ -158,6 +162,18 @@ where
     Ok(match value {
         Some(serde_json::Value::String(text)) => text.parse().ok(),
         Some(serde_json::Value::Number(number)) => number.as_i64(),
+        _ => None,
+    })
+}
+
+fn deserialize_user_id<'de, D>(deserializer: D) -> std::result::Result<Option<u64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(match value {
+        Some(serde_json::Value::String(text)) => text.parse().ok(),
+        Some(serde_json::Value::Number(number)) => number.as_u64(),
         _ => None,
     })
 }
@@ -194,7 +210,9 @@ pub struct TaskDetail {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Assignee {
-    pub id: u64,
+    /// ClickUp sends user ids as numbers in some responses and as strings in others.
+    #[serde(default, deserialize_with = "deserialize_user_id")]
+    pub id: Option<u64>,
     pub username: Option<String>,
     pub email: Option<String>,
 }
@@ -415,6 +433,10 @@ async fn execute<T: DeserializeOwned>(
     path: &str,
     request: Request<AsyncBody>,
 ) -> Result<T> {
+    // Errors name the endpoint; the query only makes them longer.
+    let path = path.split('?').next().unwrap_or(path);
+    // Errors name the endpoint; the query only makes them longer.
+    let path = path.split('?').next().unwrap_or(path);
     let mut response = client
         .send(request)
         .await
@@ -507,7 +529,7 @@ mod tests {
                 {"id": "1", "name": "minha", "url": "u", "custom_id": null,
                  "status": {"status": "open", "color": "#ccc", "type": "open", "orderindex": 0},
                  "list": {"id": "9", "name": "Sprint"},
-                 "assignees": [{"id": 7, "username": "Vinicios"}, {"id": 8, "username": "Ana"}]},
+                 "assignees": [{"id": "7", "username": "Vinicios"}, {"id": 8, "username": "Ana"}, {"id": null}]},
                 {"id": "2", "name": "da Ana", "url": "u", "custom_id": null,
                  "status": {"status": "open", "color": "#ccc", "type": "open", "orderindex": 0},
                  "list": {"id": "9", "name": "Sprint"},
@@ -518,7 +540,7 @@ mod tests {
         let mine: Vec<&str> = response
             .tasks
             .iter()
-            .filter(|task| task.assignees.iter().any(|assignee| assignee.id == 7))
+            .filter(|task| task.assignees.iter().any(|assignee| assignee.id == Some(7)))
             .map(|task| task.name.as_str())
             .collect();
         assert_eq!(mine, ["minha"]);

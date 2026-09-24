@@ -947,9 +947,11 @@ impl ClickUpPanel {
                     .color(Color::Warning),
             )
             .child(
-                Label::new(format!("Falha ao sincronizar: {error}"))
-                    .size(LabelSize::XSmall)
-                    .color(Color::Muted),
+                div().flex_1().min_w_0().child(
+                    Label::new(format!("Falha ao sincronizar: {error}"))
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted),
+                ),
             )
     }
 
