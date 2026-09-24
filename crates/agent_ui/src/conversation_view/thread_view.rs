@@ -90,6 +90,40 @@ fn plan_markdown(plan: &agent::SubmitPlanToolInput) -> String {
     markdown
 }
 
+/// A step's status icon while executing, or its number before the plan runs.
+fn render_plan_step_marker(
+    index: usize,
+    status: Option<agent::PlanStepStatus>,
+    cx: &App,
+) -> AnyElement {
+    match status {
+        Some(agent::PlanStepStatus::Completed) => Icon::new(IconName::TodoComplete)
+            .size(IconSize::Small)
+            .color(Color::Success)
+            .into_any_element(),
+        Some(agent::PlanStepStatus::InProgress) => Icon::new(IconName::TodoProgress)
+            .size(IconSize::Small)
+            .color(Color::Accent)
+            .with_rotate_animation(2)
+            .into_any_element(),
+        Some(agent::PlanStepStatus::Pending) => Icon::new(IconName::TodoPending)
+            .size(IconSize::Small)
+            .color(Color::Muted)
+            .into_any_element(),
+        None => h_flex()
+            .size_4()
+            .justify_center()
+            .rounded_full()
+            .bg(cx.theme().colors().element_background)
+            .child(
+                Label::new((index + 1).to_string())
+                    .size(LabelSize::XSmall)
+                    .color(Color::Muted),
+            )
+            .into_any_element(),
+    }
+}
+
 fn is_submit_plan_tool_call(tool_call: &ToolCall) -> bool {
     tool_call.tool_name.as_deref() == Some(<agent::SubmitPlanTool as agent::AgentTool>::NAME)
 }
@@ -664,6 +698,7 @@ pub struct ThreadView {
     /// Plans the user opened with "Editar". The buffer's text is what gets
     /// executed, instead of the plan the agent submitted.
     edited_plans: HashMap<acp::ToolCallId, Entity<Buffer>>,
+    collapsed_plans: HashSet<acp::ToolCallId>,
     pub subagent_scroll_handles: RefCell<HashMap<acp::SessionId, ScrollHandle>>,
     pub edits_expanded: bool,
     pub plan_expanded: bool,
@@ -1087,6 +1122,7 @@ impl ThreadView {
             acknowledged_confusable_warnings: HashSet::default(),
             discarded_plans: HashSet::default(),
             edited_plans: HashMap::default(),
+            collapsed_plans: HashSet::default(),
             subagent_scroll_handles: RefCell::new(HashMap::default()),
             edits_expanded: false,
             plan_expanded: false,
@@ -4067,6 +4103,37 @@ impl ThreadView {
             PlanCardState::Ready | PlanCardState::Answered => None,
         };
 
+        let status_element = status_label.map(|label| {
+            let label = Label::new(label).size(LabelSize::Small).color(Color::Muted);
+            if state == PlanCardState::Writing || is_executing {
+                label
+                    .with_animation(
+                        "plan-status",
+                        Animation::new(Duration::from_secs(2))
+                            .repeat()
+                            .with_easing(pulsating_between(0.4, 0.8)),
+                        |label, delta| label.alpha(delta),
+                    )
+                    .into_any_element()
+            } else {
+                label.into_any_element()
+            }
+        });
+
+        if state == PlanCardState::Executed {
+            return self.render_executing_plan(
+                entry_ix,
+                tool_call,
+                &plan,
+                progress.as_ref(),
+                completed_steps.unwrap_or_default(),
+                is_active,
+                border_color,
+                status_element,
+                cx,
+            );
+        }
+
         let header = h_flex()
             .px_2()
             .py_1()
@@ -4100,22 +4167,7 @@ impl ThreadView {
                 )
             })
             .child(div().flex_1())
-            .when_some(status_label, |this, label| {
-                let label = Label::new(label).size(LabelSize::Small).color(Color::Muted);
-                this.child(if state == PlanCardState::Writing || is_executing {
-                    label
-                        .with_animation(
-                            "plan-writing",
-                            Animation::new(Duration::from_secs(2))
-                                .repeat()
-                                .with_easing(pulsating_between(0.4, 0.8)),
-                            |label, delta| label.alpha(delta),
-                        )
-                        .into_any_element()
-                } else {
-                    label.into_any_element()
-                })
-            });
+            .children(status_element);
 
         // Replaced and discarded plans stay in the history collapsed to their
         // header, so the thread keeps pointing at the plan that matters.
@@ -4140,32 +4192,7 @@ impl ThreadView {
                 .as_ref()
                 .and_then(|progress| progress.steps.get(index))
                 .map(|step| step.status);
-            let marker = match step_status {
-                Some(agent::PlanStepStatus::Completed) => Icon::new(IconName::TodoComplete)
-                    .size(IconSize::Small)
-                    .color(Color::Success)
-                    .into_any_element(),
-                Some(agent::PlanStepStatus::InProgress) => Icon::new(IconName::TodoProgress)
-                    .size(IconSize::Small)
-                    .color(Color::Accent)
-                    .with_rotate_animation(2)
-                    .into_any_element(),
-                Some(agent::PlanStepStatus::Pending) => Icon::new(IconName::TodoPending)
-                    .size(IconSize::Small)
-                    .color(Color::Muted)
-                    .into_any_element(),
-                None => h_flex()
-                    .size_4()
-                    .justify_center()
-                    .rounded_full()
-                    .bg(colors.element_background)
-                    .child(
-                        Label::new((index + 1).to_string())
-                            .size(LabelSize::XSmall)
-                            .color(Color::Muted),
-                    )
-                    .into_any_element(),
-            };
+            let marker = render_plan_step_marker(index, step_status, cx);
             h_flex()
                 .items_start()
                 .gap_2()
@@ -4441,6 +4468,163 @@ impl ThreadView {
                         .color(Color::Muted),
                 )
             })
+            .into_any()
+    }
+
+    /// The card an executed plan turns into: just the title and a checklist of
+    /// its steps, so it stays small while the agent works below it.
+    fn render_executing_plan(
+        &self,
+        entry_ix: usize,
+        tool_call: &ToolCall,
+        plan: &agent::SubmitPlanToolInput,
+        progress: Option<&agent::UpdatePlanToolInput>,
+        completed_steps: usize,
+        is_active: bool,
+        border_color: Hsla,
+        status_element: Option<AnyElement>,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let colors = cx.theme().colors();
+        let is_collapsed = self.collapsed_plans.contains(&tool_call.id);
+        let step_count = plan.steps.len();
+        let is_done = step_count > 0 && completed_steps >= step_count;
+        let fraction = if step_count == 0 {
+            0.
+        } else {
+            (completed_steps.min(step_count) as f32) / (step_count as f32)
+        };
+        let title: SharedString = if plan.title.is_empty() {
+            "Plano".into()
+        } else {
+            plan.title.clone().into()
+        };
+        let profile_name = self.as_native_thread(cx).and_then(|thread| {
+            AgentSettings::get_global(cx)
+                .profiles
+                .get(thread.read(cx).profile())
+                .map(|profile| profile.name.clone())
+        });
+
+        let header = h_flex()
+            .px_2()
+            .py_1()
+            .gap_1p5()
+            .bg(self.tool_card_header_bg(cx))
+            .child(
+                Icon::new(IconName::ListTodo)
+                    .size(IconSize::Small)
+                    .color(if is_active {
+                        Color::Accent
+                    } else {
+                        Color::Muted
+                    }),
+            )
+            .child(
+                div().min_w_0().flex_1().child(
+                    Label::new(title)
+                        .size(LabelSize::Small)
+                        .weight(gpui::FontWeight::MEDIUM)
+                        .truncate(),
+                ),
+            )
+            .children(status_element)
+            .child(
+                IconButton::new(
+                    SharedString::from(format!("toggle-plan-{entry_ix}")),
+                    if is_collapsed {
+                        IconName::ChevronDown
+                    } else {
+                        IconName::ChevronUp
+                    },
+                )
+                .icon_size(IconSize::XSmall)
+                .icon_color(Color::Muted)
+                .tooltip(Tooltip::text(if is_collapsed {
+                    "Mostrar passos"
+                } else {
+                    "Esconder passos"
+                }))
+                .on_click(cx.listener({
+                    let tool_call_id = tool_call.id.clone();
+                    move |this, _, _, cx| {
+                        if !this.collapsed_plans.remove(&tool_call_id) {
+                            this.collapsed_plans.insert(tool_call_id.clone());
+                        }
+                        cx.notify();
+                    }
+                })),
+            );
+
+        let progress_bar = div().h(px(2.)).w_full().bg(colors.border_variant).child(
+            div().h_full().w(relative(fraction)).bg(if is_done {
+                colors.version_control_added
+            } else {
+                colors.text_accent
+            }),
+        );
+
+        let steps = (!is_collapsed).then(|| {
+            v_flex()
+                .p_2()
+                .gap_1()
+                .children(plan.steps.iter().enumerate().map(|(index, step)| {
+                    let step_status = progress
+                        .and_then(|progress| progress.steps.get(index))
+                        .map(|step| step.status);
+                    h_flex()
+                        .items_start()
+                        .gap_2()
+                        .child(div().flex_none().child(render_plan_step_marker(
+                            index,
+                            step_status,
+                            cx,
+                        )))
+                        .child(Label::new(step.title.clone()).size(LabelSize::Small).when(
+                            step_status == Some(agent::PlanStepStatus::Completed),
+                            |label| label.color(Color::Muted),
+                        ))
+                }))
+        });
+
+        let divider = h_flex()
+            .gap_2()
+            .child(div().flex_1().child(Divider::horizontal()))
+            .child(
+                h_flex()
+                    .gap_1()
+                    .child(
+                        Icon::new(IconName::Pencil)
+                            .size(IconSize::XSmall)
+                            .color(Color::Muted),
+                    )
+                    .child(
+                        Label::new(match profile_name {
+                            Some(name) => format!("Plano aprovado · modo {name}"),
+                            None => "Plano aprovado".to_string(),
+                        })
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted),
+                    ),
+            )
+            .child(div().flex_1().child(Divider::horizontal()));
+
+        v_flex()
+            .px_5()
+            .py_1p5()
+            .w_full()
+            .gap_2()
+            .child(
+                v_flex()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(border_color)
+                    .overflow_hidden()
+                    .child(header)
+                    .child(progress_bar)
+                    .children(steps),
+            )
+            .child(divider)
             .into_any()
     }
 
