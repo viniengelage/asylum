@@ -1404,9 +1404,9 @@ impl ClickUpPanel {
             .unwrap_or_else(|| task.list.name.clone());
 
         let assignees = match detail {
-            Some(detail) if !detail.assignees.is_empty() => h_flex()
+            Some(detail) if !detail.task.assignees.is_empty() => h_flex()
                 .gap(DynamicSpacing::Base04.px(cx))
-                .children(detail.assignees.iter().take(3).map(|assignee| {
+                .children(detail.task.assignees.iter().take(3).map(|assignee| {
                     h_flex()
                         .flex_none()
                         .size(DynamicSpacing::Base20.px(cx))
@@ -1423,6 +1423,7 @@ impl ClickUpPanel {
                 .child(
                     Label::new(
                         detail
+                            .task
                             .assignees
                             .iter()
                             .map(|assignee| assignee.display_name())

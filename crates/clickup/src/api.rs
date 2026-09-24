@@ -67,6 +67,8 @@ pub struct Task {
     #[serde(default, deserialize_with = "deserialize_millis")]
     pub date_closed: Option<i64>,
     pub list: ListReference,
+    #[serde(default)]
+    pub assignees: Vec<Assignee>,
 }
 
 impl Task {
@@ -128,7 +130,7 @@ pub async fn get_assigned_tasks(
     let mut tasks = Vec::new();
     for page in 0..MAX_TASK_PAGES {
         let mut path = format!(
-            "/team/{workspace_id}/task?assignees%5B%5D={user_id}&subtasks=true&order_by=due_date&page={page}"
+            "/team/{workspace_id}/task?assignees[]={user_id}&subtasks=true&order_by=due_date&page={page}"
         );
         if let Some(closed_since) = closed_since {
             path.push_str(&format!(
@@ -142,6 +144,9 @@ pub async fn get_assigned_tasks(
             break;
         }
     }
+    // The filter above is the one that keeps the query small, but ClickUp has answered it
+    // with every task of the workspace before, so the tasks are checked here as well.
+    tasks.retain(|task| task.assignees.iter().any(|assignee| assignee.id == user_id));
     Ok(tasks)
 }
 
@@ -178,8 +183,6 @@ pub struct TaskDetail {
     /// The description as plain text. ClickUp sends an empty string when there is none.
     #[serde(default)]
     pub text_content: Option<String>,
-    #[serde(default)]
-    pub assignees: Vec<Assignee>,
     /// Milliseconds.
     #[serde(default, deserialize_with = "deserialize_millis")]
     pub time_estimate: Option<i64>,
@@ -191,6 +194,7 @@ pub struct TaskDetail {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Assignee {
+    pub id: u64,
     pub username: Option<String>,
     pub email: Option<String>,
 }
@@ -489,11 +493,35 @@ mod tests {
         assert_eq!(detail.task.display_id(), "CU-86a1b2");
         assert_eq!(detail.time_estimate, Some(14_400_000));
         assert_eq!(detail.time_spent, Some(10_560_000));
-        assert_eq!(detail.assignees[0].display_name(), "Vinicios");
+        assert_eq!(detail.task.assignees[0].display_name(), "Vinicios");
         assert_eq!(
             detail.folder.map(|folder| folder.name).as_deref(),
             Some("App Mobile")
         );
+    }
+
+    #[test]
+    fn reads_the_assignees_of_listed_tasks() {
+        let response: TasksResponse = serde_json::from_str(
+            r##"{"tasks": [
+                {"id": "1", "name": "minha", "url": "u", "custom_id": null,
+                 "status": {"status": "open", "color": "#ccc", "type": "open", "orderindex": 0},
+                 "list": {"id": "9", "name": "Sprint"},
+                 "assignees": [{"id": 7, "username": "Vinicios"}, {"id": 8, "username": "Ana"}]},
+                {"id": "2", "name": "da Ana", "url": "u", "custom_id": null,
+                 "status": {"status": "open", "color": "#ccc", "type": "open", "orderindex": 0},
+                 "list": {"id": "9", "name": "Sprint"},
+                 "assignees": [{"id": 8, "username": "Ana"}]}
+            ]}"##,
+        )
+        .unwrap();
+        let mine: Vec<&str> = response
+            .tasks
+            .iter()
+            .filter(|task| task.assignees.iter().any(|assignee| assignee.id == 7))
+            .map(|task| task.name.as_str())
+            .collect();
+        assert_eq!(mine, ["minha"]);
     }
 
     #[test]
