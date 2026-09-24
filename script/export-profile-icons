@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""Write the per-profile app icons from the Asylum macOS app icon.
+
+Each profile color gets the same icon with only four colors swapped: the two
+gradient stops of the background, the spiral and the "A". The palette below is
+the one in design/asylum/IMPLEMENTATION.md §6.1 and the Penpot board
+"Brand — ícone por perfil"; a color added to `ProfileColor` needs a row here.
+
+Outputs:
+- design/asylum/brand/profiles/asylum-app-icon-<color>-macos.svg
+- crates/zed/resources/profile-icons/<color>.icns, embedded in the app and
+  written into each profile's launcher bundle.
+
+Requires `rsvg-convert` (brew install librsvg) and `iconutil` (Xcode tools).
+
+Usage: script/export-profile-icons
+"""
+
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+BRAND_DIR = ROOT / "design" / "asylum" / "brand"
+SOURCE_SVG = BRAND_DIR / "asylum-app-icon-macos.svg"
+SVG_DIR = BRAND_DIR / "profiles"
+ICNS_DIR = ROOT / "crates" / "zed" / "resources" / "profile-icons"
+
+SOURCE_COLORS = {
+    "gradient_start": "#7C3AED",
+    "gradient_end": "#2E1065",
+    "spiral": 'stroke="#E8B368"',
+    "letter": 'stroke="#F5F0FF"',
+}
+
+PALETTE = {
+    "amber": ("#D97706", "#451A03", "#C084FC", "#FFF7ED"),
+    "teal": ("#0D9488", "#042F2E", "#E8B368", "#F0FDFA"),
+    "purple": ("#7C3AED", "#2E1065", "#E8B368", "#F5F0FF"),
+    "blue": ("#2563EB", "#172554", "#E8B368", "#EFF6FF"),
+    "rose": ("#E11D48", "#4C0519", "#FDE68A", "#FFF1F2"),
+}
+
+ICONSET_SIZES = [16, 32, 128, 256, 512]
+
+
+def recolor(svg: str, gradient_start: str, gradient_end: str, spiral: str, letter: str) -> str:
+    for key, value in SOURCE_COLORS.items():
+        if svg.count(value) != 1:
+            sys.exit(f"{SOURCE_SVG.name}: expected exactly one {value!r} ({key})")
+    return (
+        svg.replace(SOURCE_COLORS["gradient_start"], gradient_start)
+        .replace(SOURCE_COLORS["gradient_end"], gradient_end)
+        .replace(SOURCE_COLORS["spiral"], f'stroke="{spiral}"')
+        .replace(SOURCE_COLORS["letter"], f'stroke="{letter}"')
+    )
+
+
+def render_icns(svg_path: Path, icns_path: Path) -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        iconset = Path(temp_dir) / "icon.iconset"
+        iconset.mkdir()
+        for size in ICONSET_SIZES:
+            for scale, suffix in ((1, ""), (2, "@2x")):
+                pixels = size * scale
+                subprocess.run(
+                    [
+                        "rsvg-convert",
+                        "-w",
+                        str(pixels),
+                        "-h",
+                        str(pixels),
+                        str(svg_path),
+                        "-o",
+                        str(iconset / f"icon_{size}x{size}{suffix}.png"),
+                    ],
+                    check=True,
+                )
+        subprocess.run(["iconutil", "-c", "icns", str(iconset), "-o", str(icns_path)], check=True)
+
+
+def main() -> None:
+    for tool in ("rsvg-convert", "iconutil"):
+        if shutil.which(tool) is None:
+            sys.exit(f"{tool} not found")
+    source = SOURCE_SVG.read_text()
+    SVG_DIR.mkdir(parents=True, exist_ok=True)
+    ICNS_DIR.mkdir(parents=True, exist_ok=True)
+    for color, colors in PALETTE.items():
+        svg_path = SVG_DIR / f"asylum-app-icon-{color}-macos.svg"
+        svg_path.write_text(recolor(source, *colors))
+        icns_path = ICNS_DIR / f"{color}.icns"
+        render_icns(svg_path, icns_path)
+        print(f"{icns_path.relative_to(ROOT)} ({icns_path.stat().st_size // 1024} KB)")
+
+
+if __name__ == "__main__":
+    main()
