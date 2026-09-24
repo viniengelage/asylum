@@ -3188,6 +3188,7 @@ dependencies = [
  "http_client",
  "log",
  "menu",
+ "paths",
  "serde",
  "serde_json",
  "thiserror 2.0.17",

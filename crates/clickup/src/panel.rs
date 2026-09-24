@@ -7,15 +7,21 @@ use gpui::{
     Subscription, Task, px,
 };
 use gpui::{ClipboardItem, WeakEntity};
-use std::{collections::HashSet, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    hash::{DefaultHasher, Hash as _, Hasher as _},
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
 use ui::{
     ButtonLike, CommonAnimationExt, ContextMenu, ContextMenuEntry, PopoverMenu, Tab, TabBar,
     TabPosition, TabStyle, Tooltip, prelude::*,
 };
 use ui_input::{ErasedEditorEvent, InputField};
 use util::ResultExt as _;
-use workspace::Workspace;
 use workspace::dock::{DockPosition, Panel, PanelEvent};
+use workspace::{OpenOptions, Workspace};
 
 /// Long enough that pasting a token checks it once instead of once per keystroke of typing.
 const CHECK_DEBOUNCE: Duration = Duration::from_millis(350);
@@ -58,6 +64,8 @@ pub struct ClickUpPanel {
     collapsed_groups: HashSet<String>,
     /// The task shown in place of the list, when one was opened.
     open_task: Option<OpenTask>,
+    /// Images attached to comments, keyed by URL, as downloaded to the local cache.
+    comment_images: HashMap<String, CommentImage>,
     workspace: WeakEntity<Workspace>,
     _timer_tick: Task<()>,
     _subscriptions: Vec<Subscription>,
@@ -74,6 +82,12 @@ struct OpenTask {
     posting_comment: bool,
     description_expanded: bool,
     load_task: Option<Task<()>>,
+}
+
+enum CommentImage {
+    Loading,
+    Ready(Arc<Path>),
+    Failed,
 }
 
 /// Longer descriptions are cut here until "Mostrar mais" is clicked.
@@ -134,6 +148,7 @@ impl ClickUpPanel {
             selected_tab: TaskTab::Open,
             collapsed_groups: HashSet::default(),
             open_task: None,
+            comment_images: HashMap::default(),
             workspace,
             // Keeps the running timer's clock moving; nothing redraws while none is running.
             _timer_tick: cx.spawn(async move |this, cx| {
@@ -1086,10 +1101,134 @@ impl ClickUpPanel {
                     Err(error) => errors.push(format!("{error:#}")),
                 }
                 open_task.error = (!errors.is_empty()).then(|| errors.join("\n").into());
+                this.fetch_comment_images(cx);
                 cx.notify();
             })
             .log_err();
         }));
+    }
+
+    /// Downloads the open task's comment images into the local cache, where they show from and
+    /// the image viewer opens them.
+    fn fetch_comment_images(&mut self, cx: &mut Context<Self>) {
+        let Some(open_task) = &self.open_task else {
+            return;
+        };
+        let Some((http_client, token, _)) = self.store.read(cx).request_context() else {
+            return;
+        };
+        let urls: Vec<(String, Option<String>)> = open_task
+            .comments
+            .iter()
+            .flat_map(|comment| comment.attachments())
+            .filter(|attachment| attachment.is_image())
+            .filter_map(|attachment| {
+                let url = attachment.url.clone()?;
+                Some((url, attachment.extension.clone()))
+            })
+            .filter(|(url, _)| !self.comment_images.contains_key(url))
+            .collect();
+        for (url, extension) in urls {
+            self.comment_images
+                .insert(url.clone(), CommentImage::Loading);
+            let path = comment_image_path(&url, extension.as_deref());
+            let http_client = http_client.clone();
+            let token = token.clone();
+            let download = cx.background_spawn({
+                let url = url.clone();
+                async move {
+                    if !path.exists() {
+                        let bytes = api::download_attachment(&http_client, &token, &url).await?;
+                        if let Some(parent) = path.parent() {
+                            std::fs::create_dir_all(parent)?;
+                        }
+                        std::fs::write(&path, bytes)?;
+                    }
+                    anyhow::Ok(Arc::<Path>::from(path.as_path()))
+                }
+            });
+            cx.spawn(async move |this, cx| {
+                let result = download.await;
+                this.update(cx, |this, cx| {
+                    let state = match result {
+                        Ok(path) => CommentImage::Ready(path),
+                        Err(error) => {
+                            log::warn!("ClickUp: falha ao baixar a imagem {url}: {error:#}");
+                            CommentImage::Failed
+                        }
+                    };
+                    this.comment_images.insert(url, state);
+                    cx.notify();
+                })
+            })
+            .detach_and_log_err(cx);
+        }
+    }
+
+    fn open_comment_image(&mut self, path: Arc<Path>, window: &mut Window, cx: &mut Context<Self>) {
+        self.workspace
+            .update(cx, |workspace, cx| {
+                workspace
+                    .open_abs_path(path.to_path_buf(), OpenOptions::default(), window, cx)
+                    .detach_and_log_err(cx);
+            })
+            .log_err();
+    }
+
+    /// An image shown in place, which opens in the image viewer when clicked, or a link to any
+    /// other file.
+    fn render_comment_attachment(
+        &self,
+        id: SharedString,
+        attachment: &api::CommentAttachment,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let url = attachment.url.clone().unwrap_or_default();
+        let name = attachment.display_name().to_string();
+        let image = attachment
+            .is_image()
+            .then(|| self.comment_images.get(&url))
+            .flatten();
+        match image {
+            Some(CommentImage::Ready(path)) => {
+                let opened = path.clone();
+                div()
+                    .id(id)
+                    .mt(DynamicSpacing::Base04.px(cx))
+                    .max_w_full()
+                    .rounded_md()
+                    .overflow_hidden()
+                    .border_1()
+                    .border_color(cx.theme().colors().border_variant)
+                    .cursor_pointer()
+                    .tooltip(Tooltip::text(format!("Abrir {name}")))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.open_comment_image(opened.clone(), window, cx)
+                    }))
+                    .child(
+                        gpui::img(path.clone())
+                            .max_w_full()
+                            .max_h(px(240.))
+                            .object_fit(gpui::ObjectFit::Contain),
+                    )
+                    .into_any_element()
+            }
+            Some(CommentImage::Loading) => Label::new(format!("Carregando {name}…"))
+                .size(LabelSize::XSmall)
+                .color(Color::Muted)
+                .mt(DynamicSpacing::Base04.px(cx))
+                .into_any_element(),
+            Some(CommentImage::Failed) | None => render_file_link(
+                id,
+                if attachment.is_image() {
+                    format!("{name} (abrir no navegador)")
+                } else {
+                    name
+                },
+                url,
+                cx,
+            ),
+        }
     }
 
     fn set_open_task_status(&mut self, status: String, cx: &mut Context<Self>) {
@@ -1731,7 +1870,7 @@ impl ClickUpPanel {
                             )
                             .children(comment.attachments().enumerate().map(
                                 |(index, attachment)| {
-                                    render_comment_attachment(
+                                    self.render_comment_attachment(
                                         SharedString::from(format!(
                                             "clickup-comment-{}-attachment-{index}",
                                             comment.id
@@ -1865,48 +2004,7 @@ fn render_link_row(
         )
 }
 
-/// An image shown in place, which opens the original when clicked, or a link to any other file.
-fn render_comment_attachment(
-    id: SharedString,
-    attachment: &api::CommentAttachment,
-    cx: &App,
-) -> AnyElement {
-    let url = attachment.url.clone().unwrap_or_default();
-    if attachment.is_image()
-        && let Some(preview) = attachment.preview_url()
-    {
-        let name = attachment.display_name().to_string();
-        return div()
-            .id(id)
-            .mt(DynamicSpacing::Base04.px(cx))
-            .max_w_full()
-            .rounded_md()
-            .overflow_hidden()
-            .border_1()
-            .border_color(cx.theme().colors().border_variant)
-            .cursor_pointer()
-            .tooltip(Tooltip::text(format!("Abrir {name}")))
-            .on_click(move |_, _, cx| cx.open_url(&url))
-            .child(
-                gpui::img(preview.to_string())
-                    .max_w_full()
-                    .max_h(px(240.))
-                    .object_fit(gpui::ObjectFit::Contain)
-                    .with_loading(|| {
-                        Label::new("Carregando imagem…")
-                            .size(LabelSize::XSmall)
-                            .color(Color::Muted)
-                            .into_any_element()
-                    })
-                    .with_fallback(move || {
-                        Label::new(format!("Não deu para carregar {name}"))
-                            .size(LabelSize::XSmall)
-                            .color(Color::Muted)
-                            .into_any_element()
-                    }),
-            )
-            .into_any_element();
-    }
+fn render_file_link(id: SharedString, name: String, url: String, cx: &App) -> AnyElement {
     h_flex()
         .id(id)
         .mt(DynamicSpacing::Base04.px(cx))
@@ -1924,12 +2022,25 @@ fn render_comment_attachment(
                 .size(IconSize::XSmall)
                 .color(Color::Muted),
         )
-        .child(
-            Label::new(attachment.display_name().to_string())
-                .size(LabelSize::XSmall)
-                .truncate(),
-        )
+        .child(Label::new(name).size(LabelSize::XSmall).truncate())
         .into_any_element()
+}
+
+/// Where a comment image is cached. Named after its URL, so reopening the task doesn't download
+/// it again.
+fn comment_image_path(url: &str, extension: Option<&str>) -> PathBuf {
+    let mut hasher = DefaultHasher::new();
+    url.hash(&mut hasher);
+    let extension = extension
+        .filter(|extension| {
+            extension
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric())
+        })
+        .unwrap_or("png");
+    paths::temp_dir()
+        .join("clickup-attachments")
+        .join(format!("{:016x}.{extension}", hasher.finish()))
 }
 
 /// When the running timer is on `task_id`, the moment it started.

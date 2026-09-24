@@ -273,8 +273,6 @@ pub struct CommentAttachment {
     pub name: Option<String>,
     pub title: Option<String>,
     pub extension: Option<String>,
-    pub thumbnail_large: Option<String>,
-    pub thumbnail_medium: Option<String>,
 }
 
 impl CommentAttachment {
@@ -289,14 +287,6 @@ impl CommentAttachment {
             extension.as_str(),
             "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "svg"
         )
-    }
-
-    /// The smallest version that still reads well in the panel.
-    pub fn preview_url(&self) -> Option<&str> {
-        self.thumbnail_large
-            .as_deref()
-            .or(self.thumbnail_medium.as_deref())
-            .or(self.url.as_deref())
     }
 
     pub fn display_name(&self) -> &str {
@@ -448,6 +438,38 @@ pub async fn stop_timer(
     )
     .await
     .map(|_: serde_json::Value| ())
+}
+
+/// Downloads a file attached to a comment. The token only goes to ClickUp's own attachment
+/// hosts, never to a link someone pasted into the comment.
+pub async fn download_attachment(
+    client: &Arc<dyn HttpClient>,
+    token: &str,
+    url: &str,
+) -> Result<Vec<u8>> {
+    let host = url
+        .strip_prefix("https://")
+        .and_then(|rest| rest.split('/').next())
+        .unwrap_or_default();
+    let is_clickup = host == "clickup.com"
+        || host.ends_with(".clickup.com")
+        || host.ends_with(".clickup-attachments.com");
+    let mut request = Request::get(url);
+    if is_clickup {
+        request = request.header("Authorization", token);
+    }
+    let mut response = client
+        .send(request.body(AsyncBody::default())?)
+        .await
+        .context("falha ao baixar o anexo do ClickUp")?;
+    let status = response.status();
+    let mut bytes = Vec::new();
+    response.body_mut().read_to_end(&mut bytes).await?;
+    anyhow::ensure!(
+        status.is_success(),
+        "o ClickUp respondeu {status} ao baixar o anexo"
+    );
+    Ok(bytes)
 }
 
 pub async fn get_user(client: &Arc<dyn HttpClient>, token: &str) -> Result<User> {
@@ -635,8 +657,8 @@ mod tests {
         assert_eq!(attachments.len(), 2);
         assert!(attachments[0].is_image());
         assert_eq!(
-            attachments[0].preview_url(),
-            Some("https://t1.p.clickup-attachments.com/tela_large.png")
+            attachments[0].url.as_deref(),
+            Some("https://t1.p.clickup-attachments.com/tela.png")
         );
         assert!(!attachments[1].is_image());
         assert_eq!(attachments[1].display_name(), "log.txt");
@@ -651,6 +673,33 @@ mod tests {
 
         let idle: RunningTimerResponse = serde_json::from_str(r#"{"data": null}"#).unwrap();
         assert!(idle.data.is_none());
+    }
+
+    #[gpui::test]
+    async fn sends_the_token_only_to_clickup_hosts() {
+        let client: Arc<dyn HttpClient> =
+            http_client::FakeHttpClient::create(|request| async move {
+                let authorized = request.headers().contains_key("Authorization");
+                Ok(http_client::Response::builder()
+                    .status(200)
+                    .body(if authorized { "com token" } else { "sem token" }.into())?)
+            });
+        let read = |url: &'static str| {
+            let client = client.clone();
+            async move {
+                String::from_utf8(download_attachment(&client, "pk_1", url).await.unwrap()).unwrap()
+            }
+        };
+        assert_eq!(
+            read("https://t1.p.clickup-attachments.com/t1/a/tela.png").await,
+            "com token"
+        );
+        assert_eq!(read("https://app.clickup.com/x.png").await, "com token");
+        assert_eq!(
+            read("https://example.com/clickup.com/x.png").await,
+            "sem token"
+        );
+        assert_eq!(read("https://evilclickup.com/x.png").await, "sem token");
     }
 
     #[test]
