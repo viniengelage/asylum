@@ -55,12 +55,14 @@ use super::*;
 
 /// The message the "Executar" button sends. The plan card also looks for it to
 /// tell an executed plan apart from one the user replied to with feedback.
-const EXECUTE_PLAN_PROMPT: &str = "Execute o plano aprovado.";
+pub(super) const EXECUTE_PLAN_PROMPT: &str = "Execute o plano aprovado.";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone)]
 enum PlanExecutionTarget {
     ThisThread,
     NewThread,
+    /// This thread, switching to another model first.
+    WithModel(Arc<dyn LanguageModel>),
 }
 
 fn plan_markdown(plan: &agent::SubmitPlanToolInput) -> String {
@@ -124,6 +126,78 @@ fn render_plan_step_marker(
     }
 }
 
+/// Derives a plan card's state from the entries that follow it, so it survives
+/// reloading the thread. For an executed plan, it also returns the latest
+/// progress the agent reported with `update_plan`.
+pub(super) fn plan_card_state(
+    entries: &[AgentThreadEntry],
+    entry_ix: usize,
+    tool_call: &ToolCall,
+    discarded: bool,
+) -> (PlanCardState, Option<agent::UpdatePlanToolInput>) {
+    if matches!(
+        tool_call.status,
+        ToolCallStatus::Pending | ToolCallStatus::InProgress
+    ) {
+        return (PlanCardState::Writing, None);
+    }
+    let later_entries = entries.get(entry_ix + 1..).unwrap_or_default();
+    let mut replied = false;
+    let mut executed = false;
+    let mut progress = None;
+    for entry in later_entries {
+        match entry {
+            AgentThreadEntry::ToolCall(later) if is_submit_plan_tool_call(later) => {
+                if executed {
+                    break;
+                }
+                return (PlanCardState::Superseded, None);
+            }
+            AgentThreadEntry::ToolCall(later) if executed && is_update_plan_tool_call(later) => {
+                if let Some(input) = later
+                    .raw_input
+                    .clone()
+                    .and_then(|input| serde_json::from_value(input).ok())
+                {
+                    progress = Some(input);
+                }
+            }
+            AgentThreadEntry::UserMessage(message) if !replied => {
+                executed = is_plan_execution_message(&message.chunks);
+                replied = true;
+            }
+            _ => {}
+        }
+    }
+    let state = if executed {
+        PlanCardState::Executed
+    } else if discarded {
+        PlanCardState::Discarded
+    } else if replied {
+        PlanCardState::Answered
+    } else {
+        PlanCardState::Ready
+    };
+    (state, progress)
+}
+
+fn is_plan_execution_message(chunks: &[acp::ContentBlock]) -> bool {
+    chunks.iter().any(|chunk| {
+        matches!(chunk, acp::ContentBlock::Text(text) if text.text.starts_with(EXECUTE_PLAN_PROMPT))
+    })
+}
+
+/// The profile a plan runs under: the user's default, unless that's Plan
+/// itself, which can't change files.
+fn plan_execution_profile(cx: &App) -> AgentProfileId {
+    let settings = AgentSettings::get_global(cx);
+    if settings.default_profile.as_str() == agent_settings::builtin_profiles::PLAN {
+        AgentProfileId(agent_settings::builtin_profiles::WRITE.into())
+    } else {
+        settings.default_profile.clone()
+    }
+}
+
 fn is_submit_plan_tool_call(tool_call: &ToolCall) -> bool {
     tool_call.tool_name.as_deref() == Some(<agent::SubmitPlanTool as agent::AgentTool>::NAME)
 }
@@ -132,8 +206,19 @@ fn is_update_plan_tool_call(tool_call: &ToolCall) -> bool {
     tool_call.tool_name.as_deref() == Some(<agent::UpdatePlanTool as agent::AgentTool>::NAME)
 }
 
+/// Plan card state that lives only in the view, keyed by session in the
+/// key-value store so it survives reopening the thread.
+const PLAN_CARDS_NAMESPACE: &str = "agent_plan_cards";
+
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct SavedPlanCards {
+    discarded: Vec<String>,
+    collapsed: Vec<String>,
+    edited: HashMap<String, String>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PlanCardState {
+pub(super) enum PlanCardState {
     Writing,
     Ready,
     /// The user replied with something other than executing it.
@@ -699,6 +784,8 @@ pub struct ThreadView {
     /// executed, instead of the plan the agent submitted.
     edited_plans: HashMap<acp::ToolCallId, Entity<Buffer>>,
     collapsed_plans: HashSet<acp::ToolCallId>,
+    _plan_cards_save_task: Option<Task<()>>,
+    _plan_buffer_subscriptions: Vec<Subscription>,
     pub subagent_scroll_handles: RefCell<HashMap<acp::SessionId, ScrollHandle>>,
     pub edits_expanded: bool,
     pub plan_expanded: bool,
@@ -907,6 +994,7 @@ impl ThreadView {
         let placeholder = placeholder_text(agent_display_name.as_ref(), has_slash_completions);
 
         let mut should_auto_submit = false;
+        let mut executes_plan = false;
         let mut show_external_source_prompt_warning = false;
 
         let message_editor = cx.new(|cx| {
@@ -935,6 +1023,7 @@ impl ThreadView {
                         auto_submit,
                     } => {
                         should_auto_submit = auto_submit;
+                        executes_plan = auto_submit && is_plan_execution_message(&blocks);
                         editor.set_message(blocks, window, cx);
                     }
                     AgentInitialContent::FromExternalSource(prompt) => {
@@ -1123,6 +1212,8 @@ impl ThreadView {
             discarded_plans: HashSet::default(),
             edited_plans: HashMap::default(),
             collapsed_plans: HashSet::default(),
+            _plan_cards_save_task: None,
+            _plan_buffer_subscriptions: Vec::new(),
             subagent_scroll_handles: RefCell::new(HashMap::default()),
             edits_expanded: false,
             plan_expanded: false,
@@ -1188,6 +1279,15 @@ impl ThreadView {
                 });
             });
 
+        this.restore_plan_cards(cx);
+
+        // A plan executed in a new thread must not start in the Plan profile, or the
+        // agent would plan again instead of carrying it out.
+        if executes_plan && let Some(profile_selector) = this.profile_selector.clone() {
+            profile_selector.update(cx, |profile_selector, cx| {
+                profile_selector.set_profile(plan_execution_profile(cx), cx);
+            });
+        }
         if should_auto_submit {
             this.send(window, cx);
         }
@@ -3977,68 +4077,18 @@ impl ThreadView {
             .into_any_element()
     }
 
-    /// Derives the plan card's state from the entries that follow it, so it
-    /// survives reloading the thread. For an executed plan, it also returns the
-    /// latest progress the agent reported with `update_plan`.
     fn plan_card_state(
         &self,
         entry_ix: usize,
         tool_call: &ToolCall,
         cx: &Context<Self>,
     ) -> (PlanCardState, Option<agent::UpdatePlanToolInput>) {
-        if matches!(
-            tool_call.status,
-            ToolCallStatus::Pending | ToolCallStatus::InProgress
-        ) {
-            return (PlanCardState::Writing, None);
-        }
-        let later_entries = self
-            .thread
-            .read(cx)
-            .entries()
-            .get(entry_ix + 1..)
-            .unwrap_or_default();
-        let mut replied = false;
-        let mut executed = false;
-        let mut progress = None;
-        for entry in later_entries {
-            match entry {
-                AgentThreadEntry::ToolCall(later) if is_submit_plan_tool_call(later) => {
-                    if executed {
-                        break;
-                    }
-                    return (PlanCardState::Superseded, None);
-                }
-                AgentThreadEntry::ToolCall(later)
-                    if executed && is_update_plan_tool_call(later) =>
-                {
-                    if let Some(input) = later
-                        .raw_input
-                        .clone()
-                        .and_then(|input| serde_json::from_value(input).ok())
-                    {
-                        progress = Some(input);
-                    }
-                }
-                AgentThreadEntry::UserMessage(message) if !replied => {
-                    executed = message.chunks.iter().any(|chunk| {
-                        matches!(chunk, acp::ContentBlock::Text(text) if text.text.starts_with(EXECUTE_PLAN_PROMPT))
-                    });
-                    replied = true;
-                }
-                _ => {}
-            }
-        }
-        let state = if executed {
-            PlanCardState::Executed
-        } else if self.discarded_plans.contains(&tool_call.id) {
-            PlanCardState::Discarded
-        } else if replied {
-            PlanCardState::Answered
-        } else {
-            PlanCardState::Ready
-        };
-        (state, progress)
+        plan_card_state(
+            self.thread.read(cx).entries(),
+            entry_ix,
+            tool_call,
+            self.discarded_plans.contains(&tool_call.id),
+        )
     }
 
     fn render_plan_tool_call(
@@ -4307,6 +4357,9 @@ impl ThreadView {
                     .menu(move |window, cx| {
                         let this = this.clone();
                         let tool_call_id = tool_call_id.clone();
+                        let other_models = this
+                            .read_with(cx, |this, cx| this.favorite_models_for_plan(cx))
+                            .unwrap_or_default();
                         Some(ContextMenu::build(window, cx, move |menu, _, _| {
                             menu.entry("Executar aqui", None, {
                                 let this = this.clone();
@@ -4323,22 +4376,47 @@ impl ThreadView {
                                     .log_err();
                                 }
                             })
-                            .entry(
-                                "Executar em um thread novo",
-                                None,
-                                {
-                                    let this = this.clone();
-                                    move |window, cx| {
-                                        this.update(cx, |this, cx| {
-                                            this.execute_plan(
-                                                &tool_call_id,
-                                                PlanExecutionTarget::NewThread,
-                                                window,
-                                                cx,
-                                            );
-                                        })
-                                        .log_err();
+                            .entry("Executar em um thread novo", None, {
+                                let this = this.clone();
+                                let tool_call_id = tool_call_id.clone();
+                                move |window, cx| {
+                                    this.update(cx, |this, cx| {
+                                        this.execute_plan(
+                                            &tool_call_id,
+                                            PlanExecutionTarget::NewThread,
+                                            window,
+                                            cx,
+                                        );
+                                    })
+                                    .log_err();
+                                }
+                            })
+                            .when(
+                                !other_models.is_empty(),
+                                |mut menu| {
+                                    menu = menu.separator();
+                                    for model in other_models {
+                                        let this = this.clone();
+                                        let tool_call_id = tool_call_id.clone();
+                                        menu = menu.entry(
+                                            format!("Executar com {}", model.name().0),
+                                            None,
+                                            move |window, cx| {
+                                                this.update(cx, |this, cx| {
+                                                    this.execute_plan(
+                                                        &tool_call_id,
+                                                        PlanExecutionTarget::WithModel(
+                                                            model.clone(),
+                                                        ),
+                                                        window,
+                                                        cx,
+                                                    );
+                                                })
+                                                .log_err();
+                                            },
+                                        );
                                     }
+                                    menu
                                 },
                             )
                         }))
@@ -4420,6 +4498,7 @@ impl ThreadView {
                         let tool_call_id = tool_call.id.clone();
                         move |this, _, _, cx| {
                             this.discarded_plans.insert(tool_call_id.clone());
+                            this.save_plan_cards(cx);
                             cx.notify();
                         }
                     })),
@@ -4551,6 +4630,7 @@ impl ThreadView {
                         if !this.collapsed_plans.remove(&tool_call_id) {
                             this.collapsed_plans.insert(tool_call_id.clone());
                         }
+                        this.save_plan_cards(cx);
                         cx.notify();
                     }
                 })),
@@ -4644,6 +4724,93 @@ impl ThreadView {
             .log_err();
     }
 
+    /// A markdown buffer holding a plan the user is editing. Edits are saved with
+    /// the rest of the plan card state, so they survive reopening the thread.
+    fn new_plan_buffer(&mut self, text: &str, cx: &mut Context<Self>) -> Entity<Buffer> {
+        let buffer = cx.new(|cx| Buffer::local(text, cx));
+        if let Some(project) = self.project.upgrade() {
+            let languages = project.read(cx).languages().clone();
+            cx.spawn({
+                let buffer = buffer.clone();
+                async move |_, cx| {
+                    if let Ok(language) = languages.language_for_name("Markdown").await {
+                        buffer.update(cx, |buffer, cx| buffer.set_language(Some(language), cx));
+                    }
+                }
+            })
+            .detach();
+        }
+        self._plan_buffer_subscriptions
+            .push(cx.subscribe(&buffer, |this, _, event, cx| {
+                if matches!(event, language::BufferEvent::Edited { .. }) {
+                    this.save_plan_cards(cx);
+                }
+            }));
+        buffer
+    }
+
+    fn plan_cards_key(&self, cx: &App) -> String {
+        self.thread.read(cx).session_id().0.to_string()
+    }
+
+    fn restore_plan_cards(&mut self, cx: &mut Context<Self>) {
+        let key = self.plan_cards_key(cx);
+        let Some(raw) = KeyValueStore::global(cx)
+            .scoped(PLAN_CARDS_NAMESPACE)
+            .read(&key)
+            .log_err()
+            .flatten()
+        else {
+            return;
+        };
+        let Some(saved) = serde_json::from_str::<SavedPlanCards>(&raw).log_err() else {
+            return;
+        };
+        let tool_call_id = |id: String| acp::ToolCallId::new(id);
+        self.discarded_plans
+            .extend(saved.discarded.into_iter().map(tool_call_id));
+        self.collapsed_plans
+            .extend(saved.collapsed.into_iter().map(tool_call_id));
+        for (id, text) in saved.edited {
+            let buffer = self.new_plan_buffer(&text, cx);
+            self.edited_plans.insert(tool_call_id(id), buffer);
+        }
+    }
+
+    fn save_plan_cards(&mut self, cx: &mut Context<Self>) {
+        let saved = SavedPlanCards {
+            discarded: self
+                .discarded_plans
+                .iter()
+                .map(|id| id.0.to_string())
+                .collect(),
+            collapsed: self
+                .collapsed_plans
+                .iter()
+                .map(|id| id.0.to_string())
+                .collect(),
+            edited: self
+                .edited_plans
+                .iter()
+                .map(|(id, buffer)| (id.0.to_string(), buffer.read(cx).text()))
+                .collect(),
+        };
+        let key = self.plan_cards_key(cx);
+        let kvp = KeyValueStore::global(cx);
+        // Coalesce bursts of edits in a plan buffer into a single write.
+        self._plan_cards_save_task = Some(cx.spawn(async move |_, cx| {
+            cx.background_executor()
+                .timer(SERIALIZATION_THROTTLE_TIME)
+                .await;
+            let result = match serde_json::to_string(&saved) {
+                Ok(payload) => kvp.scoped(PLAN_CARDS_NAMESPACE).write(key, payload).await,
+                Err(error) => Err(error.into()),
+            };
+            result.log_err();
+        }));
+        cx.notify();
+    }
+
     fn open_plan_editor(
         &mut self,
         tool_call_id: &acp::ToolCallId,
@@ -4654,24 +4821,16 @@ impl ThreadView {
         let Some(workspace) = self.workspace.upgrade() else {
             return;
         };
-        let buffer = self
-            .edited_plans
-            .entry(tool_call_id.clone())
-            .or_insert_with(|| {
-                let buffer = cx.new(|cx| Buffer::local(markdown, cx));
-                let languages = workspace.read(cx).app_state().languages.clone();
-                cx.spawn({
-                    let buffer = buffer.clone();
-                    async move |_, cx| {
-                        if let Ok(language) = languages.language_for_name("Markdown").await {
-                            buffer.update(cx, |buffer, cx| buffer.set_language(Some(language), cx));
-                        }
-                    }
-                })
-                .detach();
+        let buffer = match self.edited_plans.get(tool_call_id) {
+            Some(buffer) => buffer.clone(),
+            None => {
+                let buffer = self.new_plan_buffer(markdown, cx);
+                self.edited_plans
+                    .insert(tool_call_id.clone(), buffer.clone());
+                self.save_plan_cards(cx);
                 buffer
-            })
-            .clone();
+            }
+        };
         workspace.update(cx, |workspace, cx| {
             let editor = cx.new(|cx| {
                 let editor = Editor::for_buffer(buffer, None, window, cx);
@@ -4683,6 +4842,33 @@ impl ThreadView {
             workspace.add_item_to_active_pane(Box::new(editor), None, true, window, cx);
         });
         cx.notify();
+    }
+
+    /// Favorite models other than the thread's current one, offered as
+    /// "Executar com …" in the plan card's menu.
+    fn favorite_models_for_plan(&self, cx: &App) -> Vec<Arc<dyn LanguageModel>> {
+        let Some(thread) = self.as_native_thread(cx) else {
+            return Vec::new();
+        };
+        let current = thread
+            .read(cx)
+            .model()
+            .map(|model| (model.provider_id(), model.id()));
+        let registry = LanguageModelRegistry::read_global(cx);
+        AgentSettings::get_global(cx)
+            .favorite_models
+            .iter()
+            .filter_map(|favorite| {
+                let provider_id = LanguageModelProviderId::from(favorite.provider.0.clone());
+                let model_id = LanguageModelId::from(favorite.model.clone());
+                registry
+                    .provider(&provider_id)?
+                    .provided_models(cx)
+                    .into_iter()
+                    .find(|model| model.id() == model_id)
+            })
+            .filter(|model| current.as_ref() != Some(&(model.provider_id(), model.id())))
+            .collect()
     }
 
     /// The plan the user is ready to execute: the last one submitted, as long as
@@ -4722,19 +4908,19 @@ impl ThreadView {
             .map(|buffer| buffer.read(cx).text());
 
         match target {
-            PlanExecutionTarget::ThisThread => {
-                let settings = AgentSettings::get_global(cx);
-                let target_profile = if settings.default_profile.as_str()
-                    == agent_settings::builtin_profiles::PLAN
-                {
-                    AgentProfileId(agent_settings::builtin_profiles::WRITE.into())
-                } else {
-                    settings.default_profile.clone()
-                };
+            PlanExecutionTarget::ThisThread | PlanExecutionTarget::WithModel(_) => {
+                let target_profile = plan_execution_profile(cx);
                 if let Some(profile_selector) = self.profile_selector.clone() {
                     profile_selector.update(cx, |profile_selector, cx| {
                         profile_selector.set_profile(target_profile, cx);
                     });
+                }
+                // After the profile switch, which may move the thread to the
+                // profile's own preferred model.
+                if let PlanExecutionTarget::WithModel(model) = target
+                    && let Some(thread) = self.as_native_thread(cx)
+                {
+                    thread.update(cx, |thread, cx| thread.set_model(model, cx));
                 }
                 // Sent as its own message so a draft in the composer survives, and so
                 // the plan card can recognize the execution when the thread is reloaded.

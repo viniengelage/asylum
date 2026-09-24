@@ -2244,6 +2244,15 @@ impl Thread {
         &self.profile_id
     }
 
+    /// Profiles customized before `update_plan` existed don't list it, which
+    /// would leave executed plans without progress. Any profile that can edit
+    /// files gets it unless it turns the tool off explicitly.
+    fn implicitly_enables_update_plan(profile: &AgentProfileSettings, tool_name: &str) -> bool {
+        tool_name == UpdatePlanTool::NAME
+            && !profile.tools.contains_key(tool_name)
+            && profile.is_tool_enabled(EditFileTool::NAME)
+    }
+
     /// Whether this thread's profile was downgraded to `minimal` at thread start
     /// because the workspace is restricted.
     pub fn profile_was_downgraded(&self) -> bool {
@@ -4213,7 +4222,8 @@ impl Thread {
                 };
 
                 if tool.supports_provider(&model.provider_id())
-                    && profile.is_tool_enabled(profile_tool_name)
+                    && (profile.is_tool_enabled(profile_tool_name)
+                        || Self::implicitly_enables_update_plan(profile, profile_tool_name))
                 {
                     match (tool_name.as_ref(), use_sandboxed_terminal) {
                         (TerminalTool::NAME, false) | (SandboxedTerminalTool::NAME, true) => {
@@ -6964,6 +6974,43 @@ mod tests {
     use serde_json::json;
     use settings::LanguageModelProviderSetting;
     use std::sync::Arc;
+
+    #[test]
+    fn update_plan_is_implied_for_profiles_that_can_edit() {
+        let profile = |tools: &[(&str, bool)]| AgentProfileSettings {
+            name: "Custom".into(),
+            tools: tools
+                .iter()
+                .map(|(name, enabled)| (Arc::from(*name), *enabled))
+                .collect(),
+            enable_all_context_servers: false,
+            context_servers: Default::default(),
+            default_model: None,
+        };
+
+        // A Write profile customized before `update_plan` existed.
+        let legacy_write = profile(&[(EditFileTool::NAME, true)]);
+        assert!(Thread::implicitly_enables_update_plan(
+            &legacy_write,
+            UpdatePlanTool::NAME
+        ));
+        assert!(!Thread::implicitly_enables_update_plan(
+            &legacy_write,
+            GrepTool::NAME
+        ));
+
+        let opted_out = profile(&[(EditFileTool::NAME, true), (UpdatePlanTool::NAME, false)]);
+        assert!(!Thread::implicitly_enables_update_plan(
+            &opted_out,
+            UpdatePlanTool::NAME
+        ));
+
+        let read_only = profile(&[(GrepTool::NAME, true)]);
+        assert!(!Thread::implicitly_enables_update_plan(
+            &read_only,
+            UpdatePlanTool::NAME
+        ));
+    }
 
     #[test]
     fn compaction_capacity_respects_prompt_and_combined_limits() {

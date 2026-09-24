@@ -3819,6 +3819,96 @@ pub(crate) mod tests {
     }
 
     #[gpui::test]
+    async fn test_plan_card_states(cx: &mut TestAppContext) {
+        use thread_view::{EXECUTE_PLAN_PROMPT, PlanCardState, plan_card_state};
+
+        init_test(cx);
+
+        let submit_plan = |id: &str, steps: &[&str]| {
+            acp::SessionUpdate::ToolCall(
+                acp::ToolCall::new(id.to_string(), "Plan")
+                    .name("submit_plan")
+                    .status(acp::ToolCallStatus::Completed)
+                    .raw_input(serde_json::json!({
+                        "title": "Plan",
+                        "steps": steps.iter().map(|title| serde_json::json!({ "title": title })).collect::<Vec<_>>(),
+                    })),
+            )
+        };
+
+        let connection = StubAgentConnection::new();
+        connection.set_next_prompt_updates(vec![submit_plan("plan-1", &["A", "B"])]);
+        let (conversation_view, cx) =
+            setup_conversation_view(StubAgentServer::new(connection.clone()), cx).await;
+
+        let send = |text: &str, cx: &mut VisualTestContext| {
+            message_editor(&conversation_view, cx)
+                .update_in(cx, |editor, window, cx| editor.set_text(text, window, cx));
+            active_thread(&conversation_view, cx)
+                .update_in(cx, |view, window, cx| view.send(window, cx));
+            cx.run_until_parked();
+        };
+        let state_at = |entry_ix: usize, cx: &mut VisualTestContext| {
+            active_thread(&conversation_view, cx).read_with(cx, |view, cx| {
+                let entries = view.thread.read(cx).entries();
+                let AgentThreadEntry::ToolCall(tool_call) = &entries[entry_ix] else {
+                    panic!("entry {entry_ix} is not a tool call");
+                };
+                plan_card_state(entries, entry_ix, tool_call, false)
+            })
+        };
+
+        send("Planeja isso", cx);
+        assert_eq!(state_at(1, cx).0, PlanCardState::Ready);
+
+        // Replying with feedback leaves the plan without its buttons until the
+        // agent submits a revised one, which replaces it.
+        send("Muda o passo B", cx);
+        assert_eq!(state_at(1, cx).0, PlanCardState::Answered);
+        // Without updates the stub keeps the turn open; close it so the next
+        // message is sent instead of queued.
+        let session_id = active_thread(&conversation_view, cx)
+            .read_with(cx, |view, cx| view.thread.read(cx).session_id().clone());
+        connection.end_turn(session_id, acp::StopReason::EndTurn);
+        cx.run_until_parked();
+
+        connection.set_next_prompt_updates(vec![submit_plan("plan-2", &["A", "C"])]);
+        send("Tenta de novo", cx);
+        assert_eq!(state_at(1, cx).0, PlanCardState::Superseded);
+        assert_eq!(state_at(4, cx).0, PlanCardState::Ready);
+
+        connection.set_next_prompt_updates(vec![acp::SessionUpdate::ToolCall(
+            acp::ToolCall::new("progress", "Plan progress")
+                .name("update_plan")
+                .status(acp::ToolCallStatus::Completed)
+                .raw_input(serde_json::json!({
+                    "steps": [
+                        { "title": "A", "status": "completed" },
+                        { "title": "C", "status": "in_progress" },
+                    ],
+                })),
+        )]);
+        send(EXECUTE_PLAN_PROMPT, cx);
+        let (state, progress) = state_at(4, cx);
+        assert_eq!(state, PlanCardState::Executed);
+        let statuses = progress
+            .expect("progress should be reported")
+            .steps
+            .iter()
+            .map(|step| step.status)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            statuses,
+            [
+                agent::PlanStepStatus::Completed,
+                agent::PlanStepStatus::InProgress
+            ]
+        );
+        // The replaced plan stays replaced even after the new one runs.
+        assert_eq!(state_at(1, cx).0, PlanCardState::Superseded);
+    }
+
+    #[gpui::test]
     async fn test_drop_preserves_shared_pending_request_elicitations(cx: &mut TestAppContext) {
         init_test(cx);
         cx.update(|cx| {
