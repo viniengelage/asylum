@@ -1421,6 +1421,8 @@ mod tests {
             // Only presents a plan in the conversation; executing it is a user click.
             "submit_plan",
             "thinking",
+            // Only reports progress on an approved plan back to the plan card.
+            "update_plan",
             // streaming_edit_file uses "edit_file" for permission lookups,
             // so its rules are configured under the edit_file entry.
             "streaming_edit_file",

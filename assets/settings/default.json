@@ -1308,6 +1308,7 @@
           "spawn_agent": true,
           "terminal": true,
           "search_web": true,
+          "update_plan": true,
         },
       },
       "ask": {

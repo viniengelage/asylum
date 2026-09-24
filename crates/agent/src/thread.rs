@@ -5,7 +5,8 @@ use crate::{
     GoToDefinitionTool, GrepTool, ListAgentsAndModelsTool, ListDirectoryTool, MovePathTool,
     ProjectSnapshot, ReadFileTool, RenameTool, SandboxedTerminalTool, SpawnAgentTool,
     SubmitPlanTool, SystemPromptTemplate, Template, Templates, TerminalTool,
-    ToolPermissionDecision, WebSearchTool, WriteFileTool, decide_permission_from_settings,
+    ToolPermissionDecision, UpdatePlanTool, WebSearchTool, WriteFileTool,
+    decide_permission_from_settings,
 };
 use acp_thread::{ClientUserMessageId, MentionUri};
 use action_log::ActionLog;
@@ -2194,6 +2195,7 @@ impl Thread {
         // subagent inheriting the plan profile keeps exploring instead.
         if self.parent_thread_id().is_none() {
             self.add_tool(SubmitPlanTool);
+            self.add_tool(UpdatePlanTool);
         }
 
         self.add_tool(DiagnosticsTool::new(self.project.clone()));

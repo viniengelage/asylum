@@ -57,6 +57,14 @@ use super::*;
 /// tell an executed plan apart from one the user replied to with feedback.
 const EXECUTE_PLAN_PROMPT: &str = "Execute o plano aprovado.";
 
+fn is_submit_plan_tool_call(tool_call: &ToolCall) -> bool {
+    tool_call.tool_name.as_deref() == Some(<agent::SubmitPlanTool as agent::AgentTool>::NAME)
+}
+
+fn is_update_plan_tool_call(tool_call: &ToolCall) -> bool {
+    tool_call.tool_name.as_deref() == Some(<agent::UpdatePlanTool as agent::AgentTool>::NAME)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PlanCardState {
     Writing,
@@ -3896,17 +3904,20 @@ impl ThreadView {
             .into_any_element()
     }
 
+    /// Derives the plan card's state from the entries that follow it, so it
+    /// survives reloading the thread. For an executed plan, it also returns the
+    /// latest progress the agent reported with `update_plan`.
     fn plan_card_state(
         &self,
         entry_ix: usize,
         tool_call: &ToolCall,
         cx: &Context<Self>,
-    ) -> PlanCardState {
+    ) -> (PlanCardState, Option<agent::UpdatePlanToolInput>) {
         if matches!(
             tool_call.status,
             ToolCallStatus::Pending | ToolCallStatus::InProgress
         ) {
-            return PlanCardState::Writing;
+            return (PlanCardState::Writing, None);
         }
         let later_entries = self
             .thread
@@ -3915,33 +3926,46 @@ impl ThreadView {
             .get(entry_ix + 1..)
             .unwrap_or_default();
         let mut replied = false;
+        let mut executed = false;
+        let mut progress = None;
         for entry in later_entries {
             match entry {
+                AgentThreadEntry::ToolCall(later) if is_submit_plan_tool_call(later) => {
+                    if executed {
+                        break;
+                    }
+                    return (PlanCardState::Superseded, None);
+                }
                 AgentThreadEntry::ToolCall(later)
-                    if later.tool_name.as_deref()
-                        == Some(<agent::SubmitPlanTool as agent::AgentTool>::NAME) =>
+                    if executed && is_update_plan_tool_call(later) =>
                 {
-                    return PlanCardState::Superseded;
+                    if let Some(input) = later
+                        .raw_input
+                        .clone()
+                        .and_then(|input| serde_json::from_value(input).ok())
+                    {
+                        progress = Some(input);
+                    }
                 }
                 AgentThreadEntry::UserMessage(message) if !replied => {
-                    let is_execution = message.chunks.iter().any(|chunk| {
+                    executed = message.chunks.iter().any(|chunk| {
                         matches!(chunk, acp::ContentBlock::Text(text) if text.text == EXECUTE_PLAN_PROMPT)
                     });
-                    if is_execution {
-                        return PlanCardState::Executed;
-                    }
                     replied = true;
                 }
                 _ => {}
             }
         }
-        if self.discarded_plans.contains(&tool_call.id) {
+        let state = if executed {
+            PlanCardState::Executed
+        } else if self.discarded_plans.contains(&tool_call.id) {
             PlanCardState::Discarded
         } else if replied {
             PlanCardState::Answered
         } else {
             PlanCardState::Ready
-        }
+        };
+        (state, progress)
     }
 
     fn render_plan_tool_call(
@@ -3955,9 +3979,21 @@ impl ThreadView {
             .clone()
             .and_then(|input| serde_json::from_value(input).ok())
             .unwrap_or_default();
-        let state = self.plan_card_state(entry_ix, tool_call, cx);
+        let (state, progress) = self.plan_card_state(entry_ix, tool_call, cx);
         let colors = cx.theme().colors();
-        let is_active = matches!(state, PlanCardState::Writing | PlanCardState::Ready);
+        let is_generating = self.thread.read(cx).status() != ThreadStatus::Idle;
+        let completed_steps = progress.as_ref().map(|progress| {
+            progress
+                .steps
+                .iter()
+                .filter(|step| step.status == agent::PlanStepStatus::Completed)
+                .count()
+        });
+        let is_executing = state == PlanCardState::Executed
+            && is_generating
+            && completed_steps != Some(plan.steps.len());
+        let is_active =
+            is_executing || matches!(state, PlanCardState::Writing | PlanCardState::Ready);
         let border_color = if is_active {
             colors.text_accent.opacity(0.45)
         } else {
@@ -3981,11 +4017,16 @@ impl ThreadView {
             },
         );
 
-        let status_label = match state {
-            PlanCardState::Writing => Some("Escrevendo…"),
-            PlanCardState::Executed => Some("Executado"),
-            PlanCardState::Superseded => Some("Substituído"),
-            PlanCardState::Discarded => Some("Descartado"),
+        let status_label: Option<SharedString> = match state {
+            PlanCardState::Writing => Some("Escrevendo…".into()),
+            PlanCardState::Executed => Some(match completed_steps {
+                Some(completed) if completed >= step_count => "Concluído".into(),
+                Some(completed) => format!("{completed} de {step_count}").into(),
+                None if is_executing => "Executando…".into(),
+                None => "Executado".into(),
+            }),
+            PlanCardState::Superseded => Some("Substituído".into()),
+            PlanCardState::Discarded => Some("Descartado".into()),
             PlanCardState::Ready | PlanCardState::Answered => None,
         };
 
@@ -4024,7 +4065,7 @@ impl ThreadView {
             .child(div().flex_1())
             .when_some(status_label, |this, label| {
                 let label = Label::new(label).size(LabelSize::Small).color(Color::Muted);
-                this.child(if state == PlanCardState::Writing {
+                this.child(if state == PlanCardState::Writing || is_executing {
                     label
                         .with_animation(
                             "plan-writing",
@@ -4058,27 +4099,48 @@ impl ThreadView {
         }
 
         let steps = plan.steps.iter().enumerate().map(|(index, step)| {
+            let step_status = progress
+                .as_ref()
+                .and_then(|progress| progress.steps.get(index))
+                .map(|step| step.status);
+            let marker = match step_status {
+                Some(agent::PlanStepStatus::Completed) => Icon::new(IconName::TodoComplete)
+                    .size(IconSize::Small)
+                    .color(Color::Success)
+                    .into_any_element(),
+                Some(agent::PlanStepStatus::InProgress) => Icon::new(IconName::TodoProgress)
+                    .size(IconSize::Small)
+                    .color(Color::Accent)
+                    .with_rotate_animation(2)
+                    .into_any_element(),
+                Some(agent::PlanStepStatus::Pending) => Icon::new(IconName::TodoPending)
+                    .size(IconSize::Small)
+                    .color(Color::Muted)
+                    .into_any_element(),
+                None => h_flex()
+                    .size_4()
+                    .justify_center()
+                    .rounded_full()
+                    .bg(colors.element_background)
+                    .child(
+                        Label::new((index + 1).to_string())
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
+                    )
+                    .into_any_element(),
+            };
             h_flex()
                 .items_start()
                 .gap_2()
-                .child(
-                    h_flex()
-                        .flex_none()
-                        .size_4()
-                        .justify_center()
-                        .rounded_full()
-                        .bg(colors.element_background)
-                        .child(
-                            Label::new((index + 1).to_string())
-                                .size(LabelSize::XSmall)
-                                .color(Color::Muted),
-                        ),
-                )
+                .child(div().flex_none().child(marker))
                 .child(
                     v_flex()
                         .min_w_0()
                         .gap_1()
-                        .child(Label::new(step.title.clone()).size(LabelSize::Small))
+                        .child(Label::new(step.title.clone()).size(LabelSize::Small).when(
+                            step_status == Some(agent::PlanStepStatus::Completed),
+                            |label| label.color(Color::Muted),
+                        ))
                         .when(!step.files.is_empty(), |this| {
                             this.child(h_flex().flex_wrap().gap_1().children(
                                 step.files.iter().enumerate().map(|(file_ix, path)| {
@@ -8650,14 +8712,15 @@ impl ThreadView {
         )));
 
         div().w_full().id(container_id).map(|this| {
-            if tool_call.tool_name.as_deref()
-                == Some(<agent::SubmitPlanTool as agent::AgentTool>::NAME)
-                && !matches!(
-                    tool_call.status,
-                    ToolCallStatus::Failed | ToolCallStatus::Rejected | ToolCallStatus::Canceled
-                )
-            {
+            let failed = matches!(
+                tool_call.status,
+                ToolCallStatus::Failed | ToolCallStatus::Rejected | ToolCallStatus::Canceled
+            );
+            if is_submit_plan_tool_call(tool_call) && !failed {
                 this.child(self.render_plan_tool_call(entry_ix, tool_call, cx))
+            } else if is_update_plan_tool_call(tool_call) && !failed {
+                // Progress shows up on the plan card itself.
+                this
             } else if tool_call.is_subagent() {
                 this.child(
                     self.render_subagent_tool_call(
