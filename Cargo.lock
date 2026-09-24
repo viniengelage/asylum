@@ -3194,6 +3194,7 @@ dependencies = [
  "thiserror 2.0.17",
  "ui",
  "ui_input",
+ "urlencoding",
  "util",
  "workspace",
  "zed_credentials_provider",

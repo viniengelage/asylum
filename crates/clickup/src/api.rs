@@ -241,59 +241,137 @@ pub struct Comment {
     /// The comment as plain text, which leaves images and attachments out.
     #[serde(default)]
     pub comment_text: String,
-    /// The comment as ClickUp stores it: runs of text, images and attachments.
+    /// The comment as ClickUp stores it: runs of text, images and attachments. Kept as raw
+    /// JSON because where an image sits in it depends on the editor that wrote the comment.
     #[serde(default)]
-    pub comment: Vec<CommentBlock>,
+    pub comment: Vec<serde_json::Value>,
     pub user: Assignee,
     #[serde(default, deserialize_with = "deserialize_millis")]
     pub date: Option<i64>,
 }
 
 impl Comment {
-    /// The images and files attached in the comment, in the order they appear.
-    pub fn attachments(&self) -> impl Iterator<Item = &CommentAttachment> {
-        self.comment
-            .iter()
-            .filter_map(|block| block.image.as_ref().or(block.attachment.as_ref()))
-            .filter(|attachment| attachment.url.is_some())
+    /// The images and files attached in the comment, in the order they appear: any object in it
+    /// with a URL on ClickUp's attachment host, plus attachment links in the plain text.
+    pub fn attachments(&self) -> Vec<CommentAttachment> {
+        let mut attachments = Vec::new();
+        for block in &self.comment {
+            collect_attachments(block, &mut attachments);
+        }
+        for word in self.comment_text.split_whitespace() {
+            if is_attachment_url(word) && !attachments.iter().any(|found| found.url == word) {
+                attachments.push(CommentAttachment::from_url(word.to_string()));
+            }
+        }
+        attachments
     }
 }
 
-#[derive(Clone, Debug, Default, Deserialize)]
-pub struct CommentBlock {
-    #[serde(default)]
-    pub image: Option<CommentAttachment>,
-    #[serde(default)]
-    pub attachment: Option<CommentAttachment>,
+fn is_attachment_url(url: &str) -> bool {
+    url.strip_prefix("https://")
+        .and_then(|rest| rest.split('/').next())
+        .is_some_and(|host| host.ends_with(".clickup-attachments.com"))
 }
 
-#[derive(Clone, Debug, Deserialize)]
+fn collect_attachments(value: &serde_json::Value, attachments: &mut Vec<CommentAttachment>) {
+    match value {
+        serde_json::Value::Object(object) => {
+            let url = object.get("url").and_then(|url| url.as_str());
+            if let Some(url) = url.filter(|url| is_attachment_url(url)) {
+                if !attachments.iter().any(|found| found.url == url) {
+                    let text = |key: &str| {
+                        object
+                            .get(key)
+                            .and_then(|value| value.as_str())
+                            .map(str::to_string)
+                    };
+                    let mut attachment = CommentAttachment::from_url(url.to_string());
+                    attachment.name = text("title").or_else(|| text("name"));
+                    // ClickUp puts a MIME type in `extension` in some responses and a file
+                    // extension in others, and `type` is either "image" or the extension.
+                    let hints = [text("extension"), text("type"), text("mimetype")];
+                    if hints.iter().flatten().any(|hint| is_image_hint(hint)) {
+                        attachment.is_image = true;
+                    }
+                    attachments.push(attachment);
+                }
+                return;
+            }
+            for value in object.values() {
+                collect_attachments(value, attachments);
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for value in values {
+                collect_attachments(value, attachments);
+            }
+        }
+        // Some editors store the attachment as JSON inside a string attribute.
+        serde_json::Value::String(text)
+            if text.starts_with('{') && text.contains("clickup-attachments") =>
+        {
+            if let Ok(nested) = serde_json::from_str::<serde_json::Value>(text) {
+                collect_attachments(&nested, attachments);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn is_image_hint(hint: &str) -> bool {
+    let hint = hint.to_ascii_lowercase();
+    hint == "image"
+        || hint.starts_with("image/")
+        || matches!(
+            hint.trim_start_matches('.'),
+            "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "svg" | "heic"
+        )
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct CommentAttachment {
-    pub url: Option<String>,
+    pub url: String,
     pub name: Option<String>,
-    pub title: Option<String>,
-    pub extension: Option<String>,
+    pub is_image: bool,
 }
 
 impl CommentAttachment {
-    pub fn is_image(&self) -> bool {
-        let extension = self
-            .extension
+    fn from_url(url: String) -> Self {
+        let file_name = url
+            .split(['?', '#'])
+            .next()
+            .and_then(|path| path.rsplit('/').next())
+            .filter(|name| !name.is_empty())
+            .map(|name| {
+                urlencoding::decode(name).map_or(name.to_string(), |name| name.into_owned())
+            });
+        let is_image = file_name
             .as_deref()
-            .or_else(|| self.url.as_deref()?.rsplit('.').next())
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        matches!(
-            extension.as_str(),
-            "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "svg"
-        )
+            .and_then(|name| name.rsplit_once('.'))
+            .is_some_and(|(_, extension)| is_image_hint(extension));
+        Self {
+            url,
+            name: file_name,
+            is_image,
+        }
+    }
+
+    pub fn is_image(&self) -> bool {
+        self.is_image
+    }
+
+    /// The file extension to cache the attachment under.
+    pub fn extension(&self) -> Option<&str> {
+        let path = self.url.split(['?', '#']).next()?;
+        let (_, extension) = path.rsplit('/').next()?.rsplit_once('.')?;
+        extension
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric())
+            .then_some(extension)
     }
 
     pub fn display_name(&self) -> &str {
-        self.title
-            .as_deref()
-            .or(self.name.as_deref())
-            .unwrap_or("anexo")
+        self.name.as_deref().unwrap_or("anexo")
     }
 }
 
@@ -653,13 +731,14 @@ mod tests {
         let comment = &comments.comments[0];
         assert_eq!(comment.user.display_name(), "Mariana");
         assert_eq!(comment.date, Some(1_790_100_000_000));
-        let attachments: Vec<_> = comment.attachments().collect();
+        let attachments = comment.attachments();
         assert_eq!(attachments.len(), 2);
         assert!(attachments[0].is_image());
         assert_eq!(
-            attachments[0].url.as_deref(),
-            Some("https://t1.p.clickup-attachments.com/tela.png")
+            attachments[0].url,
+            "https://t1.p.clickup-attachments.com/tela.png"
         );
+        assert_eq!(attachments[0].display_name(), "tela.png");
         assert!(!attachments[1].is_image());
         assert_eq!(attachments[1].display_name(), "log.txt");
 
@@ -673,6 +752,40 @@ mod tests {
 
         let idle: RunningTimerResponse = serde_json::from_str(r#"{"data": null}"#).unwrap();
         assert!(idle.data.is_none());
+    }
+
+    #[test]
+    fn finds_images_wherever_the_editor_put_them() {
+        let comment: Comment = serde_json::from_str(
+            r##"{
+                "id": "1", "comment_text": "veja https://t1.p.clickup-attachments.com/t1/b/foto%20final.jpg",
+                "user": {"id": 1},
+                "comment": [
+                    {"type": "image", "text": "print.png", "image": {
+                        "name": "print.png", "type": "png", "extension": "image/png",
+                        "url": "https://t1.p.clickup-attachments.com/t1/a/print.png"}},
+                    {"text": "\n", "attributes": {"data-attachment":
+                        "{\"title\":\"diagrama\",\"mimetype\":\"image/webp\",\"url\":\"https://t1.p.clickup-attachments.com/t1/c/diagrama\"}"}},
+                    {"text": "link externo https://example.com/x.png"}
+                ]
+            }"##,
+        )
+        .unwrap();
+        let attachments = comment.attachments();
+        let names: Vec<(&str, bool)> = attachments
+            .iter()
+            .map(|attachment| (attachment.display_name(), attachment.is_image()))
+            .collect();
+        assert_eq!(
+            names,
+            [
+                ("print.png", true),
+                ("diagrama", true),
+                ("foto final.jpg", true)
+            ]
+        );
+        assert_eq!(attachments[0].extension(), Some("png"));
+        assert_eq!(attachments[1].extension(), None);
     }
 
     #[gpui::test]

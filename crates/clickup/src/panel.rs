@@ -1122,9 +1122,9 @@ impl ClickUpPanel {
             .iter()
             .flat_map(|comment| comment.attachments())
             .filter(|attachment| attachment.is_image())
-            .filter_map(|attachment| {
-                let url = attachment.url.clone()?;
-                Some((url, attachment.extension.clone()))
+            .map(|attachment| {
+                let extension = attachment.extension().map(str::to_string);
+                (attachment.url, extension)
             })
             .filter(|(url, _)| !self.comment_images.contains_key(url))
             .collect();
@@ -1183,7 +1183,7 @@ impl ClickUpPanel {
         attachment: &api::CommentAttachment,
         cx: &Context<Self>,
     ) -> AnyElement {
-        let url = attachment.url.clone().unwrap_or_default();
+        let url = attachment.url.clone();
         let name = attachment.display_name().to_string();
         let image = attachment
             .is_image()
@@ -1868,14 +1868,14 @@ impl ClickUpPanel {
                                 Label::new(comment.comment_text.trim().to_string())
                                     .size(LabelSize::Small),
                             )
-                            .children(comment.attachments().enumerate().map(
+                            .children(comment.attachments().into_iter().enumerate().map(
                                 |(index, attachment)| {
                                     self.render_comment_attachment(
                                         SharedString::from(format!(
                                             "clickup-comment-{}-attachment-{index}",
                                             comment.id
                                         )),
-                                        attachment,
+                                        &attachment,
                                         cx,
                                     )
                                 },
