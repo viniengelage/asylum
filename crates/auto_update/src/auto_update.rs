@@ -1035,6 +1035,14 @@ impl AutoUpdater {
 
         #[cfg(not(test))]
         let install_result = {
+            // From a profile launcher the main bundle is the launcher, which only links to the
+            // real app, so the update has to go into the bundle the executable resolves to.
+            #[cfg(target_os = "macos")]
+            let running_app_path = match util::app_bundle_path() {
+                Some(bundle) => bundle,
+                None => cx.update(|cx| cx.app_path())?,
+            };
+            #[cfg(not(target_os = "macos"))]
             let running_app_path = cx.update(|cx| cx.app_path())?;
             let background_executor = cx.background_executor().clone();
             let channel = cx.update(|cx| ReleaseChannel::global(cx).dev_name());

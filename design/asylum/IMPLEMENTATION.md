@@ -302,6 +302,153 @@ rsvg-convert -w 1024 asylum-app-icon.svg -o ../../../crates/zed/resources/app-ic
 (`rsvg-convert` vem de `brew install librsvg`.) Ajuste também o nome do bundle/app nas configs de
 empacotamento que você usa (`script/bundle-mac`, `Info.plist`) — fora do escopo deste documento.
 
+### 6.1 Ícone por perfil
+
+Cada perfil roda num processo próprio (`--profile <id>`), então cada um ganha um tile próprio no
+Dock. A ideia é que o ícone desse tile use a cor do perfil, para que dê para saber qual instância é
+qual sem abrir a janela.
+
+**Desenho:** board `Brand — ícone por perfil` no Penpot (x=25312, y=1160). SVGs em
+`design/asylum/brand/profiles/asylum-app-icon-<cor>-macos.svg`, já no grid do macOS (corpo 824 em
+1024, com sombra), iguais ao `asylum-app-icon-macos.svg` com quatro cores trocadas:
+
+| `ProfileColor` | Swatch (chip) | Gradiente (600 → 950) | Espiral | A |
+|---|---|---|---|---|
+| `Amber` | `#E8B368` | `#D97706 → #451A03` | `#C084FC` (inverte para roxo) | `#FFF7ED` |
+| `Teal` | `#5EEAD4` | `#0D9488 → #042F2E` | `#E8B368` | `#F0FDFA` |
+| `Purple` | `#C084FC` | `#7C3AED → #2E1065` (= ícone do bundle) | `#E8B368` | `#F5F0FF` |
+| `Blue` | `#60A5FA` | `#2563EB → #172554` | `#E8B368` | `#EFF6FF` |
+| `Rose` | `#FB7185` | `#E11D48 → #4C0519` | `#FDE68A` | `#FFF1F2` |
+
+Só o fundo muda: a forma continua a mesma e o ícone continua sendo o Asylum. Uma cor que ocupa o
+ícone inteiro dá para distinguir a 32 px; espiral colorida ou selo no canto (alternativas B e C
+no board) somem no Dock. Ao adicionar uma cor nova em `ProfileColor`, é preciso adicionar a linha
+aqui, o SVG e o PNG.
+
+**Por que o ícone em tempo de execução não basta.** `NSApp.setApplicationIconImage` só vale
+enquanto o processo roda: com o app fechado, o tile fixado volta ao ícone do bundle. O Dock fixa
+por bundle, então com um único `Asylum.app` não dá para fixar "Trabalho" e "Pessoal" como itens
+separados, e "Manter no Dock" numa segunda instância fixa o mesmo `Asylum.app`, que abre o perfil
+padrão. Para ver a diferença **antes** de abrir, cada perfil precisa de um bundle próprio.
+
+**Lançador por perfil (validado em spike, 2026-09-24).** Um `.app` por perfil em `~/Applications`,
+que é o mesmo binário visto por outro bundle:
+
+```
+~/Applications/Asylum Trabalho.app/Contents/
+  Info.plist            cópia do Info.plist do Asylum.app, com:
+                          CFBundleIdentifier  dev.asylum.Asylum.profile.<id>
+                          CFBundleName / CFBundleDisplayName  "Asylum <Nome>"
+                          CFBundleIconFile    profile
+                          CFBundleExecutable  launch
+                          AsylumProfile       <id>
+                          sem CFBundleURLTypes e CFBundleDocumentTypes (o zed:// e os
+                          tipos de arquivo continuam só no Asylum.app)
+  MacOS/launch          script: exec "$(dirname "$0")/zed" "$@"
+  MacOS/zed  -> /Applications/Asylum.app/Contents/MacOS/zed   (symlink)
+  MacOS/cli, MacOS/git -> idem
+  Frameworks -> /Applications/Asylum.app/Contents/Frameworks  (symlink)
+  Resources/profile.icns       gerado do SVG da cor (iconutil)
+  Resources/Document.icns -> symlink
+```
+
+O que o spike mostrou (bundle feito à mão, perfil descartável `icon-spike`, Asylum instalado):
+
+- Se o executável do lançador fizer `exec` direto em `/Applications/Asylum.app/.../zed`, **não
+  funciona**: o AppKit resolve o bundle principal pelo caminho do executável, e o processo aparece
+  como `dev.asylum.Asylum`.
+- Com o `exec` passando pelo **symlink dentro do lançador**, funciona: o `lsappinfo` mostra
+  `bundleID = dev.asylum.Asylum.profile.icon-spike`, e o Dock ganha um tile próprio, rosa, com a
+  bolinha de "rodando". Fixado, ele continua rosa com o app fechado.
+- A assinatura continua válida: `codesign --verify <pid>` → `dynamically valid`, `valid on disk`,
+  `satisfies its Designated Requirement`. O cdhash é o do binário real, então o Keychain vê o mesmo
+  código (mas isso ainda não foi testado com um perfil que tenha credenciais).
+- Web preview: o CEF sobe em modo multi-processo pelo symlink `Frameworks`, os helpers resolvem
+  para o caminho real e os frames chegam na GPU.
+- Clicar no lançador com o perfil já aberto só traz o mesmo PID para a frente, sem criar outra
+  instância.
+- **Permissões do macOS são por bundle id**: no primeiro launch, o lançador pediu de novo a
+  permissão de notificações ("Notificações de 'Asylum'"). Câmera, microfone, gravação de tela e
+  acessibilidade também precisam ser concedidas de novo, uma vez por perfil.
+- **O executável do bundle não pode ser o symlink.** Com `CFBundleExecutable = zed` (o
+  symlink), o LaunchServices resolve o link antes de executar, e o processo nasce como o app
+  real, no perfil padrão. Por isso o `CFBundleExecutable` é um script de uma linha que faz `exec`
+  pelo symlink irmão. O script não passa `--profile`: o perfil vem do `AsylumProfile`, então o
+  restart (`open -n <lançador> --args --profile x`) não duplica o argumento.
+- Teste ponta a ponta da implementação (2026-09-24, build debug num bundle de teste): o lançador
+  gerado pelo sync, aberto com `open` e sem argumentos, sobe como
+  `dev.asylum.Asylum.profile.spike`, com tile rosa próprio no Dock e o log em `Zed-spike.log`;
+  abrir de novo só ativa o mesmo PID. Um build debug fora do checkout morre ao carregar os assets
+  (`dev asset loading requires running from within the checkout`): para testar, o bundle tem que
+  ficar dentro do repositório (por exemplo `target/`).
+
+**Onde o código assume que `app_path()` é o Asylum.app** (com o lançador, `NSBundle.mainBundle`
+passa a ser o lançador):
+
+| Lugar | O que quebraria | Correção |
+|---|---|---|
+| `auto_update.rs` (`install_release(..., running_app_path)`) | instalaria a versão nova **por cima do lançador** | usar o app real: `current_exe()` canonicalizado, subindo até o `.app` |
+| `app_profiles.rs` `launch_profile` / `open_profile` / `forward_paths` | abriria outro perfil com o bundle (e o ícone) do lançador atual | abrir o lançador do perfil de destino quando ele existe, senão o app real com `--profile` |
+| `gpui_macos` `restart` | reabre o bundle atual, que na troca de perfil na mesma janela é o lançador do perfil de **origem** | `switch_in_place` chama `set_restart_path` com o bundle do perfil de destino |
+| `move_to_applications.rs` | nada: só oferece mover apps em `/Volumes` ou transladados, e o lançador fica em `~/Applications` | — |
+| `web_preview/cef_browser.rs` `main_bundle_path` | nada no spike; o CEF lê o Info.plist do lançador | manter no roteiro de teste |
+
+**O que cada plataforma permite**
+
+| | Com o app fechado (escolher qual abrir) | Com o app aberto |
+|---|---|---|
+| macOS | lançador `.app` por perfil em `~/Applications`, fixável no Dock e achado pelo Spotlight | o tile do próprio lançador; `setApplicationIconImage` só como reserva para perfis abertos sem lançador (`zed --profile` pela CLI) |
+| Windows | atalho `.lnk` por perfil com ícone próprio e `System.AppUserModel.ID` = AUMID do perfil, fixável na barra de tarefas | o processo usa o mesmo AUMID (`set_app_identity`) e cai no grupo do atalho; `WM_SETICON` para Alt-Tab |
+| Linux | `.desktop` por perfil em `~/.local/share/applications` (`Icon=`, `Exec=... --profile <id>`, `StartupWMClass`) | X11: `_NET_WM_ICON` (o gpui já envia `WindowOptions::icon`); Wayland: `app_id` por perfil casando com o `.desktop` |
+
+**Fases**
+
+0. **Assets** (feito). `script/export-profile-icons` gera os SVGs de
+   `design/asylum/brand/profiles/` e os `.icns` em `crates/zed/resources/profile-icons/<cor>.icns`
+   (iconset 16–1024, cerca de 2 MB no binário, via `include_bytes!`). O `.png` para o ícone em
+   tempo de execução entra na fase 3.
+1. **Perfil pelo bundle** (feito). `profile_launchers::launcher_profile_id` lê o `AsylumProfile`
+   do `Info.plist` ao lado do executável (crate `plist`) quando não há `--profile` nem
+   `--user-data-dir`. `util::app_bundle_path()` acha o app real pelo `current_exe()` canonicalizado;
+   o auto-update instala nele.
+2. **Criar e manter os lançadores** (feito, `crates/zed/src/zed/profile_launchers.rs`):
+   - `ProfileStore::sync_launchers` roda sempre que o registro carregado muda (id, nome ou cor),
+     inclusive no startup, e só quando o processo roda de um bundle. Grava só o que difere e
+     chama `lsregister -f` quando algo mudou, então o sync também atualiza o Info.plist depois de
+     um update do app.
+   - Um lançador por perfil que não é o padrão. Renomear o perfil renomeia o `.app` (o item
+     fixado no Dock segue); nome repetido ganha ` (<id>)`; o lançador de um perfil excluído é
+     removido antes de criar os novos.
+   - `launch_profile`, `open_profile`, `forward_paths`, `run_in_profile` e `switch_in_place` usam
+     `profile_launchers::app_for_profile`: o lançador do perfil de destino, ou o app real.
+   - Gerenciador de perfis: botão "Atalho no Finder" ao lado da pasta de dados, para arrastar o
+     lançador para o Dock.
+   - Falta: testar o Keychain com a versão release, abrindo um perfil com credenciais pelo lançador.
+     Um build debug tem outro cdhash de qualquer jeito, então não serve para esse teste.
+3. **Ícone em tempo de execução (reserva).** `Platform::set_app_icon(Option<Arc<RgbaImage>>)` no
+   GPUI, no molde de `set_app_identity`; no macOS via `NSApplication::setApplicationIconImage`.
+   Só entra quando o processo roda de `Asylum.app` com um perfil que não é o padrão (CLI, ou perfil
+   sem lançador), e é o que o Windows e o Linux reaproveitam.
+4. **Windows.** Um `.lnk` por perfil (Menu Iniciar) com o `.ico` da cor e
+   `System.AppUserModel.ID = …Profile.<id>`; o processo chama `set_app_identity` com o mesmo AUMID
+   e registra esse AUMID em `system_notifications.rs` (`register_app_user_model_id`), senão os
+   toasts somem. `WM_SETICON` com o `.ico` para o Alt-Tab.
+5. **Linux.** `.desktop` por perfil e `app_id` por perfil; no X11, `ProfileColor::app_icon()` no
+   lugar do `APP_ICON` em `zed.rs`. Baixa prioridade.
+
+**Critérios de aceite**
+
+- [ ] "Asylum Trabalho" e "Asylum Pessoal" fixados no Dock mostram cores diferentes com o app
+      fechado, e clicar abre o perfil certo.
+- [ ] Com o perfil aberto, há um tile só por perfil (o do lançador, com a bolinha de "rodando").
+- [ ] O ⌘-Tab mostra o ícone e o nome do perfil.
+- [ ] Um perfil com credenciais no Keychain abre pelo lançador sem pedir acesso de novo.
+- [ ] O auto-update substitui o `/Applications/Asylum.app`, nunca o lançador, e o lançador abre a
+      versão nova sem ser recriado.
+- [ ] Trocar a cor ou renomear o perfil atualiza o lançador e o item fixado no Dock.
+- [ ] Os ícones têm a mesma margem e sombra do `app-icon.png`, então os tiles ficam do mesmo
+      tamanho.
+
 ---
 
 ## 7. Critérios de aceite

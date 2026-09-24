@@ -356,6 +356,24 @@ pub fn get_shell_safe_zed_path(shell_kind: shell::ShellKind) -> anyhow::Result<S
         .context("Failed to shell-escape Zed executable path.")
 }
 
+/// Returns the `.app` bundle the running executable was installed in, or `None` when it
+/// doesn't run from a bundle (such as a `target/` build).
+///
+/// A profile launcher is a separate bundle whose executable is a symlink to the one in the
+/// real app, so the main bundle (and `App::app_path`) is the launcher there. Resolving the
+/// symlink finds the app that updates have to be installed into.
+#[cfg(target_os = "macos")]
+pub fn app_bundle_path() -> Option<PathBuf> {
+    let executable = std::env::current_exe().ok()?.canonicalize().ok()?;
+    let contents = executable.parent()?.parent()?;
+    let bundle = contents.parent()?;
+    let is_bundle = executable.parent()?.ends_with("Contents/MacOS")
+        && bundle
+            .extension()
+            .is_some_and(|extension| extension == "app");
+    is_bundle.then(|| bundle.to_path_buf())
+}
+
 /// Returns a path for the zed cli executable, this function
 /// should be called from the zed executable, not zed-cli.
 pub fn get_zed_cli_path() -> Result<PathBuf> {

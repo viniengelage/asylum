@@ -259,6 +259,17 @@ fn main() {
         return;
     }
 
+    // A profile launcher is its own bundle, so the Dock shows the profile's icon, and opening
+    // it passes no arguments: the profile comes from the launcher's Info.plist.
+    #[cfg(target_os = "macos")]
+    let args = {
+        let mut args = args;
+        if args.profile.is_none() && args.user_data_dir.is_none() {
+            args.profile = zed::profile_launchers::launcher_profile_id();
+        }
+        args
+    };
+
     let restart_arguments = match (args.profile.as_deref(), args.user_data_dir.as_deref()) {
         (Some(_), Some(_)) => {
             eprintln!("--profile and --user-data-dir cannot be used together");

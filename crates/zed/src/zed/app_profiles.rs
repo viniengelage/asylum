@@ -32,7 +32,7 @@ use workspace::{
     notifications::NotifyTaskExt as _,
 };
 
-use crate::zed::mac_only_instance;
+use crate::zed::{mac_only_instance, profile_launchers};
 
 const DEFAULT_PROFILE_NAME: &str = "Padrão";
 
@@ -62,6 +62,17 @@ impl ProfileColor {
             Self::Purple => rgb(0xC084FC).into(),
             Self::Blue => rgb(0x60A5FA).into(),
             Self::Rose => rgb(0xFB7185).into(),
+        }
+    }
+
+    /// The app icon of profiles in this color, written into their launchers.
+    fn launcher_icon(self) -> &'static [u8] {
+        match self {
+            Self::Amber => include_bytes!("../../resources/profile-icons/amber.icns"),
+            Self::Teal => include_bytes!("../../resources/profile-icons/teal.icns"),
+            Self::Purple => include_bytes!("../../resources/profile-icons/purple.icns"),
+            Self::Blue => include_bytes!("../../resources/profile-icons/blue.icns"),
+            Self::Rose => include_bytes!("../../resources/profile-icons/rose.icns"),
         }
     }
 
@@ -298,7 +309,6 @@ pub fn init(cx: &mut App) {
 /// Opens `paths` in the running instance of `profile_id`, starting it with them when it
 /// isn't running.
 pub fn forward_paths(profile_id: String, paths: Vec<String>, cx: &App) -> Task<Result<()>> {
-    let app_path = cx.app_path().ok();
     cx.background_spawn(async move {
         let request = mac_only_instance::InstanceRequest::Open {
             paths: paths.clone(),
@@ -306,7 +316,7 @@ pub fn forward_paths(profile_id: String, paths: Vec<String>, cx: &App) -> Task<R
         if mac_only_instance::send_to_profile(&profile_id, &request) {
             return Ok(());
         }
-        launch_profile(&profile_id, paths, app_path).await
+        launch_profile(&profile_id, paths).await
     })
 }
 
@@ -320,23 +330,16 @@ fn profile_arguments(profile_id: &str) -> Vec<OsString> {
 
 /// Brings `profile_id` to the front, starting it when it isn't running.
 fn open_profile(profile_id: String, cx: &App) -> Task<Result<()>> {
-    let app_path = cx.app_path().ok();
     cx.background_spawn(async move {
         if mac_only_instance::activate_profile(&profile_id) {
             return Ok(());
         }
-        launch_profile(&profile_id, Vec::new(), app_path).await
+        launch_profile(&profile_id, Vec::new()).await
     })
 }
 
-async fn launch_profile(
-    profile_id: &str,
-    paths: Vec<String>,
-    app_path: Option<PathBuf>,
-) -> Result<()> {
-    let bundle =
-        app_path.filter(|path| path.extension().is_some_and(|extension| extension == "app"));
-    match bundle {
+async fn launch_profile(profile_id: &str, paths: Vec<String>) -> Result<()> {
+    match profile_launchers::app_for_profile(profile_id) {
         Some(bundle) => {
             // `-n` starts another instance of the bundle instead of activating the running one.
             let status = util::command::new_command("open")
@@ -371,7 +374,6 @@ fn run_in_profile(
     data: Option<serde_json::Value>,
     cx: &App,
 ) -> Task<Result<()>> {
-    let app_path = cx.app_path().ok();
     let executor = cx.background_executor().clone();
     cx.background_spawn(async move {
         let request = mac_only_instance::InstanceRequest::Dispatch {
@@ -381,7 +383,7 @@ fn run_in_profile(
         if mac_only_instance::send_to_profile(&profile_id, &request) {
             return Ok(());
         }
-        launch_profile(&profile_id, Vec::new(), app_path).await?;
+        launch_profile(&profile_id, Vec::new()).await?;
         // A profile that was just started takes a moment to claim its socket.
         for _ in 0..80 {
             executor.timer(Duration::from_millis(250)).await;
@@ -398,15 +400,23 @@ fn run_in_profile(
 fn switch_in_place(profile_id: String, window: &mut Window, cx: &mut App) {
     let running = cx.background_spawn({
         let profile_id = profile_id.clone();
-        async move { mac_only_instance::activate_profile(&profile_id) }
+        async move {
+            let activated = mac_only_instance::activate_profile(&profile_id);
+            (activated, profile_launchers::app_for_profile(&profile_id))
+        }
     });
     window
         .spawn(cx, async move |cx| {
-            let activated = running.await;
+            let (activated, app) = running.await;
             cx.update(|_, cx| {
                 if activated {
                     cx.quit();
                 } else {
+                    // Restarting reopens this process's own bundle, which from a launcher is
+                    // the launcher of this profile rather than of the one being switched to.
+                    if let Some(app) = app {
+                        cx.set_restart_path(app);
+                    }
                     cx.set_restart_arguments(profile_arguments(&profile_id));
                     cx.restart();
                 }
@@ -498,6 +508,11 @@ pub struct ProfileStore {
     load_error: Option<SharedString>,
     refresh_task: Option<Task<()>>,
     publish_task: Option<Task<()>>,
+    /// The profiles, as (id, name, color), that the launchers were last written for.
+    synced_launchers: Option<Vec<(String, String, ProfileColor)>>,
+    launchers_task: Option<Task<()>>,
+    /// Where each profile's launcher is, once they were synced.
+    launchers: HashMap<String, PathBuf>,
     _subscriptions: Vec<gpui::Subscription>,
 }
 
@@ -533,6 +548,9 @@ impl ProfileStore {
                 load_error: None,
                 refresh_task: None,
                 publish_task: None,
+                synced_launchers: None,
+                launchers_task: None,
+                launchers: HashMap::default(),
                 _subscriptions: subscriptions,
             };
             store.refresh(cx);
@@ -744,6 +762,7 @@ impl ProfileStore {
                     Ok(profiles) => {
                         this.profiles = profiles;
                         this.load_error = None;
+                        this.sync_launchers(cx);
                     }
                     Err(error) => {
                         log::error!("failed to load profiles: {error:#}");
@@ -751,6 +770,46 @@ impl ProfileStore {
                     }
                 }
                 this.running = running;
+                cx.notify();
+            })
+            .log_err();
+        }));
+    }
+
+    /// Brings the launchers in `~/Applications` in line with the registry: one per profile
+    /// other than the default, which is the app itself. Every running profile does this when
+    /// it sees the registry change, so a profile renamed or recolored in one process updates
+    /// its launcher even when that process doesn't run from a bundle.
+    fn sync_launchers(&mut self, cx: &mut Context<Self>) {
+        let launchers: Vec<(String, String, ProfileColor)> = self
+            .profiles
+            .iter()
+            .filter(|profile| profile.id != paths::DEFAULT_PROFILE_ID)
+            .map(|profile| (profile.id.clone(), profile.name.clone(), profile.color))
+            .collect();
+        if self.synced_launchers.as_ref() == Some(&launchers) {
+            return;
+        }
+        let profiles: Vec<profile_launchers::LauncherProfile> = launchers
+            .iter()
+            .map(|(id, name, color)| profile_launchers::LauncherProfile {
+                id: id.clone(),
+                name: name.clone(),
+                icon: color.launcher_icon(),
+            })
+            .collect();
+        self.synced_launchers = Some(launchers);
+        let sync = cx.background_spawn(async move {
+            profile_launchers::sync_launchers(&profiles)
+                .await
+                .context("failed to update the profile launchers")
+        });
+        self.launchers_task = Some(cx.spawn(async move |this, cx| {
+            let Some(launchers) = sync.await.log_err() else {
+                return;
+            };
+            this.update(cx, |this, cx| {
+                this.launchers = launchers;
                 cx.notify();
             })
             .log_err();
@@ -2458,14 +2517,18 @@ impl ManageProfilesModal {
     fn render_details(&self, profile: &AppProfile, cx: &mut Context<Self>) -> impl IntoElement {
         let is_default = profile.id == paths::DEFAULT_PROFILE_ID;
         let is_active = profile.id == active_profile_id();
-        let (is_running, summary) = {
+        let (is_running, summary, launcher) = {
             let store = self.store.read(cx);
             let summary = if is_active {
                 Some(store.current_summary(cx))
             } else {
                 store.summaries.get(&profile.id).cloned()
             };
-            (store.running.contains(&profile.id), summary)
+            (
+                store.running.contains(&profile.id),
+                summary,
+                store.launchers.get(&profile.id).cloned(),
+            )
         };
         let data_dir = if is_default {
             paths::data_dir().display().to_string()
@@ -2591,11 +2654,27 @@ impl ManageProfilesModal {
                                     .child(self.name_editor.clone()),
                             )
                             .child(
-                                Label::new(data_dir)
-                                    .size(LabelSize::XSmall)
-                                    .buffer_font(cx)
-                                    .color(Color::Muted)
-                                    .truncate(),
+                                h_flex()
+                                    .gap_2()
+                                    .child(
+                                        Label::new(data_dir)
+                                            .size(LabelSize::XSmall)
+                                            .buffer_font(cx)
+                                            .color(Color::Muted)
+                                            .truncate(),
+                                    )
+                                    .when_some(launcher, |this, launcher| {
+                                        this.child(
+                                            Button::new("reveal-launcher", "Atalho no Finder")
+                                                .label_size(LabelSize::XSmall)
+                                                .tooltip(Tooltip::text(
+                                                    "Arraste o atalho para o Dock para abrir este perfil com o ícone dele",
+                                                ))
+                                                .on_click(move |_, _, cx| {
+                                                    cx.reveal_path(&launcher)
+                                                }),
+                                        )
+                                    }),
                             ),
                     )
                     .child(h_flex().gap_1p5().children(swatches)),

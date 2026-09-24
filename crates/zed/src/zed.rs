@@ -9,6 +9,8 @@ mod migrate;
 pub(crate) mod move_to_applications;
 mod open_listener;
 mod open_url_modal;
+#[cfg(target_os = "macos")]
+pub(crate) mod profile_launchers;
 mod quick_action_bar;
 pub mod remote_debug;
 pub mod telemetry_log;
