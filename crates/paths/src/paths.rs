@@ -378,6 +378,18 @@ pub fn settings_file() -> &'static PathBuf {
     SETTINGS_FILE.get_or_init(|| config_dir().join("settings.json"))
 }
 
+/// Returns the default profile's `settings.json` when this process runs as
+/// another profile, which inherits every setting from it that it doesn't
+/// isolate or override.
+pub fn inherited_settings_file() -> Option<&'static PathBuf> {
+    static INHERITED_SETTINGS_FILE: OnceLock<Option<PathBuf>> = OnceLock::new();
+    INHERITED_SETTINGS_FILE
+        .get_or_init(|| {
+            active_profile_id().map(|_| shared_config_dir().join("settings.json"))
+        })
+        .as_ref()
+}
+
 /// Returns the path to the global settings file.
 pub fn global_settings_file() -> &'static PathBuf {
     static GLOBAL_SETTINGS_FILE: OnceLock<PathBuf> = OnceLock::new();
@@ -442,10 +454,17 @@ pub const GLOBAL_AGENTS_FILE_DISPLAY: &str =
 
 /// Returns the path to the extensions directory.
 ///
-/// This is where installed extensions are stored.
+/// This is where installed extensions are stored. Every profile shares the
+/// default profile's, so themes and languages installed in one are in all.
 pub fn extensions_dir() -> &'static PathBuf {
     static EXTENSIONS_DIR: OnceLock<PathBuf> = OnceLock::new();
-    EXTENSIONS_DIR.get_or_init(|| data_dir().join("extensions"))
+    EXTENSIONS_DIR.get_or_init(|| {
+        if active_profile_id().is_some() {
+            platform_data_dir().join("extensions")
+        } else {
+            data_dir().join("extensions")
+        }
+    })
 }
 
 /// Returns the path to the extensions directory.

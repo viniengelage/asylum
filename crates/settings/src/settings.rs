@@ -171,7 +171,13 @@ pub const SPECIFIC_OVERRIDES_KEYMAP_PATH: &str = "keymaps/specific-overrides-mac
 pub const SPECIFIC_OVERRIDES_KEYMAP_PATH: &str = "keymaps/specific-overrides.json";
 
 pub fn initial_user_settings_content() -> Cow<'static, str> {
-    asset_str::<SettingsAssets>("settings/initial_user_settings.json")
+    // The template pins a theme and font sizes, which in a profile would hide
+    // the ones it inherits from the default profile.
+    if paths::inherited_settings_file().is_some() {
+        asset_str::<SettingsAssets>("settings/initial_profile_settings.json")
+    } else {
+        asset_str::<SettingsAssets>("settings/initial_user_settings.json")
+    }
 }
 
 pub fn initial_server_settings_content() -> Cow<'static, str> {

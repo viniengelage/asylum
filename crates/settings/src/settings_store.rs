@@ -147,6 +147,10 @@ pub struct SettingsStore {
     default_settings: Rc<SettingsContent>,
     user_settings: Option<UserSettingsContent>,
     global_settings: Option<Box<SettingsContent>>,
+    inherited_settings: Option<Box<SettingsContent>>,
+    /// The global settings with the ones inherited from the default profile on
+    /// top, as a single layer below the user settings.
+    global_layer: Option<Box<SettingsContent>>,
 
     extension_settings: Option<Box<SettingsContent>>,
     server_settings: Option<Box<SettingsContent>>,
@@ -157,6 +161,7 @@ pub struct SettingsStore {
 
     last_user_settings_content: Option<String>,
     last_global_settings_content: Option<String>,
+    last_inherited_settings_content: Option<String>,
     local_settings: BTreeMap<(WorktreeId, Arc<RelPath>), SettingsContent>,
     pub editorconfig_store: Entity<EditorconfigStore>,
 
@@ -310,6 +315,8 @@ impl SettingsStore {
             setting_values: Default::default(),
             default_settings: default_settings.clone(),
             global_settings: None,
+            inherited_settings: None,
+            global_layer: None,
             server_settings: None,
             user_settings: None,
             extension_settings: None,
@@ -318,6 +325,7 @@ impl SettingsStore {
             merged_settings: default_settings,
             last_user_settings_content: None,
             last_global_settings_content: None,
+            last_inherited_settings_content: None,
             local_settings: BTreeMap::default(),
             editorconfig_store: cx.new(|_| EditorconfigStore::default()),
             _settings_files_watcher: None,
@@ -363,10 +371,20 @@ impl SettingsStore {
         );
         let (mut global_settings_file_rx, global_settings_watcher) = crate::watch_config_file(
             cx.background_executor(),
-            fs,
+            fs.clone(),
             paths::global_settings_file().clone(),
         );
+        let mut inherited_settings_file = paths::inherited_settings_file().map(|path| {
+            crate::watch_config_file(cx.background_executor(), fs, path.clone())
+        });
 
+        if let Some((inherited_settings_file_rx, _)) = inherited_settings_file.as_mut()
+            && let Some(inherited_content) = cx
+                .foreground_executor()
+                .block_on(inherited_settings_file_rx.next())
+        {
+            self.set_inherited_settings(&inherited_content, cx);
+        }
         let global_content = cx
             .foreground_executor()
             .block_on(global_settings_file_rx.next())
@@ -381,16 +399,40 @@ impl SettingsStore {
         let result = self.set_global_settings(&global_content, cx);
         settings_changed(SettingsFile::Global, result, cx);
 
+        let (inherited_settings_file_rx, inherited_settings_watcher) =
+            inherited_settings_file.unzip();
         self._settings_files_watcher = Some(cx.spawn(async move |cx| {
             let _user_settings_watcher = user_settings_watcher;
             let _global_settings_watcher = global_settings_watcher;
-            let mut settings_streams = futures::stream::select(
-                global_settings_file_rx.map(|content| (SettingsFile::Global, content)),
-                user_settings_file_rx.map(|content| (SettingsFile::User, content)),
+            let _inherited_settings_watcher = inherited_settings_watcher;
+            // `None` marks the default profile's settings, which aren't one of
+            // this profile's settings files.
+            let mut settings_streams = futures::stream::select_all(
+                [
+                    Some(
+                        global_settings_file_rx
+                            .map(|content| (Some(SettingsFile::Global), content))
+                            .boxed(),
+                    ),
+                    Some(
+                        user_settings_file_rx
+                            .map(|content| (Some(SettingsFile::User), content))
+                            .boxed(),
+                    ),
+                    inherited_settings_file_rx
+                        .map(|receiver| receiver.map(|content| (None, content)).boxed()),
+                ]
+                .into_iter()
+                .flatten(),
             );
 
             while let Some((settings_file, content)) = settings_streams.next().await {
                 cx.update_global(|store: &mut SettingsStore, cx| {
+                    let Some(settings_file) = settings_file else {
+                        store.set_inherited_settings(&content, cx);
+                        cx.refresh_windows();
+                        return;
+                    };
                     let result = match settings_file {
                         SettingsFile::User => store.set_user_settings(&content, cx),
                         SettingsFile::Global => store.set_global_settings(&content, cx),
@@ -670,11 +712,15 @@ impl SettingsStore {
         // ignoring profiles
         // ignoring os profiles
         // ignoring release channel profiles
-        // ignoring global
         // ignoring extension
 
         if self.user_settings.is_some() {
             files.push(SettingsFile::User);
+        }
+        // Listed so that the values a profile inherits show up as its values
+        // instead of the defaults.
+        if self.global_layer.is_some() {
+            files.push(SettingsFile::Global);
         }
         files.push(SettingsFile::Default);
         files
@@ -689,7 +735,7 @@ impl SettingsStore {
             SettingsFile::Default => Some(self.default_settings.as_ref()),
             SettingsFile::Server => self.server_settings.as_deref(),
             SettingsFile::Project(ref key) => self.local_settings.get(key),
-            SettingsFile::Global => self.global_settings.as_deref(),
+            SettingsFile::Global => self.global_layer.as_deref(),
         }
     }
 
@@ -1003,9 +1049,48 @@ impl SettingsStore {
 
         if let Some(settings) = settings {
             self.global_settings = Some(Box::new(settings));
+            self.update_global_layer();
             self.recompute_values(None, cx);
         }
         return parse_result;
+    }
+
+    /// Sets the default profile's settings, which a profile inherits, via a
+    /// JSON string. Errors in them are the default profile's to report.
+    pub fn set_inherited_settings(&mut self, inherited_settings_content: &str, cx: &mut App) {
+        if self.last_inherited_settings_content.as_deref() == Some(inherited_settings_content) {
+            return;
+        }
+        self.last_inherited_settings_content = Some(inherited_settings_content.to_string());
+
+        let content = if inherited_settings_content.trim().is_empty() {
+            "{}".to_string()
+        } else {
+            migrator::migrate_settings(inherited_settings_content)
+                .log_err()
+                .flatten()
+                .unwrap_or_else(|| inherited_settings_content.to_string())
+        };
+        let (settings, parse_status) = UserSettingsContent::parse_json(&content);
+        if let ParseStatus::Failed { error } = parse_status {
+            log::error!("failed to parse the default profile's settings: {error}");
+        }
+        if let Some(settings) = settings {
+            self.inherited_settings = Some(Box::new(inheritable_settings(settings)));
+            self.update_global_layer();
+            self.recompute_values(None, cx);
+        }
+    }
+
+    fn update_global_layer(&mut self) {
+        self.global_layer = match (&self.global_settings, &self.inherited_settings) {
+            (None, None) => None,
+            (global, inherited) => {
+                let mut layer = global.as_deref().cloned().unwrap_or_default();
+                layer.merge_from_option(inherited.as_deref());
+                Some(Box::new(layer))
+            }
+        };
     }
 
     pub fn set_server_settings(
@@ -1374,7 +1459,7 @@ impl SettingsStore {
         if changed_local_path.is_none() {
             let mut merged = self.default_settings.as_ref().clone();
             merged.merge_from_option(self.extension_settings.as_deref());
-            merged.merge_from_option(self.global_settings.as_deref());
+            merged.merge_from_option(self.global_layer.as_deref());
             if let Some(user_settings) = self.user_settings.as_ref() {
                 let active_profile = user_settings.for_profile(cx);
                 let should_merge_user_settings =
@@ -1415,7 +1500,7 @@ impl SettingsStore {
             let mut merged = (*self.merged_settings).clone();
             // Reset disable_ai to compute fresh from base settings
             merged.project.disable_ai = self.default_settings.project.disable_ai;
-            if let Some(global) = &self.global_settings {
+            if let Some(global) = &self.global_layer {
                 merged
                     .project
                     .disable_ai
@@ -1679,6 +1764,34 @@ impl<T: Settings> AnySettingValue for SettingValue<T> {
         self.local_values
             .retain(|(worktree_id, _, _)| *worktree_id != root_id);
     }
+}
+
+/// Returns what a profile inherits from the default profile's settings: all of
+/// them but the language models, external agents and MCP servers, which each
+/// profile keeps to itself so personal and work accounts don't mix.
+fn inheritable_settings(settings: UserSettingsContent) -> SettingsContent {
+    let mut content = settings.content.as_ref().clone();
+    content.merge_from_option(settings.for_release_channel());
+    content.merge_from_option(settings.for_os());
+
+    content.language_models = None;
+    content.agent_servers = None;
+    content.project.context_servers.clear();
+    if let Some(edit_predictions) = content.project.all_languages.edit_predictions.as_mut() {
+        edit_predictions.provider = None;
+    }
+    if let Some(agent) = content.agent.as_mut() {
+        agent.default_model = None;
+        agent.subagent_model = None;
+        agent.inline_assistant_model = None;
+        agent.commit_message_model = None;
+        agent.thread_summary_model = None;
+        agent.compaction_model = None;
+        agent.inline_alternatives = None;
+        agent.favorite_models.clear();
+        agent.model_parameters.clear();
+    }
+    content
 }
 
 #[cfg(test)]
@@ -2813,6 +2926,57 @@ mod tests {
                 git_status: true, // Staff from global settings
             }
         );
+    }
+
+    #[gpui::test]
+    fn test_inherited_settings(cx: &mut App) {
+        let mut store = SettingsStore::new(cx, &test_settings());
+        store.register_setting::<ItemSettings>();
+
+        store.set_inherited_settings(
+            r#"{
+                "tabs": {
+                    "close_position": "right",
+                    "git_status": true,
+                },
+                "context_servers": {
+                    "personal": { "command": "personal-mcp" }
+                },
+                "agent": {
+                    "dock": "right",
+                    "default_model": { "provider": "anthropic", "model": "claude-opus-5-5" }
+                }
+            }"#,
+            cx,
+        );
+        store
+            .set_user_settings(r#"{ "tabs": { "close_position": "left" } }"#, cx)
+            .unwrap();
+
+        assert_eq!(
+            store.get::<ItemSettings>(None),
+            &ItemSettings {
+                close_position: ClosePosition::Left,
+                git_status: true,
+            }
+        );
+
+        let inherited = store
+            .inherited_settings
+            .as_deref()
+            .expect("the default profile's settings were set");
+        assert!(inherited.project.context_servers.is_empty());
+        let agent = inherited
+            .agent
+            .as_ref()
+            .expect("the agent settings are inherited");
+        assert_eq!(agent.dock, Some(crate::DockPosition::Right));
+        assert_eq!(agent.default_model, None);
+
+        let (file, git_status) = store.get_value_from_file(SettingsFile::User, |settings| {
+            settings.tabs.as_ref()?.git_status
+        });
+        assert_eq!((file, git_status), (SettingsFile::Global, Some(true)));
     }
 
     #[gpui::test]

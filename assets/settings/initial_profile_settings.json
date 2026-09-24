@@ -1,0 +1,11 @@
+// Settings of this profile
+//
+// Everything not set here comes from the default profile's settings, except
+// language models, external agents and MCP servers, which each profile keeps
+// to itself. Set a key here to override it in this profile only.
+//
+// To see all of Zed's default settings without changing your
+// custom settings, run `zed: open default settings` from the
+// command palette (cmd-shift-p / ctrl-shift-p)
+{
+}
