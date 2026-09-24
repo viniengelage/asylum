@@ -217,9 +217,17 @@ impl Render for ProfileSelector {
             && (self.provider.profile_downgraded(cx)
                 || !ProfilePickerDelegate::restricted_forbidden_tools(&profile_id, cx).is_empty());
 
+        let is_plan = profile_id.as_str() == builtin_profiles::PLAN;
         let trigger_button = Button::new("profile-selector", selected_profile)
             .label_size(LabelSize::Small)
-            .color(Color::Muted)
+            .color(if is_plan { Color::Accent } else { Color::Muted })
+            .when(is_plan && !show_warning, |this| {
+                this.start_icon(
+                    Icon::new(IconName::ListTodo)
+                        .size(IconSize::XSmall)
+                        .color(Color::Accent),
+                )
+            })
             .when(show_warning, |this| {
                 this.start_icon(
                     Icon::new(IconName::Warning)

@@ -3499,7 +3499,7 @@ impl AgentPanel {
         })
     }
 
-    fn external_thread(
+    pub(crate) fn external_thread(
         &mut self,
         agent_choice: Option<crate::Agent>,
         resume_thread_id: Option<ThreadId>,

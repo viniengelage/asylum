@@ -1,5 +1,5 @@
 use crate::{
-    DEFAULT_THREAD_TITLE, SelectPermissionGranularity,
+    ChatWithFollow, DEFAULT_THREAD_TITLE, SelectPermissionGranularity,
     agent_configuration::configure_context_server_modal::default_markdown_style,
     conversation_view::thread_search_bar::{ThreadSearchBar, ThreadSearchBarEvent},
     open_abs_path_at_point,
@@ -56,6 +56,39 @@ use super::*;
 /// The message the "Executar" button sends. The plan card also looks for it to
 /// tell an executed plan apart from one the user replied to with feedback.
 const EXECUTE_PLAN_PROMPT: &str = "Execute o plano aprovado.";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PlanExecutionTarget {
+    ThisThread,
+    NewThread,
+}
+
+fn plan_markdown(plan: &agent::SubmitPlanToolInput) -> String {
+    let mut markdown = String::new();
+    if !plan.title.is_empty() {
+        markdown.push_str(&format!("# {}\n\n", plan.title));
+    }
+    if !plan.summary.is_empty() {
+        markdown.push_str(&format!("{}\n\n", plan.summary));
+    }
+    if !plan.steps.is_empty() {
+        markdown.push_str("## Passos\n\n");
+        for (index, step) in plan.steps.iter().enumerate() {
+            markdown.push_str(&format!("{}. {}\n", index + 1, step.title));
+            for file in &step.files {
+                markdown.push_str(&format!("   - `{file}`\n"));
+            }
+        }
+        markdown.push('\n');
+    }
+    if !plan.open_questions.is_empty() {
+        markdown.push_str("## Em aberto\n\n");
+        for question in &plan.open_questions {
+            markdown.push_str(&format!("- {question}\n"));
+        }
+    }
+    markdown
+}
 
 fn is_submit_plan_tool_call(tool_call: &ToolCall) -> bool {
     tool_call.tool_name.as_deref() == Some(<agent::SubmitPlanTool as agent::AgentTool>::NAME)
@@ -628,6 +661,9 @@ pub struct ThreadView {
     /// its allow buttons stay disabled. See [`Self::sandbox_confusable_findings`].
     acknowledged_confusable_warnings: HashSet<acp::ToolCallId>,
     discarded_plans: HashSet<acp::ToolCallId>,
+    /// Plans the user opened with "Editar". The buffer's text is what gets
+    /// executed, instead of the plan the agent submitted.
+    edited_plans: HashMap<acp::ToolCallId, Entity<Buffer>>,
     pub subagent_scroll_handles: RefCell<HashMap<acp::SessionId, ScrollHandle>>,
     pub edits_expanded: bool,
     pub plan_expanded: bool,
@@ -1050,6 +1086,7 @@ impl ThreadView {
             collapsed_sandbox_network_details: HashSet::default(),
             acknowledged_confusable_warnings: HashSet::default(),
             discarded_plans: HashSet::default(),
+            edited_plans: HashMap::default(),
             subagent_scroll_handles: RefCell::new(HashMap::default()),
             edits_expanded: false,
             plan_expanded: false,
@@ -3949,7 +3986,7 @@ impl ThreadView {
                 }
                 AgentThreadEntry::UserMessage(message) if !replied => {
                     executed = message.chunks.iter().any(|chunk| {
-                        matches!(chunk, acp::ContentBlock::Text(text) if text.text == EXECUTE_PLAN_PROMPT)
+                        matches!(chunk, acp::ContentBlock::Text(text) if text.text.starts_with(EXECUTE_PLAN_PROMPT))
                     });
                     replied = true;
                 }
@@ -4221,32 +4258,127 @@ impl ThreadView {
                 )
             });
 
+        let edited_buffer = self.edited_plans.get(&tool_call.id).cloned();
         let footer = (state == PlanCardState::Ready).then(|| {
             let is_idle = self.thread.read(cx).status() == ThreadStatus::Idle;
-            let tool_call_id = tool_call.id.clone();
+            let focus_handle = self.message_editor.focus_handle(cx);
+            let execute_menu = {
+                let this = cx.weak_entity();
+                let tool_call_id = tool_call.id.clone();
+                PopoverMenu::new(SharedString::from(format!("execute-plan-menu-{entry_ix}")))
+                    .trigger(
+                        IconButton::new(
+                            SharedString::from(format!("execute-plan-options-{entry_ix}")),
+                            IconName::ChevronDown,
+                        )
+                        .style(ButtonStyle::Tinted(TintColor::Accent))
+                        .icon_size(IconSize::XSmall)
+                        .icon_color(Color::Accent)
+                        .disabled(!is_idle),
+                    )
+                    .anchor(gpui::Anchor::TopLeft)
+                    .menu(move |window, cx| {
+                        let this = this.clone();
+                        let tool_call_id = tool_call_id.clone();
+                        Some(ContextMenu::build(window, cx, move |menu, _, _| {
+                            menu.entry("Executar aqui", None, {
+                                let this = this.clone();
+                                let tool_call_id = tool_call_id.clone();
+                                move |window, cx| {
+                                    this.update(cx, |this, cx| {
+                                        this.execute_plan(
+                                            &tool_call_id,
+                                            PlanExecutionTarget::ThisThread,
+                                            window,
+                                            cx,
+                                        );
+                                    })
+                                    .log_err();
+                                }
+                            })
+                            .entry(
+                                "Executar em um thread novo",
+                                None,
+                                {
+                                    let this = this.clone();
+                                    move |window, cx| {
+                                        this.update(cx, |this, cx| {
+                                            this.execute_plan(
+                                                &tool_call_id,
+                                                PlanExecutionTarget::NewThread,
+                                                window,
+                                                cx,
+                                            );
+                                        })
+                                        .log_err();
+                                    }
+                                },
+                            )
+                        }))
+                    })
+            };
             h_flex()
                 .p_2()
                 .gap_1()
                 .border_t_1()
                 .border_color(colors.border_variant)
                 .child(
+                    h_flex()
+                        .gap_px()
+                        .child(
+                            Button::new(
+                                SharedString::from(format!("execute-plan-{entry_ix}")),
+                                "Executar",
+                            )
+                            .style(ButtonStyle::Tinted(TintColor::Accent))
+                            .label_size(LabelSize::Small)
+                            .start_icon(
+                                Icon::new(IconName::PlayFilled)
+                                    .size(IconSize::XSmall)
+                                    .color(Color::Accent),
+                            )
+                            .key_binding(
+                                KeyBinding::for_action_in(&ChatWithFollow, &focus_handle, cx)
+                                    .map(|binding| binding.size(rems_from_px(12_f32))),
+                            )
+                            .disabled(!is_idle)
+                            .tooltip(Tooltip::text(
+                                "Troca para o perfil de escrita e executa o plano",
+                            ))
+                            .on_click(cx.listener({
+                                let tool_call_id = tool_call.id.clone();
+                                move |this, _, window, cx| {
+                                    this.execute_plan(
+                                        &tool_call_id,
+                                        PlanExecutionTarget::ThisThread,
+                                        window,
+                                        cx,
+                                    );
+                                }
+                            })),
+                        )
+                        .child(execute_menu),
+                )
+                .child(
                     Button::new(
-                        SharedString::from(format!("execute-plan-{entry_ix}")),
-                        "Executar",
+                        SharedString::from(format!("edit-plan-{entry_ix}")),
+                        "Editar",
                     )
-                    .style(ButtonStyle::Tinted(TintColor::Accent))
                     .label_size(LabelSize::Small)
                     .start_icon(
-                        Icon::new(IconName::PlayFilled)
+                        Icon::new(IconName::Pencil)
                             .size(IconSize::XSmall)
-                            .color(Color::Accent),
+                            .color(Color::Muted),
                     )
-                    .disabled(!is_idle)
                     .tooltip(Tooltip::text(
-                        "Troca para o perfil de escrita e executa o plano",
+                        "Abre o plano como markdown; o texto editado é o que será executado",
                     ))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.execute_plan(window, cx);
+                    .on_click(cx.listener({
+                        let tool_call_id = tool_call.id.clone();
+                        let markdown = plan_markdown(&plan);
+                        move |this, _, window, cx| {
+                            this.open_plan_editor(&tool_call_id, &markdown, window, cx);
+                        }
                     })),
                 )
                 .child(div().flex_1())
@@ -4257,10 +4389,32 @@ impl ThreadView {
                     )
                     .label_size(LabelSize::Small)
                     .color(Color::Muted)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.discarded_plans.insert(tool_call_id.clone());
-                        cx.notify();
+                    .on_click(cx.listener({
+                        let tool_call_id = tool_call.id.clone();
+                        move |this, _, _, cx| {
+                            this.discarded_plans.insert(tool_call_id.clone());
+                            cx.notify();
+                        }
                     })),
+                )
+        });
+        let edited_notice = (state == PlanCardState::Ready && edited_buffer.is_some()).then(|| {
+            h_flex()
+                .px_2()
+                .py_1()
+                .gap_1p5()
+                .border_t_1()
+                .border_color(colors.border_variant)
+                .bg(colors.editor_background)
+                .child(
+                    Icon::new(IconName::Pencil)
+                        .size(IconSize::XSmall)
+                        .color(Color::Accent),
+                )
+                .child(
+                    Label::new("Editado — o texto do buffer é o que vai ser executado.")
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted),
                 )
         });
 
@@ -4277,6 +4431,7 @@ impl ThreadView {
                     .overflow_hidden()
                     .child(header)
                     .child(body)
+                    .children(edited_notice)
                     .children(footer),
             )
             .when(state == PlanCardState::Ready, |this| {
@@ -4305,33 +4460,162 @@ impl ThreadView {
             .log_err();
     }
 
-    fn execute_plan(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn open_plan_editor(
+        &mut self,
+        tool_call_id: &acp::ToolCallId,
+        markdown: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(workspace) = self.workspace.upgrade() else {
+            return;
+        };
+        let buffer = self
+            .edited_plans
+            .entry(tool_call_id.clone())
+            .or_insert_with(|| {
+                let buffer = cx.new(|cx| Buffer::local(markdown, cx));
+                let languages = workspace.read(cx).app_state().languages.clone();
+                cx.spawn({
+                    let buffer = buffer.clone();
+                    async move |_, cx| {
+                        if let Ok(language) = languages.language_for_name("Markdown").await {
+                            buffer.update(cx, |buffer, cx| buffer.set_language(Some(language), cx));
+                        }
+                    }
+                })
+                .detach();
+                buffer
+            })
+            .clone();
+        workspace.update(cx, |workspace, cx| {
+            let editor = cx.new(|cx| {
+                let editor = Editor::for_buffer(buffer, None, window, cx);
+                editor
+                    .buffer()
+                    .update(cx, |buffer, cx| buffer.set_title("Plano".to_string(), cx));
+                editor
+            });
+            workspace.add_item_to_active_pane(Box::new(editor), None, true, window, cx);
+        });
+        cx.notify();
+    }
+
+    /// The plan the user is ready to execute: the last one submitted, as long as
+    /// they haven't replied to it, discarded it, or executed it.
+    fn ready_plan_tool_call_id(&self, cx: &Context<Self>) -> Option<acp::ToolCallId> {
+        let entries = self.thread.read(cx).entries();
+        let (entry_ix, tool_call) =
+            entries
+                .iter()
+                .enumerate()
+                .rev()
+                .find_map(|(entry_ix, entry)| match entry {
+                    AgentThreadEntry::ToolCall(tool_call)
+                        if is_submit_plan_tool_call(tool_call) =>
+                    {
+                        Some((entry_ix, tool_call))
+                    }
+                    _ => None,
+                })?;
+        let (state, _) = self.plan_card_state(entry_ix, tool_call, cx);
+        (state == PlanCardState::Ready).then(|| tool_call.id.clone())
+    }
+
+    fn execute_plan(
+        &mut self,
+        tool_call_id: &acp::ToolCallId,
+        target: PlanExecutionTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.thread.read(cx).status() != ThreadStatus::Idle {
             return;
         }
-        let settings = AgentSettings::get_global(cx);
-        let target_profile =
-            if settings.default_profile.as_str() == agent_settings::builtin_profiles::PLAN {
-                AgentProfileId(agent_settings::builtin_profiles::WRITE.into())
-            } else {
-                settings.default_profile.clone()
-            };
-        if let Some(profile_selector) = self.profile_selector.clone() {
-            profile_selector.update(cx, |profile_selector, cx| {
-                profile_selector.set_profile(target_profile, cx);
-            });
+        let edited_plan = self
+            .edited_plans
+            .get(tool_call_id)
+            .map(|buffer| buffer.read(cx).text());
+
+        match target {
+            PlanExecutionTarget::ThisThread => {
+                let settings = AgentSettings::get_global(cx);
+                let target_profile = if settings.default_profile.as_str()
+                    == agent_settings::builtin_profiles::PLAN
+                {
+                    AgentProfileId(agent_settings::builtin_profiles::WRITE.into())
+                } else {
+                    settings.default_profile.clone()
+                };
+                if let Some(profile_selector) = self.profile_selector.clone() {
+                    profile_selector.update(cx, |profile_selector, cx| {
+                        profile_selector.set_profile(target_profile, cx);
+                    });
+                }
+                // Sent as its own message so a draft in the composer survives, and so
+                // the plan card can recognize the execution when the thread is reloaded.
+                let prompt = match edited_plan {
+                    Some(plan) => format!(
+                        "{EXECUTE_PLAN_PROMPT} O usuário editou o plano; siga esta versão:\n\n{plan}"
+                    ),
+                    None => EXECUTE_PLAN_PROMPT.to_string(),
+                };
+                let contents = vec![acp::ContentBlock::Text(acp::TextContent::new(prompt))];
+                self.send_content(
+                    Task::ready(Ok(Some((contents, Vec::new())))),
+                    false,
+                    window,
+                    cx,
+                );
+            }
+            PlanExecutionTarget::NewThread => {
+                let Some(plan) = edited_plan.or_else(|| {
+                    self.thread
+                        .read(cx)
+                        .entries()
+                        .iter()
+                        .find_map(|entry| match entry {
+                            AgentThreadEntry::ToolCall(tool_call)
+                                if &tool_call.id == tool_call_id =>
+                            {
+                                tool_call.raw_input.clone()
+                            }
+                            _ => None,
+                        })
+                        .and_then(|input| {
+                            serde_json::from_value::<agent::SubmitPlanToolInput>(input).ok()
+                        })
+                        .map(|plan| plan_markdown(&plan))
+                }) else {
+                    return;
+                };
+                let Some(workspace) = self.workspace.upgrade() else {
+                    return;
+                };
+                let Some(panel) = workspace.read(cx).panel::<AgentPanel>(cx) else {
+                    return;
+                };
+                // The fresh thread has none of this conversation, so the plan travels
+                // in the prompt itself.
+                let prompt = format!("{EXECUTE_PLAN_PROMPT}\n\n{plan}");
+                panel.update(cx, |panel, cx| {
+                    panel.external_thread(
+                        Some(crate::Agent::NativeAgent),
+                        None,
+                        None,
+                        None,
+                        Some(AgentInitialContent::ContentBlock {
+                            blocks: vec![acp::ContentBlock::Text(acp::TextContent::new(prompt))],
+                            auto_submit: true,
+                        }),
+                        true,
+                        AgentThreadSource::AgentPanel,
+                        window,
+                        cx,
+                    );
+                });
+            }
         }
-        // Sent as its own message so a draft in the composer survives, and so the
-        // plan card can recognize the execution when the thread is reloaded.
-        let contents = vec![acp::ContentBlock::Text(acp::TextContent::new(
-            EXECUTE_PLAN_PROMPT,
-        ))];
-        self.send_content(
-            Task::ready(Ok(Some((contents, Vec::new())))),
-            false,
-            window,
-            cx,
-        );
     }
 
     fn render_completed_plan(
@@ -4829,7 +5113,14 @@ impl ThreadView {
 
         let focus_handle = self.message_editor.focus_handle(cx);
         let composer_background = cx.theme().colors().elevated_surface_background;
-        let composer_border = cx.theme().colors().border_selected;
+        // Plan mode tints the composer so it's clear the agent won't change anything yet.
+        let composer_border = if self.as_native_thread(cx).is_some_and(|thread| {
+            thread.read(cx).profile().as_str() == agent_settings::builtin_profiles::PLAN
+        }) {
+            cx.theme().colors().text_accent.opacity(0.55)
+        } else {
+            cx.theme().colors().border_selected
+        };
 
         let editor_expanded = self.editor_expanded;
         let (expand_icon, expand_tooltip) = if editor_expanded {
@@ -13032,6 +13323,19 @@ impl Render for ThreadView {
                     mode_selector.read(cx).menu_handle().toggle(window, cx);
                 }
             }))
+            .capture_action(cx.listener(|this, _: &ChatWithFollow, window, cx| {
+                // With an empty composer, cmd-enter executes the plan that's waiting
+                // for review instead of sending nothing.
+                if !this.message_editor.read(cx).is_empty(cx)
+                    || this.thread.read(cx).status() != ThreadStatus::Idle
+                {
+                    return;
+                }
+                if let Some(tool_call_id) = this.ready_plan_tool_call_id(cx) {
+                    cx.stop_propagation();
+                    this.execute_plan(&tool_call_id, PlanExecutionTarget::ThisThread, window, cx);
+                }
+            }))
             .on_action(cx.listener(|this, _: &CycleModeSelector, window, cx| {
                 if this.thread.read(cx).status() != ThreadStatus::Idle {
                     return;
@@ -13326,6 +13630,36 @@ mod tests {
     use std::path::Path;
     use util::path;
     use workspace::MultiWorkspace;
+
+    #[test]
+    fn test_plan_markdown() {
+        let plan = agent::SubmitPlanToolInput {
+            title: "Biometria no PIN".into(),
+            summary: "Oferecer biometria depois do PIN.".into(),
+            steps: vec![
+                agent::PlanStep {
+                    title: "Instalar a dependência".into(),
+                    files: vec!["package.json".into(), "app.config.ts".into()],
+                },
+                agent::PlanStep {
+                    title: "Testes".into(),
+                    files: Vec::new(),
+                },
+            ],
+            open_questions: vec!["Pedir logo após o PIN?".into()],
+        };
+
+        assert_eq!(
+            plan_markdown(&plan),
+            "# Biometria no PIN\n\n\
+             Oferecer biometria depois do PIN.\n\n\
+             ## Passos\n\n\
+             1. Instalar a dependência\n   - `package.json`\n   - `app.config.ts`\n\
+             2. Testes\n\n\
+             ## Em aberto\n\n\
+             - Pedir logo após o PIN?\n"
+        );
+    }
 
     #[test]
     fn test_tool_call_icon_tooltip() {
