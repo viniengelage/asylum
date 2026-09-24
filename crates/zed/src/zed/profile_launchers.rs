@@ -45,6 +45,14 @@ pub fn launcher_profile_id() -> Option<String> {
     profile_id_in(&macos_dir.parent()?.join("Info.plist"))
 }
 
+/// Whether this process was started from a profile launcher, whose own icon already is the
+/// profile's.
+pub fn runs_from_launcher() -> bool {
+    static RUNS_FROM_LAUNCHER: std::sync::LazyLock<bool> =
+        std::sync::LazyLock::new(|| launcher_profile_id().is_some());
+    *RUNS_FROM_LAUNCHER
+}
+
 /// Where launchers are kept. `~/Applications` is where macOS puts per-user apps, and
 /// Spotlight and Launchpad list what's there.
 fn launchers_dir() -> PathBuf {

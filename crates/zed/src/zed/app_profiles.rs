@@ -365,6 +365,26 @@ async fn launch_profile(profile_id: &str, paths: Vec<String>) -> Result<()> {
     Ok(())
 }
 
+/// Replaces the icon of this process in the Dock and the app switcher until it quits.
+fn set_dock_icon(icns: &'static [u8]) {
+    use objc2::{AllocAnyThread as _, MainThreadMarker};
+    use objc2_app_kit::{NSApplication, NSImage};
+    use objc2_foundation::NSData;
+
+    let Some(main_thread) = MainThreadMarker::new() else {
+        log::error!("the Dock icon can only be set from the main thread");
+        return;
+    };
+    let data = NSData::with_bytes(icns);
+    let Some(image) = NSImage::initWithData(NSImage::alloc(), &data) else {
+        log::error!("failed to decode the profile's Dock icon");
+        return;
+    };
+    let application = NSApplication::sharedApplication(main_thread);
+    // SAFETY: called on the main thread with a valid image.
+    unsafe { application.setApplicationIconImage(Some(&image)) };
+}
+
 /// Runs `action` in the process of `profile_id`, starting it when it isn't running. A profile
 /// only edits its own settings and keychain entries, so another profile's manager asks it to
 /// open them instead.
@@ -513,6 +533,8 @@ pub struct ProfileStore {
     launchers_task: Option<Task<()>>,
     /// Where each profile's launcher is, once they were synced.
     launchers: HashMap<String, PathBuf>,
+    /// The color the Dock icon was last set to.
+    dock_icon: Option<ProfileColor>,
     _subscriptions: Vec<gpui::Subscription>,
 }
 
@@ -551,6 +573,7 @@ impl ProfileStore {
                 synced_launchers: None,
                 launchers_task: None,
                 launchers: HashMap::default(),
+                dock_icon: None,
                 _subscriptions: subscriptions,
             };
             store.refresh(cx);
@@ -763,6 +786,7 @@ impl ProfileStore {
                         this.profiles = profiles;
                         this.load_error = None;
                         this.sync_launchers(cx);
+                        this.update_dock_icon();
                     }
                     Err(error) => {
                         log::error!("failed to load profiles: {error:#}");
@@ -814,6 +838,23 @@ impl ProfileStore {
             })
             .log_err();
         }));
+    }
+
+    /// Colors the Dock icon of a profile that runs from the app itself, such as one started
+    /// with `--profile` from the command line, or before its launcher existed. From a launcher
+    /// the icon already is the profile's.
+    fn update_dock_icon(&mut self) {
+        if active_profile_id() == paths::DEFAULT_PROFILE_ID
+            || profile_launchers::runs_from_launcher()
+        {
+            return;
+        }
+        let color = self.active_profile().color;
+        if self.dock_icon == Some(color) {
+            return;
+        }
+        self.dock_icon = Some(color);
+        set_dock_icon(color.launcher_icon());
     }
 
     /// Makes `folders` open in `owner` from now on, taking them from any profile that had

@@ -425,10 +425,13 @@ passa a ser o lançador):
      lançador para o Dock.
    - Falta: testar o Keychain com a versão release, abrindo um perfil com credenciais pelo lançador.
      Um build debug tem outro cdhash de qualquer jeito, então não serve para esse teste.
-3. **Ícone em tempo de execução (reserva).** `Platform::set_app_icon(Option<Arc<RgbaImage>>)` no
-   GPUI, no molde de `set_app_identity`; no macOS via `NSApplication::setApplicationIconImage`.
-   Só entra quando o processo roda de `Asylum.app` com um perfil que não é o padrão (CLI, ou perfil
-   sem lançador), e é o que o Windows e o Linux reaproveitam.
+3. **Ícone em tempo de execução** (feito, só macOS). Quando um perfil que não é o padrão roda do
+   próprio `Asylum.app` (CLI com `--profile`, build sem bundle, perfil aberto antes do lançador
+   existir), `ProfileStore::update_dock_icon` troca o ícone do Dock e do ⌘-Tab pelo `.icns` da cor
+   com `NSApplication::setApplicationIconImage`, e troca de novo se a cor mudar. Fica no crate
+   `zed` (`app_profiles.rs`, `set_dock_icon`) porque só o macOS usa por enquanto; quando o Windows
+   ou o Linux precisarem, sobe para o GPUI como `Platform::set_app_icon`, no molde de
+   `set_app_identity`.
 4. **Windows.** Um `.lnk` por perfil (Menu Iniciar) com o `.ico` da cor e
    `System.AppUserModel.ID = …Profile.<id>`; o processo chama `set_app_identity` com o mesmo AUMID
    e registra esse AUMID em `system_notifications.rs` (`register_app_user_model_id`), senão os

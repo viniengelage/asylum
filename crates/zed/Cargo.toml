@@ -240,10 +240,15 @@ zlog_settings.workspace = true
 ztracing.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { workspace = true }
 objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "NSApplication",
+    "NSImage",
+    "NSResponder",
     "NSRunningApplication",
     "libc",
 ] }
+objc2-foundation = { workspace = true }
 plist = "1.3"
 
 [target.'cfg(target_os = "windows")'.dependencies]
