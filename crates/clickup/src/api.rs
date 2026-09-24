@@ -238,11 +238,73 @@ pub struct FolderReference {
 #[derive(Clone, Debug, Deserialize)]
 pub struct Comment {
     pub id: String,
+    /// The comment as plain text, which leaves images and attachments out.
     #[serde(default)]
     pub comment_text: String,
+    /// The comment as ClickUp stores it: runs of text, images and attachments.
+    #[serde(default)]
+    pub comment: Vec<CommentBlock>,
     pub user: Assignee,
     #[serde(default, deserialize_with = "deserialize_millis")]
     pub date: Option<i64>,
+}
+
+impl Comment {
+    /// The images and files attached in the comment, in the order they appear.
+    pub fn attachments(&self) -> impl Iterator<Item = &CommentAttachment> {
+        self.comment
+            .iter()
+            .filter_map(|block| block.image.as_ref().or(block.attachment.as_ref()))
+            .filter(|attachment| attachment.url.is_some())
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct CommentBlock {
+    #[serde(default)]
+    pub image: Option<CommentAttachment>,
+    #[serde(default)]
+    pub attachment: Option<CommentAttachment>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct CommentAttachment {
+    pub url: Option<String>,
+    pub name: Option<String>,
+    pub title: Option<String>,
+    pub extension: Option<String>,
+    pub thumbnail_large: Option<String>,
+    pub thumbnail_medium: Option<String>,
+}
+
+impl CommentAttachment {
+    pub fn is_image(&self) -> bool {
+        let extension = self
+            .extension
+            .as_deref()
+            .or_else(|| self.url.as_deref()?.rsplit('.').next())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        matches!(
+            extension.as_str(),
+            "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "svg"
+        )
+    }
+
+    /// The smallest version that still reads well in the panel.
+    pub fn preview_url(&self) -> Option<&str> {
+        self.thumbnail_large
+            .as_deref()
+            .or(self.thumbnail_medium.as_deref())
+            .or(self.url.as_deref())
+    }
+
+    pub fn display_name(&self) -> &str {
+        self.title
+            .as_deref()
+            .or(self.name.as_deref())
+            .unwrap_or("anexo")
+    }
 }
 
 #[derive(Deserialize)]
@@ -549,11 +611,35 @@ mod tests {
     #[test]
     fn parses_comments_and_the_running_timer() {
         let comments: CommentsResponse = serde_json::from_str(
-            r##"{"comments": [{"id": "9", "comment_text": "Lembra do caso X", "user": {"id": 2, "username": "Mariana"}, "date": "1790100000000"}]}"##,
+            r##"{"comments": [{
+                "id": "9", "comment_text": "Lembra do caso X ", "date": "1790100000000",
+                "user": {"id": 2, "username": "Mariana"},
+                "comment": [
+                    {"text": "Lembra do caso X "},
+                    {"type": "image", "text": "tela.png", "image": {
+                        "id": "a", "name": "tela.png", "title": "tela.png", "type": "image",
+                        "extension": "png", "url": "https://t1.p.clickup-attachments.com/tela.png",
+                        "thumbnail_large": "https://t1.p.clickup-attachments.com/tela_large.png"}},
+                    {"type": "attachment", "attachment": {
+                        "name": "log.txt", "extension": "txt",
+                        "url": "https://t1.p.clickup-attachments.com/log.txt"}},
+                    {"text": "\n", "attributes": {"block-id": "x"}}
+                ]
+            }]}"##,
         )
         .unwrap();
-        assert_eq!(comments.comments[0].user.display_name(), "Mariana");
-        assert_eq!(comments.comments[0].date, Some(1_790_100_000_000));
+        let comment = &comments.comments[0];
+        assert_eq!(comment.user.display_name(), "Mariana");
+        assert_eq!(comment.date, Some(1_790_100_000_000));
+        let attachments: Vec<_> = comment.attachments().collect();
+        assert_eq!(attachments.len(), 2);
+        assert!(attachments[0].is_image());
+        assert_eq!(
+            attachments[0].preview_url(),
+            Some("https://t1.p.clickup-attachments.com/tela_large.png")
+        );
+        assert!(!attachments[1].is_image());
+        assert_eq!(attachments[1].display_name(), "log.txt");
 
         let timer: RunningTimerResponse = serde_json::from_str(
             r##"{"data": {"id": "t1", "task": {"id": "86a1b2"}, "start": "1790200000000", "duration": "-12000"}}"##,

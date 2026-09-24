@@ -1728,7 +1728,19 @@ impl ClickUpPanel {
                             .child(
                                 Label::new(comment.comment_text.trim().to_string())
                                     .size(LabelSize::Small),
-                            ),
+                            )
+                            .children(comment.attachments().enumerate().map(
+                                |(index, attachment)| {
+                                    render_comment_attachment(
+                                        SharedString::from(format!(
+                                            "clickup-comment-{}-attachment-{index}",
+                                            comment.id
+                                        )),
+                                        attachment,
+                                        cx,
+                                    )
+                                },
+                            )),
                     ),
             );
         }
@@ -1851,6 +1863,73 @@ fn render_link_row(
                         .truncate(),
                 ),
         )
+}
+
+/// An image shown in place, which opens the original when clicked, or a link to any other file.
+fn render_comment_attachment(
+    id: SharedString,
+    attachment: &api::CommentAttachment,
+    cx: &App,
+) -> AnyElement {
+    let url = attachment.url.clone().unwrap_or_default();
+    if attachment.is_image()
+        && let Some(preview) = attachment.preview_url()
+    {
+        let name = attachment.display_name().to_string();
+        return div()
+            .id(id)
+            .mt(DynamicSpacing::Base04.px(cx))
+            .max_w_full()
+            .rounded_md()
+            .overflow_hidden()
+            .border_1()
+            .border_color(cx.theme().colors().border_variant)
+            .cursor_pointer()
+            .tooltip(Tooltip::text(format!("Abrir {name}")))
+            .on_click(move |_, _, cx| cx.open_url(&url))
+            .child(
+                gpui::img(preview.to_string())
+                    .max_w_full()
+                    .max_h(px(240.))
+                    .object_fit(gpui::ObjectFit::Contain)
+                    .with_loading(|| {
+                        Label::new("Carregando imagem…")
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted)
+                            .into_any_element()
+                    })
+                    .with_fallback(move || {
+                        Label::new(format!("Não deu para carregar {name}"))
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted)
+                            .into_any_element()
+                    }),
+            )
+            .into_any_element();
+    }
+    h_flex()
+        .id(id)
+        .mt(DynamicSpacing::Base04.px(cx))
+        .gap(DynamicSpacing::Base06.px(cx))
+        .px(DynamicSpacing::Base06.px(cx))
+        .py(DynamicSpacing::Base04.px(cx))
+        .rounded_md()
+        .border_1()
+        .border_color(cx.theme().colors().border_variant)
+        .cursor_pointer()
+        .hover(|style| style.bg(cx.theme().colors().ghost_element_hover))
+        .on_click(move |_, _, cx| cx.open_url(&url))
+        .child(
+            Icon::new(IconName::File)
+                .size(IconSize::XSmall)
+                .color(Color::Muted),
+        )
+        .child(
+            Label::new(attachment.display_name().to_string())
+                .size(LabelSize::XSmall)
+                .truncate(),
+        )
+        .into_any_element()
 }
 
 /// When the running timer is on `task_id`, the moment it started.
