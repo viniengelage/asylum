@@ -53,6 +53,21 @@ use super::elicitation::{
 };
 use super::*;
 
+/// The message the "Executar" button sends. The plan card also looks for it to
+/// tell an executed plan apart from one the user replied to with feedback.
+const EXECUTE_PLAN_PROMPT: &str = "Execute o plano aprovado.";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PlanCardState {
+    Writing,
+    Ready,
+    /// The user replied with something other than executing it.
+    Answered,
+    Executed,
+    Superseded,
+    Discarded,
+}
+
 const EMPTY_THREAD_SUGGESTIONS: [(IconName, &str); 3] = [
     (IconName::Sparkle, "Explain the active file"),
     (IconName::Debug, "Investigate a crash"),
@@ -604,6 +619,7 @@ pub struct ThreadView {
     /// has explicitly acknowledged. Until a prompt's tool call is in this set,
     /// its allow buttons stay disabled. See [`Self::sandbox_confusable_findings`].
     acknowledged_confusable_warnings: HashSet<acp::ToolCallId>,
+    discarded_plans: HashSet<acp::ToolCallId>,
     pub subagent_scroll_handles: RefCell<HashMap<acp::SessionId, ScrollHandle>>,
     pub edits_expanded: bool,
     pub plan_expanded: bool,
@@ -1025,6 +1041,7 @@ impl ThreadView {
             collapsed_sandbox_authorization_details: HashSet::default(),
             collapsed_sandbox_network_details: HashSet::default(),
             acknowledged_confusable_warnings: HashSet::default(),
+            discarded_plans: HashSet::default(),
             subagent_scroll_handles: RefCell::new(HashMap::default()),
             edits_expanded: false,
             plan_expanded: false,
@@ -3877,6 +3894,382 @@ impl ThreadView {
                 })),
             )
             .into_any_element()
+    }
+
+    fn plan_card_state(
+        &self,
+        entry_ix: usize,
+        tool_call: &ToolCall,
+        cx: &Context<Self>,
+    ) -> PlanCardState {
+        if matches!(
+            tool_call.status,
+            ToolCallStatus::Pending | ToolCallStatus::InProgress
+        ) {
+            return PlanCardState::Writing;
+        }
+        let later_entries = self
+            .thread
+            .read(cx)
+            .entries()
+            .get(entry_ix + 1..)
+            .unwrap_or_default();
+        let mut replied = false;
+        for entry in later_entries {
+            match entry {
+                AgentThreadEntry::ToolCall(later)
+                    if later.tool_name.as_deref()
+                        == Some(<agent::SubmitPlanTool as agent::AgentTool>::NAME) =>
+                {
+                    return PlanCardState::Superseded;
+                }
+                AgentThreadEntry::UserMessage(message) if !replied => {
+                    let is_execution = message.chunks.iter().any(|chunk| {
+                        matches!(chunk, acp::ContentBlock::Text(text) if text.text == EXECUTE_PLAN_PROMPT)
+                    });
+                    if is_execution {
+                        return PlanCardState::Executed;
+                    }
+                    replied = true;
+                }
+                _ => {}
+            }
+        }
+        if self.discarded_plans.contains(&tool_call.id) {
+            PlanCardState::Discarded
+        } else if replied {
+            PlanCardState::Answered
+        } else {
+            PlanCardState::Ready
+        }
+    }
+
+    fn render_plan_tool_call(
+        &self,
+        entry_ix: usize,
+        tool_call: &ToolCall,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let plan: agent::SubmitPlanToolInput = tool_call
+            .raw_input
+            .clone()
+            .and_then(|input| serde_json::from_value(input).ok())
+            .unwrap_or_default();
+        let state = self.plan_card_state(entry_ix, tool_call, cx);
+        let colors = cx.theme().colors();
+        let is_active = matches!(state, PlanCardState::Writing | PlanCardState::Ready);
+        let border_color = if is_active {
+            colors.text_accent.opacity(0.45)
+        } else {
+            self.tool_card_border_color(cx)
+        };
+
+        let file_count = plan
+            .steps
+            .iter()
+            .flat_map(|step| step.files.iter())
+            .collect::<HashSet<_>>()
+            .len();
+        let step_count = plan.steps.len();
+        let counts = format!(
+            "· {step_count} {} · {file_count} {}",
+            if step_count == 1 { "passo" } else { "passos" },
+            if file_count == 1 {
+                "arquivo"
+            } else {
+                "arquivos"
+            },
+        );
+
+        let status_label = match state {
+            PlanCardState::Writing => Some("Escrevendo…"),
+            PlanCardState::Executed => Some("Executado"),
+            PlanCardState::Superseded => Some("Substituído"),
+            PlanCardState::Discarded => Some("Descartado"),
+            PlanCardState::Ready | PlanCardState::Answered => None,
+        };
+
+        let header = h_flex()
+            .px_2()
+            .py_1()
+            .gap_1p5()
+            .bg(self.tool_card_header_bg(cx))
+            .border_b_1()
+            .border_color(border_color)
+            .child(
+                Icon::new(IconName::ListTodo)
+                    .size(IconSize::Small)
+                    .color(if is_active {
+                        Color::Accent
+                    } else {
+                        Color::Muted
+                    }),
+            )
+            .child(
+                Label::new("Plano")
+                    .size(LabelSize::Small)
+                    .color(if is_active {
+                        Color::Accent
+                    } else {
+                        Color::Muted
+                    }),
+            )
+            .when(step_count > 0, |this| {
+                this.child(
+                    Label::new(counts)
+                        .size(LabelSize::Small)
+                        .color(Color::Muted),
+                )
+            })
+            .child(div().flex_1())
+            .when_some(status_label, |this, label| {
+                let label = Label::new(label).size(LabelSize::Small).color(Color::Muted);
+                this.child(if state == PlanCardState::Writing {
+                    label
+                        .with_animation(
+                            "plan-writing",
+                            Animation::new(Duration::from_secs(2))
+                                .repeat()
+                                .with_easing(pulsating_between(0.4, 0.8)),
+                            |label, delta| label.alpha(delta),
+                        )
+                        .into_any_element()
+                } else {
+                    label.into_any_element()
+                })
+            });
+
+        // Replaced and discarded plans stay in the history collapsed to their
+        // header, so the thread keeps pointing at the plan that matters.
+        if matches!(state, PlanCardState::Superseded | PlanCardState::Discarded) {
+            return v_flex()
+                .px_5()
+                .py_1p5()
+                .w_full()
+                .child(
+                    v_flex()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(border_color)
+                        .overflow_hidden()
+                        .child(header.border_b_0()),
+                )
+                .into_any();
+        }
+
+        let steps = plan.steps.iter().enumerate().map(|(index, step)| {
+            h_flex()
+                .items_start()
+                .gap_2()
+                .child(
+                    h_flex()
+                        .flex_none()
+                        .size_4()
+                        .justify_center()
+                        .rounded_full()
+                        .bg(colors.element_background)
+                        .child(
+                            Label::new((index + 1).to_string())
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted),
+                        ),
+                )
+                .child(
+                    v_flex()
+                        .min_w_0()
+                        .gap_1()
+                        .child(Label::new(step.title.clone()).size(LabelSize::Small))
+                        .when(!step.files.is_empty(), |this| {
+                            this.child(h_flex().flex_wrap().gap_1().children(
+                                step.files.iter().enumerate().map(|(file_ix, path)| {
+                                    let file_name = std::path::Path::new(path)
+                                        .file_name()
+                                        .map(|name| name.to_string_lossy().into_owned())
+                                        .unwrap_or_else(|| path.clone());
+                                    let path = path.clone();
+                                    Button::new(
+                                        SharedString::from(format!(
+                                            "plan-file-{entry_ix}-{index}-{file_ix}"
+                                        )),
+                                        file_name,
+                                    )
+                                    .label_size(LabelSize::XSmall)
+                                    .style(ButtonStyle::Filled)
+                                    .start_icon(
+                                        Icon::new(IconName::File)
+                                            .size(IconSize::XSmall)
+                                            .color(Color::Muted),
+                                    )
+                                    .tooltip(Tooltip::text(path.clone()))
+                                    .on_click(cx.listener(
+                                        move |this, _, window, cx| {
+                                            this.open_plan_file(&path, window, cx);
+                                        },
+                                    ))
+                                }),
+                            ))
+                        }),
+                )
+        });
+
+        let body = v_flex()
+            .p_2()
+            .gap_2()
+            .when(!plan.title.is_empty(), |this| {
+                this.child(Label::new(plan.title.clone()).weight(gpui::FontWeight::SEMIBOLD))
+            })
+            .when(!plan.summary.is_empty(), |this| {
+                this.child(
+                    Label::new(plan.summary.clone())
+                        .size(LabelSize::Small)
+                        .color(Color::Muted),
+                )
+            })
+            .when(!plan.steps.is_empty(), |this| {
+                this.child(v_flex().gap_2().children(steps))
+            })
+            .when(!plan.open_questions.is_empty(), |this| {
+                this.child(
+                    v_flex()
+                        .p_2()
+                        .gap_1()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(colors.border_variant)
+                        .bg(colors.editor_background)
+                        .child(
+                            h_flex()
+                                .gap_1p5()
+                                .child(
+                                    Icon::new(IconName::CircleHelp)
+                                        .size(IconSize::Small)
+                                        .color(Color::Warning),
+                                )
+                                .child(
+                                    Label::new("Em aberto")
+                                        .size(LabelSize::Small)
+                                        .weight(gpui::FontWeight::MEDIUM),
+                                ),
+                        )
+                        .children(plan.open_questions.iter().map(|question| {
+                            Label::new(format!("• {question}"))
+                                .size(LabelSize::Small)
+                                .color(Color::Muted)
+                        })),
+                )
+            });
+
+        let footer = (state == PlanCardState::Ready).then(|| {
+            let is_idle = self.thread.read(cx).status() == ThreadStatus::Idle;
+            let tool_call_id = tool_call.id.clone();
+            h_flex()
+                .p_2()
+                .gap_1()
+                .border_t_1()
+                .border_color(colors.border_variant)
+                .child(
+                    Button::new(
+                        SharedString::from(format!("execute-plan-{entry_ix}")),
+                        "Executar",
+                    )
+                    .style(ButtonStyle::Tinted(TintColor::Accent))
+                    .label_size(LabelSize::Small)
+                    .start_icon(
+                        Icon::new(IconName::PlayFilled)
+                            .size(IconSize::XSmall)
+                            .color(Color::Accent),
+                    )
+                    .disabled(!is_idle)
+                    .tooltip(Tooltip::text(
+                        "Troca para o perfil de escrita e executa o plano",
+                    ))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.execute_plan(window, cx);
+                    })),
+                )
+                .child(div().flex_1())
+                .child(
+                    Button::new(
+                        SharedString::from(format!("discard-plan-{entry_ix}")),
+                        "Descartar",
+                    )
+                    .label_size(LabelSize::Small)
+                    .color(Color::Muted)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.discarded_plans.insert(tool_call_id.clone());
+                        cx.notify();
+                    })),
+                )
+        });
+
+        v_flex()
+            .px_5()
+            .py_1p5()
+            .w_full()
+            .gap_1()
+            .child(
+                v_flex()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(border_color)
+                    .overflow_hidden()
+                    .child(header)
+                    .child(body)
+                    .children(footer),
+            )
+            .when(state == PlanCardState::Ready, |this| {
+                this.child(
+                    Label::new("Responda abaixo para ajustar o plano antes de executar.")
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted),
+                )
+            })
+            .into_any()
+    }
+
+    fn open_plan_file(&self, path: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(project) = self.project.upgrade() else {
+            return;
+        };
+        let Some(project_path) = project.read(cx).find_project_path(path, cx) else {
+            return;
+        };
+        self.workspace
+            .update(cx, |workspace, cx| {
+                workspace
+                    .open_path(project_path, None, true, window, cx)
+                    .detach_and_log_err(cx);
+            })
+            .log_err();
+    }
+
+    fn execute_plan(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.thread.read(cx).status() != ThreadStatus::Idle {
+            return;
+        }
+        let settings = AgentSettings::get_global(cx);
+        let target_profile =
+            if settings.default_profile.as_str() == agent_settings::builtin_profiles::PLAN {
+                AgentProfileId(agent_settings::builtin_profiles::WRITE.into())
+            } else {
+                settings.default_profile.clone()
+            };
+        if let Some(profile_selector) = self.profile_selector.clone() {
+            profile_selector.update(cx, |profile_selector, cx| {
+                profile_selector.set_profile(target_profile, cx);
+            });
+        }
+        // Sent as its own message so a draft in the composer survives, and so the
+        // plan card can recognize the execution when the thread is reloaded.
+        let contents = vec![acp::ContentBlock::Text(acp::TextContent::new(
+            EXECUTE_PLAN_PROMPT,
+        ))];
+        self.send_content(
+            Task::ready(Ok(Some((contents, Vec::new())))),
+            false,
+            window,
+            cx,
+        );
     }
 
     fn render_completed_plan(
@@ -8257,7 +8650,15 @@ impl ThreadView {
         )));
 
         div().w_full().id(container_id).map(|this| {
-            if tool_call.is_subagent() {
+            if tool_call.tool_name.as_deref()
+                == Some(<agent::SubmitPlanTool as agent::AgentTool>::NAME)
+                && !matches!(
+                    tool_call.status,
+                    ToolCallStatus::Failed | ToolCallStatus::Rejected | ToolCallStatus::Canceled
+                )
+            {
+                this.child(self.render_plan_tool_call(entry_ix, tool_call, cx))
+            } else if tool_call.is_subagent() {
                 this.child(
                     self.render_subagent_tool_call(
                         active_session_id,

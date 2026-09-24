@@ -92,6 +92,11 @@ impl ProfileSelector {
         self.picker_handle.clone()
     }
 
+    pub fn set_profile(&mut self, profile_id: AgentProfileId, cx: &mut Context<Self>) {
+        self.provider.set_profile(profile_id, cx);
+        cx.notify();
+    }
+
     pub fn cycle_profile(&mut self, cx: &mut Context<Self>) {
         if !self.provider.profiles_supported(cx) {
             return;
@@ -390,6 +395,7 @@ impl ProfilePickerDelegate {
         match candidate.id.as_str() {
             builtin_profiles::WRITE => Some("Get help to write anything."),
             builtin_profiles::ASK => Some("Chat about your codebase."),
+            builtin_profiles::PLAN => Some("Explore the project and propose a plan to execute."),
             builtin_profiles::MINIMAL => Some("Chat about anything with no tools."),
             _ => None,
         }

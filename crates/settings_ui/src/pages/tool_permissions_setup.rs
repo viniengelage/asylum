@@ -1418,6 +1418,8 @@ mod tests {
             "open",
             "read_file",
             "rename_symbol",
+            // Only presents a plan in the conversation; executing it is a user click.
+            "submit_plan",
             "thinking",
             // streaming_edit_file uses "edit_file" for permission lookups,
             // so its rules are configured under the edit_file entry.

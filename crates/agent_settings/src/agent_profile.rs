@@ -18,10 +18,11 @@ pub mod builtin_profiles {
 
     pub const WRITE: &str = "write";
     pub const ASK: &str = "ask";
+    pub const PLAN: &str = "plan";
     pub const MINIMAL: &str = "minimal";
 
     pub fn is_builtin(profile_id: &AgentProfileId) -> bool {
-        profile_id.as_str() == WRITE || profile_id.as_str() == ASK || profile_id.as_str() == MINIMAL
+        matches!(profile_id.as_str(), WRITE | ASK | PLAN | MINIMAL)
     }
 }
 

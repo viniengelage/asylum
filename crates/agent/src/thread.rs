@@ -4,8 +4,8 @@ use crate::{
     DiagnosticsTool, EditFileTool, FetchTool, FindPathTool, FindReferencesTool, GetCodeActionsTool,
     GoToDefinitionTool, GrepTool, ListAgentsAndModelsTool, ListDirectoryTool, MovePathTool,
     ProjectSnapshot, ReadFileTool, RenameTool, SandboxedTerminalTool, SpawnAgentTool,
-    SystemPromptTemplate, Template, Templates, TerminalTool, ToolPermissionDecision, WebSearchTool,
-    WriteFileTool, decide_permission_from_settings,
+    SubmitPlanTool, SystemPromptTemplate, Template, Templates, TerminalTool,
+    ToolPermissionDecision, WebSearchTool, WriteFileTool, decide_permission_from_settings,
 };
 use acp_thread::{ClientUserMessageId, MentionUri};
 use action_log::ActionLog;
@@ -2190,6 +2190,11 @@ impl Thread {
         self.add_tool(WebSearchTool);
 
         self.add_tool(AskUserTool);
+        // Plans are reviewed and executed from the root thread's view, so a
+        // subagent inheriting the plan profile keeps exploring instead.
+        if self.parent_thread_id().is_none() {
+            self.add_tool(SubmitPlanTool);
+        }
 
         self.add_tool(DiagnosticsTool::new(self.project.clone()));
 
@@ -2244,8 +2249,8 @@ impl Thread {
     }
 
     /// Computes the profile a thread should start with, given the user's chosen
-    /// profile. In a restricted workspace, the built-in `write`/`ask` profiles
-    /// are downgraded to `minimal` — but only when both the chosen profile and
+    /// profile. In a restricted workspace, the built-in `write`/`ask`/`plan`
+    /// profiles are downgraded to `minimal` — but only when both the chosen profile and
     /// `minimal` are unmodified, shipped defaults, so we never override a user's
     /// custom or customized profiles.
     ///
@@ -2256,10 +2261,12 @@ impl Thread {
         project: &Entity<Project>,
         cx: &App,
     ) -> (AgentProfileId, bool) {
-        let is_write_or_ask = profile_id.as_str() == builtin_profiles::WRITE
-            || profile_id.as_str() == builtin_profiles::ASK;
+        let is_downgradable = matches!(
+            profile_id.as_str(),
+            builtin_profiles::WRITE | builtin_profiles::ASK | builtin_profiles::PLAN
+        );
         let minimal = AgentProfileId(builtin_profiles::MINIMAL.into());
-        if is_write_or_ask
+        if is_downgradable
             && TrustedWorktrees::has_restricted_worktrees(&project.read(cx).worktree_store(), cx)
             && AgentProfileSettings::is_unmodified_default(&profile_id, cx)
             && AgentProfileSettings::is_unmodified_default(&minimal, cx)

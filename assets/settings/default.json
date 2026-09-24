@@ -1332,6 +1332,25 @@
           "search_web": true,
         },
       },
+      "plan": {
+        "name": "Plan",
+        // Read-only exploration: the agent proposes a plan with `submit_plan`
+        // and only changes files after the user executes it.
+        "tools": {
+          "diagnostics": true,
+          "fetch": true,
+          "list_directory": true,
+          "find_path": true,
+          "find_references": true,
+          "go_to_definition": true,
+          "read_file": true,
+          "grep": true,
+          "skill": true,
+          "spawn_agent": true,
+          "search_web": true,
+          "submit_plan": true,
+        },
+      },
       "minimal": {
         "name": "Minimal",
         "enable_all_context_servers": false,
