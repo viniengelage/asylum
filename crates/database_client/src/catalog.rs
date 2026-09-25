@@ -111,6 +111,34 @@ fn parse_column(row: Vec<Option<String>>) -> Option<ColumnInfo> {
     })
 }
 
+/// Every column of every user table and view, for autocomplete: `(schema, relation, column,
+/// type)`, in column order.
+pub async fn list_all_columns(
+    session: &Session,
+) -> anyhow::Result<Vec<(String, String, String, String)>> {
+    let sql = "select n.nspname, c.relname, a.attname, pg_catalog.format_type(a.atttypid, a.atttypmod)
+                 from pg_catalog.pg_attribute a
+                 join pg_catalog.pg_class c on c.oid = a.attrelid
+                 join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+                where c.relkind in ('r', 'p', 'v', 'm', 'f') and not c.relispartition
+                  and a.attnum > 0 and not a.attisdropped
+                  and n.nspname <> 'information_schema' and n.nspname not like 'pg\\_%'
+                order by n.nspname, c.relname, a.attnum";
+    let rows = session.query_text(sql).await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| {
+            let mut values = row.into_iter();
+            Some((
+                values.next().flatten()?,
+                values.next().flatten()?,
+                values.next().flatten()?,
+                values.next().flatten()?,
+            ))
+        })
+        .collect())
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IndexInfo {
     pub name: String,

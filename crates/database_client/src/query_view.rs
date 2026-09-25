@@ -3,7 +3,8 @@
 //! session, so a transaction opened here stays here.
 
 use crate::{
-    CancelQuery, ExplainStatement, RunScript, RunStatement,
+    CancelQuery, ExplainStatement, RunScript, RunStatement, catalog,
+    completion::{SchemaCache, SqlCompletionProvider},
     connection::SavedConnection,
     grid::{GridColumn, ResultGrid},
     panel::environment_chip,
@@ -18,7 +19,9 @@ use gpui::{
 };
 use project::Project;
 use std::{
+    cell::RefCell,
     ops::Range,
+    rc::Rc,
     path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, Instant},
@@ -151,7 +154,21 @@ impl SqlQueryView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let editor = cx.new(|cx| Editor::for_buffer(buffer, Some(project.clone()), window, cx));
+        let cache = Rc::new(RefCell::new(SchemaCache::default()));
+        let editor = cx.new(|cx| {
+            let mut editor = Editor::for_buffer(buffer, Some(project.clone()), window, cx);
+            editor.set_completion_provider(Some(Rc::new(SqlCompletionProvider {
+                cache: cache.clone(),
+            })));
+            editor
+        });
+        let catalog_session = panel_session.clone();
+        cx.spawn(async move |_, _| {
+            let columns = catalog::list_all_columns(&catalog_session).await?;
+            *cache.borrow_mut() = SchemaCache::new(columns);
+            anyhow::Ok(())
+        })
+        .detach_and_log_err(cx);
         let grid = cx.new(|cx| ResultGrid::new(false, cx));
         let subscriptions = vec![cx.subscribe(&editor, |this, _, event, cx| match event {
             EditorEvent::DirtyChanged
@@ -287,6 +304,23 @@ impl SqlQueryView {
     /// For the debug hook, which can't press ⌘↵.
     pub(crate) fn run_statement(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.run(Scope::Statement, window, cx);
+    }
+
+    /// For the debug hook: cursor at the end of the first line, completion menu open.
+    pub(crate) fn show_completions_at_first_line(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let text = self.editor.read(cx).text(cx);
+        let end = text.find('\n').unwrap_or(text.len());
+        window.focus(&self.editor.focus_handle(cx), cx);
+        self.editor.update(cx, |editor, cx| {
+            editor.change_selections(SelectionEffects::default(), window, cx, |selections| {
+                selections.select_ranges([MultiBufferOffset(end)..MultiBufferOffset(end)])
+            });
+            editor.show_completions(&editor::actions::ShowCompletions, window, cx);
+        });
     }
 
     fn run(&mut self, scope: Scope, window: &mut Window, cx: &mut Context<Self>) {

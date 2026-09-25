@@ -2,6 +2,7 @@
 //! the shared tokio runtime of `reqwest_client`; views only await the results.
 
 mod catalog;
+mod completion;
 mod connect_view;
 mod connection;
 mod discovery;
@@ -60,7 +61,8 @@ pub fn init(cx: &mut App) {
     cx.observe_new(|workspace: &mut Workspace, window, cx| {
         // `panel` opens the dock, `connect` also opens the connection form,
         // `table:<schema>.<name>[:<tab>]` opens a table once the dock has connected and
-        // `query:<file relative to the project>[:run]` opens (and runs) a SQL file.
+        // `query:<file relative to the project>[:run|:complete]` opens a SQL file and runs it or
+        // shows completions at the end of its first line.
         if let (Ok(step), Some(window)) = (std::env::var("DATABASE_CLIENT_DEBUG_OPEN"), window) {
             cx.spawn_in(window, async move |workspace, cx| {
                 cx.background_executor()
@@ -83,9 +85,11 @@ pub fn init(cx: &mut App) {
                     panel
                 })?;
                 if let (Some(target), Some(panel)) = (step.strip_prefix("query:"), panel.clone()) {
-                    let (file, run) = match target.strip_suffix(":run") {
-                        Some(file) => (file.to_owned(), true),
-                        None => (target.to_owned(), false),
+                    let (file, action) = match target.rsplit_once(':') {
+                        Some((file, action @ ("run" | "complete"))) => {
+                            (file.to_owned(), Some(action.to_owned()))
+                        }
+                        _ => (target.to_owned(), None),
                     };
                     for _ in 0..40 {
                         if panel.read_with(cx, |panel, _| panel.session().is_some()) {
@@ -100,7 +104,7 @@ pub fn init(cx: &mut App) {
                             panel.open_query(root, window, cx);
                         }
                     })?;
-                    if run {
+                    if let Some(action) = action {
                         cx.background_executor()
                             .timer(std::time::Duration::from_secs(2))
                             .await;
@@ -110,7 +114,13 @@ pub fn init(cx: &mut App) {
                                 .collect::<Vec<_>>()
                         })?;
                         for view in views {
-                            view.update_in(cx, |view, window, cx| view.run_statement(window, cx))?;
+                            view.update_in(cx, |view, window, cx| {
+                                if action == "run" {
+                                    view.run_statement(window, cx)
+                                } else {
+                                    view.show_completions_at_first_line(window, cx)
+                                }
+                            })?;
                         }
                     }
                     return anyhow::Ok(());
