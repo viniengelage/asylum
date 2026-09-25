@@ -5,8 +5,10 @@ mod catalog;
 mod connect_view;
 mod connection;
 mod discovery;
+mod grid;
 mod panel;
 mod session;
+mod table_view;
 mod tls;
 
 pub use catalog::{ColumnInfo, Relation, RelationKind, list_columns, list_relations};
@@ -30,6 +32,8 @@ actions!(
         NewConnection,
         /// Saves the connection in the focused form and connects to it.
         SaveConnection,
+        /// Reloads the open table with the typed WHERE and ORDER BY.
+        ApplyTableFilter,
     ]
 );
 
@@ -38,18 +42,29 @@ pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("cmd-enter", SaveConnection, Some("DatabaseConnectView")),
         KeyBinding::new("ctrl-enter", SaveConnection, Some("DatabaseConnectView")),
+        KeyBinding::new("enter", ApplyTableFilter, Some("DatabaseTableFilter")),
+        KeyBinding::new("cmd-enter", ApplyTableFilter, Some("DatabaseTableView")),
+        KeyBinding::new("ctrl-enter", ApplyTableFilter, Some("DatabaseTableView")),
+        KeyBinding::new("cmd-c", grid::CopyCell, Some("DatabaseGrid")),
+        KeyBinding::new("ctrl-c", grid::CopyCell, Some("DatabaseGrid")),
+        KeyBinding::new("up", grid::SelectCellAbove, Some("DatabaseGrid")),
+        KeyBinding::new("down", grid::SelectCellBelow, Some("DatabaseGrid")),
+        KeyBinding::new("left", grid::SelectCellLeft, Some("DatabaseGrid")),
+        KeyBinding::new("right", grid::SelectCellRight, Some("DatabaseGrid")),
     ]);
     cx.observe_new(|workspace: &mut Workspace, window, cx| {
-        // `panel` opens the dock, `connect` also opens the connection form.
+        // `panel` opens the dock, `connect` also opens the connection form and
+        // `table:<schema>.<name>[:<tab>]` opens a table once the dock has connected.
         if let (Ok(step), Some(window)) = (std::env::var("DATABASE_CLIENT_DEBUG_OPEN"), window) {
             cx.spawn_in(window, async move |workspace, cx| {
                 cx.background_executor()
                     .timer(std::time::Duration::from_secs(3))
                     .await;
-                workspace.update_in(cx, |workspace, window, cx| {
+                let panel = workspace.update_in(cx, |workspace, window, cx| {
                     open(workspace, window, cx);
+                    let panel = workspace.panel::<DatabasePanel>(cx);
                     if step == "connect"
-                        && let Some(panel) = workspace.panel::<DatabasePanel>(cx)
+                        && let Some(panel) = panel.clone()
                     {
                         connect_view::open_in(
                             workspace,
@@ -59,7 +74,43 @@ pub fn init(cx: &mut App) {
                             cx,
                         );
                     }
-                })
+                    panel
+                })?;
+                let (Some(target), Some(panel)) = (step.strip_prefix("table:"), panel) else {
+                    return anyhow::Ok(());
+                };
+                let mut parts = target.splitn(2, ':');
+                let relation = parts.next().unwrap_or_default().to_owned();
+                let tab = parts.next().map(str::to_owned);
+                let (schema, name) = relation
+                    .split_once('.')
+                    .map(|(schema, name)| (schema.to_owned(), name.to_owned()))
+                    .unwrap_or_else(|| ("public".to_owned(), relation.clone()));
+                for _ in 0..40 {
+                    if panel.read_with(cx, |panel, _| panel.session().is_some()) {
+                        break;
+                    }
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_millis(250))
+                        .await;
+                }
+                panel.update_in(cx, |panel, window, cx| {
+                    panel.open_table(schema, name, RelationKind::Table, None, window, cx)
+                })?;
+                if let Some(tab) = tab {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_secs(2))
+                        .await;
+                    workspace.update(cx, |workspace, cx| {
+                        let views = workspace
+                            .items_of_type::<table_view::TableView>(cx)
+                            .collect::<Vec<_>>();
+                        for view in views {
+                            view.update(cx, |view, cx| view.select_tab_named(&tab, cx));
+                        }
+                    })?;
+                }
+                anyhow::Ok(())
             })
             .detach_and_log_err(cx);
         }
@@ -223,6 +274,11 @@ mod tests {
                          (1, 'Ana', '{\"theme\": \"dark\"}', '{investor,beta}', '1'),
                          (2, 'Bruno', null, '{investor}', '2'),
                          (3, 'Camila', '{}', '{}', null);
+                     create table database_client_spike.devices (
+                         id bigint primary key,
+                         user_id bigint not null references database_client_spike.users(id) on delete cascade
+                     );
+                     create index devices_user_idx on database_client_spike.devices (user_id);
                      analyze database_client_spike.users;",
                     1000,
                 )
@@ -232,9 +288,10 @@ mod tests {
             let relations = list_relations(&session).await.unwrap();
             let users = relations
                 .iter()
-                .find(|relation| relation.schema == "database_client_spike")
+                .find(|relation| {
+                    relation.schema == "database_client_spike" && relation.name == "users"
+                })
                 .expect("the spike table is listed");
-            assert_eq!(users.name, "users");
             assert_eq!(users.kind, RelationKind::Table);
             assert_eq!(users.estimated_rows, Some(3));
             eprintln!("{} relações no catálogo", relations.len());
@@ -265,6 +322,64 @@ mod tests {
                     "document character varying(14) unique",
                 ]
             );
+
+            let indexes = catalog::list_indexes(&session, "database_client_spike", "users")
+                .await
+                .unwrap();
+            let names = indexes
+                .iter()
+                .map(|index| (index.name.as_str(), index.primary, index.constraint))
+                .collect::<Vec<_>>();
+            assert_eq!(
+                names,
+                [
+                    ("users_pkey", true, true),
+                    ("users_document_key", false, true)
+                ]
+            );
+            let foreign_keys =
+                catalog::list_foreign_keys(&session, "database_client_spike", "users")
+                    .await
+                    .unwrap();
+            assert_eq!(foreign_keys.len(), 1);
+            assert_eq!(
+                foreign_keys[0].direction,
+                catalog::ForeignKeyDirection::ReferencedBy
+            );
+            assert_eq!(foreign_keys[0].on_delete, "CASCADE");
+            assert_eq!(
+                foreign_keys[0].other_table,
+                "database_client_spike.devices"
+            );
+            let device_columns = list_columns(&session, "database_client_spike", "devices")
+                .await
+                .unwrap();
+            let device_indexes =
+                catalog::list_indexes(&session, "database_client_spike", "devices")
+                    .await
+                    .unwrap();
+            let constraints =
+                catalog::list_constraints(&session, "database_client_spike", "devices")
+                    .await
+                    .unwrap();
+            let ddl = catalog::table_ddl(
+                "database_client_spike",
+                "devices",
+                &device_columns,
+                &constraints,
+                &device_indexes,
+            );
+            eprintln!("{ddl}");
+            assert!(ddl.starts_with("create table \"database_client_spike\".\"devices\" ("));
+            assert!(ddl.contains("ON DELETE CASCADE"));
+            assert!(ddl.contains("CREATE INDEX devices_user_idx"));
+
+            let read_only = session.connect_read_only().await.unwrap();
+            let error = read_only
+                .run("delete from database_client_spike.users", 10)
+                .await
+                .unwrap_err();
+            assert_eq!(server_error(&error).code, "25006");
 
             let outcome = session
                 .run("select * from database_client_spike.users order by id", 1000)

@@ -5,6 +5,7 @@ use crate::{
     connection::{self, Environment, SavedConnection, Scope},
     discovery::{self, Source, Suggestion},
     session::Session,
+    table_view,
 };
 use collections::{HashMap, HashSet};
 use credentials_provider::CredentialsProvider;
@@ -406,6 +407,31 @@ impl DatabasePanel {
             .log_err();
     }
 
+    pub(crate) fn open_table(
+        &mut self,
+        schema: String,
+        name: String,
+        kind: RelationKind,
+        estimated_rows: Option<i64>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((connection, session)) = self.session() else {
+            return;
+        };
+        table_view::open(
+            self.workspace.clone(),
+            connection,
+            session,
+            schema,
+            name,
+            kind,
+            estimated_rows,
+            window,
+            cx,
+        );
+    }
+
     fn toggle(&mut self, key: String, cx: &mut Context<Self>) {
         if !self.expanded.remove(&key) {
             self.expanded.insert(key);
@@ -621,7 +647,19 @@ impl DatabasePanel {
                 expanded,
             } => clickable(base)
                 .pl(px(40.))
-                .child(chevron(expanded))
+                .child(
+                    div()
+                        .id(("db-row-chevron", index))
+                        .child(chevron(expanded))
+                        .on_click({
+                            let schema = schema.clone();
+                            let name = name.clone();
+                            cx.listener(move |this, _, _, cx| {
+                                cx.stop_propagation();
+                                this.toggle_relation(schema.clone(), name.clone(), cx)
+                            })
+                        }),
+                )
                 .child(
                     Icon::new(match kind {
                         RelationKind::View | RelationKind::MaterializedView => IconName::Eye,
@@ -641,8 +679,16 @@ impl DatabasePanel {
                 .when_some(estimated_rows, |this, rows| {
                     this.child(count(format_count(rows)))
                 })
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.toggle_relation(schema.clone(), name.clone(), cx)
+                .tooltip(Tooltip::text("Abrir tabela"))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.open_table(
+                        schema.clone(),
+                        name.clone(),
+                        kind,
+                        estimated_rows,
+                        window,
+                        cx,
+                    )
                 }))
                 .into_any_element(),
             TreeRow::Column(column) => base
@@ -1408,7 +1454,7 @@ fn short_version(version: &str) -> Option<String> {
 }
 
 /// `48213` → `48.213`, `1234567` → `1,2 M`, as the dock shows row estimates.
-fn format_count(count: i64) -> String {
+pub(crate) fn format_count(count: i64) -> String {
     if count >= 1_000_000 {
         format!("{:.1} M", count as f64 / 1_000_000.0).replace('.', ",")
     } else {

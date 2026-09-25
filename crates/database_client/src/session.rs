@@ -162,6 +162,7 @@ pub struct Session {
     client: Arc<Client>,
     cancel_token: CancelToken,
     tls: RustlsConnect,
+    target: ConnectTarget,
     pub server_version: String,
 }
 
@@ -190,6 +191,7 @@ impl Session {
             client,
             cancel_token,
             tls,
+            target: target.clone(),
             server_version: String::new(),
         };
         let server_version = session
@@ -207,6 +209,21 @@ impl Session {
 
     pub fn is_closed(&self) -> bool {
         self.client.is_closed()
+    }
+
+    /// A second connection with the same credentials whose transactions are all read-only, for
+    /// views that run SQL the person typed (a table filter) without meaning to write.
+    pub async fn connect_read_only(&self) -> anyhow::Result<Self> {
+        let mut target = self.target.clone();
+        let options = match target.config.get_options() {
+            Some(options) if options.contains("default_transaction_read_only") => {
+                options.to_owned()
+            }
+            Some(options) => format!("{options} -c default_transaction_read_only=on"),
+            None => "-c default_transaction_read_only=on".to_owned(),
+        };
+        target.config.options(options);
+        Self::connect(&target).await
     }
 
     /// Runs one statement or a whole script. Past `row_limit` rows in a result the rest of the
