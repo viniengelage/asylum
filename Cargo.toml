@@ -50,6 +50,7 @@ members = [
     "crates/credentials_provider",
     "crates/dap",
     "crates/dap_adapters",
+    "crates/database_client",
     "crates/db",
     "crates/debug_adapter_extension",
     "crates/debugger_tools",
@@ -331,6 +332,7 @@ crashes = { path = "crates/crashes" }
 credentials_provider = { path = "crates/credentials_provider" }
 dap = { path = "crates/dap" }
 dap_adapters = { path = "crates/dap_adapters" }
+database_client = { path = "crates/database_client" }
 db = { path = "crates/db" }
 debug_adapter_extension = { path = "crates/debug_adapter_extension" }
 debugger_tools = { path = "crates/debugger_tools" }
@@ -874,6 +876,8 @@ time = { version = "0.3", features = [
 ] }
 tiny_http = "0.12"
 tokio = { version = "1" }
+tokio-postgres = "0.7.18"
+tokio-rustls = { version = "0.26", default-features = false }
 toml = "0.8"
 toml_edit = { version = "0.22", default-features = false, features = [
     "display",
