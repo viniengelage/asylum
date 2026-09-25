@@ -166,6 +166,8 @@ pub enum HighlightKey {
     ColorizeBracket(usize),
     SemanticToken(u32),
     // below is sorted lexicographically, as there is no relevant ordering for these aside from coming after the above
+    ApiVariable,
+    ApiVariableMissing,
     BufferSearchHighlights,
     ConsoleAnsiHighlight(usize),
     DebugStackFrameLine,

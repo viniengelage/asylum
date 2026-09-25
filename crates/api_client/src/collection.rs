@@ -146,6 +146,10 @@ impl Collection {
         collection
     }
 
+    pub fn fs(&self) -> Arc<dyn Fs> {
+        self.fs.clone()
+    }
+
     pub fn spec_path(&self) -> PathBuf {
         self.root.join(&self.file.spec)
     }

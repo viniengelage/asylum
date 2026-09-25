@@ -5,13 +5,14 @@ use crate::{
     collection::{Collection, Exchange},
     config::{self, HeaderEntry, ParamEntry, RequestDraft},
     schema::Validation,
-    send::{self, HeaderOrigin},
+    send::{self, HeaderOrigin, REFRESH_TOKEN_VARIABLE, TOKEN_VARIABLE},
     spec::{Operation, ParameterLocation},
+    vars::{self, SECRET_PREFIX},
 };
-use editor::{Editor, EditorEvent};
+use editor::{Editor, EditorEvent, HighlightKey, MultiBufferOffset};
 use gpui::{
-    AnyElement, ClipboardItem, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Hsla,
-    Subscription, Task, WeakEntity,
+    AnyElement, ClipboardItem, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
+    HighlightStyle, Hsla, Subscription, Task, WeakEntity,
 };
 use language::LanguageRegistry;
 use std::sync::Arc;
@@ -19,7 +20,7 @@ use ui::{Checkbox, Tooltip, prelude::*};
 use ui_input::{ErasedEditorEvent, InputField};
 use util::ResultExt as _;
 use workspace::{
-    Item, Workspace,
+    Item, OpenOptions, Workspace,
     item::{ItemEvent, TabContentParams},
 };
 
@@ -46,6 +47,7 @@ struct Row {
 }
 
 pub struct ApiRequestView {
+    workspace: WeakEntity<Workspace>,
     collection: Entity<Collection>,
     pub(crate) operation_key: String,
     pub(crate) saved_id: Option<String>,
@@ -109,6 +111,132 @@ fn chip(label: impl Into<SharedString>, color: Color, cx: &App) -> impl IntoElem
         )
 }
 
+/// The editor behind an input, to color the placeholders in it.
+fn input_editor(input: &Entity<InputField>, cx: &App) -> Option<Entity<Editor>> {
+    input
+        .read(cx)
+        .editor()
+        .as_any()
+        .downcast_ref::<Entity<Editor>>()
+        .cloned()
+}
+
+fn is_sensitive_variable(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    name.starts_with(SECRET_PREFIX)
+        || name == TOKEN_VARIABLE
+        || name == REFRESH_TOKEN_VARIABLE
+        || ["token", "password", "senha", "secret", "key"]
+            .iter()
+            .any(|word| lower.contains(word))
+}
+
+/// What a placeholder resolves to right now, as it can be shown on screen.
+fn resolved_variable(collection: &Collection, name: &str) -> Option<String> {
+    if name.starts_with('$') {
+        return vars::dynamic_value(name).map(|_| "gerado a cada envio".to_string());
+    }
+    let value = collection.variable(name)?;
+    Some(if is_sensitive_variable(name) {
+        send::mask(&value)
+    } else {
+        value
+    })
+}
+
+/// Colors `{{…}}` in the editor: accent when something defines it, warning when not.
+fn highlight_placeholders(editor: &Entity<Editor>, collection: &Collection, cx: &mut App) {
+    let text = editor.read(cx).text(cx);
+    let (mut known, mut missing) = (Vec::new(), Vec::new());
+    for range in vars::placeholder_ranges(&text) {
+        let name = text[range.start + 2..range.end - 2].trim();
+        if resolved_variable(collection, name).is_some() {
+            known.push(range);
+        } else {
+            missing.push(range);
+        }
+    }
+    let accent = cx.theme().colors().text_accent;
+    let warning = cx.theme().status().warning;
+    editor.update(cx, |editor, cx| {
+        let snapshot = editor.buffer().read(cx).snapshot(cx);
+        let anchors = |ranges: Vec<std::ops::Range<usize>>| {
+            ranges
+                .into_iter()
+                .map(|range| {
+                    snapshot.anchor_before(MultiBufferOffset(range.start))
+                        ..snapshot.anchor_after(MultiBufferOffset(range.end))
+                })
+                .collect::<Vec<_>>()
+        };
+        for (key, ranges, color) in [
+            (HighlightKey::ApiVariable, known, accent),
+            (HighlightKey::ApiVariableMissing, missing, warning),
+        ] {
+            if ranges.is_empty() {
+                editor.clear_highlights(key, cx);
+            } else {
+                editor.highlight_text(
+                    key,
+                    anchors(ranges),
+                    HighlightStyle {
+                        color: Some(color),
+                        background_color: Some(color.opacity(0.12)),
+                        ..HighlightStyle::default()
+                    },
+                    cx,
+                );
+            }
+        }
+    });
+}
+
+/// A header or URL template as labels, with its placeholders set off like in the editors.
+fn render_template(text: &str, collection: &Collection, muted: bool, cx: &App) -> AnyElement {
+    let mut row = h_flex().min_w_0().overflow_hidden();
+    let mut last = 0;
+    let text_color = if muted { Color::Muted } else { Color::Default };
+    for range in vars::placeholder_ranges(text) {
+        if range.start > last {
+            row = row.child(
+                Label::new(text[last..range.start].to_string())
+                    .size(LabelSize::Small)
+                    .buffer_font(cx)
+                    .color(text_color),
+            );
+        }
+        let name = text[range.start + 2..range.end - 2].trim();
+        let color = if resolved_variable(collection, name).is_some() {
+            Color::Accent
+        } else {
+            Color::Warning
+        };
+        row = row.child(
+            div()
+                .px_0p5()
+                .rounded_sm()
+                .bg(color.color(cx).opacity(0.12))
+                .child(
+                    Label::new(text[range.clone()].to_string())
+                        .size(LabelSize::Small)
+                        .buffer_font(cx)
+                        .color(color),
+                ),
+        );
+        last = range.end;
+    }
+    if last < text.len() {
+        row = row.child(
+            Label::new(text[last..].to_string())
+                .size(LabelSize::Small)
+                .buffer_font(cx)
+                .color(text_color)
+                .truncate(),
+        );
+    }
+    row.into_any_element()
+}
+
 fn human_size(bytes: usize) -> String {
     if bytes < 1024 {
         format!("{bytes} B")
@@ -121,6 +249,7 @@ fn human_size(bytes: usize) -> String {
 
 impl ApiRequestView {
     pub fn new(
+        workspace: WeakEntity<Workspace>,
         collection: Entity<Collection>,
         operation_key: String,
         saved: Option<(String, String, RequestDraft)>,
@@ -152,6 +281,7 @@ impl ApiRequestView {
         set_json_language(&languages, &response_editor, cx);
 
         let mut this = Self {
+            workspace,
             collection: collection.clone(),
             operation_key,
             saved_id,
@@ -201,10 +331,35 @@ impl ApiRequestView {
                 }
             }),
         );
+        // Switching environments or logging in changes which placeholders have values.
         this._subscriptions
-            .push(cx.observe(&collection, |_, _, cx| cx.notify()));
+            .push(cx.observe(&collection, |this, _, cx| {
+                this.highlight_placeholders(cx);
+                cx.notify();
+            }));
         this.body_changed(cx);
+        this.highlight_placeholders(cx);
         this
+    }
+
+    fn placeholder_editors(&self, cx: &App) -> Vec<Entity<Editor>> {
+        let inputs = std::iter::once(&self.url_input)
+            .chain(self.path_params.iter().map(|(_, input)| input))
+            .chain(self.query_rows.iter().map(|row| &row.value))
+            .chain(self.header_rows.iter().map(|row| &row.value));
+        std::iter::once(self.body_editor.clone())
+            .chain(inputs.filter_map(|input| input_editor(input, cx)))
+            .collect()
+    }
+
+    fn highlight_placeholders(&self, cx: &mut Context<Self>) {
+        let editors = self.placeholder_editors(cx);
+        // `update` hands out the collection and the app together, which the editors need.
+        self.collection.update(cx, |collection, cx| {
+            for editor in &editors {
+                highlight_placeholders(editor, collection, cx);
+            }
+        });
     }
 
     fn new_input(
@@ -247,7 +402,11 @@ impl ApiRequestView {
         self._subscriptions.push(editor.subscribe(
             Box::new(move |event, _window, cx| {
                 if event == ErasedEditorEvent::BufferEdited {
-                    this.update(cx, |this, cx| this.store_draft(cx)).log_err();
+                    this.update(cx, |this, cx| {
+                        this.highlight_placeholders(cx);
+                        this.store_draft(cx);
+                    })
+                    .log_err();
                 }
             }),
             window,
@@ -317,6 +476,7 @@ impl ApiRequestView {
                 .read(cx)
                 .validate_body(&self.operation_key, &body)
         };
+        self.highlight_placeholders(cx);
         self.store_draft(cx);
     }
 
@@ -389,6 +549,86 @@ impl ApiRequestView {
         cx.notify();
     }
 
+    /// `local → http://127.0.0.1:8765`: the environment the URL is sent to.
+    fn environment_hint(&self, cx: &App) -> Option<String> {
+        let collection = self.collection.read(cx);
+        let environment = collection.active_environment()?;
+        let base_url = environment.get("baseUrl").filter(|url| !url.is_empty());
+        Some(match base_url {
+            Some(base_url) => format!("{} → {base_url}", environment.name),
+            None => format!("{} → sem baseUrl", environment.name),
+        })
+    }
+
+    /// Every placeholder the request uses, in the order they appear, once each.
+    fn used_placeholders(&self, cx: &App) -> Vec<String> {
+        let draft = self.draft(cx);
+        let mut texts: Vec<String> = vec![draft.url.clone()];
+        texts.extend(draft.path_params.iter().map(|entry| entry.value.clone()));
+        texts.extend(
+            draft
+                .query
+                .iter()
+                .filter(|entry| entry.enabled)
+                .map(|entry| entry.value.clone()),
+        );
+        texts.extend(
+            self.inherited_headers(cx)
+                .into_iter()
+                .filter(|header| {
+                    header.enabled
+                        && !draft
+                            .disabled_inherited
+                            .iter()
+                            .any(|name| name.eq_ignore_ascii_case(&header.name))
+                })
+                .map(|header| header.value),
+        );
+        texts.extend(
+            draft
+                .headers
+                .iter()
+                .filter(|entry| entry.enabled)
+                .map(|entry| entry.value.clone()),
+        );
+        texts.extend(draft.body.clone());
+        let mut names: Vec<String> = Vec::new();
+        for text in texts {
+            for name in vars::placeholder_names(&text) {
+                if !names.contains(&name) {
+                    names.push(name);
+                }
+            }
+        }
+        names
+    }
+
+    /// Opens the spec at this operation.
+    fn open_in_spec(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(operation) = self.operation(cx).cloned() else {
+            return;
+        };
+        let spec_path = self.collection.read(cx).spec_path();
+        let fs = self.collection.read(cx).fs();
+        let workspace = self.workspace.clone();
+        cx.spawn_in(window, async move |_, cx| {
+            let text = fs.load(&spec_path).await.unwrap_or_default();
+            let row = operation_row(&text, &operation.path, &operation.method);
+            let item = workspace
+                .update_in(cx, |workspace, window, cx| {
+                    workspace.open_abs_path(spec_path, OpenOptions::default(), window, cx)
+                })?
+                .await?;
+            if let Some(editor) = item.downcast::<Editor>() {
+                editor.update_in(cx, |editor, window, cx| {
+                    editor.go_to_singleton_buffer_point(language::Point::new(row, 0), window, cx);
+                })?;
+            }
+            anyhow::Ok(())
+        })
+        .detach_and_log_err(cx);
+    }
+
     fn render_request_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let method = self
             .operation(cx)
@@ -419,12 +659,32 @@ impl ApiRequestView {
             .child(
                 div()
                     .flex_1()
+                    .relative()
                     .capture_action(cx.listener(
                         |this, _: &editor::actions::Newline, window, cx| {
                             this.send(window, cx);
                         },
                     ))
-                    .child(self.url_input.clone()),
+                    .child(self.url_input.clone())
+                    .when_some(self.environment_hint(cx), |this, hint| {
+                        this.child(
+                            div()
+                                .absolute()
+                                .top_0()
+                                .bottom_0()
+                                .right_2()
+                                .max_w(px(320.))
+                                .flex()
+                                .items_center()
+                                .child(
+                                    Label::new(hint)
+                                        .size(LabelSize::XSmall)
+                                        .buffer_font(cx)
+                                        .color(Color::Muted)
+                                        .truncate(),
+                                ),
+                        )
+                    }),
             )
             .child(
                 Button::new("api-send", if sending { "Enviando…" } else { "Enviar" })
@@ -455,7 +715,7 @@ impl ApiRequestView {
             )
     }
 
-    fn render_meta(&self, cx: &App) -> impl IntoElement {
+    fn render_meta(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let collection = self.collection.read(cx);
         let draft = self.draft(cx);
         let prepared = collection.prepare(&self.operation_key, &draft).ok();
@@ -488,6 +748,14 @@ impl ApiRequestView {
             .as_ref()
             .map(|prepared| prepared.missing.clone())
             .unwrap_or_default();
+        let variables: Vec<(String, Option<String>)> = self
+            .used_placeholders(cx)
+            .into_iter()
+            .map(|name| {
+                let value = resolved_variable(collection, &name);
+                (name, value)
+            })
+            .collect();
         v_flex()
             .px_3()
             .pt_1p5()
@@ -509,8 +777,53 @@ impl ApiRequestView {
                     .when_some(
                         operation.filter(|operation| operation.deprecated),
                         |this, _| this.child(chip("deprecated", Color::Warning, cx)),
-                    ),
+                    )
+                    .child(div().flex_1())
+                    .when(operation.is_some(), |this| {
+                        this.child(
+                            Button::new("api-open-in-spec", "Ver na spec")
+                                .style(ButtonStyle::Subtle)
+                                .label_size(LabelSize::XSmall)
+                                .color(Color::Accent)
+                                .on_click(
+                                    cx.listener(|this, _, window, cx| {
+                                        this.open_in_spec(window, cx)
+                                    }),
+                                ),
+                        )
+                    }),
             )
+            .when(!variables.is_empty(), |this| {
+                this.child(
+                    h_flex()
+                        .flex_wrap()
+                        .gap_1()
+                        .children(variables.into_iter().map(|(name, value)| {
+                            let color = if value.is_some() {
+                                Color::Accent
+                            } else {
+                                Color::Warning
+                            };
+                            h_flex()
+                                .gap_1()
+                                .px_1()
+                                .rounded_sm()
+                                .bg(color.color(cx).opacity(0.1))
+                                .child(
+                                    Label::new(format!("{{{{{name}}}}}"))
+                                        .size(LabelSize::XSmall)
+                                        .buffer_font(cx)
+                                        .color(color),
+                                )
+                                .child(
+                                    Label::new(value.unwrap_or_else(|| "sem valor".to_string()))
+                                        .size(LabelSize::XSmall)
+                                        .buffer_font(cx)
+                                        .color(Color::Muted),
+                                )
+                        })),
+                )
+            })
             .when_some(prepared, |this, prepared| {
                 this.child(
                     Label::new(prepared.url)
@@ -861,19 +1174,12 @@ impl ApiRequestView {
                                 }),
                         ),
                     )
-                    .child(
-                        div().flex_1().min_w_0().child(
-                            Label::new(header.value.clone())
-                                .size(LabelSize::Small)
-                                .buffer_font(cx)
-                                .color(if enabled {
-                                    Color::Default
-                                } else {
-                                    Color::Muted
-                                })
-                                .truncate(),
-                        ),
-                    )
+                    .child(div().flex_1().min_w_0().child(render_template(
+                        &header.value,
+                        self.collection.read(cx),
+                        !enabled,
+                        cx,
+                    )))
                     .child(chip(header.origin.label(), origin_color, cx))
             }))
             .child(Self::section_label("DESTA REQUEST"))
@@ -1440,6 +1746,49 @@ fn render_validation(
     }
 }
 
+/// The 0-based line of `method:` under `path:` in the spec's text, or of the path itself.
+fn operation_row(text: &str, path: &str, method: &str) -> u32 {
+    let method = format!("{}:", method.to_ascii_lowercase());
+    let path_keys = [
+        format!("{path}:"),
+        format!("'{path}':"),
+        format!("\"{path}\":"),
+    ];
+    let lines: Vec<&str> = text.lines().collect();
+    let Some(path_row) = lines.iter().position(|line| {
+        path_keys
+            .iter()
+            .any(|key| line.trim_start() == key.as_str())
+    }) else {
+        return 0;
+    };
+    let indent = lines[path_row].len() - lines[path_row].trim_start().len();
+    for (offset, line) in lines.iter().enumerate().skip(path_row + 1) {
+        let line_indent = line.len() - line.trim_start().len();
+        if !line.trim().is_empty() && line_indent <= indent {
+            break;
+        }
+        if line.trim_start().starts_with(&method) {
+            return offset as u32;
+        }
+    }
+    path_row as u32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finds_the_operation_in_the_spec() {
+        let text = "paths:\n  /auth/:\n    get:\n      x: 1\n    post:\n      y: 2\n  /me:\n    post: {}\n";
+        assert_eq!(operation_row(text, "/auth/", "POST"), 4);
+        assert_eq!(operation_row(text, "/me", "POST"), 7);
+        assert_eq!(operation_row(text, "/me", "GET"), 6);
+        assert_eq!(operation_row(text, "/nope", "GET"), 0);
+    }
+}
+
 fn set_json_language(
     languages: &Arc<LanguageRegistry>,
     editor: &Entity<Editor>,
@@ -1554,8 +1903,17 @@ pub fn open(
                 return;
             }
             let languages = workspace.app_state().languages.clone();
+            let workspace_handle = workspace.weak_handle();
             let view = cx.new(|cx| {
-                ApiRequestView::new(collection, operation_key, saved, languages, window, cx)
+                ApiRequestView::new(
+                    workspace_handle,
+                    collection,
+                    operation_key,
+                    saved,
+                    languages,
+                    window,
+                    cx,
+                )
             });
             workspace.add_item_to_active_pane(Box::new(view), None, true, window, cx);
         })

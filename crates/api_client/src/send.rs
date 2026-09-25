@@ -245,7 +245,7 @@ impl PreparedRequest {
     }
 }
 
-fn mask(value: &str) -> String {
+pub(crate) fn mask(value: &str) -> String {
     let count = value.chars().count();
     if count <= 12 {
         return "••••".to_string();
