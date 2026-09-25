@@ -1816,4 +1816,66 @@
       "shift-tab": "skill_creator::FocusPreviousField",
     },
   },
+  {
+    // Database client (crates/database_client). Declared here instead of in code because
+    // reloading the keymap clears bindings registered with `bind_keys`.
+    "context": "SqlQueryView > Editor",
+    "use_key_equivalents": true,
+    "bindings": {
+      "cmd-enter": "database_client::RunStatement",
+      "cmd-shift-enter": "database_client::RunScript",
+      "alt-enter": "database_client::ExplainStatement",
+      "cmd-.": "database_client::CancelQuery",
+    },
+  },
+  {
+    "context": "SqlQueryView",
+    "use_key_equivalents": true,
+    "bindings": {
+      "cmd-enter": "database_client::RunStatement",
+      "cmd-shift-enter": "database_client::RunScript",
+      "alt-enter": "database_client::ExplainStatement",
+      "cmd-.": "database_client::CancelQuery",
+    },
+  },
+  {
+    "context": "DatabaseConnectView",
+    "use_key_equivalents": true,
+    "bindings": {
+      "cmd-enter": "database_client::SaveConnection",
+    },
+  },
+  {
+    "context": "DatabaseTableFilter > Editor",
+    "use_key_equivalents": true,
+    "bindings": {
+      "enter": "database_client::ApplyTableFilter",
+    },
+  },
+  {
+    "context": "DatabaseTableView",
+    "use_key_equivalents": true,
+    "bindings": {
+      "cmd-enter": "database_client::ApplyTableFilter",
+    },
+  },
+  {
+    "context": "DatabaseGrid",
+    "use_key_equivalents": true,
+    "bindings": {
+      "cmd-c": "database_client::CopyCell",
+      "up": "database_client::SelectCellAbove",
+      "down": "database_client::SelectCellBelow",
+      "left": "database_client::SelectCellLeft",
+      "right": "database_client::SelectCellRight",
+    },
+  },
+  {
+    "context": "DatabaseWriteGuard",
+    "use_key_equivalents": true,
+    "bindings": {
+      "escape": "menu::Cancel",
+      "enter": "menu::Confirm",
+    },
+  },
 ]

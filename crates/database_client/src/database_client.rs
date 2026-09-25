@@ -7,9 +7,12 @@ mod connection;
 mod discovery;
 mod grid;
 mod panel;
+mod query_view;
 mod session;
+mod statements;
 mod table_view;
 mod tls;
+mod write_guard;
 
 pub use catalog::{ColumnInfo, Relation, RelationKind, list_columns, list_relations};
 pub use connection::{Environment, SavedConnection};
@@ -17,7 +20,7 @@ pub use panel::DatabasePanel;
 pub use session::{Column, ConnectTarget, QueryOutcome, ResultSet, ServerError, Session};
 pub use tls::SslMode;
 
-use gpui::{KeyBinding, Subscription, WeakEntity, actions};
+use gpui::{Subscription, WeakEntity, actions};
 use std::any::TypeId;
 use ui::{Tooltip, prelude::*};
 use util::ResultExt as _;
@@ -34,27 +37,27 @@ actions!(
         SaveConnection,
         /// Reloads the open table with the typed WHERE and ORDER BY.
         ApplyTableFilter,
+        /// Runs the SQL statement under the cursor, or the selection.
+        RunStatement,
+        /// Runs every statement in the SQL file.
+        RunScript,
+        /// Shows the plan of the statement under the cursor (EXPLAIN ANALYZE for reads).
+        ExplainStatement,
+        /// Cancels the query running in the SQL tab, on the server.
+        CancelQuery,
+        /// Creates a SQL file in .asylum/db/queries and opens it against the dock's connection.
+        NewQuery,
+        /// Opens the SQL file in the active editor against the dock's connection.
+        OpenInDatabase,
     ]
 );
 
 pub fn init(cx: &mut App) {
     workspace::register_panel_item::<DatabasePanel>(cx);
-    cx.bind_keys([
-        KeyBinding::new("cmd-enter", SaveConnection, Some("DatabaseConnectView")),
-        KeyBinding::new("ctrl-enter", SaveConnection, Some("DatabaseConnectView")),
-        KeyBinding::new("enter", ApplyTableFilter, Some("DatabaseTableFilter")),
-        KeyBinding::new("cmd-enter", ApplyTableFilter, Some("DatabaseTableView")),
-        KeyBinding::new("ctrl-enter", ApplyTableFilter, Some("DatabaseTableView")),
-        KeyBinding::new("cmd-c", grid::CopyCell, Some("DatabaseGrid")),
-        KeyBinding::new("ctrl-c", grid::CopyCell, Some("DatabaseGrid")),
-        KeyBinding::new("up", grid::SelectCellAbove, Some("DatabaseGrid")),
-        KeyBinding::new("down", grid::SelectCellBelow, Some("DatabaseGrid")),
-        KeyBinding::new("left", grid::SelectCellLeft, Some("DatabaseGrid")),
-        KeyBinding::new("right", grid::SelectCellRight, Some("DatabaseGrid")),
-    ]);
     cx.observe_new(|workspace: &mut Workspace, window, cx| {
-        // `panel` opens the dock, `connect` also opens the connection form and
-        // `table:<schema>.<name>[:<tab>]` opens a table once the dock has connected.
+        // `panel` opens the dock, `connect` also opens the connection form,
+        // `table:<schema>.<name>[:<tab>]` opens a table once the dock has connected and
+        // `query:<file relative to the project>[:run]` opens (and runs) a SQL file.
         if let (Ok(step), Some(window)) = (std::env::var("DATABASE_CLIENT_DEBUG_OPEN"), window) {
             cx.spawn_in(window, async move |workspace, cx| {
                 cx.background_executor()
@@ -76,6 +79,39 @@ pub fn init(cx: &mut App) {
                     }
                     panel
                 })?;
+                if let (Some(target), Some(panel)) = (step.strip_prefix("query:"), panel.clone()) {
+                    let (file, run) = match target.strip_suffix(":run") {
+                        Some(file) => (file.to_owned(), true),
+                        None => (target.to_owned(), false),
+                    };
+                    for _ in 0..40 {
+                        if panel.read_with(cx, |panel, _| panel.session().is_some()) {
+                            break;
+                        }
+                        cx.background_executor()
+                            .timer(std::time::Duration::from_millis(250))
+                            .await;
+                    }
+                    panel.update_in(cx, |panel, window, cx| {
+                        if let Some(root) = panel.root().map(|root| root.join(&file)) {
+                            panel.open_query(root, window, cx);
+                        }
+                    })?;
+                    if run {
+                        cx.background_executor()
+                            .timer(std::time::Duration::from_secs(2))
+                            .await;
+                        let views = workspace.update(cx, |workspace, cx| {
+                            workspace
+                                .items_of_type::<query_view::SqlQueryView>(cx)
+                                .collect::<Vec<_>>()
+                        })?;
+                        for view in views {
+                            view.update_in(cx, |view, window, cx| view.run_statement(window, cx))?;
+                        }
+                    }
+                    return anyhow::Ok(());
+                }
                 let (Some(target), Some(panel)) = (step.strip_prefix("table:"), panel) else {
                     return anyhow::Ok(());
                 };
@@ -116,6 +152,27 @@ pub fn init(cx: &mut App) {
         }
         workspace.register_action(|workspace, _: &ToggleFocus, window, cx| {
             toggle_focus(workspace, window, cx);
+        });
+        workspace.register_action(|workspace, _: &NewQuery, window, cx| {
+            open(workspace, window, cx);
+            if let Some(panel) = workspace.panel::<DatabasePanel>(cx) {
+                panel.update(cx, |panel, cx| panel.new_query(window, cx));
+            }
+        });
+        workspace.register_action(|workspace, _: &OpenInDatabase, window, cx| {
+            let path = workspace
+                .active_item(cx)
+                .and_then(|item| item.project_path(cx))
+                .and_then(|project_path| {
+                    workspace.project().read(cx).absolute_path(&project_path, cx)
+                });
+            let Some(path) = path else {
+                return;
+            };
+            open(workspace, window, cx);
+            if let Some(panel) = workspace.panel::<DatabasePanel>(cx) {
+                panel.update(cx, |panel, cx| panel.open_query(path, window, cx));
+            }
         });
         workspace.register_action(|workspace, _: &NewConnection, window, cx| {
             open(workspace, window, cx);
@@ -430,6 +487,19 @@ mod tests {
                 .unwrap();
             let error = session.run("select 1", 10).await.unwrap_err();
             assert_eq!(server_error(&error).code, "25P02");
+            session.run("rollback", 10).await.unwrap();
+
+            // Through a cursor the limit leaves the transaction usable.
+            session.run("begin", 10).await.unwrap();
+            let outcome = session
+                .run_in_cursor("select g from generate_series(1, 5000000) g", 1000)
+                .await
+                .unwrap();
+            assert_eq!(outcome.result_sets[0].rows.len(), 1000);
+            assert!(outcome.result_sets[0].truncated);
+            assert_eq!(outcome.result_sets[0].columns[0].type_name.as_deref(), Some("int4"));
+            let outcome = session.run("select 1", 10).await.unwrap();
+            assert_eq!(outcome.result_sets[0].rows, [[Some("1".to_owned())]]);
             session.run("rollback", 10).await.unwrap();
 
             let outcome = session

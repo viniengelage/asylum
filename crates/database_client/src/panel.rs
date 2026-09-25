@@ -4,6 +4,7 @@ use crate::{
     connect_view::{self, Prefill},
     connection::{self, Environment, SavedConnection, Scope},
     discovery::{self, Source, Suggestion},
+    query_view,
     session::Session,
     table_view,
 };
@@ -397,14 +398,53 @@ impl DatabasePanel {
         connect_view::open(self.workspace.clone(), cx.entity(), prefill, window, cx);
     }
 
-    fn open_query(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        self.workspace
-            .update(cx, |workspace, cx| {
-                workspace
-                    .open_abs_path(path, OpenOptions::default(), window, cx)
-                    .detach_and_log_err(cx);
+    /// Opens the file against the active connection; without one it opens as plain text.
+    pub(crate) fn open_query(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        match self.session() {
+            Some((connection, session)) => query_view::open(
+                self.workspace.clone(),
+                self.project.clone(),
+                connection,
+                session,
+                path,
+                window,
+                cx,
+            ),
+            None => {
+                self.workspace
+                    .update(cx, |workspace, cx| {
+                        workspace
+                            .open_abs_path(path, OpenOptions::default(), window, cx)
+                            .detach_and_log_err(cx);
+                    })
+                    .log_err();
+            }
+        }
+    }
+
+    pub(crate) fn new_query(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(root) = self.root.clone() else {
+            return;
+        };
+        let header = match &self.active {
+            Some(active) => format!(
+                "-- {} · {}",
+                active.connection.name,
+                active.connection.environment.label()
+            ),
+            None => "-- nova query".to_owned(),
+        };
+        let fs = self.fs.clone();
+        cx.spawn_in(window, async move |this, cx| {
+            let path = query_view::create_query_file(fs.as_ref(), &root, &header).await?;
+            this.update_in(cx, |this, window, cx| {
+                this.saved_queries.push(path.clone());
+                this.saved_queries.sort();
+                this.open_query(path, window, cx);
+                cx.notify();
             })
-            .log_err();
+        })
+        .detach_and_log_err(cx);
     }
 
     pub(crate) fn open_table(
@@ -1147,6 +1187,15 @@ impl DatabasePanel {
                 )
             })
             .child(div().flex_1())
+            .when(self.session().is_some(), |this| {
+                this.child(
+                    Button::new("db-new-query", "Nova query")
+                        .style(ButtonStyle::Subtle)
+                        .label_size(LabelSize::XSmall)
+                        .color(Color::Accent)
+                        .on_click(cx.listener(|this, _, window, cx| this.new_query(window, cx))),
+                )
+            })
             .child(
                 Button::new("db-new-connection-footer", "Nova conexão")
                     .style(ButtonStyle::Subtle)

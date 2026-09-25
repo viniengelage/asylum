@@ -211,6 +211,60 @@ impl Session {
         self.client.is_closed()
     }
 
+    /// Another connection with the same credentials, for a view that keeps its own transaction.
+    pub async fn connect_again(&self) -> anyhow::Result<Self> {
+        Self::connect(&self.target).await
+    }
+
+    /// Runs a single SELECT through a cursor and fetches at most `row_limit + 1` rows. Inside an
+    /// open transaction this is how a row limit works without cancelling, which would abort it.
+    pub async fn run_in_cursor(&self, sql: &str, row_limit: usize) -> anyhow::Result<QueryOutcome> {
+        let client = self.client.clone();
+        let sql = sql.to_owned();
+        on_runtime(async move {
+            let started = Instant::now();
+            let statement = client.prepare(&sql).await.map_err(server_error)?;
+            let columns = statement
+                .columns()
+                .iter()
+                .map(|column| Column {
+                    name: column.name().to_owned(),
+                    type_name: Some(column.type_().name().to_owned()),
+                })
+                .collect::<Vec<_>>();
+            drop(statement);
+            let script = format!(
+                "declare asylum_rows no scroll cursor for {sql};\n\
+                 fetch {} from asylum_rows;\n\
+                 close asylum_rows",
+                row_limit + 1
+            );
+            let messages = client.simple_query(&script).await.map_err(server_error)?;
+            let mut rows = Vec::new();
+            for message in messages {
+                if let SimpleQueryMessage::Row(row) = message {
+                    rows.push(
+                        (0..row.len())
+                            .map(|index| row.try_get(index).ok().flatten().map(str::to_owned))
+                            .collect::<Vec<_>>(),
+                    );
+                }
+            }
+            let truncated = rows.len() > row_limit;
+            rows.truncate(row_limit);
+            Ok(QueryOutcome {
+                result_sets: vec![ResultSet {
+                    columns,
+                    rows_affected: Some(rows.len() as u64),
+                    rows,
+                    truncated,
+                }],
+                elapsed: started.elapsed(),
+            })
+        })
+        .await
+    }
+
     /// A second connection with the same credentials whose transactions are all read-only, for
     /// views that run SQL the person typed (a table filter) without meaning to write.
     pub async fn connect_read_only(&self) -> anyhow::Result<Self> {

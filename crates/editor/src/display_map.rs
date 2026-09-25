@@ -170,6 +170,8 @@ pub enum HighlightKey {
     ApiVariableMissing,
     BufferSearchHighlights,
     ConsoleAnsiHighlight(usize),
+    DatabaseError,
+    DatabaseStatement,
     DebugStackFrameLine,
     DocumentHighlightRead,
     DocumentHighlightWrite,

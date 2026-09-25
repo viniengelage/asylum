@@ -175,6 +175,11 @@ impl ResultGrid {
         cx.notify();
     }
 
+    /// The whole result as CSV (RFC 4180 quoting), NULL as an empty field.
+    pub fn to_csv(&self) -> String {
+        to_csv(&self.columns, &self.rows)
+    }
+
     pub fn selected_value(&self) -> Option<(&GridColumn, Option<&str>)> {
         let (row, column) = self.selected?;
         let value = self.rows.get(row)?.get(column)?;
@@ -367,6 +372,32 @@ impl ResultGrid {
     }
 }
 
+fn to_csv(columns: &[GridColumn], rows: &[Vec<Option<String>>]) -> String {
+    fn field(value: &str) -> String {
+        if value.contains([',', '"', '\n', '\r']) {
+            format!("\"{}\"", value.replace('"', "\"\""))
+        } else {
+            value.to_owned()
+        }
+    }
+    let mut csv = columns
+        .iter()
+        .map(|column| field(&column.name))
+        .collect::<Vec<_>>()
+        .join(",");
+    csv.push('\n');
+    for row in rows {
+        let line = row
+            .iter()
+            .map(|value| value.as_deref().map(field).unwrap_or_default())
+            .collect::<Vec<_>>()
+            .join(",");
+        csv.push_str(&line);
+        csv.push('\n');
+    }
+    csv
+}
+
 /// One line, at most `MAX_CELL_CHARS` characters, so a huge jsonb value can't blow up layout.
 fn display_value(value: &str) -> SharedString {
     let mut result = String::new();
@@ -448,6 +479,25 @@ mod tests {
         let shown = display_value(&long);
         assert_eq!(shown.chars().count(), MAX_CELL_CHARS + 1);
         assert!(shown.ends_with('…'));
+    }
+
+    #[test]
+    fn csv_quotes_what_needs_quoting() {
+        let columns = [
+            GridColumn {
+                name: "id".into(),
+                type_name: None,
+            },
+            GridColumn {
+                name: "note".into(),
+                type_name: None,
+            },
+        ];
+        let rows = [
+            vec![Some("1".to_owned()), Some("a, \"b\"".to_owned())],
+            vec![Some("2".to_owned()), None],
+        ];
+        assert_eq!(to_csv(&columns, &rows), "id,note\n1,\"a, \"\"b\"\"\"\n2,\n");
     }
 
     #[test]
