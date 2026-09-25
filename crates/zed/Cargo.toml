@@ -87,6 +87,7 @@ chrono.workspace = true
 clap.workspace = true
 cli.workspace = true
 clickup.workspace = true
+repo_hosting.workspace = true
 api_client.workspace = true
 client.workspace = true
 clock = { workspace = true, optional = true }

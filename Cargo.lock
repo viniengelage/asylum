@@ -15577,6 +15577,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "repo_hosting"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "askpass",
+ "base64 0.22.1",
+ "chrono",
+ "credentials_provider",
+ "editor",
+ "futures 0.3.34",
+ "git",
+ "git_hosting_providers",
+ "git_ui",
+ "git_ui_core",
+ "gpui",
+ "http_client",
+ "log",
+ "menu",
+ "project",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "ui",
+ "ui_input",
+ "urlencoding",
+ "util",
+ "workspace",
+ "zed_actions",
+ "zed_credentials_provider",
+]
+
+[[package]]
 name = "reqwest"
 version = "0.11.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -23298,6 +23330,7 @@ dependencies = [
  "remote",
  "remote_server",
  "repl",
+ "repo_hosting",
  "reqwest_client",
  "rope",
  "sandbox",

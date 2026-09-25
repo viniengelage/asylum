@@ -458,6 +458,9 @@ struct ProfileSummary {
     mcp_servers: Vec<McpServerSummary>,
     /// `None` when the ClickUp integration isn't part of this build.
     clickup_connected: Option<bool>,
+    /// `None` when the Repo panel isn't part of this build.
+    #[serde(default)]
+    bitbucket_connected: Option<bool>,
     git_committer: Option<String>,
     #[serde(default)]
     git_name: Option<String>,
@@ -475,6 +478,9 @@ struct McpServerSummary {
 const CLICKUP_CREDENTIALS_URL: &str = "https://app.clickup.com/asylum";
 const CLICKUP_OPEN_ACTION: &str = "clickup::ToggleFocus";
 const CLICKUP_DISCONNECT_ACTION: &str = "clickup::Disconnect";
+const BITBUCKET_CREDENTIALS_URL: &str = "https://bitbucket.org/asylum";
+const REPO_OPEN_ACTION: &str = "repo_hosting::ToggleFocus";
+const BITBUCKET_DISCONNECT_ACTION: &str = "repo_hosting::DisconnectBitbucket";
 
 fn summaries_dir() -> PathBuf {
     paths::profiles_dir().join("summaries")
@@ -523,6 +529,7 @@ pub struct ProfileStore {
     running: HashSet<String>,
     summaries: HashMap<String, ProfileSummary>,
     clickup_connected: Option<bool>,
+    bitbucket_connected: Option<bool>,
     git_committer: Option<String>,
     git_identity: git::repository::GitCommitter,
     load_error: Option<SharedString>,
@@ -562,6 +569,7 @@ impl ProfileStore {
                 running: HashSet::default(),
                 summaries: HashMap::default(),
                 clickup_connected: None,
+                bitbucket_connected: None,
                 git_committer: None,
                 git_identity: git::repository::GitCommitter {
                     name: None,
@@ -627,6 +635,10 @@ impl ProfileStore {
                 .build_action(CLICKUP_OPEN_ACTION, None)
                 .is_ok()
                 .then_some(self.clickup_connected.unwrap_or(false)),
+            bitbucket_connected: cx
+                .build_action(REPO_OPEN_ACTION, None)
+                .is_ok()
+                .then_some(self.bitbucket_connected.unwrap_or(false)),
             git_committer: self.git_committer.clone(),
             git_name: self.git_identity.name.clone(),
             git_email: self.git_identity.email.clone(),
@@ -652,13 +664,18 @@ impl ProfileStore {
         }));
     }
 
-    /// Checks the accounts this process can see only asynchronously: whether ClickUp has a
-    /// token and who git commits as.
+    /// Checks the accounts this process can see only asynchronously: whether ClickUp and
+    /// Bitbucket have a token and who git commits as.
     fn refresh_accounts(&mut self, cx: &mut Context<Self>) {
         let credentials = zed_credentials_provider::global(cx);
         cx.spawn(async move |this, cx| {
             let clickup_connected = credentials
                 .read_credentials(CLICKUP_CREDENTIALS_URL, cx)
+                .await
+                .log_err()
+                .map(|credentials| credentials.is_some());
+            let bitbucket_connected = credentials
+                .read_credentials(BITBUCKET_CREDENTIALS_URL, cx)
                 .await
                 .log_err()
                 .map(|credentials| credentials.is_some());
@@ -671,6 +688,7 @@ impl ProfileStore {
             };
             this.update(cx, |this, cx| {
                 this.clickup_connected = clickup_connected;
+                this.bitbucket_connected = bitbucket_connected;
                 this.git_committer = git_committer;
                 this.git_identity = committer;
                 this.publish_summary(cx);
@@ -2410,40 +2428,67 @@ impl ManageProfilesModal {
         is_active: bool,
         cx: &App,
     ) -> Option<impl IntoElement> {
-        let connected = summary.clickup_connected?;
-        let (label, action) = if connected {
-            ("Desconectar", CLICKUP_DISCONNECT_ACTION)
-        } else {
-            ("Conectar", CLICKUP_OPEN_ACTION)
-        };
-        let trailing = h_flex()
-            .gap_2()
-            .when(!is_active, |this| {
-                this.child(Self::render_status(
-                    if connected {
-                        "conectado"
+        let integrations = [
+            (
+                summary.clickup_connected,
+                "clickup-connection",
+                IconName::ListTodo,
+                "ClickUp",
+                "token pessoal no Keychain deste perfil",
+                CLICKUP_OPEN_ACTION,
+                CLICKUP_DISCONNECT_ACTION,
+            ),
+            (
+                summary.bitbucket_connected,
+                "bitbucket-connection",
+                IconName::PullRequest,
+                "Bitbucket",
+                "API token e e-mail Atlassian no Keychain deste perfil",
+                REPO_OPEN_ACTION,
+                BITBUCKET_DISCONNECT_ACTION,
+            ),
+        ];
+        let rows: Vec<AnyElement> = integrations
+            .into_iter()
+            .filter_map(
+                |(connected, id, icon, name, detail, open_action, disconnect_action)| {
+                    let connected = connected?;
+                    let (label, action) = if connected {
+                        ("Desconectar", disconnect_action)
                     } else {
-                        "desconectado"
-                    },
-                    connected,
-                ))
-            })
-            .child(
-                Button::new("clickup-connection", label)
-                    .label_size(LabelSize::Small)
-                    .on_click(self.profile_action(&self.selected_id, action, None)),
+                        ("Conectar", open_action)
+                    };
+                    let trailing = h_flex()
+                        .gap_2()
+                        .when(!is_active, |this| {
+                            this.child(Self::render_status(
+                                if connected {
+                                    "conectado"
+                                } else {
+                                    "desconectado"
+                                },
+                                connected,
+                            ))
+                        })
+                        .child(
+                            Button::new(id, label)
+                                .label_size(LabelSize::Small)
+                                .on_click(self.profile_action(&self.selected_id, action, None)),
+                        )
+                        .into_any_element();
+                    Some(Self::render_row(
+                        icon,
+                        Color::Default,
+                        name,
+                        Some(detail.into()),
+                        Some(trailing),
+                        false,
+                        cx,
+                    ))
+                },
             )
-            .into_any_element();
-        let row = Self::render_row(
-            IconName::ListTodo,
-            Color::Default,
-            "ClickUp",
-            Some("token pessoal no Keychain deste perfil".into()),
-            Some(trailing),
-            false,
-            cx,
-        );
-        Some(Self::render_card("INTEGRAÇÕES", None, vec![row], None, cx))
+            .collect();
+        (!rows.is_empty()).then(|| Self::render_card("INTEGRAÇÕES", None, rows, None, cx))
     }
 
     fn render_folders_card(

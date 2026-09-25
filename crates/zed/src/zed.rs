@@ -638,6 +638,7 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
             cx.new(|_| line_ending_selector::LineEndingIndicator::default());
         let toolbox_button = cx.new(|cx| toolbox::ToolboxButton::new(workspace, cx));
         let clickup_button = cx.new(|cx| clickup::ClickUpToolkitButton::new(workspace, cx));
+        let repo_button = cx.new(|cx| repo_hosting::RepoToolkitButton::new(workspace, cx));
         let api_button = cx.new(|cx| api_client::ApiToolkitButton::new(workspace, cx));
         let dock_toggle_buttons =
             cx.new(|cx| workspace::dock::DockToggleButtons::new(workspace, cx));
@@ -659,6 +660,7 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
             status_bar.add_left_item(active_file_name, window, cx);
             status_bar.add_toolkit_item(toolbox_button, window, cx);
             status_bar.add_toolkit_item(clickup_button, window, cx);
+            status_bar.add_toolkit_item(repo_button, window, cx);
             status_bar.add_toolkit_item(api_button, window, cx);
             // Editor info renders right items in reverse, so this sits at its right end,
             // next to the toolkit.

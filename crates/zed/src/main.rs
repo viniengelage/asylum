@@ -822,6 +822,7 @@ fn main() {
         svg_preview::init(cx);
         toolbox::init(cx);
         clickup::init(cx);
+        repo_hosting::init(cx);
         api_client::init(cx);
         onboarding::init(cx);
         settings_ui::init(cx);
