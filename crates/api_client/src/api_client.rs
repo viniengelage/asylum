@@ -15,7 +15,7 @@ mod vars;
 pub use panel::ApiPanel;
 pub use request_view::ApiRequestView;
 
-use gpui::{KeyBinding, Subscription, WeakEntity, actions};
+use gpui::{Subscription, WeakEntity, actions};
 use std::any::TypeId;
 use ui::{Tooltip, prelude::*};
 use util::ResultExt as _;
@@ -33,10 +33,6 @@ actions!(
 
 pub fn init(cx: &mut App) {
     workspace::register_panel_item::<ApiPanel>(cx);
-    cx.bind_keys([
-        KeyBinding::new("cmd-enter", SendRequest, Some("ApiRequestView")),
-        KeyBinding::new("ctrl-enter", SendRequest, Some("ApiRequestView")),
-    ]);
     cx.observe_new(|workspace: &mut Workspace, _window, _cx| {
         workspace.register_action(|workspace, _: &ToggleFocus, window, cx| {
             toggle_focus(workspace, window, cx);

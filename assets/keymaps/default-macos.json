@@ -1888,4 +1888,20 @@
       "enter": "menu::Confirm",
     },
   },
+  {
+    // API client (crates/api_client). In the keymap rather than in code because reloading the
+    // keymap drops bindings registered with `bind_keys`.
+    "context": "ApiRequestView > Editor",
+    "use_key_equivalents": true,
+    "bindings": {
+      "cmd-enter": "api_client::SendRequest",
+    },
+  },
+  {
+    "context": "ApiRequestView",
+    "use_key_equivalents": true,
+    "bindings": {
+      "cmd-enter": "api_client::SendRequest",
+    },
+  },
 ]
