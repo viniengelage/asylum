@@ -824,6 +824,7 @@ fn main() {
         clickup::init(cx);
         repo_hosting::init(cx);
         api_client::init(cx);
+        database_client::init(cx);
         onboarding::init(cx);
         settings_ui::init(cx);
         keymap_editor::init(cx);

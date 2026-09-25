@@ -47,6 +47,64 @@ pub async fn list_relations(session: &Session) -> anyhow::Result<Vec<Relation>> 
     Ok(rows.into_iter().filter_map(parse_relation).collect())
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ColumnInfo {
+    pub name: String,
+    /// As `format_type` prints it: `varchar(14)`, `timestamp with time zone`, `text[]`.
+    pub type_name: String,
+    pub not_null: bool,
+    pub primary_key: bool,
+    /// Unique on its own, not as part of a wider index.
+    pub unique: bool,
+}
+
+pub fn quote_ident(name: &str) -> String {
+    format!("\"{}\"", name.replace('"', "\"\""))
+}
+
+/// Relies on `standard_conforming_strings`, on by default since Postgres 9.1.
+pub fn quote_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+pub fn qualified_name(schema: &str, name: &str) -> String {
+    format!("{}.{}", quote_ident(schema), quote_ident(name))
+}
+
+pub async fn list_columns(
+    session: &Session,
+    schema: &str,
+    relation: &str,
+) -> anyhow::Result<Vec<ColumnInfo>> {
+    let sql = format!(
+        "select a.attname, pg_catalog.format_type(a.atttypid, a.atttypmod), a.attnotnull,
+                coalesce((select bool_or(i.indisprimary) from pg_catalog.pg_index i
+                           where i.indrelid = a.attrelid and a.attnum = any(i.indkey)), false),
+                coalesce((select bool_or(i.indisunique and not i.indisprimary) from pg_catalog.pg_index i
+                           where i.indrelid = a.attrelid and i.indnatts = 1 and i.indkey[0] = a.attnum), false)
+           from pg_catalog.pg_attribute a
+          where a.attrelid = {}::regclass and a.attnum > 0 and not a.attisdropped
+          order by a.attnum",
+        quote_literal(&qualified_name(schema, relation))
+    );
+    let rows = session.query_text(&sql).await?;
+    Ok(rows.into_iter().filter_map(parse_column).collect())
+}
+
+fn parse_column(row: Vec<Option<String>>) -> Option<ColumnInfo> {
+    let mut values = row.into_iter();
+    let name = values.next().flatten()?;
+    let type_name = values.next().flatten()?;
+    let mut flag = || values.next().flatten().as_deref() == Some("t");
+    Some(ColumnInfo {
+        name,
+        type_name,
+        not_null: flag(),
+        primary_key: flag(),
+        unique: flag(),
+    })
+}
+
 fn parse_relation(row: Vec<Option<String>>) -> Option<Relation> {
     let mut values = row.into_iter();
     let schema = values.next().flatten()?;
@@ -89,6 +147,12 @@ mod tests {
 
         let relation = parse_relation(row(&[Some("audit"), Some("log"), Some("p"), Some("1200")]));
         assert_eq!(relation.map(|relation| relation.estimated_rows), Some(Some(1200)));
+    }
+
+    #[test]
+    fn identifiers_and_literals_are_quoted() {
+        assert_eq!(qualified_name("public", "my \"odd\" table"), "\"public\".\"my \"\"odd\"\" table\"");
+        assert_eq!(quote_literal("O'Brien"), "'O''Brien'");
     }
 
     #[test]

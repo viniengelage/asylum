@@ -640,6 +640,8 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
         let clickup_button = cx.new(|cx| clickup::ClickUpToolkitButton::new(workspace, cx));
         let repo_button = cx.new(|cx| repo_hosting::RepoToolkitButton::new(workspace, cx));
         let api_button = cx.new(|cx| api_client::ApiToolkitButton::new(workspace, cx));
+        let database_button =
+            cx.new(|cx| database_client::DatabaseToolkitButton::new(workspace, cx));
         let dock_toggle_buttons =
             cx.new(|cx| workspace::dock::DockToggleButtons::new(workspace, cx));
         let git_blame_status = cx.new(|_| git_ui::GitBlameStatus::default());
@@ -662,6 +664,7 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
             status_bar.add_toolkit_item(clickup_button, window, cx);
             status_bar.add_toolkit_item(repo_button, window, cx);
             status_bar.add_toolkit_item(api_button, window, cx);
+            status_bar.add_toolkit_item(database_button, window, cx);
             // Editor info renders right items in reverse, so this sits at its right end,
             // next to the toolkit.
             status_bar.add_right_item(edit_prediction_ui, window, cx);

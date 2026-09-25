@@ -2,12 +2,166 @@
 //! the shared tokio runtime of `reqwest_client`; views only await the results.
 
 mod catalog;
+mod connect_view;
+mod connection;
+mod discovery;
+mod panel;
 mod session;
 mod tls;
 
-pub use catalog::{Relation, RelationKind, list_relations};
+pub use catalog::{ColumnInfo, Relation, RelationKind, list_columns, list_relations};
+pub use connection::{Environment, SavedConnection};
+pub use panel::DatabasePanel;
 pub use session::{Column, ConnectTarget, QueryOutcome, ResultSet, ServerError, Session};
 pub use tls::SslMode;
+
+use gpui::{KeyBinding, Subscription, WeakEntity, actions};
+use std::any::TypeId;
+use ui::{Tooltip, prelude::*};
+use util::ResultExt as _;
+use workspace::{HideStatusItem, ItemHandle, StatusItemView, Workspace, dock::StatusBarButton};
+
+actions!(
+    database_client,
+    [
+        /// Opens the database panel, or hands focus back if it already has it.
+        ToggleFocus,
+        /// Opens the form for a new Postgres connection.
+        NewConnection,
+        /// Saves the connection in the focused form and connects to it.
+        SaveConnection,
+    ]
+);
+
+pub fn init(cx: &mut App) {
+    workspace::register_panel_item::<DatabasePanel>(cx);
+    cx.bind_keys([
+        KeyBinding::new("cmd-enter", SaveConnection, Some("DatabaseConnectView")),
+        KeyBinding::new("ctrl-enter", SaveConnection, Some("DatabaseConnectView")),
+    ]);
+    cx.observe_new(|workspace: &mut Workspace, window, cx| {
+        // `panel` opens the dock, `connect` also opens the connection form.
+        if let (Ok(step), Some(window)) = (std::env::var("DATABASE_CLIENT_DEBUG_OPEN"), window) {
+            cx.spawn_in(window, async move |workspace, cx| {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_secs(3))
+                    .await;
+                workspace.update_in(cx, |workspace, window, cx| {
+                    open(workspace, window, cx);
+                    if step == "connect"
+                        && let Some(panel) = workspace.panel::<DatabasePanel>(cx)
+                    {
+                        connect_view::open_in(
+                            workspace,
+                            panel,
+                            connect_view::Prefill::New,
+                            window,
+                            cx,
+                        );
+                    }
+                })
+            })
+            .detach_and_log_err(cx);
+        }
+        workspace.register_action(|workspace, _: &ToggleFocus, window, cx| {
+            toggle_focus(workspace, window, cx);
+        });
+        workspace.register_action(|workspace, _: &NewConnection, window, cx| {
+            open(workspace, window, cx);
+            if let Some(panel) = workspace.panel::<DatabasePanel>(cx) {
+                connect_view::open_in(workspace, panel, connect_view::Prefill::New, window, cx);
+            }
+        });
+    })
+    .detach();
+}
+
+/// Adds the panel the first time it is asked for, so projects without a database don't get a
+/// tab.
+pub fn open(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
+    if workspace.panel::<DatabasePanel>(cx).is_none() {
+        let panel = cx.new(|cx| DatabasePanel::new(workspace, window, cx));
+        workspace.add_panel(panel, window, cx);
+    }
+    workspace.focus_panel::<DatabasePanel>(window, cx);
+}
+
+fn toggle_focus(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
+    if workspace.panel::<DatabasePanel>(cx).is_none() {
+        open(workspace, window, cx);
+        return;
+    }
+    workspace.toggle_panel_focus::<DatabasePanel>(window, cx);
+}
+
+fn panel_is_visible(workspace: &Workspace, cx: &App) -> bool {
+    workspace.all_docks().iter().any(|dock| {
+        dock.read(cx)
+            .visible_panel()
+            .is_some_and(|panel| panel.panel_type_id() == TypeId::of::<DatabasePanel>())
+    })
+}
+
+/// The database button in the status bar's toolkit group, lit while the panel is open.
+pub struct DatabaseToolkitButton {
+    workspace: WeakEntity<Workspace>,
+    _dock_subscriptions: Vec<Subscription>,
+}
+
+impl DatabaseToolkitButton {
+    pub fn new(workspace: &Workspace, cx: &mut Context<Self>) -> Self {
+        let dock_subscriptions = workspace
+            .all_docks()
+            .into_iter()
+            .map(|dock| cx.observe(dock, |_, _, cx| cx.notify()))
+            .collect();
+        Self {
+            workspace: workspace.weak_handle(),
+            _dock_subscriptions: dock_subscriptions,
+        }
+    }
+}
+
+impl Render for DatabaseToolkitButton {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let is_open = self
+            .workspace
+            .upgrade()
+            .is_some_and(|workspace| panel_is_visible(workspace.read(cx), cx));
+        let workspace = self.workspace.clone();
+
+        StatusBarButton::new("toolkit-database", IconName::Database, is_open)
+            .tab_index(0isize)
+            .aria_label("Banco")
+            .tooltip(|_window, cx| Tooltip::for_action("Banco", &ToggleFocus, cx))
+            .on_click(move |_, window, cx| {
+                workspace
+                    .update(cx, |workspace, cx| {
+                        if is_open {
+                            workspace.close_panel::<DatabasePanel>(window, cx);
+                        } else {
+                            open(workspace, window, cx);
+                        }
+                    })
+                    .log_err();
+            })
+    }
+}
+
+impl StatusItemView for DatabaseToolkitButton {
+    fn set_active_pane_item(
+        &mut self,
+        _active_pane_item: Option<&dyn ItemHandle>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) {
+    }
+
+    fn hide_setting(&self, _cx: &App) -> Option<HideStatusItem> {
+        // The panel has no status bar button of its own, so this is the only visible way in.
+        None
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -62,12 +216,13 @@ mod tests {
                     "drop schema if exists database_client_spike cascade;
                      create schema database_client_spike;
                      create table database_client_spike.users (
-                         id bigint primary key, name text not null, profile jsonb, roles text[]
+                         id bigint primary key, name text not null, profile jsonb, roles text[],
+                         document varchar(14) unique
                      );
                      insert into database_client_spike.users values
-                         (1, 'Ana', '{\"theme\": \"dark\"}', '{investor,beta}'),
-                         (2, 'Bruno', null, '{investor}'),
-                         (3, 'Camila', '{}', '{}');
+                         (1, 'Ana', '{\"theme\": \"dark\"}', '{investor,beta}', '1'),
+                         (2, 'Bruno', null, '{investor}', '2'),
+                         (3, 'Camila', '{}', '{}', null);
                      analyze database_client_spike.users;",
                     1000,
                 )
@@ -84,6 +239,33 @@ mod tests {
             assert_eq!(users.estimated_rows, Some(3));
             eprintln!("{} relações no catálogo", relations.len());
 
+            let columns = list_columns(&session, "database_client_spike", "users")
+                .await
+                .unwrap();
+            let summary = columns
+                .iter()
+                .map(|column| {
+                    format!(
+                        "{} {}{}{}{}",
+                        column.name,
+                        column.type_name,
+                        if column.not_null { " not null" } else { "" },
+                        if column.primary_key { " pk" } else { "" },
+                        if column.unique { " unique" } else { "" },
+                    )
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                summary,
+                [
+                    "id bigint not null pk",
+                    "name text not null",
+                    "profile jsonb",
+                    "roles text[]",
+                    "document character varying(14) unique",
+                ]
+            );
+
             let outcome = session
                 .run("select * from database_client_spike.users order by id", 1000)
                 .await
@@ -98,7 +280,13 @@ mod tests {
                 .collect::<Vec<_>>();
             assert_eq!(
                 types,
-                [Some("int8"), Some("text"), Some("jsonb"), Some("_text")]
+                [
+                    Some("int8"),
+                    Some("text"),
+                    Some("jsonb"),
+                    Some("_text"),
+                    Some("varchar")
+                ]
             );
             assert_eq!(users.rows[0][2].as_deref(), Some("{\"theme\": \"dark\"}"));
             assert_eq!(users.rows[0][3].as_deref(), Some("{investor,beta}"));

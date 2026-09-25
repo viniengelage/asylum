@@ -12,7 +12,8 @@ use tokio_postgres::tls::{ChannelBinding, MakeTlsConnect, TlsConnect, TlsStream}
 
 /// The `sslmode` values libpq understands. tokio-postgres only knows the first three, so the
 /// certificate checks of the `verify-*` modes happen in the rustls verifier instead.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum SslMode {
     Disable,
     #[default]
