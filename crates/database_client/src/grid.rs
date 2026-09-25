@@ -2,6 +2,8 @@
 //! pinned row-number column, resizable columns, one selected cell and a strip that shows the
 //! whole value of that cell.
 
+use crate::edits::PendingEdits;
+use editor::Editor;
 use gpui::{
     AbsoluteLength, AnyElement, ClipboardItem, Entity, EventEmitter, FocusHandle, Focusable,
     FontWeight, actions, px,
@@ -25,6 +27,12 @@ actions!(
         SelectCellLeft,
         /// Selects the cell to the right.
         SelectCellRight,
+        /// Starts editing the selected cell.
+        EditCell,
+        /// Keeps the value typed in the cell.
+        ConfirmCellEdit,
+        /// Leaves the cell as it was.
+        CancelCellEdit,
     ]
 );
 
@@ -75,6 +83,18 @@ pub struct Sort {
 pub enum GridEvent {
     /// A header was clicked; the owner reorders and reloads.
     SortRequested(usize),
+    /// A cell got a new value (`None` is NULL); the owner keeps it as a pending change.
+    CellEdited {
+        row: usize,
+        column: usize,
+        value: Option<String>,
+    },
+}
+
+struct CellEditor {
+    row: usize,
+    column: usize,
+    editor: Entity<Editor>,
 }
 
 pub struct ResultGrid {
@@ -85,6 +105,9 @@ pub struct ResultGrid {
     sort: Option<Sort>,
     sortable: bool,
     selected: Option<(usize, usize)>,
+    editable: bool,
+    pending: PendingEdits,
+    editing: Option<CellEditor>,
     widths: Entity<ResizableColumnsState>,
     interaction: Entity<TableInteractionState>,
     focus_handle: FocusHandle,
@@ -102,9 +125,91 @@ impl ResultGrid {
             sort: None,
             sortable,
             selected: None,
+            editable: false,
+            pending: PendingEdits::default(),
+            editing: None,
             widths: cx.new(|_| ResizableColumnsState::new(1, vec![px(48.)], vec![TableResizeBehavior::None])),
             interaction: cx.new(|cx| TableInteractionState::new(cx)),
             focus_handle: cx.focus_handle(),
+        }
+    }
+
+    pub fn set_editable(&mut self, editable: bool, cx: &mut Context<Self>) {
+        self.editable = editable;
+        cx.notify();
+    }
+
+    /// Values the owner hasn't written yet, shown in place of what was loaded.
+    pub fn set_pending(&mut self, pending: PendingEdits, cx: &mut Context<Self>) {
+        self.pending = pending;
+        cx.notify();
+    }
+
+    pub fn rows(&self) -> &[Vec<Option<String>>] {
+        &self.rows
+    }
+
+    pub fn columns(&self) -> &[GridColumn] {
+        &self.columns
+    }
+
+    fn start_editing(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((row, column)) = self.selected.filter(|_| self.editable) else {
+            return;
+        };
+        let current = match self.pending.get(&(row, column)) {
+            Some(value) => value.clone(),
+            None => self
+                .rows
+                .get(row)
+                .and_then(|values| values.get(column))
+                .cloned()
+                .flatten(),
+        };
+        let editor = cx.new(|cx| {
+            let mut editor = Editor::single_line(window, cx);
+            editor.set_text(current.unwrap_or_default(), window, cx);
+            editor.select_all(&editor::actions::SelectAll, window, cx);
+            editor
+        });
+        window.focus(&editor.focus_handle(cx), cx);
+        self.editing = Some(CellEditor {
+            row,
+            column,
+            editor,
+        });
+        cx.notify();
+    }
+
+    fn confirm_edit(&mut self, _: &ConfirmCellEdit, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(editing) = self.editing.take() else {
+            return;
+        };
+        let value = editing.editor.read(cx).text(cx);
+        cx.emit(GridEvent::CellEdited {
+            row: editing.row,
+            column: editing.column,
+            value: Some(value),
+        });
+        window.focus(&self.focus_handle, cx);
+        cx.notify();
+    }
+
+    fn cancel_edit(&mut self, _: &CancelCellEdit, window: &mut Window, cx: &mut Context<Self>) {
+        if self.editing.take().is_some() {
+            window.focus(&self.focus_handle, cx);
+            cx.notify();
+        }
+    }
+
+    fn set_selected_null(&mut self, cx: &mut Context<Self>) {
+        if let Some((row, column)) = self.selected.filter(|_| self.editable) {
+            self.editing = None;
+            cx.emit(GridEvent::CellEdited {
+                row,
+                column,
+                value: None,
+            });
         }
     }
 
@@ -169,6 +274,7 @@ impl ResultGrid {
         {
             self.selected = None;
         }
+        self.editing = None;
         self.columns = columns;
         self.rows = rows;
         self.first_row_number = first_row_number;
@@ -280,6 +386,31 @@ impl ResultGrid {
                         .get(column_index)
                         .is_some_and(GridColumn::is_numeric);
                     let cell_selected = self.selected == Some((row_index, column_index));
+                    if let Some(editing) = self
+                        .editing
+                        .as_ref()
+                        .filter(|editing| editing.row == row_index && editing.column == column_index)
+                    {
+                        cells.push(
+                            div()
+                                .key_context("DatabaseCellEditor")
+                                .w_full()
+                                .px_1()
+                                .rounded_sm()
+                                .border_1()
+                                .border_color(selected_border)
+                                .bg(cx.theme().colors().editor_background)
+                                .child(editing.editor.clone())
+                                .into_any_element(),
+                        );
+                        continue;
+                    }
+                    let pending = self.pending.get(&(row_index, column_index));
+                    let pending_display = pending.map(|value| value.as_deref().map(display_value));
+                    let value = match &pending_display {
+                        Some(pending) => pending,
+                        None => value,
+                    };
                     cells.push(
                         div()
                             .id(("db-grid-cell", row_index * 4096 + column_index))
@@ -290,6 +421,11 @@ impl ResultGrid {
                             .overflow_hidden()
                             .when(numeric, |this| this.justify_end())
                             .when(row_selected, |this| this.bg(selected_row_background))
+                            .when(pending.is_some(), |this| {
+                                this.bg(Color::Warning.color(cx).opacity(0.14))
+                                    .border_l_2()
+                                    .border_color(Color::Warning.color(cx))
+                            })
                             .when(cell_selected, |this| {
                                 this.border_1().border_color(selected_border).rounded_sm()
                             })
@@ -297,6 +433,7 @@ impl ResultGrid {
                                 Some(value) => Label::new(value.clone())
                                     .size(LabelSize::Small)
                                     .buffer_font(cx)
+                                    .when(pending.is_some(), |label| label.color(Color::Warning))
                                     .single_line()
                                     .truncate()
                                     .into_any_element(),
@@ -307,9 +444,14 @@ impl ResultGrid {
                                     .color(Color::Disabled)
                                     .into_any_element(),
                             })
-                            .on_click(cx.listener(move |this, _, window, cx| {
+                            .on_click(cx.listener(move |this, event: &gpui::ClickEvent, window, cx| {
                                 this.selected = Some((row_index, column_index));
-                                window.focus(&this.focus_handle, cx);
+                                if event.click_count() >= 2 {
+                                    this.start_editing(window, cx);
+                                } else {
+                                    this.editing = None;
+                                    window.focus(&this.focus_handle, cx);
+                                }
                                 cx.notify();
                             }))
                             .into_any_element(),
@@ -358,6 +500,23 @@ impl ResultGrid {
                             .into_any_element(),
                     }),
                 )
+                .when(self.editable, |this| {
+                    this.child(
+                        Button::new("db-grid-null", "NULL")
+                            .style(ButtonStyle::Subtle)
+                            .label_size(LabelSize::XSmall)
+                            .tooltip(Tooltip::text("Deixar esta célula NULL"))
+                            .on_click(cx.listener(|this, _, _, cx| this.set_selected_null(cx))),
+                    )
+                    .child(
+                        Button::new("db-grid-edit", "Editar")
+                            .style(ButtonStyle::Subtle)
+                            .label_size(LabelSize::XSmall)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.start_editing(window, cx)
+                            })),
+                    )
+                })
                 .child(
                     IconButton::new("db-grid-copy", IconName::Copy)
                         .icon_size(IconSize::Small)
@@ -440,6 +599,9 @@ impl Render for ResultGrid {
             .key_context("DatabaseGrid")
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::copy_cell))
+            .on_action(cx.listener(|this, _: &EditCell, window, cx| this.start_editing(window, cx)))
+            .on_action(cx.listener(Self::confirm_edit))
+            .on_action(cx.listener(Self::cancel_edit))
             .on_action(cx.listener(|this, _: &SelectCellBelow, _, cx| this.move_selection(1, 0, cx)))
             .on_action(cx.listener(|this, _: &SelectCellAbove, _, cx| this.move_selection(-1, 0, cx)))
             .on_action(cx.listener(|this, _: &SelectCellRight, _, cx| this.move_selection(0, 1, cx)))

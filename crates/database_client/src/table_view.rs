@@ -3,15 +3,18 @@
 //! connection, so a typed filter can't write and a slow page doesn't hold up the dock.
 
 use crate::{
-    ApplyTableFilter,
+    ApplyEdits, ApplyTableFilter,
     catalog::{
         self, ColumnInfo, ForeignKey, ForeignKeyDirection, IndexInfo, RelationKind, qualified_name,
         quote_ident,
     },
-    connection::SavedConnection,
+    connection::{Environment, SavedConnection},
+    edits::{self, PendingEdits},
     grid::{GridColumn, GridEvent, ResultGrid, Sort},
     panel::environment_chip,
     session::{ServerError, Session},
+    statements::Risk,
+    write_guard::WriteGuard,
 };
 use gpui::{
     AnyElement, ClipboardItem, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
@@ -19,8 +22,8 @@ use gpui::{
 };
 use std::{sync::Arc, time::Duration};
 use ui::{
-    ToggleButtonGroup, ToggleButtonGroupSize, ToggleButtonGroupStyle, ToggleButtonSimple,
-    Tooltip, prelude::*,
+    Indicator, ToggleButtonGroup, ToggleButtonGroupSize, ToggleButtonGroupStyle,
+    ToggleButtonSimple, Tooltip, prelude::*,
 };
 use ui_input::InputField;
 use util::ResultExt as _;
@@ -79,7 +82,15 @@ struct Structure {
 }
 
 pub struct TableView {
+    workspace: WeakEntity<Workspace>,
     connection: SavedConnection,
+    panel_session: Arc<Session>,
+    write_session: Option<Arc<Session>>,
+    pending: PendingEdits,
+    show_sql: bool,
+    applying: bool,
+    notice: Option<(SharedString, Color)>,
+    apply_task: Task<()>,
     schema: String,
     name: String,
     kind: RelationKind,
@@ -113,6 +124,7 @@ fn describe_error(error: &anyhow::Error) -> SharedString {
 impl TableView {
     #[allow(clippy::too_many_arguments)]
     fn new(
+        workspace: WeakEntity<Workspace>,
         connection: SavedConnection,
         panel_session: Arc<Session>,
         schema: String,
@@ -130,9 +142,20 @@ impl TableView {
         let grid = cx.new(|cx| ResultGrid::new(true, cx));
         let subscriptions = vec![cx.subscribe(&grid, |this, _, event, cx| match event {
             GridEvent::SortRequested(column) => this.sort_by(*column, cx),
+            GridEvent::CellEdited { row, column, value } => {
+                this.cell_edited(*row, *column, value.clone(), cx)
+            }
         })];
         let mut this = Self {
+            workspace,
             connection,
+            panel_session: panel_session.clone(),
+            write_session: None,
+            pending: PendingEdits::default(),
+            show_sql: false,
+            applying: false,
+            notice: None,
+            apply_task: Task::ready(()),
             schema,
             name,
             kind,
@@ -170,6 +193,8 @@ impl TableView {
                 Ok((session, columns)) => {
                     this.session = Some(session);
                     this.columns = columns;
+                    let editable = this.can_edit();
+                    this.grid.update(cx, |grid, cx| grid.set_editable(editable, cx));
                     this.load_page(cx);
                 }
                 Err(error) => {
@@ -282,7 +307,214 @@ impl TableView {
         });
     }
 
+    fn can_edit(&self) -> bool {
+        matches!(
+            self.kind,
+            RelationKind::Table | RelationKind::PartitionedTable
+        ) && !self.connection.read_only
+            && self.columns.iter().any(|column| column.primary_key)
+    }
+
+    /// Paging, sorting or filtering would drop the edited page, so they wait.
+    fn blocked_by_pending(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.pending.is_empty() {
+            return false;
+        }
+        self.notice = Some((
+            "Aplique ou descarte as alterações antes de trocar de página, ordenar ou filtrar."
+                .into(),
+            Color::Warning,
+        ));
+        cx.notify();
+        true
+    }
+
+    fn cell_edited(
+        &mut self,
+        row: usize,
+        column: usize,
+        value: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let original = self
+            .grid
+            .read(cx)
+            .rows()
+            .get(row)
+            .and_then(|values| values.get(column))
+            .cloned()
+            .flatten();
+        if original == value {
+            self.pending.remove(&(row, column));
+        } else {
+            self.pending.insert((row, column), value);
+        }
+        self.notice = None;
+        let pending = self.pending.clone();
+        self.grid.update(cx, |grid, cx| grid.set_pending(pending, cx));
+        cx.notify();
+    }
+
+    fn discard_edits(&mut self, cx: &mut Context<Self>) {
+        self.pending.clear();
+        self.show_sql = false;
+        self.notice = None;
+        self.grid
+            .update(cx, |grid, cx| grid.set_pending(PendingEdits::default(), cx));
+        cx.notify();
+    }
+
+    fn pending_updates(&self, cx: &App) -> Result<Vec<edits::RowUpdate>, String> {
+        let grid = self.grid.read(cx);
+        let names = grid
+            .columns()
+            .iter()
+            .map(|column| column.name.clone())
+            .collect::<Vec<_>>();
+        let primary_key = names
+            .iter()
+            .enumerate()
+            .filter(|(_, name)| {
+                self.columns
+                    .iter()
+                    .any(|column| column.primary_key && &column.name == *name)
+            })
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        edits::row_updates(
+            &self.schema,
+            &self.name,
+            &names,
+            &primary_key,
+            grid.rows(),
+            &self.pending,
+        )
+    }
+
+    fn apply_edits(&mut self, _: &ApplyEdits, window: &mut Window, cx: &mut Context<Self>) {
+        if self.pending.is_empty() || self.applying {
+            return;
+        }
+        let updates = match self.pending_updates(cx) {
+            Ok(updates) => updates,
+            Err(error) => {
+                self.notice = Some((error.into(), Color::Error));
+                cx.notify();
+                return;
+            }
+        };
+        if updates.is_empty() {
+            self.discard_edits(cx);
+            return;
+        }
+        if self.connection.environment != Environment::Prod {
+            self.write(updates, cx);
+            return;
+        }
+        let this = cx.weak_entity();
+        let connection = self.connection.clone();
+        let preview = edits::preview(&updates);
+        let opened = self.workspace.update(cx, |workspace, cx| {
+            workspace.toggle_modal(window, cx, move |window, cx| {
+                WriteGuard::new(
+                    connection,
+                    preview,
+                    Risk::ProductionWrite,
+                    true,
+                    Some(
+                        "As alterações rodam numa transação: se alguma linha mudou desde que a \
+                         página carregou, nada é gravado."
+                            .into(),
+                    ),
+                    None,
+                    Box::new(move |_, _window, cx| {
+                        this.update(cx, |this, cx| this.write(updates, cx)).log_err();
+                    }),
+                    window,
+                    cx,
+                )
+            });
+        });
+        if opened.is_err() {
+            self.notice = Some(("A janela deste workspace foi fechada.".into(), Color::Error));
+            cx.notify();
+        }
+    }
+
+    /// Runs every update in one transaction and rolls back if any of them doesn't match
+    /// exactly one row.
+    fn write(&mut self, updates: Vec<edits::RowUpdate>, cx: &mut Context<Self>) {
+        self.applying = true;
+        self.notice = None;
+        cx.notify();
+        let write_session = self.write_session.clone();
+        let panel_session = self.panel_session.clone();
+        let first_row_number = self.page * PAGE_SIZE + 1;
+        self.apply_task = cx.spawn(async move |this, cx| {
+            let result = async {
+                let session = match write_session {
+                    Some(session) => session,
+                    None => Arc::new(panel_session.connect_again().await?),
+                };
+                this.update(cx, |this, _| this.write_session = Some(session.clone()))?;
+                session.run("begin", 1).await?;
+                for update in &updates {
+                    let outcome = session.run(&update.sql, 1).await;
+                    let changed = match outcome {
+                        Ok(outcome) => outcome
+                            .result_sets
+                            .last()
+                            .and_then(|result_set| result_set.rows_affected),
+                        Err(error) => {
+                            session.run("rollback", 1).await.log_err();
+                            return Err(error);
+                        }
+                    };
+                    if changed != Some(1) {
+                        session.run("rollback", 1).await.log_err();
+                        anyhow::bail!(
+                            "A linha {} mudou ou sumiu desde que a página carregou. Nada foi \
+                             gravado; recarregue a página para ver o valor atual.",
+                            first_row_number + update.row
+                        );
+                    }
+                }
+                session.run("commit", 1).await?;
+                anyhow::Ok(updates.len())
+            }
+            .await;
+            this.update(cx, |this, cx| {
+                this.applying = false;
+                match result {
+                    Ok(count) => {
+                        this.pending.clear();
+                        this.show_sql = false;
+                        this.grid
+                            .update(cx, |grid, cx| grid.set_pending(PendingEdits::default(), cx));
+                        this.notice = Some((
+                            if count == 1 {
+                                "1 linha atualizada.".into()
+                            } else {
+                                format!("{count} linhas atualizadas.").into()
+                            },
+                            Color::Success,
+                        ));
+                        this.load_page(cx);
+                    }
+                    Err(error) => {
+                        this.notice = Some((describe_error(&error), Color::Error));
+                        cx.notify();
+                    }
+                }
+            })
+            .log_err();
+        });
+    }
+
     fn apply_filter(&mut self, _: &ApplyTableFilter, _window: &mut Window, cx: &mut Context<Self>) {
+        if self.blocked_by_pending(cx) {
+            return;
+        }
         self.page = 0;
         self.sort = None;
         self.grid.update(cx, |grid, cx| grid.set_sort(None, cx));
@@ -291,6 +523,9 @@ impl TableView {
 
     /// Ascending, then descending, then back to the default order.
     fn sort_by(&mut self, column: usize, cx: &mut Context<Self>) {
+        if self.blocked_by_pending(cx) {
+            return;
+        }
         self.sort = match self.sort {
             Some(sort) if sort.column == column && !sort.descending => Some(Sort {
                 column,
@@ -309,6 +544,9 @@ impl TableView {
     }
 
     fn go_to_page(&mut self, page: usize, cx: &mut Context<Self>) {
+        if self.blocked_by_pending(cx) {
+            return;
+        }
         self.page = page;
         self.load_page(cx);
     }
@@ -321,8 +559,22 @@ impl TableView {
         cx.notify();
     }
 
-    /// For the debug hook: selects a tab by its label, ignoring case.
+    /// For the debug hook: `edit` fakes two cell edits and opens the SQL preview.
     pub(crate) fn select_tab_named(&mut self, label: &str, cx: &mut Context<Self>) {
+        if label == "edit" {
+            let email = self
+                .grid
+                .read(cx)
+                .columns()
+                .iter()
+                .position(|column| column.name == "email");
+            if let Some(email) = email {
+                self.cell_edited(1, email, Some("ana.nova@exemplo.com".to_owned()), cx);
+                self.cell_edited(4, email, None, cx);
+                self.show_sql = true;
+            }
+            return;
+        }
         if let Some(tab) = Tab::ALL
             .into_iter()
             .find(|tab| tab.label().eq_ignore_ascii_case(label))
@@ -472,11 +724,15 @@ impl TableView {
                 } else {
                     format!("linhas {first}–{last}")
                 };
+                let mode = if self.can_edit() {
+                    "duplo clique ou Enter edita a célula"
+                } else if self.columns.iter().any(|column| column.primary_key) {
+                    "somente leitura"
+                } else {
+                    "somente leitura: sem chave primária"
+                };
                 (
-                    format!(
-                        "{range} · {} ms · somente leitura",
-                        page.elapsed.as_millis()
-                    ),
+                    format!("{range} · {} ms · {mode}", page.elapsed.as_millis()),
                     page.has_more,
                 )
             }
@@ -564,8 +820,154 @@ impl TableView {
                     .child(self.grid.clone())
                     .into_any_element(),
             })
+            .children(self.render_pending(cx))
             .child(self.render_footer(cx))
             .into_any_element()
+    }
+
+    fn render_pending(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if self.pending.is_empty() && self.notice.is_none() {
+            return None;
+        }
+        let preview = self
+            .show_sql
+            .then(|| self.pending_updates(cx).map(|updates| edits::preview(&updates)));
+        let count = self.pending.len();
+        Some(
+            v_flex()
+                .border_t_1()
+                .border_color(cx.theme().colors().border)
+                .when_some(preview, |this, preview| {
+                    let text = match &preview {
+                        Ok(text) => text.clone(),
+                        Err(error) => error.clone(),
+                    };
+                    let copy = text.clone();
+                    this.child(
+                        v_flex()
+                            .max_h(px(260.))
+                            .id("db-edits-preview")
+                            .overflow_y_scroll()
+                            .px_3()
+                            .py_2()
+                            .gap_0p5()
+                            .bg(cx.theme().colors().editor_background)
+                            .child(
+                                h_flex()
+                                    .pb_1()
+                                    .child(
+                                        Label::new("SQL que vai rodar")
+                                            .size(LabelSize::Small)
+                                            .weight(FontWeight::SEMIBOLD),
+                                    )
+                                    .child(
+                                        Label::new(
+                                            " · as condições com ::text conferem o valor antigo",
+                                        )
+                                        .size(LabelSize::XSmall)
+                                        .color(Color::Muted),
+                                    )
+                                    .child(div().flex_1())
+                                    .child(
+                                        IconButton::new("db-copy-edits-sql", IconName::Copy)
+                                            .icon_size(IconSize::Small)
+                                            .icon_color(Color::Muted)
+                                            .tooltip(Tooltip::text("Copiar o SQL"))
+                                            .on_click(move |_, _, cx| {
+                                                cx.write_to_clipboard(ClipboardItem::new_string(
+                                                    copy.clone(),
+                                                ))
+                                            }),
+                                    ),
+                            )
+                            .children(text.lines().map(|line| {
+                                Label::new(line.to_owned())
+                                    .size(LabelSize::Small)
+                                    .buffer_font(cx)
+                                    .color(if line.contains("is not distinct from") {
+                                        Color::Warning
+                                    } else {
+                                        Color::Default
+                                    })
+                            })),
+                    )
+                })
+                .child(
+                    h_flex()
+                        .px_3()
+                        .py_1p5()
+                        .gap_2()
+                        .when(count > 0, |this| {
+                            this.bg(Color::Warning.color(cx).opacity(0.08))
+                                .child(Indicator::dot().color(Color::Warning))
+                                .child(
+                                    Label::new(if count == 1 {
+                                        "1 alteração pendente".to_owned()
+                                    } else {
+                                        format!("{count} alterações pendentes")
+                                    })
+                                    .size(LabelSize::Small)
+                                    .weight(FontWeight::SEMIBOLD)
+                                    .color(Color::Warning),
+                                )
+                                .child(
+                                    Label::new("· numa transação")
+                                        .size(LabelSize::XSmall)
+                                        .color(Color::Muted),
+                                )
+                        })
+                        .when_some(self.notice.clone(), |this, (notice, color)| {
+                            this.child(
+                                div().min_w_0().child(
+                                    Label::new(notice)
+                                        .size(LabelSize::Small)
+                                        .color(color)
+                                        .truncate(),
+                                ),
+                            )
+                        })
+                        .child(div().flex_1())
+                        .when(count > 0, |this| {
+                            this.child(
+                                Button::new(
+                                    "db-edits-sql",
+                                    if self.show_sql { "Ocultar SQL" } else { "Ver SQL" },
+                                )
+                                .style(ButtonStyle::Subtle)
+                                .label_size(LabelSize::Small)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.show_sql = !this.show_sql;
+                                    cx.notify();
+                                })),
+                            )
+                            .child(
+                                Button::new("db-edits-discard", "Descartar")
+                                    .style(ButtonStyle::Subtle)
+                                    .label_size(LabelSize::Small)
+                                    .disabled(self.applying)
+                                    .on_click(cx.listener(|this, _, _, cx| this.discard_edits(cx))),
+                            )
+                            .child(
+                                Button::new(
+                                    "db-edits-apply",
+                                    if self.applying { "Aplicando…" } else { "Aplicar" },
+                                )
+                                .style(ButtonStyle::Tinted(ui::TintColor::Accent))
+                                .label_size(LabelSize::Small)
+                                .disabled(self.applying)
+                                .key_binding(ui::KeyBinding::for_action_in(
+                                    &ApplyEdits,
+                                    &self.focus_handle,
+                                    cx,
+                                ))
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.apply_edits(&ApplyEdits, window, cx)
+                                })),
+                            )
+                        }),
+                )
+                .into_any_element(),
+        )
     }
 
     fn render_rows(
@@ -822,6 +1224,7 @@ impl Render for TableView {
             .key_context("DatabaseTableView")
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::apply_filter))
+            .on_action(cx.listener(Self::apply_edits))
             .size_full()
             .bg(cx.theme().colors().editor_background)
             .child(self.render_header(cx))
@@ -899,8 +1302,10 @@ pub fn open(
                 workspace.activate_item(&existing, true, true, window, cx);
                 return;
             }
+            let workspace_handle = workspace.weak_handle();
             let view = cx.new(|cx| {
                 TableView::new(
+                    workspace_handle,
                     connection,
                     session,
                     schema,

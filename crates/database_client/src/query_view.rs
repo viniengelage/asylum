@@ -330,6 +330,7 @@ impl SqlQueryView {
                     statement,
                     risk,
                     in_transaction,
+                    None,
                     session,
                     Box::new(move |decision, _window, cx| {
                         this.update(cx, |this, cx| {

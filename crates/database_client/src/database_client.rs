@@ -5,6 +5,7 @@ mod catalog;
 mod connect_view;
 mod connection;
 mod discovery;
+mod edits;
 mod grid;
 mod panel;
 mod query_view;
@@ -37,6 +38,8 @@ actions!(
         SaveConnection,
         /// Reloads the open table with the typed WHERE and ORDER BY.
         ApplyTableFilter,
+        /// Writes the table's pending cell edits in one transaction.
+        ApplyEdits,
         /// Runs the SQL statement under the cursor, or the selection.
         RunStatement,
         /// Runs every statement in the SQL file.
@@ -526,6 +529,31 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(outcome.result_sets[0].rows_affected, Some(1));
+
+            // Cell edits: the update matches while the old values hold, and matches nothing once
+            // someone else changed the row.
+            let page = session
+                .run("select id, name, profile from database_client_spike.users order by id", 10)
+                .await
+                .unwrap();
+            let rows = page.result_sets[0].rows.clone();
+            let names = ["id", "name", "profile"].map(str::to_owned);
+            let mut pending = edits::PendingEdits::default();
+            pending.insert((0, 1), Some("Ana Paula".to_owned()));
+            pending.insert((0, 2), None);
+            let updates = edits::row_updates(
+                "database_client_spike",
+                "users",
+                &names,
+                &[0],
+                &rows,
+                &pending,
+            )
+            .unwrap();
+            let outcome = session.run(&updates[0].sql, 1).await.unwrap();
+            assert_eq!(outcome.result_sets[0].rows_affected, Some(1));
+            let outcome = session.run(&updates[0].sql, 1).await.unwrap();
+            assert_eq!(outcome.result_sets[0].rows_affected, Some(0));
 
             let started = Instant::now();
             let (slow, cancelled) = futures::join!(

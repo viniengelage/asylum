@@ -1857,6 +1857,7 @@
     "use_key_equivalents": true,
     "bindings": {
       "cmd-enter": "database_client::ApplyTableFilter",
+      "cmd-s": "database_client::ApplyEdits",
     },
   },
   {
@@ -1868,6 +1869,15 @@
       "down": "database_client::SelectCellBelow",
       "left": "database_client::SelectCellLeft",
       "right": "database_client::SelectCellRight",
+      "enter": "database_client::EditCell",
+    },
+  },
+  {
+    "context": "DatabaseCellEditor > Editor",
+    "use_key_equivalents": true,
+    "bindings": {
+      "enter": "database_client::ConfirmCellEdit",
+      "escape": "database_client::CancelCellEdit",
     },
   },
   {

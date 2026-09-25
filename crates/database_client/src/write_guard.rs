@@ -31,6 +31,7 @@ pub struct WriteGuard {
     statement: String,
     risk: Risk,
     in_transaction: bool,
+    note: Option<SharedString>,
     estimate: Option<Result<String, String>>,
     confirm_input: Option<Entity<InputField>>,
     on_decision: Option<OnDecision>,
@@ -69,11 +70,13 @@ fn plan_estimate(lines: impl Iterator<Item = String>) -> Option<u64> {
 }
 
 impl WriteGuard {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         connection: SavedConnection,
         statement: String,
         risk: Risk,
         in_transaction: bool,
+        note: Option<SharedString>,
         session: Option<Arc<Session>>,
         on_decision: OnDecision,
         window: &mut Window,
@@ -132,6 +135,7 @@ impl WriteGuard {
             statement,
             risk,
             in_transaction,
+            note,
             estimate: None,
             confirm_input,
             on_decision: Some(on_decision),
@@ -281,12 +285,16 @@ impl Render for WriteGuard {
                                     .color(Color::Muted),
                             )
                             .child(
-                                Label::new(if self.in_transaction {
-                                    "Já existe uma transação aberta nesta aba: nada é gravado até \
-                                     o COMMIT."
-                                } else {
-                                    "Numa transação você vê quantas linhas mudaram antes de \
-                                     decidir entre COMMIT e ROLLBACK."
+                                Label::new(match &self.note {
+                                    Some(note) => note.clone(),
+                                    None if self.in_transaction => {
+                                        "Já existe uma transação aberta nesta aba: nada é gravado \
+                                         até o COMMIT."
+                                            .into()
+                                    }
+                                    None => "Numa transação você vê quantas linhas mudaram antes \
+                                             de decidir entre COMMIT e ROLLBACK."
+                                        .into(),
                                 })
                                 .size(LabelSize::Small)
                                 .color(Color::Muted),
