@@ -1,4 +1,6 @@
 #[cfg(target_os = "macos")]
+mod agent_toolkit;
+#[cfg(target_os = "macos")]
 mod cef_browser;
 #[cfg(target_os = "macos")]
 mod cef_install;
@@ -75,6 +77,13 @@ const PAINT_GIVE_UP_TIMEOUT: std::time::Duration = std::time::Duration::from_sec
 struct PreviewError {
     headline: SharedString,
     detail: SharedString,
+}
+
+/// Registers the browser toolkit agents use to drive the embedded Chromium.
+#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
+pub fn register_agent_toolkit(cx: &mut App) {
+    #[cfg(target_os = "macos")]
+    agent_toolkit::register_toolkit(cx);
 }
 
 pub fn init(cx: &mut App) {
@@ -200,6 +209,8 @@ impl WebPreviewView {
     }
 
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        #[cfg(target_os = "macos")]
+        agent_toolkit::register_view(cx.weak_entity(), cx);
         let focus_handle = cx.focus_handle();
         let browser_focus = cx.focus_handle();
 

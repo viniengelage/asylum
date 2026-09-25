@@ -71,6 +71,8 @@ use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 use util::ResultExt;
 use util::path_list::PathList;
+use util::paths::PathStyle;
+use task_agents::TaskAgent;
 use util::rel_path::RelPath;
 
 const MAXIMUM_RETRY_JITTER_FRACTION: f64 = 0.1;
@@ -209,6 +211,7 @@ struct ProjectState {
     project_context: Entity<ProjectContext>,
     skills: Arc<Vec<Skill>>,
     skill_loading_issues: Vec<SkillLoadingIssue>,
+    task_agents: Arc<Vec<TaskAgent>>,
     project_context_needs_refresh: watch::Sender<()>,
     _maintain_project_context: Task<Result<()>>,
     context_server_registry: Entity<ContextServerRegistry>,
@@ -494,6 +497,13 @@ static AGENTS_PREFIX: LazyLock<Option<Arc<RelPath>>> = LazyLock::new(|| {
     RelPath::from_unix_str(AGENTS_DIR_NAME)
         .ok()
         .map(|path| path.into_arc())
+});
+
+static TASK_AGENT_PREFIXES: LazyLock<Vec<Arc<RelPath>>> = LazyLock::new(|| {
+    [task_agents::PROJECT_AGENTS_DIR, task_agents::CLAUDE_AGENTS_DIR]
+        .into_iter()
+        .filter_map(|path| RelPath::from_unix_str(path).ok().map(|path| path.into_arc()))
+        .collect()
 });
 
 static SKILLS_PREFIX: LazyLock<Option<Arc<RelPath>>> = LazyLock::new(|| {
@@ -975,6 +985,7 @@ impl NativeAgent {
                 project_context,
                 skills: Arc::new(Vec::new()),
                 skill_loading_issues: Vec::new(),
+                task_agents: Arc::default(),
                 project_context_needs_refresh: project_context_needs_refresh_tx,
                 _maintain_project_context: cx.spawn(async move |this, cx| {
                     Self::maintain_project_context(
@@ -1009,13 +1020,23 @@ impl NativeAgent {
                     .projects
                     .get(&project_id)
                     .context("project state not found")?;
-                anyhow::Ok(Self::build_project_context(
-                    &state.project,
-                    this.fs.clone(),
-                    cx,
+                let task_agents = Self::load_task_agents(&state.project, this.fs.clone(), cx);
+                anyhow::Ok((
+                    Self::build_project_context(&state.project, this.fs.clone(), cx),
+                    task_agents,
                 ))
             })??;
+            let (task, task_agents_task) = task;
             let (project_context, skills, skill_issue_data) = task.await;
+            let (task_agents, task_agent_errors) = task_agents_task.await;
+            for error in task_agent_errors {
+                log::warn!(
+                    "failed to load task agent {}: {}",
+                    error.path.display(),
+                    error.message
+                );
+            }
+            let task_agents = Arc::new(task_agents);
             let skills = Arc::new(skills);
             let skill_loading_issues: Vec<SkillLoadingIssue> = skill_issue_data
                 .into_iter()
@@ -1043,6 +1064,7 @@ impl NativeAgent {
 
                 if let Some(state) = this.projects.get_mut(&project_id) {
                     state.skills = skills;
+                    state.task_agents = task_agents;
                     state.skill_loading_issues = skill_loading_issues.clone();
                     // Only push the new `ProjectContext` through if it
                     // differs from the current one. The system prompt is
@@ -1079,6 +1101,38 @@ impl NativeAgent {
         }
 
         Ok(())
+    }
+
+    /// Task agents come from trusted local worktrees only: a cloned repository could ship an
+    /// agent that turns on acting tools and allows them without asking.
+    fn load_task_agents(
+        project: &Entity<Project>,
+        fs: Arc<dyn Fs>,
+        cx: &mut App,
+    ) -> Task<(Vec<TaskAgent>, Vec<task_agents::TaskAgentLoadError>)> {
+        let trusted_worktrees = TrustedWorktrees::try_get_global(cx);
+        let worktree_store = project.read(cx).worktree_store();
+        let worktrees = project.read(cx).visible_worktrees(cx).collect::<Vec<_>>();
+        let roots = worktrees
+            .into_iter()
+            .filter_map(|worktree| {
+                let worktree_id = worktree.read(cx).id();
+                let is_trusted = trusted_worktrees.as_ref().is_none_or(|trusted_worktrees| {
+                    trusted_worktrees.update(cx, |trusted_worktrees, cx| {
+                        trusted_worktrees.can_trust(&worktree_store, worktree_id, cx)
+                    })
+                });
+                let worktree = worktree.read(cx);
+                let local = worktree.as_local()?;
+                is_trusted.then(|| {
+                    (
+                        Arc::<str>::from(worktree.root_name_str()),
+                        local.abs_path().to_path_buf(),
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        cx.background_spawn(task_agents::load_task_agents(fs, roots))
     }
 
     fn build_project_context(
@@ -1427,6 +1481,9 @@ impl NativeAgent {
                         || AGENTS_PREFIX
                             .as_ref()
                             .is_some_and(|prefix| path_ref.starts_with(prefix))
+                        || TASK_AGENT_PREFIXES
+                            .iter()
+                            .any(|prefix| path_ref.starts_with(prefix))
                 }) {
                     state.project_context_needs_refresh.send(()).ok();
                 }
@@ -1630,7 +1687,23 @@ impl NativeAgent {
             Some(command)
         });
 
+        let task_agent_commands = state.task_agents.iter().map(|agent| {
+            let description = if agent.description.is_empty() {
+                agent.name.clone()
+            } else {
+                format!("{} — {}", agent.name, agent.description)
+            };
+            acp::AvailableCommand::new(agent.command.clone(), description)
+                .meta(acp_thread::meta_with_command_category(
+                    acp_thread::CommandCategory::Native,
+                ))
+                .input(acp::AvailableCommandInput::Unstructured(
+                    acp::UnstructuredCommandInput::new("<pedido>"),
+                ))
+        });
+
         std::iter::once(compact_command)
+            .chain(task_agent_commands)
             .chain(mcp_commands)
             .collect()
     }
@@ -2210,6 +2283,16 @@ impl NativeAgentConnection {
     pub fn ensure_skills_scan_started(&self, cx: &mut App) {
         self.0
             .update(cx, |agent, cx| agent.ensure_skills_scan_started(cx));
+    }
+
+    /// The task agents loaded for a project, in the order they appear in the slash menu.
+    pub fn task_agents(&self, project: &Entity<Project>, cx: &App) -> Arc<Vec<TaskAgent>> {
+        self.0
+            .read(cx)
+            .projects
+            .get(&project.entity_id())
+            .map(|state| state.task_agents.clone())
+            .unwrap_or_default()
     }
 
     pub fn refresh_skills_for_project(&self, project: Entity<Project>, cx: &mut App) {
@@ -2895,6 +2978,23 @@ impl acp_thread::AgentSessionClientUserMessageIds for NativeAgentConnection {
                 });
             }
 
+            // A task agent takes over the thread and the message goes out as typed: the agent's
+            // instructions reach the model through the system prompt, and the `/command` tells
+            // it which request started the task.
+            if parsed_command.is_unqualified(parsed_command.prompt_name)
+                && let Some(task_agent) = project_state
+                    .task_agents
+                    .iter()
+                    .find(|agent| agent.command == parsed_command.prompt_name)
+                    .cloned()
+            {
+                let path_style = project_state.project.read(cx).path_style(cx);
+                if let Some(thread) = self.thread(&session_id, cx) {
+                    thread.update(cx, |thread, cx| thread.set_task_agent(Some(task_agent), cx));
+                }
+                return self.send_prompt(client_user_message_id, session_id, params.prompt, path_style, cx);
+            }
+
             // Skill scope qualifiers (`/:<name>` and
             // `/<worktree>:<name>`) use a colon separator that can't
             // collide with MCP's `/<server>.<name>` grammar. The popup
@@ -3009,10 +3109,21 @@ impl acp_thread::AgentSessionClientUserMessageIds for NativeAgentConnection {
         };
 
         let path_style = project_state.project.read(cx).path_style(cx);
+        self.send_prompt(client_user_message_id, session_id, params.prompt, path_style, cx)
+    }
+}
 
+impl NativeAgentConnection {
+    fn send_prompt(
+        &self,
+        client_user_message_id: acp_thread::ClientUserMessageId,
+        session_id: acp::SessionId,
+        prompt: Vec<acp::ContentBlock>,
+        path_style: PathStyle,
+        cx: &mut App,
+    ) -> Task<Result<acp::PromptResponse>> {
         self.run_turn(session_id, cx, move |thread, cx| {
-            let content: Vec<UserMessageContent> = params
-                .prompt
+            let content: Vec<UserMessageContent> = prompt
                 .into_iter()
                 .map(|block| UserMessageContent::from_content_block(block, path_style))
                 .collect::<Vec<_>>();
@@ -4070,6 +4181,98 @@ mod internal_tests {
                 Some(acp_thread::CommandCategory::Native),
             );
         });
+    }
+
+    #[gpui::test]
+    async fn test_task_agent_command_takes_over_thread(cx: &mut TestAppContext) {
+        init_test(cx);
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree(
+            path!("/app"),
+            json!({
+                ".asylum": { "agents": {
+                    "qa.md": "---\nname: QA do app\ncommand: qa\nprofile: ask\ntoolkits: [devices]\ntools:\n  grep: false\npermissions:\n  devices: allow\n---\nTeste o fluxo pedido no simulador.",
+                }},
+            }),
+        )
+        .await;
+        cx.update(|cx| {
+            task_agents::register_toolkit(
+                task_agents::Toolkit {
+                    id: "devices".into(),
+                    name: "Dispositivos".into(),
+                    description: "test".into(),
+                    icon: "smartphone".into(),
+                    tools: vec![task_agents::ToolkitTool::new(
+                        "device_tap",
+                        "Tocou",
+                        "Taps the screen.",
+                        task_agents::ToolAccess::Act,
+                        |_project, _input: serde_json::Value, _cx| {
+                            Task::ready(Ok(task_agents::ToolkitOutput::text("ok")))
+                        },
+                    )],
+                },
+                cx,
+            )
+        });
+        let project = Project::test(fs.clone(), [path!("/app").as_ref()], cx).await;
+        let thread_store = cx.new(|cx| ThreadStore::new(cx));
+        let agent =
+            cx.update(|cx| NativeAgent::new(thread_store, Templates::new(), fs.clone(), cx));
+        let connection = Rc::new(NativeAgentConnection(agent.clone()));
+        let acp_thread = cx
+            .update(|cx| {
+                connection.clone().new_session(
+                    project.clone(),
+                    PathList::new(&[Path::new(path!("/app"))]),
+                    cx,
+                )
+            })
+            .await
+            .unwrap();
+        cx.run_until_parked();
+
+        cx.update(|cx| {
+            let commands = acp_thread.read(cx).available_commands();
+            assert!(
+                commands.iter().any(|command| command.name == "qa"),
+                "the agent's command should be offered in the slash menu"
+            );
+        });
+
+        let session_id = cx.update(|cx| acp_thread.read(cx).session_id().clone());
+        let thread = cx.update(|cx| native_thread_for_session(&agent, &session_id, cx));
+        let model = Arc::new(FakeLanguageModel::default());
+        thread.update(cx, |thread, cx| thread.set_model(model.clone(), cx));
+
+        let _prompt = cx.update(|cx| {
+            acp_thread::AgentSessionClientUserMessageIds::prompt(
+                connection.as_ref(),
+                ClientUserMessageId::new(),
+                acp::PromptRequest::new(session_id.clone(), vec!["/qa testar o login".into()]),
+                cx,
+            )
+        });
+        cx.run_until_parked();
+
+        thread.read_with(cx, |thread, _| {
+            let agent = thread.task_agent().expect("the thread should run the task agent");
+            assert_eq!(agent.command, "qa");
+            assert_eq!(thread.profile().0.as_ref(), "ask");
+        });
+        let request = model.pending_completions().pop().expect("a completion request");
+        let system = request.messages[0].string_contents();
+        assert!(system.contains("Task Agent: QA do app"));
+        assert!(system.contains("Teste o fluxo pedido no simulador."));
+        let tool_names = request
+            .tools
+            .iter()
+            .map(|tool| tool.name.as_str())
+            .collect::<Vec<_>>();
+        assert!(tool_names.contains(&"device_tap"), "{tool_names:?}");
+        assert!(!tool_names.contains(&"grep"), "{tool_names:?}");
+        assert!(tool_names.contains(&"read_file"), "{tool_names:?}");
     }
 
     #[gpui::test]

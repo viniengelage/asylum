@@ -412,6 +412,45 @@ pub async fn get_task(
     get(client, token, &format!("/task/{task_id}")).await
 }
 
+/// Like [`get_task`], but also accepts the custom IDs people put in branch names (`CU-86a1b2`),
+/// which ClickUp only resolves when told the workspace.
+pub async fn get_task_by_any_id(
+    client: &Arc<dyn HttpClient>,
+    token: &str,
+    workspace_id: &str,
+    task_id: &str,
+) -> Result<TaskDetail> {
+    match get_task(client, token, task_id).await {
+        Ok(task) => Ok(task),
+        Err(error) if task_id.contains('-') => get(
+            client,
+            token,
+            &format!("/task/{task_id}?custom_task_ids=true&team_id={workspace_id}"),
+        )
+        .await
+        .map_err(|custom_error| error.context(custom_error)),
+        Err(error) => Err(error),
+    }
+}
+
+/// Creates a task in a list and returns it.
+pub async fn create_task(
+    client: &Arc<dyn HttpClient>,
+    token: &str,
+    list_id: &str,
+    name: &str,
+    markdown_description: &str,
+) -> Result<Task> {
+    send(
+        client,
+        token,
+        http_client::Method::POST,
+        &format!("/list/{list_id}/task"),
+        serde_json::json!({ "name": name, "markdown_description": markdown_description }),
+    )
+    .await
+}
+
 /// The statuses a task in `list_id` can move to, in board order.
 pub async fn get_list_statuses(
     client: &Arc<dyn HttpClient>,

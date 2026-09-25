@@ -1,5 +1,6 @@
 mod android_device_modal;
 mod device_location_modal;
+mod device_toolkit;
 mod thread_switcher;
 
 use device_location_modal::{DeviceLocation, DeviceLocationModal};
@@ -1464,6 +1465,7 @@ impl Sidebar {
         sidebar.devices_only = true;
         sidebar.view = SidebarView::Devices;
         sidebar.observe_devices_dock(window, cx);
+        device_toolkit::register_device_host(cx.weak_entity(), window.window_handle(), cx);
         // The focused instance is outlined, and moving focus between two instances fires no
         // focus event on the panel that lays them out, so both have to be told.
         let focus_handle = sidebar.focus_handle.clone();
@@ -11629,6 +11631,11 @@ fn all_thread_infos_for_workspace(
         });
 
     Some(threads).into_iter().flatten()
+}
+
+/// Registers the agent toolkits this crate owns: the devices of the Devices dock.
+pub fn register_agent_toolkits(cx: &mut App) {
+    device_toolkit::register_toolkit(cx);
 }
 
 pub fn dump_workspace_info(

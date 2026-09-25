@@ -156,3 +156,114 @@ unsafe fn connect_sim_display_view(display_view: id, device_screen: id) -> Resul
         }
     }
 }
+
+const NS_EVENT_TYPE_LEFT_MOUSE_DOWN: u64 = 1;
+const NS_EVENT_TYPE_LEFT_MOUSE_UP: u64 = 2;
+const NS_EVENT_TYPE_LEFT_MOUSE_DRAGGED: u64 = 6;
+const NS_EVENT_TYPE_KEY_DOWN: u64 = 10;
+const NS_EVENT_TYPE_KEY_UP: u64 = 11;
+const NS_EVENT_MODIFIER_FLAG_SHIFT: u64 = 1 << 17;
+const NS_EVENT_MODIFIER_FLAG_COMMAND: u64 = 1 << 20;
+
+/// Builds an `NSEvent` in the display view's window and hands it to the view's own handlers.
+/// SimDisplayView turns mouse events into touches and key events into HID keys, which is the
+/// same path a real click or keystroke on the simulator takes.
+pub(crate) fn send_sim_display_input(display_view: id, input: gpui::SimulatorInput) -> Result<()> {
+    unsafe {
+        let window: id = msg_send![display_view, window];
+        anyhow::ensure!(window != nil, "the simulator display has no window");
+        let window_number: isize = msg_send![window, windowNumber];
+        let process_info: id = msg_send![class!(NSProcessInfo), processInfo];
+        let timestamp: f64 = msg_send![process_info, systemUptime];
+        let bounds: NSRect = msg_send![display_view, bounds];
+        anyhow::ensure!(
+            bounds.size.width > 0. && bounds.size.height > 0.,
+            "the simulator display has no size yet"
+        );
+
+        match input {
+            gpui::SimulatorInput::Pointer { x, y, phase } => {
+                let flipped: BOOL = msg_send![display_view, isFlipped];
+                let local_x = bounds.origin.x + x.clamp(0., 1.) * bounds.size.width;
+                let from_top = y.clamp(0., 1.) * bounds.size.height;
+                let local_y = if flipped != NO {
+                    bounds.origin.y + from_top
+                } else {
+                    bounds.origin.y + bounds.size.height - from_top
+                };
+                let location: NSPoint = msg_send![
+                    display_view,
+                    convertPoint: NSPoint::new(local_x, local_y)
+                    toView: nil
+                ];
+                let (event_type, pressure) = match phase {
+                    gpui::SimulatorPointerPhase::Down => (NS_EVENT_TYPE_LEFT_MOUSE_DOWN, 1.0f32),
+                    gpui::SimulatorPointerPhase::Drag => {
+                        (NS_EVENT_TYPE_LEFT_MOUSE_DRAGGED, 1.0f32)
+                    }
+                    gpui::SimulatorPointerPhase::Up => (NS_EVENT_TYPE_LEFT_MOUSE_UP, 0.0f32),
+                };
+                let event: id = msg_send![
+                    class!(NSEvent),
+                    mouseEventWithType: event_type
+                    location: location
+                    modifierFlags: 0u64
+                    timestamp: timestamp
+                    windowNumber: window_number
+                    context: nil
+                    eventNumber: 0isize
+                    clickCount: 1isize
+                    pressure: pressure
+                ];
+                anyhow::ensure!(event != nil, "could not create the pointer event");
+                match phase {
+                    gpui::SimulatorPointerPhase::Down => {
+                        let _: () = msg_send![display_view, mouseDown: event];
+                    }
+                    gpui::SimulatorPointerPhase::Drag => {
+                        let _: () = msg_send![display_view, mouseDragged: event];
+                    }
+                    gpui::SimulatorPointerPhase::Up => {
+                        let _: () = msg_send![display_view, mouseUp: event];
+                    }
+                }
+            }
+            gpui::SimulatorInput::Key {
+                key_code,
+                characters,
+                shift,
+                command,
+                down,
+            } => {
+                let mut flags = 0u64;
+                if shift {
+                    flags |= NS_EVENT_MODIFIER_FLAG_SHIFT;
+                }
+                if command {
+                    flags |= NS_EVENT_MODIFIER_FLAG_COMMAND;
+                }
+                let characters = ns_string(&characters);
+                let event: id = msg_send![
+                    class!(NSEvent),
+                    keyEventWithType: if down { NS_EVENT_TYPE_KEY_DOWN } else { NS_EVENT_TYPE_KEY_UP }
+                    location: NSPoint::new(0., 0.)
+                    modifierFlags: flags
+                    timestamp: timestamp
+                    windowNumber: window_number
+                    context: nil
+                    characters: characters
+                    charactersIgnoringModifiers: characters
+                    isARepeat: NO
+                    keyCode: key_code
+                ];
+                anyhow::ensure!(event != nil, "could not create the key event");
+                if down {
+                    let _: () = msg_send![display_view, keyDown: event];
+                } else {
+                    let _: () = msg_send![display_view, keyUp: event];
+                }
+            }
+        }
+        Ok(())
+    }
+}

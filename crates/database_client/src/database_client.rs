@@ -2,6 +2,7 @@
 //! the shared tokio runtime of `reqwest_client`; views only await the results.
 
 mod agent_schema;
+mod agent_toolkit;
 mod catalog;
 mod completion;
 mod connect_view;
@@ -19,6 +20,7 @@ mod tunnel;
 mod write_guard;
 
 pub use agent_schema::describe_for_agent;
+pub use agent_toolkit::register_toolkit as register_agent_toolkit;
 pub use catalog::{ColumnInfo, Relation, RelationKind, list_columns, list_relations};
 pub use connection::{Environment, SavedConnection};
 pub use panel::DatabasePanel;

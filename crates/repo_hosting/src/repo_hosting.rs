@@ -2,10 +2,12 @@
 //! the one for the checked-out branch on top. Bitbucket Cloud authenticates with an Atlassian
 //! API token kept in the keychain, which is already scoped to the active profile.
 
+mod agent_toolkit;
 mod api;
 mod bitbucket;
 mod panel;
 
+pub use agent_toolkit::register_toolkit as register_agent_toolkit;
 pub use panel::RepoPanel;
 
 use anyhow::Result;

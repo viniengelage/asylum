@@ -2104,6 +2104,22 @@ impl PlatformWindow for MacWindow {
         MacWindow::remove_native_subview(self, subview_id);
     }
 
+    fn send_simulator_input(
+        &self,
+        subview_id: u64,
+        input: gpui::SimulatorInput,
+    ) -> anyhow::Result<()> {
+        let view = {
+            let state = self.0.lock();
+            state
+                .native_subviews
+                .get(&subview_id)
+                .map(|hosted| hosted.view)
+                .ok_or_else(|| anyhow::anyhow!("the simulator display is not mounted"))?
+        };
+        crate::simulator_kit::send_sim_display_input(view, input)
+    }
+
     fn set_native_subview_hidden(&self, subview_id: u64, hidden: bool) {
         MacWindow::set_native_subview_hidden(self, subview_id, hidden);
     }

@@ -792,6 +792,71 @@ impl AndroidSdkManager {
         })
     }
 
+    /// Captures the emulator screen at its native resolution as PNG bytes.
+    pub fn screenshot_png(&self, cx: &App) -> Task<Result<Vec<u8>>> {
+        let Some(serial) = self.running_serial().map(str::to_string) else {
+            return Task::ready(Err(anyhow!("nenhum emulador Android em execução")));
+        };
+        cx.background_spawn(async move {
+            let png = run_adb(&serial, &["exec-out", "screencap", "-p"]).await?;
+            anyhow::ensure!(!png.is_empty(), "screencap não retornou nenhuma imagem");
+            Ok(png)
+        })
+    }
+
+    /// The display resolution that taps and swipes are expressed in.
+    pub fn native_screen_size(&self, cx: &App) -> Task<Result<(u32, u32)>> {
+        let Some(serial) = self.running_serial().map(str::to_string) else {
+            return Task::ready(Err(anyhow!("nenhum emulador Android em execução")));
+        };
+        cx.background_spawn(async move { fetch_native_screen_size(&serial).await })
+    }
+
+    /// The last `lines` lines of the device log, optionally only those mentioning `filter`.
+    pub fn logcat(&self, lines: usize, filter: Option<String>, cx: &App) -> Task<Result<String>> {
+        let Some(serial) = self.running_serial().map(str::to_string) else {
+            return Task::ready(Err(anyhow!("nenhum emulador Android em execução")));
+        };
+        cx.background_spawn(async move {
+            let lines_argument = lines.max(1).to_string();
+            let output = run_adb(&serial, &["logcat", "-d", "-t", &lines_argument]).await?;
+            let text = String::from_utf8_lossy(&output);
+            Ok(match filter {
+                Some(filter) => {
+                    let filter = filter.to_lowercase();
+                    text.lines()
+                        .filter(|line| line.to_lowercase().contains(&filter))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                }
+                None => text.into_owned(),
+            })
+        })
+    }
+
+    /// Opens a URL or deep link on the emulator, as tapping a link would.
+    pub fn open_url(&self, url: String, cx: &App) -> Task<Result<()>> {
+        let Some(serial) = self.running_serial().map(str::to_string) else {
+            return Task::ready(Err(anyhow!("nenhum emulador Android em execução")));
+        };
+        cx.background_spawn(async move {
+            run_adb(
+                &serial,
+                &[
+                    "shell",
+                    "am",
+                    "start",
+                    "-a",
+                    "android.intent.action.VIEW",
+                    "-d",
+                    &shell_quote(&url),
+                ],
+            )
+            .await?;
+            Ok(())
+        })
+    }
+
     /// Force-stops and relaunches the given package's launcher activity.
     pub fn launch_package(&self, package: String, cx: &App) -> Task<Result<()>> {
         let Some(serial) = self.running_serial().map(str::to_string) else {
@@ -2350,6 +2415,12 @@ async fn stream_screen_frames(
             return Ok(());
         }
     }
+}
+
+/// `adb shell` joins its arguments into one command line for the device's shell, so a URL with
+/// `&` or `?` has to be quoted.
+fn shell_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "'\\''"))
 }
 
 /// Runs `adb -s <serial> <arguments>` and returns its stdout.

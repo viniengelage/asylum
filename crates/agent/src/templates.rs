@@ -37,6 +37,14 @@ pub trait Template: Sized {
 }
 
 #[derive(Serialize)]
+pub struct TaskAgentPrompt {
+    pub name: String,
+    pub command: String,
+    pub description: String,
+    pub instructions: String,
+}
+
+#[derive(Serialize)]
 pub struct SystemPromptTemplate<'a> {
     #[serde(flatten)]
     pub project: &'a prompt_store::ProjectContext,
@@ -46,6 +54,8 @@ pub struct SystemPromptTemplate<'a> {
     /// Contents of the user-global `~/.config/zed/AGENTS.md` file (or the
     /// platform equivalent), if present and non-empty.
     pub user_agents_md: Option<SharedString>,
+    /// The task agent the user handed this thread to with `/command`.
+    pub task_agent: Option<TaskAgentPrompt>,
     /// Whether agent-run terminal commands are wrapped in an OS-level
     /// sandbox for this thread. When `true` — and the `terminal` tool is
     /// in `available_tools` — the rendered prompt describes the sandbox's
@@ -105,6 +115,7 @@ mod tests {
             model_name: Some("test-model".to_string()),
             date: "2026-01-01".to_string(),
             user_agents_md: None,
+            task_agent: None,
             sandboxing: false,
             is_linux: false,
             is_windows: false,
@@ -138,6 +149,7 @@ mod tests {
             model_name: Some("test-model".to_string()),
             date: "2026-01-01".to_string(),
             user_agents_md: Some("always be concise".into()),
+            task_agent: None,
             sandboxing: false,
             is_linux: false,
             is_windows: false,
@@ -167,6 +179,7 @@ mod tests {
             model_name: Some("test-model".to_string()),
             date: "2026-01-01".to_string(),
             user_agents_md: None,
+            task_agent: None,
             sandboxing: false,
             is_linux: false,
             is_windows: false,
@@ -200,6 +213,7 @@ mod tests {
             model_name: Some("test-model".to_string()),
             date: "2026-01-01".to_string(),
             user_agents_md: None,
+            task_agent: None,
             sandboxing: true,
             is_linux: false,
             is_windows: false,
@@ -243,6 +257,7 @@ mod tests {
             model_name: Some("test-model".to_string()),
             date: "2026-01-01".to_string(),
             user_agents_md: None,
+            task_agent: None,
             sandboxing: true,
             is_linux: true,
             is_windows: false,
@@ -276,6 +291,7 @@ mod tests {
             model_name: Some("test-model".to_string()),
             date: "2026-01-01".to_string(),
             user_agents_md: None,
+            task_agent: None,
             sandboxing: true,
             is_linux: false,
             is_windows: true,
@@ -306,6 +322,7 @@ mod tests {
             model_name: Some("test-model".to_string()),
             date: "2026-01-01".to_string(),
             user_agents_md: None,
+            task_agent: None,
             sandboxing: true,
             is_linux: false,
             is_windows: false,
@@ -328,6 +345,7 @@ mod tests {
             model_name: Some("test-model".to_string()),
             date: "2026-01-01".to_string(),
             user_agents_md: None,
+            task_agent: None,
             sandboxing: true,
             is_linux: false,
             is_windows: false,
@@ -348,6 +366,7 @@ mod tests {
             model_name: Some("test-model".to_string()),
             date: "2026-01-01".to_string(),
             user_agents_md: None,
+            task_agent: None,
             sandboxing: false,
             is_linux: false,
             is_windows: false,
@@ -366,6 +385,7 @@ mod tests {
             model_name: Some("test-model".to_string()),
             date: "2026-01-01".to_string(),
             user_agents_md: None,
+            task_agent: None,
             sandboxing: false,
             is_linux: false,
             is_windows: false,

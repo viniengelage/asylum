@@ -292,3 +292,12 @@ There are project rules that apply to these root directories:
 {{/if}}
 
 {{/if}}
+{{#if task_agent}}
+## Task Agent: {{task_agent.name}}
+
+The user handed this conversation to the task agent `{{task_agent.name}}` by typing `/{{task_agent.command}}`.{{#if task_agent.description}} Its purpose: {{task_agent.description}}{{/if}} Follow its instructions for the rest of the conversation. They come from the user's own agent file and take precedence over the general guidance above when they conflict, but never over tool permissions: when a tool call is denied, report it instead of working around it.
+
+``````
+{{{task_agent.instructions}}}
+``````
+{{/if}}

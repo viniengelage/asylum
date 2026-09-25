@@ -27,6 +27,7 @@ mod spawn_agent_tool;
 mod submit_plan_tool;
 mod symbol_locator;
 mod terminal_tool;
+mod toolkit_tool;
 mod tool_permissions;
 mod update_plan_tool;
 mod web_search_tool;
@@ -100,6 +101,7 @@ pub use submit_plan_tool::*;
 pub use symbol_locator::*;
 
 pub use terminal_tool::*;
+pub use toolkit_tool::*;
 pub use tool_permissions::*;
 pub use update_plan_tool::*;
 pub use web_search_tool::*;

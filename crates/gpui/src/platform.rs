@@ -79,6 +79,46 @@ use strum::EnumIter;
 use uuid::Uuid;
 
 pub use app_menu::*;
+
+/// Where a synthetic pointer event is in the gesture it belongs to.
+#[cfg(target_os = "macos")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SimulatorPointerPhase {
+    /// The finger touches the screen.
+    Down,
+    /// The finger moves while touching.
+    Drag,
+    /// The finger lifts.
+    Up,
+}
+
+/// Input synthesized for a SimulatorKit display view, as if the user clicked or typed on it.
+#[cfg(target_os = "macos")]
+#[derive(Debug, Clone, PartialEq)]
+pub enum SimulatorInput {
+    /// A point given as fractions of the display view's width and height, from the top left.
+    Pointer {
+        /// Fraction of the view's width, 0 at the left edge.
+        x: f64,
+        /// Fraction of the view's height, 0 at the top edge.
+        y: f64,
+        /// Which part of the gesture this event is.
+        phase: SimulatorPointerPhase,
+    },
+    /// A macOS virtual key code with the characters it produces.
+    Key {
+        /// The macOS virtual key code (ANSI layout).
+        key_code: u16,
+        /// The characters the key produces.
+        characters: String,
+        /// Whether Shift is held.
+        shift: bool,
+        /// Whether Command is held.
+        command: bool,
+        /// Key down when true, key up when false.
+        down: bool,
+    },
+}
 pub use keyboard::*;
 pub use keystroke::*;
 
@@ -1019,6 +1059,10 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
         _enabled: bool,
     ) -> anyhow::Result<()> {
         anyhow::bail!("CoreSimulator is not available on this platform")
+    }
+    #[cfg(target_os = "macos")]
+    fn send_simulator_input(&self, _subview_id: u64, _input: SimulatorInput) -> anyhow::Result<()> {
+        anyhow::bail!("SimulatorKit is not available on this platform")
     }
     #[cfg(target_os = "macos")]
     fn has_native_subviews(&self) -> bool {

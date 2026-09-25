@@ -5590,6 +5590,7 @@ impl ThreadView {
                                     .child(self.render_add_context_button(cx))
                                     .child(self.render_mention_button(cx))
                                     .child(self.render_follow_toggle(cx))
+                                    .children(self.render_task_agent_chip(cx))
                                     .children(self.render_fast_mode_control(cx)),
                             )
                             .child(
@@ -6913,6 +6914,34 @@ impl ThreadView {
                     editor.insert_skill_crease(&skill, window, cx);
                 });
             })
+    }
+
+    /// The task agent this thread was handed to with `/command`. Clicking it hands the thread
+    /// back to the plain profile.
+    fn render_task_agent_chip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let thread = self.as_native_thread(cx)?;
+        let agent = thread.read(cx).task_agent()?.clone();
+        Some(
+            Button::new("task-agent-chip", agent.name.clone())
+                .style(ButtonStyle::Tinted(TintColor::Accent))
+                .label_size(LabelSize::Small)
+                .start_icon(
+                    Icon::new(IconName::UserGroup)
+                        .size(IconSize::XSmall)
+                        .color(Color::Accent),
+                )
+                .tooltip(Tooltip::text(format!(
+                    "Agente /{} ativo nesta thread. Clique para voltar ao modo normal.",
+                    agent.command
+                )))
+                .on_click(cx.listener(move |this, _, _window, cx| {
+                    if let Some(thread) = this.as_native_thread(cx) {
+                        thread.update(cx, |thread, cx| thread.set_task_agent(None, cx));
+                    }
+                    cx.notify();
+                }))
+                .into_any_element(),
+        )
     }
 
     fn render_follow_toggle(&self, cx: &mut Context<Self>) -> impl IntoElement {

@@ -1,9 +1,11 @@
 //! ClickUp in the editor: the tasks assigned to you, in a dock panel. Authentication is a
 //! personal API token kept in the system keychain, so there is no OAuth app to register.
 
+mod agent_toolkit;
 mod api;
 mod panel;
 
+pub use agent_toolkit::register_toolkit as register_agent_toolkit;
 pub use panel::ClickUpPanel;
 
 use anyhow::{Context as _, Result};

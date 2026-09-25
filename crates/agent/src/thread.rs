@@ -68,6 +68,7 @@ use std::{
     time::{Duration, Instant},
 };
 use util::{ResultExt, debug_panic, markdown::MarkdownCodeBlock, paths::PathStyle};
+use task_agents::TaskAgent;
 use uuid::Uuid;
 
 const TOOL_CANCELED_MESSAGE: &str = "Tool canceled by user";
@@ -1324,6 +1325,9 @@ pub struct Thread {
     /// already-granted permissions skip the approval prompt.
     /// Never persisted — lives and dies with this thread.
     sandbox_grants: Rc<RefCell<ThreadSandboxGrants>>,
+    /// The task agent invoked with `/command` in this thread. Its instructions, tools and
+    /// permission rules apply to every later turn, and it is saved with the thread.
+    task_agent: Option<Arc<TaskAgent>>,
 }
 
 impl Thread {
@@ -1460,6 +1464,7 @@ impl Thread {
             inherits_parent_model_settings: true,
             sandboxed_terminal_temp_dir: None,
             sandbox_grants: Rc::new(RefCell::new(ThreadSandboxGrants::default())),
+            task_agent: None,
         }
     }
 
@@ -1845,6 +1850,7 @@ impl Thread {
             sandbox_grants: Rc::new(RefCell::new(ThreadSandboxGrants::from_db(
                 &db_thread.sandbox_grants,
             ))),
+            task_agent: db_thread.task_agent.map(Arc::new),
         }
     }
 
@@ -1942,6 +1948,7 @@ impl Thread {
             }),
             sandboxed_terminal_temp_dir: self.sandboxed_terminal_temp_dir.clone(),
             sandbox_grants: self.sandbox_grants.borrow().to_db(),
+            task_agent: self.task_agent.as_deref().cloned(),
         };
 
         cx.background_spawn(async move {
@@ -2225,6 +2232,28 @@ impl Thread {
         // `Thread::enabled_tools`.
         self.add_tool(CreateThreadTool::new(environment.clone()));
         self.add_tool(ListAgentsAndModelsTool::new(environment));
+        self.add_toolkit_tools(cx);
+    }
+
+    /// Tools registered by other crates (devices, browser, API client, …). They are off unless
+    /// the profile or the task agent turns them on.
+    fn add_toolkit_tools(&mut self, cx: &App) {
+        for toolkit in task_agents::toolkits(cx) {
+            for tool in &toolkit.tools {
+                if self.tools.contains_key(&tool.name) {
+                    log::warn!("toolkit `{}` repeats tool `{}`", toolkit.id, tool.name);
+                    continue;
+                }
+                self.tools.insert(
+                    tool.name.clone(),
+                    Arc::new(crate::ToolkitToolAdapter::new(
+                        self.project.clone(),
+                        toolkit.id.clone(),
+                        tool.clone(),
+                    )),
+                );
+            }
+        }
     }
 
     pub fn add_tool<T: AgentTool>(&mut self, tool: T) {
@@ -2310,6 +2339,65 @@ impl Thread {
                 .update(cx, |thread, cx| thread.set_profile(profile_id.clone(), cx))
                 .ok();
         }
+    }
+
+    pub fn task_agent(&self) -> Option<&Arc<TaskAgent>> {
+        self.task_agent.as_ref()
+    }
+
+    /// Hands the thread to a task agent: its profile and model become the thread's, and its
+    /// instructions, tool overrides and permission rules apply from the next request on.
+    pub fn set_task_agent(&mut self, agent: Option<TaskAgent>, cx: &mut Context<Self>) {
+        if let Some(agent) = &agent {
+            if let Some(profile) = &agent.profile {
+                let profile_id = AgentProfileId(profile.clone().into());
+                if AgentSettings::get_global(cx)
+                    .profiles
+                    .contains_key(&profile_id)
+                {
+                    self.set_profile(profile_id, cx);
+                } else {
+                    log::warn!("task agent `{}` names unknown profile `{profile}`", agent.name);
+                }
+            }
+            if let Some(reference) = agent.model_reference() {
+                let selected = SelectedModel {
+                    provider: LanguageModelProviderId::from(reference.provider.clone()),
+                    model: LanguageModelId::from(reference.model.clone()),
+                };
+                let model = LanguageModelRegistry::global(cx).update(cx, |registry, cx| {
+                    registry
+                        .select_model(&selected, cx)
+                        .map(|configured| configured.model)
+                });
+                match model {
+                    Some(model) => self.set_model(model, cx),
+                    None => log::warn!(
+                        "task agent `{}` names unavailable model `{reference}`",
+                        agent.name
+                    ),
+                }
+            }
+        }
+        self.task_agent = agent.map(Arc::new);
+        cx.notify();
+    }
+
+    /// The task agent's decision for a tool call, or `None` when the agent has no rule for it
+    /// (or no agent is active) and the user's settings decide alone.
+    pub(crate) fn task_agent_decision(
+        &self,
+        tool_name: &str,
+        inputs: &[String],
+        cx: &App,
+    ) -> Option<ToolPermissionDecision> {
+        let agent = self.task_agent.as_ref()?;
+        let toolkit = task_agents::toolkit_for_tool(tool_name, cx);
+        let rules = agent.permission_rules(
+            tool_name,
+            toolkit.as_ref().map(|toolkit| toolkit.id.as_ref()),
+        )?;
+        crate::task_agent_permission_decision(&agent.name, rules, tool_name, inputs)
     }
 
     pub fn cancel(&mut self, cx: &mut Context<Self>) -> Task<()> {
@@ -4207,6 +4295,16 @@ impl Thread {
         let is_restricted =
             TrustedWorktrees::has_restricted_worktrees(&self.project.read(cx).worktree_store(), cx);
 
+        let toolkit_ids = task_agents::toolkits(cx)
+            .into_iter()
+            .flat_map(|toolkit| {
+                toolkit
+                    .tools
+                    .iter()
+                    .map(|tool| (tool.name.clone(), toolkit.id.clone()))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<HashMap<_, _>>();
         let mut tools = self
             .tools
             .iter()
@@ -4222,10 +4320,19 @@ impl Thread {
                     tool_name.as_ref()
                 };
 
-                if tool.supports_provider(&model.provider_id())
-                    && (profile.is_tool_enabled(profile_tool_name)
-                        || Self::implicitly_enables_update_plan(profile, profile_tool_name))
-                {
+                let profile_enables = profile.is_tool_enabled(profile_tool_name)
+                    || Self::implicitly_enables_update_plan(profile, profile_tool_name);
+                let enabled = self
+                    .task_agent
+                    .as_ref()
+                    .and_then(|agent| {
+                        agent.tool_override(
+                            profile_tool_name,
+                            toolkit_ids.get(profile_tool_name).map(|id| id.as_ref()),
+                        )
+                    })
+                    .unwrap_or(profile_enables);
+                if tool.supports_provider(&model.provider_id()) && enabled {
                     match (tool_name.as_ref(), use_sandboxed_terminal) {
                         (TerminalTool::NAME, false) | (SandboxedTerminalTool::NAME, true) => {
                             Some((SharedString::from(TerminalTool::NAME), tool.clone()))
@@ -4396,6 +4503,12 @@ impl Thread {
             model_name: self.model().map(|m| m.name().0.to_string()),
             date: Local::now().format("%Y-%m-%d").to_string(),
             user_agents_md,
+            task_agent: self.task_agent.as_ref().map(|agent| crate::TaskAgentPrompt {
+                name: agent.name.clone(),
+                command: agent.command.clone(),
+                description: agent.description.clone(),
+                instructions: agent.instructions.clone(),
+            }),
             sandboxing: crate::sandboxing::sandboxing_enabled_for_project(
                 self.project.read(cx),
                 cx,
@@ -5373,6 +5486,29 @@ where
     }
 }
 
+/// The user's settings decide unless they deny; then an active task agent's rule, when it has
+/// one for the tool, replaces the settings' answer. A task agent can loosen a confirmation but
+/// never a denial.
+fn combined_permission_decision(
+    thread: Option<&WeakEntity<Thread>>,
+    tool_name: &str,
+    inputs: &[String],
+    cx: &App,
+) -> ToolPermissionDecision {
+    let settings_decision = decide_permission_from_settings(
+        tool_name,
+        inputs,
+        agent_settings::AgentSettings::get_global(cx),
+    );
+    if matches!(settings_decision, ToolPermissionDecision::Deny(_)) {
+        return settings_decision;
+    }
+    thread
+        .and_then(|thread| thread.upgrade())
+        .and_then(|thread| thread.read(cx).task_agent_decision(tool_name, inputs, cx))
+        .unwrap_or(settings_decision)
+}
+
 /// Builds the ACP-facing tool call id for a tool use in the message at
 /// `message_ix`.
 ///
@@ -5862,16 +5998,52 @@ impl ToolCallEventStream {
 
         let tool_name = context.tool_name.clone();
         let input_values = context.input_values.clone();
+        let thread = self.thread.clone();
         let check_settings: Box<dyn Fn(&App) -> ToolPermissionDecision> =
             Box::new(move |cx: &App| {
-                decide_permission_from_settings(
-                    &tool_name,
-                    &input_values,
-                    agent_settings::AgentSettings::get_global(cx),
-                )
+                combined_permission_decision(thread.as_ref(), &tool_name, &input_values, cx)
             });
 
         self.run_authorization_loop(title, options, Some(context), Some(check_settings), cx)
+    }
+
+    /// Authorization for tools registered by toolkits. Reading tools run unless a rule says
+    /// otherwise; acting tools follow the user's settings unless the task agent decides.
+    pub fn authorize_toolkit_tool(
+        &self,
+        title: impl Into<String>,
+        context: ToolPermissionContext,
+        acts: bool,
+        cx: &mut App,
+    ) -> Task<Result<()>> {
+        let settings_decision = decide_permission_from_settings(
+            &context.tool_name,
+            &context.input_values,
+            agent_settings::AgentSettings::get_global(cx),
+        );
+        if let ToolPermissionDecision::Deny(reason) = settings_decision {
+            return Task::ready(Err(anyhow!(reason)));
+        }
+        let agent_decision = self
+            .thread
+            .as_ref()
+            .and_then(|thread| thread.upgrade())
+            .and_then(|thread| {
+                thread.read(cx).task_agent_decision(
+                    &context.tool_name,
+                    &context.input_values,
+                    cx,
+                )
+            });
+        match agent_decision {
+            Some(ToolPermissionDecision::Allow) => Task::ready(Ok(())),
+            Some(ToolPermissionDecision::Deny(reason)) => Task::ready(Err(anyhow!(reason))),
+            Some(ToolPermissionDecision::Confirm) => {
+                self.authorize_always_prompt(title, context, cx)
+            }
+            None if acts => self.authorize(title, context, cx),
+            None => Task::ready(Ok(())),
+        }
     }
 
     /// Like [`Self::authorize`], but always prompts the user without

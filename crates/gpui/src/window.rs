@@ -7539,6 +7539,16 @@ impl Window {
             .create_simulator_display_view(udid, size)
     }
 
+    /// Delivers synthetic pointer or key input to a SimulatorKit display view previously mounted
+    /// with [`Self::add_native_subview`].
+    pub fn send_simulator_input(
+        &self,
+        subview_id: u64,
+        input: crate::SimulatorInput,
+    ) -> anyhow::Result<()> {
+        self.platform_window.send_simulator_input(subview_id, input)
+    }
+
     /// Attaches or detaches the host keyboard from the simulator with this UDID. iOS draws its
     /// on-screen keyboard only while no hardware keyboard is attached.
     pub fn set_simulator_hardware_keyboard_enabled(

@@ -16,6 +16,12 @@ pub struct PanelRegistry(HashMap<EntityId, WeakEntity<DatabasePanel>>);
 
 impl Global for PanelRegistry {}
 
+impl PanelRegistry {
+    pub(crate) fn panel(&self, project: &Entity<Project>) -> Option<Entity<DatabasePanel>> {
+        self.0.get(&project.entity_id()).and_then(|panel| panel.upgrade())
+    }
+}
+
 pub fn register_panel(project: &Entity<Project>, panel: WeakEntity<DatabasePanel>, cx: &mut App) {
     cx.default_global::<PanelRegistry>()
         .0

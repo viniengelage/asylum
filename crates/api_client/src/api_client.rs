@@ -2,6 +2,7 @@
 //! are tags, requests are operations, environments are `servers` and logging in follows the
 //! spec's security schemes. What the spec doesn't say lives in `.asylum/api/<id>.json`.
 
+mod agent_toolkit;
 mod collection;
 mod config;
 mod cookies;
@@ -15,6 +16,7 @@ mod send;
 mod spec;
 mod vars;
 
+pub use agent_toolkit::register_toolkit as register_agent_toolkit;
 pub use panel::ApiPanel;
 pub use request_view::ApiRequestView;
 

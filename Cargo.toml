@@ -208,6 +208,7 @@ members = [
     "crates/syntax_theme",
     "crates/system_specs",
     "crates/tab_switcher",
+    "crates/task_agents",
     "crates/tabular_data_preview",
     "crates/task",
     "crates/tasks_ui",
@@ -484,6 +485,7 @@ system_specs = { path = "crates/system_specs" }
 tab_switcher = { path = "crates/tab_switcher" }
 tabular_data_preview = { path = "crates/tabular_data_preview"}
 task = { path = "crates/task" }
+task_agents = { path = "crates/task_agents" }
 tasks_ui = { path = "crates/tasks_ui" }
 telemetry = { path = "crates/telemetry" }
 telemetry_events = { path = "crates/telemetry_events" }

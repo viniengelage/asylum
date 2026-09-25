@@ -42,7 +42,7 @@ const DESCRIPTION_PREVIEW_CHARS: usize = 280;
 
 /// What the project's active repository is, as far as the panel is concerned.
 #[derive(Clone, PartialEq, Eq)]
-enum Target {
+pub(crate) enum Target {
     NoRepository,
     /// A remote the panel can't talk to yet, or none at all.
     Unsupported {
@@ -5214,7 +5214,7 @@ async fn has_commit(repository: &Entity<Repository>, hash: &str, cx: &mut AsyncA
 
 /// The active repository's hosted remote, preferring `origin`, and its checked-out branch as
 /// that remote names it.
-fn detect_target(project: &Entity<Project>, cx: &App) -> (Target, Option<String>) {
+pub(crate) fn detect_target(project: &Entity<Project>, cx: &App) -> (Target, Option<String>) {
     let Some(repository) = project.read(cx).active_repository(cx) else {
         return (Target::NoRepository, None);
     };
