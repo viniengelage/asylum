@@ -1,6 +1,7 @@
 //! A Postgres client for the dock: connect, browse the catalog and run SQL. The socket lives on
 //! the shared tokio runtime of `reqwest_client`; views only await the results.
 
+mod agent_schema;
 mod catalog;
 mod completion;
 mod connect_view;
@@ -14,8 +15,10 @@ mod session;
 mod statements;
 mod table_view;
 mod tls;
+mod tunnel;
 mod write_guard;
 
+pub use agent_schema::describe_for_agent;
 pub use catalog::{ColumnInfo, Relation, RelationKind, list_columns, list_relations};
 pub use connection::{Environment, SavedConnection};
 pub use panel::DatabasePanel;
@@ -177,7 +180,10 @@ pub fn init(cx: &mut App) {
                 .active_item(cx)
                 .and_then(|item| item.project_path(cx))
                 .and_then(|project_path| {
-                    workspace.project().read(cx).absolute_path(&project_path, cx)
+                    workspace
+                        .project()
+                        .read(cx)
+                        .absolute_path(&project_path, cx)
                 });
             let Some(path) = path else {
                 return;
@@ -316,7 +322,10 @@ mod tests {
             let session = Session::connect(&target).await.unwrap();
             let connected_in = started.elapsed();
             let encrypted = session
-                .run("select ssl from pg_stat_ssl where pid = pg_backend_pid()", 1)
+                .run(
+                    "select ssl from pg_stat_ssl where pid = pg_backend_pid()",
+                    1,
+                )
                 .await
                 .unwrap();
             let encrypted = encrypted.result_sets[0].rows[0][0].as_deref() == Some("t");
@@ -417,10 +426,7 @@ mod tests {
                 catalog::ForeignKeyDirection::ReferencedBy
             );
             assert_eq!(foreign_keys[0].on_delete, "CASCADE");
-            assert_eq!(
-                foreign_keys[0].other_table,
-                "database_client_spike.devices"
-            );
+            assert_eq!(foreign_keys[0].other_table, "database_client_spike.devices");
             let device_columns = list_columns(&session, "database_client_spike", "devices")
                 .await
                 .unwrap();
@@ -452,7 +458,10 @@ mod tests {
             assert_eq!(server_error(&error).code, "25006");
 
             let outcome = session
-                .run("select * from database_client_spike.users order by id", 1000)
+                .run(
+                    "select * from database_client_spike.users order by id",
+                    1000,
+                )
                 .await
                 .unwrap();
             let [users] = outcome.result_sets.as_slice() else {
@@ -480,7 +489,10 @@ mod tests {
 
             let started = Instant::now();
             let outcome = session
-                .run("select g, md5(g::text) from generate_series(1, 5000000) g", 1000)
+                .run(
+                    "select g, md5(g::text) from generate_series(1, 5000000) g",
+                    1000,
+                )
                 .await
                 .unwrap();
             let limited_in = started.elapsed();
@@ -510,7 +522,10 @@ mod tests {
                 .unwrap();
             assert_eq!(outcome.result_sets[0].rows.len(), 1000);
             assert!(outcome.result_sets[0].truncated);
-            assert_eq!(outcome.result_sets[0].columns[0].type_name.as_deref(), Some("int4"));
+            assert_eq!(
+                outcome.result_sets[0].columns[0].type_name.as_deref(),
+                Some("int4")
+            );
             let outcome = session.run("select 1", 10).await.unwrap();
             assert_eq!(outcome.result_sets[0].rows, [[Some("1".to_owned())]]);
             session.run("rollback", 10).await.unwrap();
@@ -543,7 +558,10 @@ mod tests {
             // Cell edits: the update matches while the old values hold, and matches nothing once
             // someone else changed the row.
             let page = session
-                .run("select id, name, profile from database_client_spike.users order by id", 10)
+                .run(
+                    "select id, name, profile from database_client_spike.users order by id",
+                    10,
+                )
                 .await
                 .unwrap();
             let rows = page.result_sets[0].rows.clone();
@@ -566,13 +584,10 @@ mod tests {
             assert_eq!(outcome.result_sets[0].rows_affected, Some(0));
 
             let started = Instant::now();
-            let (slow, cancelled) = futures::join!(
-                session.run("select pg_sleep(30)", 10),
-                async {
-                    sleep(Duration::from_millis(300)).await;
-                    session.cancel().await
-                }
-            );
+            let (slow, cancelled) = futures::join!(session.run("select pg_sleep(30)", 10), async {
+                sleep(Duration::from_millis(300)).await;
+                session.cancel().await
+            });
             let cancelled_in = started.elapsed();
             cancelled.unwrap();
             assert_eq!(server_error(&slow.unwrap_err()).code, "57014");

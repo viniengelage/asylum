@@ -1,9 +1,9 @@
 use crate::{
     ApplyCodeActionTool, AskUserTool, CodeActionStore, ContextServerRegistry, CopyPathTool,
-    CreateDirectoryTool, CreateThreadTool, DbLanguageModel, DbThread, DeletePathTool,
-    DiagnosticsTool, EditFileTool, FetchTool, FindPathTool, FindReferencesTool, GetCodeActionsTool,
-    GoToDefinitionTool, GrepTool, ListAgentsAndModelsTool, ListDirectoryTool, MovePathTool,
-    ProjectSnapshot, ReadFileTool, RenameTool, SandboxedTerminalTool, SpawnAgentTool,
+    CreateDirectoryTool, CreateThreadTool, DatabaseSchemaTool, DbLanguageModel, DbThread,
+    DeletePathTool, DiagnosticsTool, EditFileTool, FetchTool, FindPathTool, FindReferencesTool,
+    GetCodeActionsTool, GoToDefinitionTool, GrepTool, ListAgentsAndModelsTool, ListDirectoryTool,
+    MovePathTool, ProjectSnapshot, ReadFileTool, RenameTool, SandboxedTerminalTool, SpawnAgentTool,
     SubmitPlanTool, SystemPromptTemplate, Template, Templates, TerminalTool,
     ToolPermissionDecision, UpdatePlanTool, WebSearchTool, WriteFileTool,
     decide_permission_from_settings,
@@ -2199,6 +2199,7 @@ impl Thread {
         }
 
         self.add_tool(DiagnosticsTool::new(self.project.clone()));
+        self.add_tool(DatabaseSchemaTool::new(self.project.clone()));
 
         let code_action_store: CodeActionStore = cx.new(|_cx| None);
         self.add_tool(FindReferencesTool::new(self.project.clone()));

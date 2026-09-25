@@ -4,6 +4,9 @@
 
 use crate::session::ConnectTarget;
 use crate::tls::SslMode;
+use crate::tunnel::{self, SshTunnel};
+use std::net::{IpAddr, Ipv4Addr};
+use std::sync::Arc;
 use anyhow::Context as _;
 use db::kvp::KeyValueStore;
 use fs::Fs;
@@ -62,6 +65,8 @@ pub struct SavedConnection {
     pub read_only: bool,
     #[serde(default = "default_true")]
     pub confirm_writes: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh: Option<SshTunnel>,
 }
 
 fn default_port() -> u16 {
@@ -86,16 +91,43 @@ impl SavedConnection {
         format!("{}@{}:{}", self.user, self.host, self.port)
     }
 
+    /// `user@host:port`, plus the SSH host when the connection goes through one.
+    pub fn address_with_tunnel(&self) -> String {
+        match &self.ssh {
+            Some(ssh) => format!("{} · via ssh {}", self.address(), ssh.label()),
+            None => self.address(),
+        }
+    }
+
+    /// The target without a tunnel, as when the database is reachable directly.
     pub fn target(&self, password: Option<&str>) -> ConnectTarget {
+        self.target_through(password, None)
+    }
+
+    fn target_through(
+        &self,
+        password: Option<&str>,
+        tunnel: Option<Arc<tunnel::Tunnel>>,
+    ) -> ConnectTarget {
         let mut config = tokio_postgres::Config::new();
         config
             .host(&self.host)
-            .port(self.port)
             .dbname(&self.database)
             .user(&self.user)
             .application_name("Asylum")
             .connect_timeout(Duration::from_secs(10))
             .ssl_mode(self.ssl_mode.negotiation());
+        match &tunnel {
+            // Dial the forward, but keep `host` so TLS still checks the database's own name.
+            Some(tunnel) => {
+                config
+                    .hostaddr(IpAddr::V4(Ipv4Addr::LOCALHOST))
+                    .port(tunnel.local_port);
+            }
+            None => {
+                config.port(self.port);
+            }
+        }
         if let Some(password) = password.filter(|password| !password.is_empty()) {
             config.password(password);
         }
@@ -105,7 +137,22 @@ impl SavedConnection {
         ConnectTarget {
             config,
             ssl_mode: self.ssl_mode,
+            tunnel,
         }
+    }
+
+    /// The target, after opening the SSH forward when the connection has one.
+    pub async fn open_target(&self, password: Option<String>) -> anyhow::Result<ConnectTarget> {
+        let Some(ssh) = self.ssh.clone() else {
+            return Ok(self.target(password.as_deref()));
+        };
+        let host = self.host.clone();
+        let port = self.port;
+        let tunnel = reqwest_client::runtime()
+            .spawn(async move { tunnel::open(&ssh, &host, port).await })
+            .await
+            .map_err(|error| anyhow::anyhow!("o túnel SSH parou: {error}"))??;
+        Ok(self.target_through(password.as_deref(), Some(Arc::new(tunnel))))
     }
 }
 
@@ -175,8 +222,8 @@ pub async fn load_project(fs: &dyn Fs, root: &Path) -> anyhow::Result<Vec<SavedC
         return Ok(Vec::new());
     }
     let text = fs.load(&path).await?;
-    let file: ConnectionsFile = serde_json::from_str(&text)
-        .with_context(|| format!("{} ilegível", path.display()))?;
+    let file: ConnectionsFile =
+        serde_json::from_str(&text).with_context(|| format!("{} ilegível", path.display()))?;
     Ok(file.connections)
 }
 
@@ -254,6 +301,9 @@ mod tests {
         assert_eq!(connection.environment, Environment::Local);
         assert_eq!(connection.ssl_mode, SslMode::VerifyFull);
         assert!(connection.confirm_writes);
-        assert_eq!(connection.keychain_url(), "postgres://app@localhost:5432/trix");
+        assert_eq!(
+            connection.keychain_url(),
+            "postgres://app@localhost:5432/trix"
+        );
     }
 }

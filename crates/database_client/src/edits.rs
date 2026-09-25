@@ -41,7 +41,10 @@ pub fn row_updates(
             .and_then(|values| values.get(*column))
             .ok_or_else(|| format!("A célula ({row}, {column}) não existe mais nesta página."))?;
         if old.as_deref() != value.as_deref() {
-            by_row.entry(*row).or_default().push((*column, value.as_deref()));
+            by_row
+                .entry(*row)
+                .or_default()
+                .push((*column, value.as_deref()));
         }
     }
     let target = qualified_name(schema, table);
@@ -111,7 +114,11 @@ mod tests {
                 Some("diego.martins@trix.com.br".to_owned()),
                 Some("{investor}".to_owned()),
             ],
-            vec![Some("48205".to_owned()), None, Some("{investor}".to_owned())],
+            vec![
+                Some("48205".to_owned()),
+                None,
+                Some("{investor}".to_owned()),
+            ],
         ];
         let mut edits = PendingEdits::default();
         edits.insert((0, 1), Some("diego@trix.com.br".to_owned()));
@@ -132,11 +139,12 @@ mod tests {
                 },
                 RowUpdate {
                     row: 1,
-                    sql: "update \"public\".\"users\"\n   set \"email\" = 'o''brien@x.com',\n       \
+                    sql:
+                        "update \"public\".\"users\"\n   set \"email\" = 'o''brien@x.com',\n       \
                           \"roles\" = null\n where \"id\" = '48205'\n   and \"email\"::text is \
                           not distinct from null\n   and \"roles\"::text is not distinct from \
                           '{investor}'"
-                        .into(),
+                            .into(),
                 },
             ]
         );

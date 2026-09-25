@@ -116,7 +116,8 @@ fn parse_column(row: Vec<Option<String>>) -> Option<ColumnInfo> {
 pub async fn list_all_columns(
     session: &Session,
 ) -> anyhow::Result<Vec<(String, String, String, String)>> {
-    let sql = "select n.nspname, c.relname, a.attname, pg_catalog.format_type(a.atttypid, a.atttypmod)
+    let sql =
+        "select n.nspname, c.relname, a.attname, pg_catalog.format_type(a.atttypid, a.atttypmod)
                  from pg_catalog.pg_attribute a
                  join pg_catalog.pg_class c on c.oid = a.attrelid
                  join pg_catalog.pg_namespace n on n.oid = c.relnamespace
@@ -347,7 +348,10 @@ mod tests {
     use super::*;
 
     fn row(values: &[Option<&str>]) -> Vec<Option<String>> {
-        values.iter().map(|value| value.map(str::to_owned)).collect()
+        values
+            .iter()
+            .map(|value| value.map(str::to_owned))
+            .collect()
     }
 
     #[test]
@@ -364,19 +368,30 @@ mod tests {
         );
 
         let relation = parse_relation(row(&[Some("audit"), Some("log"), Some("p"), Some("1200")]));
-        assert_eq!(relation.map(|relation| relation.estimated_rows), Some(Some(1200)));
+        assert_eq!(
+            relation.map(|relation| relation.estimated_rows),
+            Some(Some(1200))
+        );
     }
 
     #[test]
     fn identifiers_and_literals_are_quoted() {
-        assert_eq!(qualified_name("public", "my \"odd\" table"), "\"public\".\"my \"\"odd\"\" table\"");
+        assert_eq!(
+            qualified_name("public", "my \"odd\" table"),
+            "\"public\".\"my \"\"odd\"\" table\""
+        );
         assert_eq!(quote_literal("O'Brien"), "'O''Brien'");
     }
 
     #[test]
     fn unknown_kinds_are_skipped() {
         assert_eq!(
-            parse_relation(row(&[Some("public"), Some("users_seq"), Some("S"), Some("1")])),
+            parse_relation(row(&[
+                Some("public"),
+                Some("users_seq"),
+                Some("S"),
+                Some("1")
+            ])),
             None
         );
     }

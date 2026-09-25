@@ -128,7 +128,9 @@ impl ResultGrid {
             editable: false,
             pending: PendingEdits::default(),
             editing: None,
-            widths: cx.new(|_| ResizableColumnsState::new(1, vec![px(48.)], vec![TableResizeBehavior::None])),
+            widths: cx.new(|_| {
+                ResizableColumnsState::new(1, vec![px(48.)], vec![TableResizeBehavior::None])
+            }),
             interaction: cx.new(|cx| TableInteractionState::new(cx)),
             focus_handle: cx.focus_handle(),
         }
@@ -247,8 +249,8 @@ impl ResultGrid {
                 .max(44.));
             let mut widths: Vec<AbsoluteLength> = vec![number_width.into()];
             widths.extend(columns.iter().enumerate().map(|(index, column)| {
-                let header = column.name.len()
-                    + column.type_name.as_ref().map_or(0, |name| name.len() + 1);
+                let header =
+                    column.name.len() + column.type_name.as_ref().map_or(0, |name| name.len() + 1);
                 let longest = self
                     .display
                     .iter()
@@ -259,19 +261,17 @@ impl ResultGrid {
                     .unwrap_or(4);
                 let characters = header.max(longest) as f32;
                 AbsoluteLength::from(px(
-                    (characters * CHAR_WIDTH + 28.).clamp(MIN_COLUMN_WIDTH, MAX_COLUMN_WIDTH),
+                    (characters * CHAR_WIDTH + 28.).clamp(MIN_COLUMN_WIDTH, MAX_COLUMN_WIDTH)
                 ))
             }));
             let mut behaviors = vec![TableResizeBehavior::Resizable; columns.len() + 1];
             behaviors[0] = TableResizeBehavior::None;
             let cols = columns.len() + 1;
-            self.widths
-                .update(cx, |state, _| *state = ResizableColumnsState::new(cols, widths, behaviors));
+            self.widths.update(cx, |state, _| {
+                *state = ResizableColumnsState::new(cols, widths, behaviors)
+            });
             self.selected = None;
-        } else if self
-            .selected
-            .is_some_and(|(row, _)| row >= rows.len())
-        {
+        } else if self.selected.is_some_and(|(row, _)| row >= rows.len()) {
             self.selected = None;
         }
         self.editing = None;
@@ -325,9 +325,9 @@ impl ResultGrid {
             .gap_1p5()
             .overflow_hidden()
             .when(self.sortable, |this| {
-                this.cursor_pointer().on_click(cx.listener(move |_, _, _, cx| {
-                    cx.emit(GridEvent::SortRequested(index))
-                }))
+                this.cursor_pointer().on_click(
+                    cx.listener(move |_, _, _, cx| cx.emit(GridEvent::SortRequested(index))),
+                )
             })
             .child(
                 Label::new(column.name.clone())
@@ -386,11 +386,9 @@ impl ResultGrid {
                         .get(column_index)
                         .is_some_and(GridColumn::is_numeric);
                     let cell_selected = self.selected == Some((row_index, column_index));
-                    if let Some(editing) = self
-                        .editing
-                        .as_ref()
-                        .filter(|editing| editing.row == row_index && editing.column == column_index)
-                    {
+                    if let Some(editing) = self.editing.as_ref().filter(|editing| {
+                        editing.row == row_index && editing.column == column_index
+                    }) {
                         cells.push(
                             div()
                                 .key_context("DatabaseCellEditor")
@@ -444,16 +442,18 @@ impl ResultGrid {
                                     .color(Color::Disabled)
                                     .into_any_element(),
                             })
-                            .on_click(cx.listener(move |this, event: &gpui::ClickEvent, window, cx| {
-                                this.selected = Some((row_index, column_index));
-                                if event.click_count() >= 2 {
-                                    this.start_editing(window, cx);
-                                } else {
-                                    this.editing = None;
-                                    window.focus(&this.focus_handle, cx);
-                                }
-                                cx.notify();
-                            }))
+                            .on_click(cx.listener(
+                                move |this, event: &gpui::ClickEvent, window, cx| {
+                                    this.selected = Some((row_index, column_index));
+                                    if event.click_count() >= 2 {
+                                        this.start_editing(window, cx);
+                                    } else {
+                                        this.editing = None;
+                                        window.focus(&this.focus_handle, cx);
+                                    }
+                                    cx.notify();
+                                },
+                            ))
                             .into_any_element(),
                     );
                 }
@@ -512,9 +512,9 @@ impl ResultGrid {
                         Button::new("db-grid-edit", "Editar")
                             .style(ButtonStyle::Subtle)
                             .label_size(LabelSize::XSmall)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.start_editing(window, cx)
-                            })),
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.start_editing(window, cx)),
+                            ),
                     )
                 })
                 .child(
@@ -522,9 +522,11 @@ impl ResultGrid {
                         .icon_size(IconSize::Small)
                         .icon_color(Color::Muted)
                         .tooltip(Tooltip::text("Copiar valor"))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.copy_cell(&CopyCell, window, cx)
-                        })),
+                        .on_click(
+                            cx.listener(|this, _, window, cx| {
+                                this.copy_cell(&CopyCell, window, cx)
+                            }),
+                        ),
                 )
                 .into_any_element(),
         )
@@ -602,13 +604,22 @@ impl Render for ResultGrid {
             .on_action(cx.listener(|this, _: &EditCell, window, cx| this.start_editing(window, cx)))
             .on_action(cx.listener(Self::confirm_edit))
             .on_action(cx.listener(Self::cancel_edit))
-            .on_action(cx.listener(|this, _: &SelectCellBelow, _, cx| this.move_selection(1, 0, cx)))
-            .on_action(cx.listener(|this, _: &SelectCellAbove, _, cx| this.move_selection(-1, 0, cx)))
-            .on_action(cx.listener(|this, _: &SelectCellRight, _, cx| this.move_selection(0, 1, cx)))
-            .on_action(cx.listener(|this, _: &SelectCellLeft, _, cx| this.move_selection(0, -1, cx)))
+            .on_action(
+                cx.listener(|this, _: &SelectCellBelow, _, cx| this.move_selection(1, 0, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &SelectCellAbove, _, cx| this.move_selection(-1, 0, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &SelectCellRight, _, cx| this.move_selection(0, 1, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &SelectCellLeft, _, cx| this.move_selection(0, -1, cx)),
+            )
             .size_full()
-            .child(
-                div().flex_1().min_h_0().when(widths_match && !self.columns.is_empty(), |this| {
+            .child(div().flex_1().min_h_0().when(
+                widths_match && !self.columns.is_empty(),
+                |this| {
                     this.child(
                         Table::new(cols)
                             .interactable(&self.interaction)
@@ -624,8 +635,8 @@ impl Render for ResultGrid {
                                 }),
                             ),
                     )
-                }),
-            )
+                },
+            ))
             .children(self.render_detail(cx))
     }
 }

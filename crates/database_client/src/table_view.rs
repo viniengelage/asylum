@@ -137,8 +137,7 @@ impl TableView {
         let where_input = cx.new(|cx| {
             InputField::new(window, cx, "created_at > now() - interval '7 days'").label("WHERE")
         });
-        let order_input =
-            cx.new(|cx| InputField::new(window, cx, "id desc").label("ORDER BY"));
+        let order_input = cx.new(|cx| InputField::new(window, cx, "id desc").label("ORDER BY"));
         let grid = cx.new(|cx| ResultGrid::new(true, cx));
         let subscriptions = vec![cx.subscribe(&grid, |this, _, event, cx| match event {
             GridEvent::SortRequested(column) => this.sort_by(*column, cx),
@@ -194,7 +193,8 @@ impl TableView {
                     this.session = Some(session);
                     this.columns = columns;
                     let editable = this.can_edit();
-                    this.grid.update(cx, |grid, cx| grid.set_editable(editable, cx));
+                    this.grid
+                        .update(cx, |grid, cx| grid.set_editable(editable, cx));
                     this.load_page(cx);
                 }
                 Err(error) => {
@@ -232,10 +232,7 @@ impl TableView {
     }
 
     fn page_sql(&self, cx: &App) -> String {
-        let mut sql = format!(
-            "select * from {}",
-            qualified_name(&self.schema, &self.name)
-        );
+        let mut sql = format!("select * from {}", qualified_name(&self.schema, &self.name));
         let filter = self.where_input.read(cx).text(cx).trim().to_owned();
         if !filter.is_empty() {
             sql.push_str(&format!(" where {filter}"));
@@ -351,7 +348,8 @@ impl TableView {
         }
         self.notice = None;
         let pending = self.pending.clone();
-        self.grid.update(cx, |grid, cx| grid.set_pending(pending, cx));
+        self.grid
+            .update(cx, |grid, cx| grid.set_pending(pending, cx));
         cx.notify();
     }
 
@@ -428,7 +426,8 @@ impl TableView {
                     ),
                     None,
                     Box::new(move |_, _window, cx| {
-                        this.update(cx, |this, cx| this.write(updates, cx)).log_err();
+                        this.update(cx, |this, cx| this.write(updates, cx))
+                            .log_err();
                     }),
                     window,
                     cx,
@@ -829,9 +828,10 @@ impl TableView {
         if self.pending.is_empty() && self.notice.is_none() {
             return None;
         }
-        let preview = self
-            .show_sql
-            .then(|| self.pending_updates(cx).map(|updates| edits::preview(&updates)));
+        let preview = self.show_sql.then(|| {
+            self.pending_updates(cx)
+                .map(|updates| edits::preview(&updates))
+        });
         let count = self.pending.len();
         Some(
             v_flex()
@@ -931,14 +931,20 @@ impl TableView {
                             this.child(
                                 Button::new(
                                     "db-edits-sql",
-                                    if self.show_sql { "Ocultar SQL" } else { "Ver SQL" },
+                                    if self.show_sql {
+                                        "Ocultar SQL"
+                                    } else {
+                                        "Ver SQL"
+                                    },
                                 )
                                 .style(ButtonStyle::Subtle)
                                 .label_size(LabelSize::Small)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.show_sql = !this.show_sql;
-                                    cx.notify();
-                                })),
+                                .on_click(cx.listener(
+                                    |this, _, _, cx| {
+                                        this.show_sql = !this.show_sql;
+                                        cx.notify();
+                                    },
+                                )),
                             )
                             .child(
                                 Button::new("db-edits-discard", "Descartar")
@@ -950,7 +956,11 @@ impl TableView {
                             .child(
                                 Button::new(
                                     "db-edits-apply",
-                                    if self.applying { "Aplicando…" } else { "Aplicar" },
+                                    if self.applying {
+                                        "Aplicando…"
+                                    } else {
+                                        "Aplicar"
+                                    },
                                 )
                                 .style(ButtonStyle::Tinted(ui::TintColor::Accent))
                                 .label_size(LabelSize::Small)
@@ -960,9 +970,9 @@ impl TableView {
                                     &self.focus_handle,
                                     cx,
                                 ))
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.apply_edits(&ApplyEdits, window, cx)
-                                })),
+                                .on_click(cx.listener(
+                                    |this, _, window, cx| this.apply_edits(&ApplyEdits, window, cx),
+                                )),
                             )
                         }),
                 )
@@ -989,7 +999,11 @@ impl TableView {
         let cell = |index: usize, child: AnyElement| {
             let width = widths.get(index).copied().unwrap_or(0.);
             if width > 0. {
-                div().w(px(width)).flex_none().child(child).into_any_element()
+                div()
+                    .w(px(width))
+                    .flex_none()
+                    .child(child)
+                    .into_any_element()
             } else {
                 div().flex_1().min_w_0().child(child).into_any_element()
             }
@@ -1138,9 +1152,7 @@ impl TableView {
                                     (
                                         match foreign_key.direction {
                                             ForeignKeyDirection::References => "referencia",
-                                            ForeignKeyDirection::ReferencedBy => {
-                                                "referenciada por"
-                                            }
+                                            ForeignKeyDirection::ReferencedBy => "referenciada por",
                                         }
                                         .to_owned(),
                                         Color::Muted,

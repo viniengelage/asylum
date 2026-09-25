@@ -1,11 +1,11 @@
 use crate::{
-    SaveConnection,
-    catalog,
+    SaveConnection, catalog,
     connection::{self, DEFAULT_PORT, Environment, SavedConnection, Scope, UrlFields},
     discovery::{Source, Suggestion},
     panel::DatabasePanel,
     session::Session,
     tls::SslMode,
+    tunnel::SshTunnel,
 };
 use gpui::{
     AnyElement, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Subscription, Task,
@@ -47,6 +47,9 @@ pub struct ConnectView {
     database_input: Entity<InputField>,
     user_input: Entity<InputField>,
     password_input: Entity<InputField>,
+    ssh_enabled: bool,
+    ssh_host_input: Entity<InputField>,
+    ssh_port_input: Entity<InputField>,
     environment: Environment,
     ssl_mode: SslMode,
     read_only: bool,
@@ -68,13 +71,18 @@ impl ConnectView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let input = |placeholder: &str, label: &str, window: &mut Window, cx: &mut Context<Self>| {
-            cx.new(|cx| InputField::new(window, cx, placeholder).label(label.to_owned()))
-        };
+        let input =
+            |placeholder: &str, label: &str, window: &mut Window, cx: &mut Context<Self>| {
+                cx.new(|cx| InputField::new(window, cx, placeholder).label(label.to_owned()))
+            };
         let url_input = cx.new(|cx| {
-            InputField::new(window, cx, "postgres://usuário:senha@host:5432/banco?sslmode=prefer")
-                .label("Colar URL de conexão")
-                .start_icon(IconName::Link)
+            InputField::new(
+                window,
+                cx,
+                "postgres://usuário:senha@host:5432/banco?sslmode=prefer",
+            )
+            .label("Colar URL de conexão")
+            .start_icon(IconName::Link)
         });
         let name_input = input("igual ao banco", "Nome", window, cx);
         let host_input = input("localhost", "Host", window, cx);
@@ -87,6 +95,9 @@ impl ConnectView {
                 .label("Senha")
                 .masked(true)
         });
+
+        let ssh_host_input = input("bastion ou usuário@bastion.exemplo.com", "Host SSH", window, cx);
+        let ssh_port_input = input("22", "Porta SSH", window, cx);
 
         let mut subscriptions = Vec::new();
         {
@@ -140,6 +151,9 @@ impl ConnectView {
             database_input,
             user_input,
             password_input,
+            ssh_enabled: false,
+            ssh_host_input,
+            ssh_port_input,
             environment: Environment::Local,
             ssl_mode: SslMode::Prefer,
             read_only: false,
@@ -185,6 +199,13 @@ impl ConnectView {
                 self.ssl_mode = connection.ssl_mode;
                 self.read_only = connection.read_only;
                 self.confirm_writes = connection.confirm_writes;
+                if let Some(ssh) = &connection.ssh {
+                    self.ssh_enabled = true;
+                    set_input(&self.ssh_host_input, &ssh.host, window, cx);
+                    if let Some(port) = ssh.port {
+                        set_input(&self.ssh_port_input, &port.to_string(), window, cx);
+                    }
+                }
                 self.scope = scope;
                 self.editing = Some((connection.id, scope));
             }
@@ -273,6 +294,24 @@ impl ConnectView {
             .map(|(id, _)| id.clone())
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         let password = self.password_input.read(cx).text(cx);
+        let ssh = if self.ssh_enabled {
+            let host = text(&self.ssh_host_input);
+            if host.is_empty() {
+                return Err("Preencha o host SSH ou desligue o túnel.".into());
+            }
+            let port = text(&self.ssh_port_input);
+            let port = if port.is_empty() {
+                None
+            } else {
+                Some(
+                    port.parse::<u16>()
+                        .map_err(|_| SharedString::from(format!("Porta SSH inválida: {port}")))?,
+                )
+            };
+            Some(SshTunnel { host, port })
+        } else {
+            None
+        };
         Ok((
             SavedConnection {
                 id,
@@ -283,6 +322,7 @@ impl ConnectView {
                 database,
                 user,
                 ssl_mode: self.ssl_mode,
+                ssh,
                 read_only: self.read_only,
                 confirm_writes: self.confirm_writes || self.environment == Environment::Prod,
             },
@@ -304,13 +344,17 @@ impl ConnectView {
         self.test_task = cx.spawn(async move |this, cx| {
             let result = async {
                 let started = Instant::now();
-                let session =
-                    Session::connect(&connection.target(Some(password.as_str()).filter(|p| !p.is_empty())))
-                        .await?;
+                let target = connection
+                    .open_target(Some(password).filter(|password| !password.is_empty()))
+                    .await?;
+                let session = Session::connect(&target).await?;
                 let connected_in = started.elapsed();
                 let relations = catalog::list_relations(&session).await?;
                 let encrypted = session
-                    .run("select ssl from pg_stat_ssl where pid = pg_backend_pid()", 1)
+                    .run(
+                        "select ssl from pg_stat_ssl where pid = pg_backend_pid()",
+                        1,
+                    )
                     .await?
                     .result_sets
                     .first()
@@ -410,9 +454,12 @@ impl ConnectView {
                 SharedString::default(),
                 Color::Muted,
             ),
-            TestState::Passed(summary) => {
-                (IconName::CheckDouble, "Conectado", summary.clone(), Color::Success)
-            }
+            TestState::Passed(summary) => (
+                IconName::CheckDouble,
+                "Conectado",
+                summary.clone(),
+                Color::Success,
+            ),
             TestState::Failed(error) => (IconName::XCircle, "Falhou", error.clone(), Color::Error),
         };
         Some(
@@ -574,16 +621,20 @@ impl Render for ConnectView {
                             .items_end()
                             .child(div().flex_1().child(self.name_input.clone()))
                             .child(
-                                v_flex().flex_1().gap_1().child(field_label("Ambiente")).child(
-                                    ToggleButtonGroup::single_row(
-                                        "db-environment",
-                                        environment_buttons,
-                                    )
-                                    .style(ToggleButtonGroupStyle::Outlined)
-                                    .size(ToggleButtonGroupSize::Custom(rems_from_px(30_f32)))
-                                    .label_size(LabelSize::Small)
-                                    .selected_index(environment_index),
-                                ),
+                                v_flex()
+                                    .flex_1()
+                                    .gap_1()
+                                    .child(field_label("Ambiente"))
+                                    .child(
+                                        ToggleButtonGroup::single_row(
+                                            "db-environment",
+                                            environment_buttons,
+                                        )
+                                        .style(ToggleButtonGroupStyle::Outlined)
+                                        .size(ToggleButtonGroupSize::Custom(rems_from_px(30_f32)))
+                                        .label_size(LabelSize::Small)
+                                        .selected_index(environment_index),
+                                    ),
                             ),
                     )
                     .child(two(self.host_input.clone(), self.port_input.clone()))
@@ -608,22 +659,53 @@ impl Render for ConnectView {
                     )
                     .child(
                         v_flex()
+                            .gap_2()
+                            .child(SwitchField::new(
+                                "db-ssh",
+                                Some("Túnel SSH"),
+                                Some(
+                                    "Usa o ssh do sistema: ~/.ssh/config, chaves e agent. Sem \
+                                     prompt de senha."
+                                        .into(),
+                                ),
+                                ToggleState::from(self.ssh_enabled),
+                                cx.listener(|this, state: &ToggleState, _, cx| {
+                                    this.ssh_enabled = state.selected();
+                                    this.test = TestState::Idle;
+                                    cx.notify();
+                                }),
+                            ))
+                            .when(self.ssh_enabled, |this| {
+                                this.child(
+                                    h_flex()
+                                        .gap_4()
+                                        .items_start()
+                                        .child(div().flex_1().child(self.ssh_host_input.clone()))
+                                        .child(div().w(px(140.)).child(self.ssh_port_input.clone())),
+                                )
+                                .child(
+                                    Label::new(
+                                        "Host e porta acima são os do banco visto a partir do \
+                                         servidor SSH.",
+                                    )
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted),
+                                )
+                            }),
+                    )
+                    .child(
+                        v_flex()
                             .gap_3()
-                            .child(
-                                div().child(SwitchField::new(
-                                    "db-read-only",
-                                    Some("Somente leitura"),
-                                    Some(
-                                        "Abre toda sessão com default_transaction_read_only."
-                                            .into(),
-                                    ),
-                                    ToggleState::from(self.read_only),
-                                    cx.listener(|this, state: &ToggleState, _, cx| {
-                                        this.read_only = state.selected();
-                                        cx.notify();
-                                    }),
-                                )),
-                            )
+                            .child(div().child(SwitchField::new(
+                                "db-read-only",
+                                Some("Somente leitura"),
+                                Some("Abre toda sessão com default_transaction_read_only.".into()),
+                                ToggleState::from(self.read_only),
+                                cx.listener(|this, state: &ToggleState, _, cx| {
+                                    this.read_only = state.selected();
+                                    cx.notify();
+                                }),
+                            )))
                             .child(
                                 div().child(SwitchField::new(
                                     "db-confirm-writes",
@@ -683,20 +765,26 @@ impl Render for ConnectView {
                                         Icon::new(IconName::SignalHigh).size(IconSize::Small),
                                     )
                                     .disabled(matches!(self.test, TestState::Running))
-                                    .on_click(cx.listener(|this, _, _, cx| this.test_connection(cx))),
+                                    .on_click(
+                                        cx.listener(|this, _, _, cx| this.test_connection(cx)),
+                                    ),
                             )
                             .child(div().flex_1())
                             .child(
                                 Button::new("db-cancel", "Cancelar")
                                     .style(ButtonStyle::Subtle)
-                                    .on_click(cx.listener(|_, _, _, cx| {
-                                        cx.emit(ItemEvent::CloseItem)
-                                    })),
+                                    .on_click(
+                                        cx.listener(|_, _, _, cx| cx.emit(ItemEvent::CloseItem)),
+                                    ),
                             )
                             .child(
                                 Button::new(
                                     "db-save",
-                                    if saving { "Salvando…" } else { "Salvar e conectar" },
+                                    if saving {
+                                        "Salvando…"
+                                    } else {
+                                        "Salvar e conectar"
+                                    },
                                 )
                                 .style(ButtonStyle::Tinted(TintColor::Accent))
                                 .disabled(saving)
@@ -705,9 +793,9 @@ impl Render for ConnectView {
                                     &self.focus_handle,
                                     cx,
                                 ))
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.save(&SaveConnection, window, cx)
-                                })),
+                                .on_click(cx.listener(
+                                    |this, _, window, cx| this.save(&SaveConnection, window, cx),
+                                )),
                             ),
                     ),
             )
@@ -761,7 +849,9 @@ pub fn open(
     cx: &mut App,
 ) {
     workspace
-        .update(cx, |workspace, cx| open_in(workspace, panel, prefill, window, cx))
+        .update(cx, |workspace, cx| {
+            open_in(workspace, panel, prefill, window, cx)
+        })
         .log_err();
 }
 

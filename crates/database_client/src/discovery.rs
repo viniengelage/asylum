@@ -7,7 +7,12 @@ use collections::HashMap;
 use fs::Fs;
 use std::path::{Path, PathBuf};
 
-const ENV_FILES: [&str; 4] = [".env", ".env.local", ".env.development", ".env.development.local"];
+const ENV_FILES: [&str; 4] = [
+    ".env",
+    ".env.local",
+    ".env.development",
+    ".env.development.local",
+];
 const COMPOSE_FILES: [&str; 4] = [
     "docker-compose.yml",
     "docker-compose.yaml",
@@ -18,8 +23,15 @@ const URL_VARIABLES: [&str; 4] = ["DATABASE_URL", "POSTGRES_URL", "POSTGRESQL_UR
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Source {
-    Env { file: String, variable: String },
-    Compose { file: String, service: String, image: String },
+    Env {
+        file: String,
+        variable: String,
+    },
+    Compose {
+        file: String,
+        service: String,
+        image: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -35,7 +47,10 @@ pub struct Suggestion {
 
 impl Suggestion {
     pub fn address(&self) -> String {
-        format!("{}@{}:{}/{}", self.user, self.host, self.port, self.database)
+        format!(
+            "{}@{}:{}/{}",
+            self.user, self.host, self.port, self.database
+        )
     }
 
     fn from_fields(source: Source, fields: UrlFields) -> Option<Self> {
@@ -95,9 +110,10 @@ fn env_suggestions(file: &str, variables: &[(String, String)]) -> Vec<Suggestion
     };
     let mut suggestions = Vec::new();
     for (variable, value) in variables {
-        let is_url_variable = URL_VARIABLES.contains(&variable.as_str())
-            || variable.ends_with("_DATABASE_URL");
-        let is_postgres_url = value.starts_with("postgres://") || value.starts_with("postgresql://");
+        let is_url_variable =
+            URL_VARIABLES.contains(&variable.as_str()) || variable.ends_with("_DATABASE_URL");
+        let is_postgres_url =
+            value.starts_with("postgres://") || value.starts_with("postgresql://");
         if !is_url_variable || !is_postgres_url {
             continue;
         }
@@ -169,16 +185,16 @@ fn compose_suggestions(
     env: &HashMap<String, String>,
 ) -> anyhow::Result<Vec<Suggestion>> {
     let document: serde_yaml::Value = serde_yaml::from_str(text)?;
-    let Some(services) = document.get("services").and_then(|services| services.as_mapping())
+    let Some(services) = document
+        .get("services")
+        .and_then(|services| services.as_mapping())
     else {
         return Ok(Vec::new());
     };
     let mut suggestions = Vec::new();
     for (name, service) in services {
-        let (Some(name), Some(image)) = (
-            name.as_str(),
-            service.get("image").and_then(yaml_string),
-        ) else {
+        let (Some(name), Some(image)) = (name.as_str(), service.get("image").and_then(yaml_string))
+        else {
             continue;
         };
         let image = interpolate(&image, env);
@@ -193,7 +209,9 @@ fn compose_suggestions(
             .unwrap_or_else(|| "postgres".to_owned());
         let fields = UrlFields {
             host: Some("localhost".to_owned()),
-            port: service.get("ports").and_then(|ports| published_port(ports, env)),
+            port: service
+                .get("ports")
+                .and_then(|ports| published_port(ports, env)),
             database: Some(
                 environment
                     .get("POSTGRES_DB")

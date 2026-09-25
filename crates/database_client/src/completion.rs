@@ -13,19 +13,83 @@ use project::{
 use std::{cell::RefCell, rc::Rc};
 
 const KEYWORDS: &[&str] = &[
-    "select", "from", "where", "join", "left join", "inner join", "on", "group by", "order by",
-    "having", "limit", "offset", "insert into", "values", "update", "set", "delete from",
-    "returning", "with", "as", "and", "or", "not", "null", "is null", "is not null", "in",
-    "exists", "between", "like", "ilike", "case", "when", "then", "else", "end", "distinct",
-    "union all", "count(*)", "coalesce", "now()", "interval", "true", "false", "asc", "desc",
-    "begin", "commit", "rollback", "explain analyze",
+    "select",
+    "from",
+    "where",
+    "join",
+    "left join",
+    "inner join",
+    "on",
+    "group by",
+    "order by",
+    "having",
+    "limit",
+    "offset",
+    "insert into",
+    "values",
+    "update",
+    "set",
+    "delete from",
+    "returning",
+    "with",
+    "as",
+    "and",
+    "or",
+    "not",
+    "null",
+    "is null",
+    "is not null",
+    "in",
+    "exists",
+    "between",
+    "like",
+    "ilike",
+    "case",
+    "when",
+    "then",
+    "else",
+    "end",
+    "distinct",
+    "union all",
+    "count(*)",
+    "coalesce",
+    "now()",
+    "interval",
+    "true",
+    "false",
+    "asc",
+    "desc",
+    "begin",
+    "commit",
+    "rollback",
+    "explain analyze",
 ];
 
 /// Words after which the next word can't be an alias.
 const NOT_ALIASES: &[&str] = &[
-    "where", "join", "left", "right", "inner", "outer", "full", "cross", "on", "using", "group",
-    "order", "limit", "offset", "having", "union", "set", "values", "returning", "natural",
-    "lateral", "window", "for",
+    "where",
+    "join",
+    "left",
+    "right",
+    "inner",
+    "outer",
+    "full",
+    "cross",
+    "on",
+    "using",
+    "group",
+    "order",
+    "limit",
+    "offset",
+    "having",
+    "union",
+    "set",
+    "values",
+    "returning",
+    "natural",
+    "lateral",
+    "window",
+    "for",
 ];
 
 #[derive(Default)]
@@ -43,7 +107,11 @@ impl SchemaCache {
             if !cache.columns.contains_key(&key) {
                 cache.relations.push(key.clone());
             }
-            cache.columns.entry(key).or_default().push((column, type_name));
+            cache
+                .columns
+                .entry(key)
+                .or_default()
+                .push((column, type_name));
         }
         cache
     }
@@ -54,9 +122,9 @@ impl SchemaCache {
         match name.split_once('.') {
             Some((schema, relation)) => {
                 let (schema, relation) = (unquote(schema), unquote(relation));
-                self.relations
-                    .iter()
-                    .find(|(s, r)| s.eq_ignore_ascii_case(&schema) && r.eq_ignore_ascii_case(&relation))
+                self.relations.iter().find(|(s, r)| {
+                    s.eq_ignore_ascii_case(&schema) && r.eq_ignore_ascii_case(&relation)
+                })
             }
             None => {
                 let relation = unquote(name);
@@ -309,25 +377,45 @@ mod tests {
     }
 
     fn texts(suggestions: Vec<Suggestion>) -> Vec<String> {
-        suggestions.into_iter().map(|suggestion| suggestion.text).collect()
+        suggestions
+            .into_iter()
+            .map(|suggestion| suggestion.text)
+            .collect()
     }
 
     #[test]
     fn aliases_resolve_to_their_columns() {
         let statement = "select t.st from transactions t join accounts as a on a.id = t.id";
-        assert_eq!(texts(suggestions(&cache(), statement, "t.st")), ["id", "status"]);
-        assert_eq!(texts(suggestions(&cache(), statement, "a.")), ["id", "user_id"]);
-        // A table name works as its own qualifier.
         assert_eq!(
-            texts(suggestions(&cache(), "select accounts. from accounts", "accounts.")),
+            texts(suggestions(&cache(), statement, "t.st")),
+            ["id", "status"]
+        );
+        assert_eq!(
+            texts(suggestions(&cache(), statement, "a.")),
             ["id", "user_id"]
         );
-        assert_eq!(texts(suggestions(&cache(), "select * from audit.", "audit.")), ["log"]);
+        // A table name works as its own qualifier.
+        assert_eq!(
+            texts(suggestions(
+                &cache(),
+                "select accounts. from accounts",
+                "accounts."
+            )),
+            ["id", "user_id"]
+        );
+        assert_eq!(
+            texts(suggestions(&cache(), "select * from audit.", "audit.")),
+            ["log"]
+        );
     }
 
     #[test]
     fn plain_words_offer_columns_tables_and_keywords() {
-        let offered = texts(suggestions(&cache(), "select s from transactions where ", "s"));
+        let offered = texts(suggestions(
+            &cache(),
+            "select s from transactions where ",
+            "s",
+        ));
         assert_eq!(&offered[..2], ["id", "status"]);
         assert!(offered.contains(&"accounts".to_owned()));
         assert!(offered.contains(&"audit.log".to_owned()));

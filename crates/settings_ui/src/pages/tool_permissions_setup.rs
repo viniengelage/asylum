@@ -1407,6 +1407,8 @@ mod tests {
             // Interactive prompt: always asks the user via prompt_for_decision,
             // so it has no settings-driven permission rules.
             "ask_user",
+            // Reads the database catalog through the app's panel; never runs the model's SQL.
+            "database_schema",
             "diagnostics",
             "find_path",
             "find_references",

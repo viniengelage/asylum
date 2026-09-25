@@ -21,14 +21,14 @@ use project::Project;
 use std::{
     cell::RefCell,
     ops::Range,
-    rc::Rc,
     path::{Path, PathBuf},
+    rc::Rc,
     sync::Arc,
     time::{Duration, Instant},
 };
 use ui::{
-    ToggleButtonGroup, ToggleButtonGroupSize, ToggleButtonGroupStyle, ToggleButtonSimple,
-    Tooltip, prelude::*,
+    ToggleButtonGroup, ToggleButtonGroupSize, ToggleButtonGroupStyle, ToggleButtonSimple, Tooltip,
+    prelude::*,
 };
 use util::ResultExt as _;
 use workspace::{
@@ -449,7 +449,8 @@ impl SqlQueryView {
             this.update(cx, |this, _| this.session = Some(session.clone()))
                 .log_err();
             let executed = execute_plan(&session, plan, begin_first, in_transaction).await;
-            this.update(cx, |this, cx| this.finish(executed, cx)).log_err();
+            this.update(cx, |this, cx| this.finish(executed, cx))
+                .log_err();
         });
     }
 
@@ -480,7 +481,9 @@ impl SqlQueryView {
                 .find(|result_set| !result_set.columns.is_empty())
                 .cloned()
         });
-        let truncated = shown.as_ref().is_some_and(|result_set| result_set.truncated);
+        let truncated = shown
+            .as_ref()
+            .is_some_and(|result_set| result_set.truncated);
         if let Some(result_set) = shown {
             let columns = result_set
                 .columns
@@ -490,8 +493,9 @@ impl SqlQueryView {
                     type_name: column.type_name,
                 })
                 .collect();
-            self.grid
-                .update(cx, |grid, cx| grid.set_data(columns, result_set.rows, 1, cx));
+            self.grid.update(cx, |grid, cx| {
+                grid.set_data(columns, result_set.rows, 1, cx)
+            });
             self.has_grid = true;
         } else if !executed.outcomes.is_empty() {
             self.has_grid = false;
@@ -500,18 +504,22 @@ impl SqlQueryView {
             Some((planned, error)) => {
                 let text = self.editor.read(cx).text(cx);
                 let server = error.downcast_ref::<ServerError>().cloned();
-                let range = server.as_ref().and_then(|server| server.position).and_then(|position| {
-                    let position = position.checked_sub(planned.prefix_chars)?;
-                    let statement_text = text.get(planned.statement.range.clone())?;
-                    let offset = planned.statement.range.start
-                        + statements::char_position_to_offset(statement_text, position);
-                    let range = statements::identifier_at(&text, offset.min(text.len()));
-                    Some(if range.is_empty() {
-                        offset..(offset + 1).min(text.len())
-                    } else {
-                        range
-                    })
-                });
+                let range =
+                    server
+                        .as_ref()
+                        .and_then(|server| server.position)
+                        .and_then(|position| {
+                            let position = position.checked_sub(planned.prefix_chars)?;
+                            let statement_text = text.get(planned.statement.range.clone())?;
+                            let offset = planned.statement.range.start
+                                + statements::char_position_to_offset(statement_text, position);
+                            let range = statements::identifier_at(&text, offset.min(text.len()));
+                            Some(if range.is_empty() {
+                                offset..(offset + 1).min(text.len())
+                            } else {
+                                range
+                            })
+                        });
                 let line = range
                     .as_ref()
                     .map(|range| text[..range.start].matches('\n').count() + 1);
@@ -629,9 +637,8 @@ impl SqlQueryView {
         let range = range.clone();
         self.editor.update(cx, |editor, cx| {
             editor.change_selections(SelectionEffects::default(), window, cx, |selections| {
-                selections.select_ranges([
-                    MultiBufferOffset(range.start)..MultiBufferOffset(range.end),
-                ])
+                selections
+                    .select_ranges([MultiBufferOffset(range.start)..MultiBufferOffset(range.end)])
             });
         });
         window.focus(&self.editor.focus_handle(cx), cx);
@@ -722,9 +729,9 @@ impl SqlQueryView {
                         &self.editor.focus_handle(cx),
                         cx,
                     ))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.run(Scope::Explain, window, cx)
-                    })),
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.run(Scope::Explain, window, cx)),
+                    ),
             )
             .child(if running {
                 Button::new("db-cancel-query", "Cancelar")
@@ -736,9 +743,9 @@ impl SqlQueryView {
                         &self.editor.focus_handle(cx),
                         cx,
                     ))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.cancel(&CancelQuery, window, cx)
-                    }))
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.cancel(&CancelQuery, window, cx)),
+                    )
                     .into_any_element()
             } else {
                 Button::new("db-run", "Executar")
@@ -750,9 +757,9 @@ impl SqlQueryView {
                         &self.editor.focus_handle(cx),
                         cx,
                     ))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.run(Scope::Statement, window, cx)
-                    }))
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.run(Scope::Statement, window, cx)),
+                    )
                     .into_any_element()
             })
             .into_any_element()
@@ -827,29 +834,33 @@ impl SqlQueryView {
                             .weight(FontWeight::SEMIBOLD),
                     ),
             )
-            .when_some(failure.server.as_ref().and_then(|s| s.detail.clone()), |this, detail| {
-                this.child(
-                    Label::new(format!("DETAIL: {detail}"))
-                        .size(LabelSize::Small)
-                        .buffer_font(cx)
-                        .color(Color::Muted),
-                )
-            })
-            .when_some(failure.server.as_ref().and_then(|s| s.hint.clone()), |this, hint| {
-                this.child(
-                    Label::new(format!("HINT: {hint}"))
-                        .size(LabelSize::Small)
-                        .buffer_font(cx)
-                        .color(Color::Warning),
-                )
-            })
+            .when_some(
+                failure.server.as_ref().and_then(|s| s.detail.clone()),
+                |this, detail| {
+                    this.child(
+                        Label::new(format!("DETAIL: {detail}"))
+                            .size(LabelSize::Small)
+                            .buffer_font(cx)
+                            .color(Color::Muted),
+                    )
+                },
+            )
+            .when_some(
+                failure.server.as_ref().and_then(|s| s.hint.clone()),
+                |this, hint| {
+                    this.child(
+                        Label::new(format!("HINT: {hint}"))
+                            .size(LabelSize::Small)
+                            .buffer_font(cx)
+                            .color(Color::Warning),
+                    )
+                },
+            )
             .when(self.in_transaction, |this| {
                 this.child(
-                    Label::new(
-                        "A transação desta aba foi abortada: rode Rollback para continuar.",
-                    )
-                    .size(LabelSize::Small)
-                    .color(Color::Warning),
+                    Label::new("A transação desta aba foi abortada: rode Rollback para continuar.")
+                        .size(LabelSize::Small)
+                        .color(Color::Warning),
                 )
             })
             .child(
@@ -876,9 +887,9 @@ impl SqlQueryView {
                             )
                             .style(ButtonStyle::Outlined)
                             .label_size(LabelSize::Small)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.go_to_error(window, cx)
-                            })),
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.go_to_error(window, cx)),
+                            ),
                         )
                     }),
             )
@@ -1099,9 +1110,9 @@ impl Render for SqlQueryView {
             .on_action(cx.listener(|this, _: &RunStatement, window, cx| {
                 this.run(Scope::Statement, window, cx)
             }))
-            .on_action(cx.listener(|this, _: &RunScript, window, cx| {
-                this.run(Scope::Script, window, cx)
-            }))
+            .on_action(
+                cx.listener(|this, _: &RunScript, window, cx| this.run(Scope::Script, window, cx)),
+            )
             .on_action(cx.listener(|this, _: &ExplainStatement, window, cx| {
                 this.run(Scope::Explain, window, cx)
             }))
@@ -1237,7 +1248,11 @@ pub fn open(
 }
 
 /// A new, empty file in `.asylum/db/queries`, named `query-N.sql`.
-pub async fn create_query_file(fs: &dyn fs::Fs, root: &Path, header: &str) -> anyhow::Result<PathBuf> {
+pub async fn create_query_file(
+    fs: &dyn fs::Fs,
+    root: &Path,
+    header: &str,
+) -> anyhow::Result<PathBuf> {
     let directory = root.join(".asylum/db/queries");
     fs.create_dir(&directory).await?;
     let mut number = 1;
@@ -1248,7 +1263,8 @@ pub async fn create_query_file(fs: &dyn fs::Fs, root: &Path, header: &str) -> an
         }
         number += 1;
     };
-    fs.atomic_write(path.clone(), format!("{header}\n\n")).await?;
+    fs.atomic_write(path.clone(), format!("{header}\n\n"))
+        .await?;
     Ok(path)
 }
 
@@ -1259,7 +1275,8 @@ mod tests {
     #[test]
     fn reads_the_column_out_of_the_hint() {
         assert_eq!(
-            suggested_column("Perhaps you meant to reference the column \"users.name\".").as_deref(),
+            suggested_column("Perhaps you meant to reference the column \"users.name\".")
+                .as_deref(),
             Some("users.name")
         );
         assert_eq!(suggested_column("Something else."), None);

@@ -111,13 +111,19 @@ impl WriteGuard {
                                 .result_sets
                                 .first()
                                 .and_then(|result_set| {
-                                    plan_estimate(result_set.rows.iter().filter_map(|row| {
-                                        row.first().cloned().flatten()
-                                    }))
+                                    plan_estimate(
+                                        result_set
+                                            .rows
+                                            .iter()
+                                            .filter_map(|row| row.first().cloned().flatten()),
+                                    )
                                 })
                                 .map(|rows| match rows {
                                     1 => "≈ 1 linha".to_owned(),
-                                    rows => format!("≈ {} linhas", crate::panel::format_count(rows as i64)),
+                                    rows => format!(
+                                        "≈ {} linhas",
+                                        crate::panel::format_count(rows as i64)
+                                    ),
                                 })
                                 .ok_or_else(|| "sem estimativa".to_owned()),
                             Err(error) => Err(format!("{error:#}")),
@@ -186,7 +192,12 @@ impl Render for WriteGuard {
             Risk::ProductionWrite => "Esta conexão está marcada como produção.",
         };
         let confirmed = self.confirmed(cx);
-        let preview = self.statement.lines().take(6).collect::<Vec<_>>().join("\n");
+        let preview = self
+            .statement
+            .lines()
+            .take(6)
+            .collect::<Vec<_>>()
+            .join("\n");
         v_flex()
             .key_context("DatabaseWriteGuard")
             .track_focus(&self.focus_handle)
@@ -267,7 +278,9 @@ impl Render for WriteGuard {
                                 .child(
                                     Label::new(match estimate {
                                         Ok(rows) => {
-                                            format!("{rows}, pela estimativa do planner (sem rodar)")
+                                            format!(
+                                                "{rows}, pela estimativa do planner (sem rodar)"
+                                            )
                                         }
                                         Err(error) => format!("Sem estimativa: {error}"),
                                     })
@@ -306,12 +319,9 @@ impl Render for WriteGuard {
                     v_flex()
                         .gap_1()
                         .child(
-                            Label::new(format!(
-                                "Digite {} para liberar",
-                                self.connection.database
-                            ))
-                            .size(LabelSize::Small)
-                            .color(Color::Muted),
+                            Label::new(format!("Digite {} para liberar", self.connection.database))
+                                .size(LabelSize::Small)
+                                .color(Color::Muted),
                         )
                         .child(input),
                 )
@@ -347,9 +357,11 @@ impl Render for WriteGuard {
                         )
                         .style(ButtonStyle::Tinted(TintColor::Error))
                         .disabled(!confirmed)
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.decide(Decision::Run, window, cx)
-                        })),
+                        .on_click(
+                            cx.listener(|this, _, window, cx| {
+                                this.decide(Decision::Run, window, cx)
+                            }),
+                        ),
                     ),
             )
     }
@@ -365,12 +377,18 @@ mod tests {
             estimated_rows("Delete on pix_keys  (cost=0.00..190.80 rows=12480 width=6)"),
             Some(12480)
         );
-        assert_eq!(estimated_rows("Result  (cost=0.00..0.01 rows=1 width=0)"), Some(1));
+        assert_eq!(
+            estimated_rows("Result  (cost=0.00..0.01 rows=1 width=0)"),
+            Some(1)
+        );
         assert_eq!(estimated_rows("Seq Scan on t"), None);
         let plan = [
             "Delete on pix_keys  (cost=0.00..190.80 rows=0 width=0)",
             "  ->  Seq Scan on pix_keys  (cost=0.00..190.80 rows=12480 width=6)",
         ];
-        assert_eq!(plan_estimate(plan.into_iter().map(str::to_owned)), Some(12480));
+        assert_eq!(
+            plan_estimate(plan.into_iter().map(str::to_owned)),
+            Some(12480)
+        );
     }
 }

@@ -144,7 +144,10 @@ fn scan(source: &str, mut visit: impl FnMut(Token, Range<usize>)) {
                     .position(|byte| !is_word_byte(*byte))
                     .map(|offset| index + 1 + offset);
                 let is_quote = tag_end.is_some_and(|end| {
-                    bytes[end] == b'$' && !bytes[index + 1..end].first().is_some_and(u8::is_ascii_digit)
+                    bytes[end] == b'$'
+                        && !bytes[index + 1..end]
+                            .first()
+                            .is_some_and(u8::is_ascii_digit)
                 });
                 match tag_end {
                     Some(end) if is_quote => {
@@ -258,9 +261,7 @@ pub fn classify(text: &str) -> (StatementKind, Option<String>) {
                 .iter()
                 .any(|verb| anywhere(verb))
             {
-                StatementKind::Write {
-                    every_row: false,
-                }
+                StatementKind::Write { every_row: false }
             } else {
                 StatementKind::Read
             }
@@ -271,9 +272,7 @@ pub fn classify(text: &str) -> (StatementKind, Option<String>) {
                 .iter()
                 .any(|verb| anywhere(verb));
             if analyze && writes {
-                StatementKind::Write {
-                    every_row: false,
-                }
+                StatementKind::Write { every_row: false }
             } else {
                 StatementKind::Read
             }
@@ -306,7 +305,9 @@ pub fn char_position_to_offset(text: &str, position: u32) -> usize {
 pub fn identifier_at(text: &str, offset: usize) -> Range<usize> {
     let end = text[offset..]
         .char_indices()
-        .find(|(_, character)| !(character.is_alphanumeric() || *character == '_' || *character == '.'))
+        .find(|(_, character)| {
+            !(character.is_alphanumeric() || *character == '_' || *character == '.')
+        })
         .map_or(text.len(), |(index, _)| offset + index);
     offset..end.max(offset)
 }
@@ -365,7 +366,10 @@ mod tests {
         let kind = |text: &str| classify(text).0;
         assert_eq!(kind("select * from users"), StatementKind::Read);
         assert_eq!(kind("(select 1) union (select 2)"), StatementKind::Read);
-        assert_eq!(kind("with x as (select 1) select * from x"), StatementKind::Read);
+        assert_eq!(
+            kind("with x as (select 1) select * from x"),
+            StatementKind::Read
+        );
         assert_eq!(
             kind("with gone as (delete from t returning *) select count(*) from gone"),
             StatementKind::Write { every_row: false }
@@ -382,7 +386,10 @@ mod tests {
             kind("update users set name = (select 'x' where true)"),
             StatementKind::Write { every_row: true }
         );
-        assert_eq!(kind("truncate audit.log"), StatementKind::Write { every_row: true });
+        assert_eq!(
+            kind("truncate audit.log"),
+            StatementKind::Write { every_row: true }
+        );
         assert_eq!(kind("explain select 1"), StatementKind::Read);
         assert_eq!(
             kind("explain analyze delete from t"),
@@ -413,6 +420,7 @@ mod tests {
             ssl_mode: crate::tls::SslMode::Prefer,
             read_only: false,
             confirm_writes: false,
+            ssh: None,
         };
         let write = StatementKind::Write { every_row: false };
         let wipe = StatementKind::Write { every_row: true };
@@ -433,6 +441,9 @@ mod tests {
         let offset = char_position_to_offset(text, 13);
         assert_eq!(&text[identifier_at(text, offset)], "nme");
         let text = "select t.stauts from t";
-        assert_eq!(&text[identifier_at(text, char_position_to_offset(text, 8))], "t.stauts");
+        assert_eq!(
+            &text[identifier_at(text, char_position_to_offset(text, 8))],
+            "t.stauts"
+        );
     }
 }

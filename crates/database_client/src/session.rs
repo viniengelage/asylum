@@ -17,14 +17,18 @@ const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 pub struct ConnectTarget {
     pub config: tokio_postgres::Config,
     pub ssl_mode: SslMode,
+    /// The SSH forward the config dials through; every session made from this target keeps it
+    /// open.
+    pub tunnel: Option<Arc<crate::tunnel::Tunnel>>,
 }
 
 impl ConnectTarget {
     pub fn parse(input: &str) -> anyhow::Result<Self> {
         let (rest, ssl_mode) = take_ssl_mode(input.trim());
         let ssl_mode = match ssl_mode {
-            Some(value) => SslMode::parse(&value)
-                .with_context(|| format!("sslmode desconhecido: {value}"))?,
+            Some(value) => {
+                SslMode::parse(&value).with_context(|| format!("sslmode desconhecido: {value}"))?
+            }
             None => SslMode::default(),
         };
         let mut config =
@@ -33,7 +37,11 @@ impl ConnectTarget {
         if config.get_connect_timeout().is_none() {
             config.connect_timeout(DEFAULT_CONNECT_TIMEOUT);
         }
-        Ok(Self { config, ssl_mode })
+        Ok(Self {
+            config,
+            ssl_mode,
+            tunnel: None,
+        })
     }
 }
 
@@ -296,13 +304,7 @@ impl Session {
     pub async fn cancel(&self) -> anyhow::Result<()> {
         let cancel_token = self.cancel_token.clone();
         let tls = self.tls.clone();
-        on_runtime(async move {
-            cancel_token
-                .cancel_query(tls)
-                .await
-                .map_err(server_error)
-        })
-        .await
+        on_runtime(async move { cancel_token.cancel_query(tls).await.map_err(server_error) }).await
     }
 
     /// Rows of a query the client itself issues, without describing or limiting it.
@@ -354,10 +356,7 @@ async fn run(
         Err(error) => return Err(server_error(error)),
     };
 
-    let stream = client
-        .simple_query_raw(&sql)
-        .await
-        .map_err(server_error)?;
+    let stream = client.simple_query_raw(&sql).await.map_err(server_error)?;
     pin_mut!(stream);
 
     let mut result_sets = Vec::new();
@@ -422,8 +421,7 @@ async fn run(
         }
     }
 
-    if let (Some(described_columns), [result_set]) =
-        (described_columns, result_sets.as_mut_slice())
+    if let (Some(described_columns), [result_set]) = (described_columns, result_sets.as_mut_slice())
         && described_columns.len() == result_set.columns.len()
     {
         result_set.columns = described_columns;
@@ -441,9 +439,13 @@ mod tests {
 
     #[test]
     fn ssl_mode_comes_out_of_a_url() {
-        let (rest, mode) =
-            take_ssl_mode("postgres://app@localhost:5432/trix?sslmode=verify-full&application_name=x");
-        assert_eq!(rest, "postgres://app@localhost:5432/trix?application_name=x");
+        let (rest, mode) = take_ssl_mode(
+            "postgres://app@localhost:5432/trix?sslmode=verify-full&application_name=x",
+        );
+        assert_eq!(
+            rest,
+            "postgres://app@localhost:5432/trix?application_name=x"
+        );
         assert_eq!(mode.as_deref(), Some("verify-full"));
 
         let (rest, mode) = take_ssl_mode("postgresql://localhost/db?sslmode=require");
@@ -457,8 +459,7 @@ mod tests {
 
     #[test]
     fn ssl_mode_comes_out_of_key_value_pairs() {
-        let (rest, mode) =
-            take_ssl_mode("host=db password='a b' sslmode = verify-ca dbname=trix");
+        let (rest, mode) = take_ssl_mode("host=db password='a b' sslmode = verify-ca dbname=trix");
         assert_eq!(rest, "host=db password='a b'  dbname=trix");
         assert_eq!(mode.as_deref(), Some("verify-ca"));
 

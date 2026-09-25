@@ -142,6 +142,7 @@ impl DatabasePanel {
                 this.load(cx);
             }
         }));
+        crate::agent_schema::register_panel(&project, cx.weak_entity(), cx);
         let mut this = Self {
             workspace: workspace.weak_handle(),
             project,
@@ -399,7 +400,12 @@ impl DatabasePanel {
     }
 
     /// Opens the file against the active connection; without one it opens as plain text.
-    pub(crate) fn open_query(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn open_query(
+        &mut self,
+        path: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         match self.session() {
             Some((connection, session)) => query_view::open(
                 self.workspace.clone(),
@@ -556,8 +562,10 @@ impl DatabasePanel {
                 }),
             ];
             for (group, label, icon, belongs) in groups {
-                let members: Vec<&&Relation> =
-                    list.iter().filter(|relation| belongs(relation.kind)).collect();
+                let members: Vec<&&Relation> = list
+                    .iter()
+                    .filter(|relation| belongs(relation.kind))
+                    .collect();
                 if members.is_empty() {
                     continue;
                 }
@@ -600,12 +608,14 @@ impl DatabasePanel {
         }
         if !self.saved_queries.is_empty() && !filtering {
             rows.push(TreeRow::QueriesHeader(self.saved_queries.len()));
-            rows.extend(self.saved_queries.iter().map(|path| TreeRow::Query {
-                name: path
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_default(),
-                path: path.clone(),
+            rows.extend(self.saved_queries.iter().map(|path| {
+                TreeRow::Query {
+                    name: path
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
+                    path: path.clone(),
+                }
             }));
         }
         rows
@@ -706,7 +716,11 @@ impl DatabasePanel {
                         _ => IconName::Table,
                     })
                     .size(IconSize::Small)
-                    .color(if expanded { Color::Accent } else { Color::Muted }),
+                    .color(if expanded {
+                        Color::Accent
+                    } else {
+                        Color::Muted
+                    }),
                 )
                 .child(
                     div().flex_1().min_w_0().child(
@@ -733,18 +747,14 @@ impl DatabasePanel {
                 .into_any_element(),
             TreeRow::Column(column) => base
                 .pl(px(74.))
-                .child(
-                    div()
-                        .w(px(16.))
-                        .when(column.primary_key, |this| {
-                            this.child(
-                                Label::new("PK")
-                                    .size(LabelSize::XSmall)
-                                    .buffer_font(cx)
-                                    .color(Color::Warning),
-                            )
-                        }),
-                )
+                .child(div().w(px(16.)).when(column.primary_key, |this| {
+                    this.child(
+                        Label::new("PK")
+                            .size(LabelSize::XSmall)
+                            .buffer_font(cx)
+                            .color(Color::Warning),
+                    )
+                }))
                 .child(
                     h_flex()
                         .flex_1()
@@ -816,22 +826,24 @@ impl DatabasePanel {
                         .color(Color::Disabled),
                 )
                 .into_any_element(),
-            TreeRow::Query { path, name } => clickable(base)
-                .child(
-                    Icon::new(IconName::FileCode)
-                        .size(IconSize::Small)
-                        .color(Color::Muted),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .child(Label::new(name).size(LabelSize::Small).truncate()),
-                )
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.open_query(path.clone(), window, cx)
-                }))
-                .into_any_element(),
+            TreeRow::Query { path, name } => {
+                clickable(base)
+                    .child(
+                        Icon::new(IconName::FileCode)
+                            .size(IconSize::Small)
+                            .color(Color::Muted),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(Label::new(name).size(LabelSize::Small).truncate()),
+                    )
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.open_query(path.clone(), window, cx)
+                    }))
+                    .into_any_element()
+            }
         }
     }
 
@@ -842,8 +854,11 @@ impl DatabasePanel {
             _ => None,
         };
         let subtitle = match version {
-            Some(version) => format!("{} · PostgreSQL {version}", connection.address()),
-            None => connection.address(),
+            Some(version) => format!(
+                "{} · PostgreSQL {version}",
+                connection.address_with_tunnel()
+            ),
+            None => connection.address_with_tunnel(),
         };
         let this = cx.weak_entity();
         let others: Vec<SavedConnection> = self
@@ -1062,7 +1077,12 @@ impl DatabasePanel {
         };
         v_flex()
             .size_full()
-            .child(div().px_3().pt_2p5().child(self.render_connection_card(active, cx)))
+            .child(
+                div()
+                    .px_3()
+                    .pt_2p5()
+                    .child(self.render_connection_card(active, cx)),
+            )
             .child(self.render_status_row(active, cx))
             .map(|this| match &active.state {
                 ActiveState::Connecting => this.child(
@@ -1165,9 +1185,10 @@ impl DatabasePanel {
                         ),
                     ),
             })
-            .when(!matches!(active.state, ActiveState::Connected { .. }), |this| {
-                this.child(div().flex_1())
-            })
+            .when(
+                !matches!(active.state, ActiveState::Connected { .. }),
+                |this| this.child(div().flex_1()),
+            )
             .child(self.render_footer(summary, cx))
             .into_any_element()
     }
@@ -1220,7 +1241,11 @@ impl DatabasePanel {
                 file,
                 service,
                 image,
-            } => (IconName::Box, file.clone(), format!("service {service} · {image}")),
+            } => (
+                IconName::Box,
+                file.clone(),
+                format!("service {service} · {image}"),
+            ),
         };
         let password = match (&suggestion.source, &suggestion.password) {
             (_, None) => "sem senha no arquivo",
@@ -1256,7 +1281,11 @@ impl DatabasePanel {
                                 .truncate(),
                         ),
                     )
-                    .child(Label::new("Usar").size(LabelSize::XSmall).color(Color::Accent)),
+                    .child(
+                        Label::new("Usar")
+                            .size(LabelSize::XSmall)
+                            .color(Color::Accent),
+                    ),
             )
             .child(
                 Label::new(suggestion.address())
@@ -1397,14 +1426,11 @@ impl DatabasePanel {
             .when(!self.suggestions.is_empty(), |this| {
                 this.child(section("ENCONTRADAS NO PROJETO", self.suggestions.len()))
                     .child(
-                        v_flex().gap_2().children(
-                            self.suggestions
-                                .iter()
-                                .enumerate()
-                                .map(|(index, suggestion)| {
-                                    self.render_suggestion(index, suggestion, cx)
-                                }),
-                        ),
+                        v_flex()
+                            .gap_2()
+                            .children(self.suggestions.iter().enumerate().map(
+                                |(index, suggestion)| self.render_suggestion(index, suggestion, cx),
+                            )),
                     )
                     .child(
                         div().pt_2().child(
@@ -1454,7 +1480,8 @@ async fn open_session(
                 )
             }),
     };
-    let session = Session::connect(&connection.target(password.as_deref())).await?;
+    let target = connection.open_target(password).await?;
+    let session = Session::connect(&target).await?;
     let relations = catalog::list_relations(&session).await?;
     let started = Instant::now();
     session.run("select 1", 1).await?;
@@ -1538,7 +1565,11 @@ pub fn environment_chip(environment: Environment, cx: &App) -> impl IntoElement 
         .rounded_full()
         .bg(color.color(cx).opacity(0.12))
         .child(Indicator::dot().color(color))
-        .child(Label::new(environment.label()).size(LabelSize::XSmall).color(color))
+        .child(
+            Label::new(environment.label())
+                .size(LabelSize::XSmall)
+                .color(color),
+        )
 }
 
 impl Render for DatabasePanel {

@@ -1287,6 +1287,7 @@
           "copy_path": true,
           "create_directory": true,
           "create_thread": true,
+          "database_schema": true,
           "delete_path": true,
           "diagnostics": true,
           "apply_code_action": true,
@@ -1317,6 +1318,7 @@
         // "enable_all_context_servers": true,
         "tools": {
           "create_thread": true,
+          "database_schema": true,
           "diagnostics": true,
           "ask_user": false,
           "fetch": true,
@@ -1338,6 +1340,7 @@
         // Read-only exploration: the agent proposes a plan with `submit_plan`
         // and only changes files after the user executes it.
         "tools": {
+          "database_schema": true,
           "diagnostics": true,
           "fetch": true,
           "list_directory": true,

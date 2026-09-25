@@ -825,6 +825,9 @@ fn main() {
         repo_hosting::init(cx);
         api_client::init(cx);
         database_client::init(cx);
+        cx.set_global(agent::DatabaseSchemaSource(std::sync::Arc::new(
+            database_client::describe_for_agent,
+        )));
         onboarding::init(cx);
         settings_ui::init(cx);
         keymap_editor::init(cx);
