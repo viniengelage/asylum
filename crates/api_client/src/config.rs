@@ -24,6 +24,17 @@ pub struct CollectionFile {
     pub auth: AuthConfig,
     #[serde(default)]
     pub saved: Vec<SavedRequest>,
+    /// Values taken from responses into variables, per operation.
+    #[serde(default)]
+    pub captures: Vec<CaptureRule>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct CaptureRule {
+    pub operation: String,
+    /// JSONPath into the response body.
+    pub path: String,
+    pub variable: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -133,6 +144,52 @@ pub struct RequestDraft {
     pub disabled_inherited: Vec<String>,
     #[serde(default)]
     pub body: Option<String>,
+    /// Fields of a form or multipart body, used instead of `body` for those content types.
+    #[serde(default)]
+    pub form: Vec<FormField>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct FormField {
+    pub name: String,
+    /// The text, or for a file field the path of the file to send.
+    pub value: String,
+    #[serde(default)]
+    pub is_file: bool,
+    #[serde(default = "enabled_by_default")]
+    pub enabled: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BodyKind {
+    Json,
+    Text,
+    UrlEncoded,
+    Multipart,
+}
+
+impl BodyKind {
+    pub fn for_content_type(content_type: &str) -> Self {
+        let essence = content_type
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        if essence == "multipart/form-data" || essence.starts_with("multipart/") {
+            BodyKind::Multipart
+        } else if essence == "application/x-www-form-urlencoded" {
+            BodyKind::UrlEncoded
+        } else if crate::spec::is_json_content_type(&essence) {
+            BodyKind::Json
+        } else {
+            BodyKind::Text
+        }
+    }
+
+    pub fn is_form(self) -> bool {
+        matches!(self, BodyKind::UrlEncoded | BodyKind::Multipart)
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -231,6 +288,7 @@ pub fn initial(spec: &Spec, spec_relative_path: String) -> CollectionFile {
             ..AuthConfig::default()
         },
         saved: Vec::new(),
+        captures: Vec::new(),
     }
 }
 
@@ -358,6 +416,9 @@ pub fn guess_login(spec: &Spec) -> Option<LoginConfig> {
 pub fn example_body(spec: &Spec, operation_key: &str) -> Option<String> {
     let operation = spec.operation(operation_key)?;
     let body = operation.request_body.as_ref()?;
+    if BodyKind::for_content_type(&body.content_type).is_form() {
+        return None;
+    }
     let value = match (&body.example, &body.schema) {
         (Some(example), _) => example.clone(),
         (None, Some(schema)) => schema::example(&spec.document, schema),
@@ -429,7 +490,54 @@ pub fn initial_draft(spec: &Spec, operation_key: &str) -> RequestDraft {
             .collect(),
         disabled_inherited: Vec::new(),
         body: example_body(spec, operation_key),
+        form: form_fields(spec, operation_key),
     }
+}
+
+/// One field per property of a form or multipart body; `format: binary` ones are files.
+pub fn form_fields(spec: &Spec, operation_key: &str) -> Vec<FormField> {
+    let Some(body) = spec
+        .operation(operation_key)
+        .and_then(|operation| operation.request_body.as_ref())
+    else {
+        return Vec::new();
+    };
+    if !BodyKind::for_content_type(&body.content_type).is_form() {
+        return Vec::new();
+    }
+    let Some(schema) = body.schema.as_ref() else {
+        return Vec::new();
+    };
+    let resolved = crate::spec::deref(&spec.document, schema);
+    let required: Vec<&str> = resolved
+        .get("required")
+        .and_then(Value::as_array)
+        .map(|names| names.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    property_names(&spec.document, schema)
+        .into_iter()
+        .map(|name| {
+            let property = resolved
+                .get("properties")
+                .and_then(|properties| properties.get(&name))
+                .map(|property| crate::spec::deref(&spec.document, property));
+            let is_file = property.is_some_and(|property| {
+                let format = property.get("format").and_then(Value::as_str);
+                let item_format = property
+                    .get("items")
+                    .and_then(|items| items.get("format"))
+                    .and_then(Value::as_str);
+                matches!(format, Some("binary" | "base64"))
+                    || matches!(item_format, Some("binary" | "base64"))
+            });
+            FormField {
+                enabled: required.contains(&name.as_str()) || required.is_empty(),
+                name,
+                value: String::new(),
+                is_file,
+            }
+        })
+        .collect()
 }
 
 pub fn login_paths_are_valid(login: &LoginConfig) -> bool {

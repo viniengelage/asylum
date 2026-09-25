@@ -2,7 +2,10 @@
 //! session. Requests go through here so login, renewal and retries happen in one place.
 
 use crate::{
-    config::{self, CollectionFile, Environment, LoginConfig, RequestDraft, SavedRequest},
+    config::{
+        self, CaptureRule, CollectionFile, Environment, LoginConfig, RequestDraft, SavedRequest,
+    },
+    cookies::{Cookie, CookieJar},
     jsonpath,
     schema::{self, Validation},
     send::{
@@ -54,6 +57,23 @@ impl Session {
     }
 }
 
+/// What survives between launches besides the login: cookies and captured values.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+struct StoredState {
+    #[serde(default)]
+    cookies: CookieJar,
+    #[serde(default)]
+    captured: BTreeMap<String, String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Capture {
+    pub variable: String,
+    pub path: String,
+    /// `None` when the path found nothing in the response.
+    pub value: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum LoginStatus {
     Idle,
@@ -80,6 +100,9 @@ pub struct Exchange {
     pub validation: Option<Validation>,
     pub response_schema_name: Option<String>,
     pub sent_at: DateTime<Local>,
+    /// Cookies the responses set along the way, the request's own and any login's.
+    pub cookies_set: Vec<Cookie>,
+    pub captures: Vec<Capture>,
 }
 
 pub struct Collection {
@@ -98,6 +121,8 @@ pub struct Collection {
     secrets: BTreeMap<String, String>,
     pub session: Session,
     pub login_status: LoginStatus,
+    pub cookies: CookieJar,
+    captured: BTreeMap<String, String>,
     drafts: HashMap<String, RequestDraft>,
     fs: Arc<dyn Fs>,
     http_client: Arc<dyn HttpClient>,
@@ -133,6 +158,8 @@ impl Collection {
             secrets: BTreeMap::default(),
             session: Session::default(),
             login_status: LoginStatus::Idle,
+            cookies: CookieJar::default(),
+            captured: BTreeMap::default(),
             drafts: HashMap::default(),
             fs,
             http_client: cx.http_client(),
@@ -167,6 +194,7 @@ impl Collection {
         let credentials_provider = self.credentials_provider.clone();
         let secrets_url = secrets_url(&self.id);
         let session_url = session_url(&self.id);
+        let state_url = state_url(&self.id);
         cx.spawn(async move |this, cx| {
             let text = fs.load(&file_path).await;
             let loaded = this.update(cx, |this, cx| {
@@ -193,9 +221,16 @@ impl Collection {
                 read_json::<BTreeMap<String, String>>(&credentials_provider, &secrets_url, cx)
                     .await;
             let session = read_json::<Session>(&credentials_provider, &session_url, cx).await;
+            let state = read_json::<StoredState>(&credentials_provider, &state_url, cx).await;
             this.update(cx, |this, cx| {
                 if let Some(secrets) = secrets {
                     this.secrets = secrets;
+                }
+                if let Some(state) = state
+                    && this.file.auth.remember_session
+                {
+                    this.cookies = state.cookies;
+                    this.captured = state.captured;
                 }
                 if let Some(session) = session
                     && this.file.auth.remember_session
@@ -228,6 +263,7 @@ impl Collection {
             this.update(cx, |this, cx| {
                 match loaded {
                     Ok((spec, root)) => {
+                        crate::lens::register_spec(this.spec_path(), cx.weak_entity(), cx);
                         // Drafts of operations that left the spec stay, so a renamed path
                         // doesn't lose what was typed; they just have nothing to open them.
                         this.spec = Some(Arc::new(spec));
@@ -378,6 +414,9 @@ impl Collection {
         if name == REFRESH_TOKEN_VARIABLE {
             return self.session.refresh_token.clone();
         }
+        if let Some(value) = self.captured.get(name) {
+            return Some(value.clone());
+        }
         if let Some(secret) = name.strip_prefix(SECRET_PREFIX) {
             return self.secrets.get(secret).cloned();
         }
@@ -479,13 +518,131 @@ impl Collection {
 
     pub fn prepare(&self, operation_key: &str, draft: &RequestDraft) -> Result<PreparedRequest> {
         let spec = self.spec.as_ref().context("o spec ainda não foi lido")?;
-        send::prepare(
+        let mut prepared = send::prepare(
             spec,
             operation_key,
             draft,
             &self.file.headers,
             &|name: &str| self.variable(name),
-        )
+        )?;
+        // Cookies the request sets itself go first; the jar's follow them.
+        if let Some(jar_cookies) = self
+            .cookies
+            .header_for(&prepared.url, Utc::now().timestamp())
+        {
+            match prepared
+                .headers
+                .iter_mut()
+                .find(|(name, _)| name.eq_ignore_ascii_case("cookie"))
+            {
+                Some((_, value)) => *value = format!("{value}; {jar_cookies}"),
+                None => prepared.headers.push(("Cookie".to_string(), jar_cookies)),
+            }
+        }
+        Ok(prepared)
+    }
+
+    fn store_cookies(
+        &mut self,
+        response: &ReceivedResponse,
+        url: &str,
+        cx: &mut Context<Self>,
+    ) -> Vec<Cookie> {
+        let set = self
+            .cookies
+            .store(&response.headers, url, Utc::now().timestamp());
+        if !set.is_empty() {
+            self.save_state(cx);
+            cx.notify();
+        }
+        set
+    }
+
+    pub fn clear_cookies(&mut self, cx: &mut Context<Self>) {
+        self.cookies = CookieJar::default();
+        self.save_state(cx);
+        cx.notify();
+    }
+
+    fn save_state(&mut self, cx: &mut Context<Self>) {
+        if !self.file.auth.remember_session {
+            return;
+        }
+        let state = StoredState {
+            cookies: self.cookies.clone(),
+            captured: self.captured.clone(),
+        };
+        let url = state_url(&self.id);
+        let credentials_provider = self.credentials_provider.clone();
+        cx.spawn(async move |_this, cx| write_json(&credentials_provider, &url, &state, cx).await)
+            .detach_and_log_err(cx);
+    }
+
+    pub fn capture_rules(&self, operation_key: &str) -> Vec<CaptureRule> {
+        self.file
+            .captures
+            .iter()
+            .filter(|rule| rule.operation == operation_key)
+            .cloned()
+            .collect()
+    }
+
+    pub fn set_capture_rules(
+        &mut self,
+        operation_key: &str,
+        rules: Vec<CaptureRule>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.capture_rules(operation_key) == rules {
+            return;
+        }
+        self.update_file(
+            |file| {
+                file.captures.retain(|rule| rule.operation != operation_key);
+                file.captures.extend(rules);
+            },
+            cx,
+        );
+    }
+
+    pub fn captured_value(&self, variable: &str) -> Option<&str> {
+        self.captured.get(variable).map(String::as_str)
+    }
+
+    /// Takes the operation's capture rules out of a successful JSON response.
+    fn apply_captures(
+        &mut self,
+        operation_key: &str,
+        response: &ReceivedResponse,
+        cx: &mut Context<Self>,
+    ) -> Vec<Capture> {
+        let rules = self.capture_rules(operation_key);
+        if rules.is_empty() || !(200..300).contains(&response.status) {
+            return Vec::new();
+        }
+        let body = response.json();
+        let captures: Vec<Capture> = rules
+            .into_iter()
+            .filter(|rule| !rule.variable.trim().is_empty() && !rule.path.trim().is_empty())
+            .map(|rule| Capture {
+                value: body
+                    .as_ref()
+                    .and_then(|body| jsonpath::select_string(body, &rule.path)),
+                variable: rule.variable.trim().to_string(),
+                path: rule.path,
+            })
+            .collect();
+        for capture in &captures {
+            if let Some(value) = &capture.value {
+                self.captured
+                    .insert(capture.variable.clone(), value.clone());
+            }
+        }
+        if captures.iter().any(|capture| capture.value.is_some()) {
+            self.save_state(cx);
+            cx.notify();
+        }
+        captures
     }
 
     pub fn validate_body(&self, operation_key: &str, body: &str) -> Option<Validation> {
@@ -548,11 +705,10 @@ impl Collection {
         self.login_status = LoginStatus::LoggingIn;
         cx.notify();
         let prepared = self.login_request();
-        let http_client = self.http_client.clone();
         cx.spawn(async move |this, cx| {
             let result = async {
                 let (login, prepared) = prepared?;
-                let (step, response) = run_step(http_client, &prepared, "login").await;
+                let (step, response, _) = run_step(&this, &prepared, "login", cx).await;
                 let response = response?;
                 let session = session_from_response(&login, &response)?;
                 anyhow::Ok((step, session))
@@ -629,11 +785,10 @@ impl Collection {
             return cx.background_spawn(async move { Ok(vec![login.await?]) });
         }
         let prepared = self.refresh_request();
-        let http_client = self.http_client.clone();
         cx.spawn(async move |this, cx| {
             let refreshed = async {
                 let (login, prepared) = prepared?;
-                let (step, response) = run_step(http_client, &prepared, "renovou o token").await;
+                let (step, response, _) = run_step(&this, &prepared, "renovou o token", cx).await;
                 let session =
                     response.and_then(|response| session_from_response(&login, &response));
                 anyhow::Ok((step, session))
@@ -682,6 +837,9 @@ impl Collection {
 
     pub fn logout(&mut self, cx: &mut Context<Self>) {
         self.session = Session::default();
+        // Servers often keep the session in a cookie too; leaving it would stay logged in.
+        self.cookies = CookieJar::default();
+        self.save_state(cx);
         self.login_status = LoginStatus::Idle;
         cx.notify();
         let url = session_url(&self.id);
@@ -705,16 +863,16 @@ impl Collection {
         draft: RequestDraft,
         cx: &mut Context<Self>,
     ) -> Task<Exchange> {
-        let http_client = self.http_client.clone();
         let sent_at = Local::now();
         cx.spawn(async move |this, cx| {
             let mut timeline = Vec::new();
+            let mut cookies_set = Vec::new();
             let result = send_with_retries(
                 &this,
-                http_client,
                 &operation_key,
                 &draft,
                 &mut timeline,
+                &mut cookies_set,
                 cx,
             )
             .await;
@@ -735,6 +893,15 @@ impl Collection {
                     .flatten()
                 })
                 .map_or((None, None), |(validation, name)| (Some(validation), name));
+            let captures = response
+                .as_ref()
+                .and_then(|response| {
+                    this.update(cx, |this, cx| {
+                        this.apply_captures(&operation_key, response, cx)
+                    })
+                    .ok()
+                })
+                .unwrap_or_default();
             Exchange {
                 request: request.map(|request| request.masked()),
                 response,
@@ -743,6 +910,8 @@ impl Collection {
                 validation,
                 response_schema_name,
                 sent_at,
+                cookies_set,
+                captures,
             }
         })
     }
@@ -779,10 +948,10 @@ type SendResult = std::result::Result<
 
 async fn send_with_retries(
     this: &WeakEntity<Collection>,
-    http_client: Arc<dyn HttpClient>,
     operation_key: &str,
     draft: &RequestDraft,
     timeline: &mut Vec<TimelineStep>,
+    cookies_set: &mut Vec<Cookie>,
     cx: &mut AsyncApp,
 ) -> SendResult {
     let renewal = this
@@ -803,8 +972,9 @@ async fn send_with_retries(
             .map_err(|error| Box::new((None, error)))
     };
     let prepared = prepare(cx)?;
-    let (step, response) = run_step(http_client.clone(), &prepared, "").await;
+    let (step, response, cookies) = run_step(this, &prepared, "", cx).await;
     timeline.push(step);
+    cookies_set.extend(cookies);
     let response = response.map_err(|error| Box::new((Some(prepared.clone()), error)))?;
 
     let carried_token = prepared.headers.iter().any(|(name, value)| {
@@ -834,19 +1004,33 @@ async fn send_with_retries(
         }
     }
     let prepared = prepare(cx)?;
-    let (step, retried) = run_step(http_client, &prepared, "repetida com o token novo").await;
+    let (step, retried, cookies) = run_step(this, &prepared, "repetida com o token novo", cx).await;
     timeline.push(step);
+    cookies_set.extend(cookies);
     let retried = retried.map_err(|error| Box::new((Some(prepared.clone()), error)))?;
     Ok((prepared, retried))
 }
 
+/// Sends one request of an exchange and keeps the cookies it sets.
 async fn run_step(
-    http_client: Arc<dyn HttpClient>,
+    this: &WeakEntity<Collection>,
     prepared: &PreparedRequest,
     note: &str,
-) -> (TimelineStep, Result<ReceivedResponse>) {
+    cx: &mut AsyncApp,
+) -> (TimelineStep, Result<ReceivedResponse>, Vec<Cookie>) {
     let started = std::time::Instant::now();
-    let result = send::execute(http_client, prepared).await;
+    let result = match this.read_with(cx, |this, _| (this.http_client.clone(), this.fs.clone())) {
+        Ok((http_client, fs)) => send::execute(http_client, Some(&fs), prepared).await,
+        Err(error) => Err(error),
+    };
+    let cookies = match &result {
+        Ok(response) => this
+            .update(cx, |this, cx| {
+                this.store_cookies(response, &prepared.url, cx)
+            })
+            .unwrap_or_default(),
+        Err(_) => Vec::new(),
+    };
     let path = prepared
         .url
         .split_once("://")
@@ -865,7 +1049,7 @@ async fn run_step(
             .map(|response| response.elapsed)
             .unwrap_or_else(|_| started.elapsed()),
     };
-    (step, result)
+    (step, result, cookies)
 }
 
 fn session_from_response(login: &LoginConfig, response: &ReceivedResponse) -> Result<Session> {
@@ -913,6 +1097,10 @@ fn secrets_url(id: &str) -> String {
 
 fn session_url(id: &str) -> String {
     format!("asylum-api://{id}/session")
+}
+
+fn state_url(id: &str) -> String {
+    format!("asylum-api://{id}/state")
 }
 
 async fn read_json<T: for<'de> Deserialize<'de>>(
@@ -1110,10 +1298,20 @@ paths:
                         .get("authorization")
                         .map(|value| value.to_str().unwrap_or("").to_string())
                         .unwrap_or_default();
+                    let cookie = request
+                        .headers()
+                        .get("cookie")
+                        .map(|value| format!(" cookie={}", value.to_str().unwrap_or("")))
+                        .unwrap_or_default();
                     let line = format!(
-                        "{} {} {authorization}",
+                        "{} {}{} {authorization}{cookie}",
                         request.method(),
-                        request.uri().path()
+                        request.uri().path(),
+                        request
+                            .uri()
+                            .query()
+                            .map(|query| format!("?{query}"))
+                            .unwrap_or_default(),
                     );
                     requests.lock().push(line);
                     let (status, body) = match (request.uri().path(), authorization.as_str()) {
@@ -1124,11 +1322,13 @@ paths:
                         }
                         _ => (404, "{}"),
                     };
-                    Ok(Response::builder()
+                    let mut response = Response::builder()
                         .status(status)
-                        .header("content-type", "application/json")
-                        .body(AsyncBody::from(body.to_string()))
-                        .unwrap())
+                        .header("content-type", "application/json");
+                    if status == 200 && request.uri().path() == "/me" {
+                        response = response.header("set-cookie", "sid=s1; Path=/; HttpOnly");
+                    }
+                    Ok(response.body(AsyncBody::from(body.to_string())).unwrap())
                 }
             }
         });
@@ -1246,5 +1446,53 @@ paths:
             !text.contains("\"new\""),
             "tokens never go to the collection file"
         );
+
+        // The cookie the response set and the captured id go into the next request.
+        assert_eq!(exchange.cookies_set.len(), 1);
+        collection.update(cx, |collection, cx| {
+            collection.set_capture_rules(
+                "GET /me",
+                vec![CaptureRule {
+                    operation: "GET /me".to_string(),
+                    path: "$.id".to_string(),
+                    variable: "userId".to_string(),
+                }],
+                cx,
+            );
+        });
+        let exchange = collection
+            .update(cx, |collection, cx| {
+                let draft = collection.draft("GET /me");
+                collection.send("GET /me".to_string(), draft, cx)
+            })
+            .await;
+        assert_eq!(
+            exchange.captures,
+            vec![Capture {
+                variable: "userId".to_string(),
+                path: "$.id".to_string(),
+                value: Some("7".to_string()),
+            }]
+        );
+        let mut draft = collection.read_with(cx, |collection, _| collection.draft("GET /me"));
+        draft.query.push(crate::config::ParamEntry {
+            name: "user".to_string(),
+            value: "{{userId}}".to_string(),
+            enabled: true,
+        });
+        collection
+            .update(cx, |collection, cx| {
+                collection.send("GET /me".to_string(), draft, cx)
+            })
+            .await;
+        assert_eq!(
+            requests.lock().last().map(String::as_str),
+            Some("GET /me?user=7 Bearer new cookie=sid=s1")
+        );
+        cx.run_until_parked();
+        let state = keychain.0.lock().get(&state_url("trix")).cloned().unwrap();
+        let state: StoredState = serde_json::from_slice(&state.1).unwrap();
+        assert_eq!(state.captured.get("userId").map(String::as_str), Some("7"));
+        assert_eq!(state.cookies.cookies[0].name, "sid");
     }
 }

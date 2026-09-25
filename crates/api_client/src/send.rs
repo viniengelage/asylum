@@ -1,15 +1,17 @@
 //! Turns an operation and what the user typed into an HTTP request, and sends it.
 
 use crate::{
-    config::{HeaderEntry, RequestDraft},
+    config::{BodyKind, HeaderEntry, RequestDraft},
     spec::{ApiKeyLocation, ParameterLocation, SchemeKind, Spec, is_json_content_type},
     vars::{self, SECRET_PREFIX},
 };
 use anyhow::{Context as _, Result};
 use base64::Engine as _;
+use fs::Fs;
 use futures::AsyncReadExt as _;
 use http_client::{AsyncBody, HttpClient, HttpRequestExt as _, RedirectPolicy, http};
 use std::{
+    path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -204,11 +206,127 @@ pub fn auth_plan(spec: &Spec, operation_key: &str, variables: &dyn Variables) ->
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct MultipartPart {
+    pub name: String,
+    pub value: String,
+    /// A file to send as the part's content, named after it.
+    pub file: Option<PathBuf>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum PreparedBody {
+    Text(String),
+    UrlEncoded(Vec<(String, String)>),
+    Multipart {
+        boundary: String,
+        parts: Vec<MultipartPart>,
+    },
+}
+
+impl PreparedBody {
+    pub fn url_encoded(fields: &[(String, String)]) -> String {
+        fields
+            .iter()
+            .map(|(name, value)| {
+                format!(
+                    "{}={}",
+                    urlencoding::encode(name),
+                    urlencoding::encode(value)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("&")
+    }
+
+    /// What the body looks like, for the timeline: files by name, not content.
+    pub fn summary(&self) -> String {
+        match self {
+            PreparedBody::Text(text) => text.clone(),
+            PreparedBody::UrlEncoded(fields) => Self::url_encoded(fields),
+            PreparedBody::Multipart { parts, .. } => parts
+                .iter()
+                .map(|part| match &part.file {
+                    Some(file) => format!("{}=@{}", part.name, file.display()),
+                    None => format!("{}={}", part.name, part.value),
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+        }
+    }
+
+    async fn into_bytes(self, fs: Option<&Arc<dyn Fs>>) -> Result<Vec<u8>> {
+        Ok(match self {
+            PreparedBody::Text(text) => text.into_bytes(),
+            PreparedBody::UrlEncoded(fields) => Self::url_encoded(&fields).into_bytes(),
+            PreparedBody::Multipart { boundary, parts } => {
+                let mut bytes = Vec::new();
+                for part in parts {
+                    bytes.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+                    let name = part.name.replace('"', "%22");
+                    match &part.file {
+                        Some(path) => {
+                            let fs = fs.context("sem acesso ao disco para ler o arquivo")?;
+                            let content = fs.load_bytes(path).await.with_context(|| {
+                                format!("não foi possível ler {}", path.display())
+                            })?;
+                            let file_name = path
+                                .file_name()
+                                .map(|name| name.to_string_lossy().replace('"', "%22"))
+                                .unwrap_or_default();
+                            bytes.extend_from_slice(
+                                format!(
+                                    "Content-Disposition: form-data; name=\"{name}\"; filename=\"{file_name}\"\r\nContent-Type: {}\r\n\r\n",
+                                    guess_mime(path)
+                                )
+                                .as_bytes(),
+                            );
+                            bytes.extend_from_slice(&content);
+                        }
+                        None => {
+                            bytes.extend_from_slice(
+                                format!("Content-Disposition: form-data; name=\"{name}\"\r\n\r\n")
+                                    .as_bytes(),
+                            );
+                            bytes.extend_from_slice(part.value.as_bytes());
+                        }
+                    }
+                    bytes.extend_from_slice(b"\r\n");
+                }
+                bytes.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+                bytes
+            }
+        })
+    }
+}
+
+fn guess_mime(path: &Path) -> &'static str {
+    let extension = path
+        .extension()
+        .map(|extension| extension.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    match extension.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "pdf" => "application/pdf",
+        "json" => "application/json",
+        "csv" => "text/csv",
+        "txt" | "md" => "text/plain",
+        "zip" => "application/zip",
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        _ => "application/octet-stream",
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct PreparedRequest {
     pub method: String,
     pub url: String,
     pub headers: Vec<(String, String)>,
-    pub body: Option<String>,
+    pub body: Option<PreparedBody>,
     /// Placeholders nothing defines; they are sent as typed.
     pub missing: Vec<String>,
 }
@@ -238,8 +356,40 @@ impl PreparedRequest {
         for (name, value) in &self.headers {
             command.push_str(&format!(" \\\n  -H {}", quote(&format!("{name}: {value}"))));
         }
-        if let Some(body) = &self.body {
-            command.push_str(&format!(" \\\n  --data-raw {}", quote(body)));
+        match &self.body {
+            Some(PreparedBody::Text(body)) => {
+                command.push_str(&format!(" \\\n  --data-raw {}", quote(body)));
+            }
+            Some(PreparedBody::UrlEncoded(fields)) => {
+                for (name, value) in fields {
+                    command.push_str(&format!(
+                        " \\\n  --data-urlencode {}",
+                        quote(&format!("{name}={value}"))
+                    ));
+                }
+            }
+            Some(PreparedBody::Multipart { parts, .. }) => {
+                // curl writes its own boundary, so the one in Content-Type must not go along.
+                command = command.replace(
+                    &self
+                        .headers
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+                        .map(|(name, value)| {
+                            format!(" \\\n  -H {}", quote(&format!("{name}: {value}")))
+                        })
+                        .unwrap_or_default(),
+                    "",
+                );
+                for part in parts {
+                    let field = match &part.file {
+                        Some(file) => format!("{}=@{}", part.name, file.display()),
+                        None => format!("{}={}", part.name, part.value),
+                    };
+                    command.push_str(&format!(" \\\n  -F {}", quote(&field)));
+                }
+            }
+            None => {}
         }
         command
     }
@@ -317,11 +467,51 @@ pub fn prepare(
         url.push_str(&encoded.join("&"));
     }
 
-    let body = draft
-        .body
+    let body_kind = operation
+        .request_body
         .as_ref()
-        .filter(|body| !body.trim().is_empty())
-        .map(|body| fill(body));
+        .map(|body| BodyKind::for_content_type(&body.content_type))
+        .unwrap_or(BodyKind::Json);
+    let body = if body_kind.is_form() {
+        let fields: Vec<_> = draft
+            .form
+            .iter()
+            .filter(|field| field.enabled && !field.name.trim().is_empty())
+            .collect();
+        if fields.is_empty() {
+            None
+        } else if body_kind == BodyKind::UrlEncoded {
+            Some(PreparedBody::UrlEncoded(
+                fields
+                    .iter()
+                    .map(|field| (field.name.trim().to_string(), fill(&field.value)))
+                    .collect(),
+            ))
+        } else {
+            Some(PreparedBody::Multipart {
+                boundary: format!("asylum-{}", uuid::Uuid::new_v4().simple()),
+                parts: fields
+                    .iter()
+                    .map(|field| {
+                        let value = fill(&field.value);
+                        let file = (field.is_file && !value.trim().is_empty())
+                            .then(|| PathBuf::from(value.trim()));
+                        MultipartPart {
+                            name: field.name.trim().to_string(),
+                            value,
+                            file,
+                        }
+                    })
+                    .collect(),
+            })
+        }
+    } else {
+        draft
+            .body
+            .as_ref()
+            .filter(|body| !body.trim().is_empty())
+            .map(|body| PreparedBody::Text(fill(body)))
+    };
 
     let mut headers: Vec<(String, String)> = Vec::new();
     let mut set = |name: &str, value: String| {
@@ -347,6 +537,13 @@ pub fn prepare(
         if header.enabled && !header.name.is_empty() {
             set(&header.name, fill(&header.value));
         }
+    }
+    // The boundary is only known here, so it replaces whatever Content-Type came before.
+    if let Some(PreparedBody::Multipart { boundary, .. }) = &body {
+        set(
+            "Content-Type",
+            format!("multipart/form-data; boundary={boundary}"),
+        );
     }
     for parameter in &operation.parameters {
         if parameter.location == ParameterLocation::Path
@@ -411,6 +608,7 @@ impl ReceivedResponse {
 
 pub async fn execute(
     http_client: Arc<dyn HttpClient>,
+    fs: Option<&Arc<dyn Fs>>,
     prepared: &PreparedRequest,
 ) -> Result<ReceivedResponse> {
     let method = http::Method::from_bytes(prepared.method.as_bytes())?;
@@ -421,8 +619,8 @@ pub async fn execute(
     for (name, value) in &prepared.headers {
         builder = builder.header(name.as_str(), value.as_str());
     }
-    let body = match &prepared.body {
-        Some(body) => AsyncBody::from(body.clone()),
+    let body = match prepared.body.clone() {
+        Some(body) => AsyncBody::from(body.into_bytes(fs).await?),
         None => AsyncBody::empty(),
     };
     let request = builder
@@ -506,6 +704,22 @@ paths:
     get:
       security: []
       responses: { '204': { description: ok } }
+  /files:
+    post:
+      security: []
+      requestBody:
+        content:
+          multipart/form-data:
+            schema: { type: object, properties: { title: { type: string }, file: { type: string, format: binary } } }
+      responses: { '201': { description: ok } }
+  /token:
+    post:
+      security: []
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema: { type: object, properties: { grant_type: { type: string } } }
+      responses: { '200': { description: ok } }
 "##;
 
     fn spec() -> Spec {
@@ -547,6 +761,7 @@ paths:
             }],
             disabled_inherited: vec!["X-Debug".to_string()],
             body: Some(r#"{"tenant":"{{tenant}}","missing":"{{nope}}"}"#.to_string()),
+            form: Vec::new(),
         };
         let collection_headers = vec![
             HeaderEntry {
@@ -586,8 +801,10 @@ paths:
             ]
         );
         assert_eq!(
-            prepared.body.as_deref(),
-            Some(r#"{"tenant":"trix","missing":"{{nope}}"}"#)
+            prepared.body,
+            Some(PreparedBody::Text(
+                r#"{"tenant":"trix","missing":"{{nope}}"}"#.to_string()
+            ))
         );
         assert_eq!(prepared.missing, vec!["nope".to_string()]);
         let masked = prepared.masked();
@@ -612,6 +829,87 @@ paths:
         let plans = auth_plan(&spec, "PATCH /users/{id}", &|_: &str| None);
         assert_eq!(plans.len(), 2);
         assert!(plans.iter().all(|plan| plan.missing.is_some()));
+    }
+
+    #[gpui::test]
+    async fn sends_form_and_multipart_bodies(cx: &mut gpui::TestAppContext) {
+        use crate::config::{self, FormField};
+        let spec = spec();
+        let fields = config::form_fields(&spec, "POST /files");
+        assert_eq!(
+            fields
+                .iter()
+                .map(|field| (field.name.as_str(), field.is_file))
+                .collect::<Vec<_>>(),
+            vec![("title", false), ("file", true)]
+        );
+
+        let draft = RequestDraft {
+            url: "{{baseUrl}}/files".to_string(),
+            form: vec![
+                FormField {
+                    name: "title".to_string(),
+                    value: "{{tenant}}".to_string(),
+                    is_file: false,
+                    enabled: true,
+                },
+                FormField {
+                    name: "file".to_string(),
+                    value: "/docs/memo.pdf".to_string(),
+                    is_file: true,
+                    enabled: true,
+                },
+            ],
+            ..RequestDraft::default()
+        };
+        let prepared = prepare(&spec, "POST /files", &draft, &[], &variables).unwrap();
+        let Some(PreparedBody::Multipart { boundary, parts }) = prepared.body.clone() else {
+            panic!("esperava multipart");
+        };
+        assert_eq!(parts[0].value, "trix");
+        assert_eq!(parts[1].file.as_deref(), Some(Path::new("/docs/memo.pdf")));
+        assert!(prepared.headers.contains(&(
+            "Content-Type".to_string(),
+            format!("multipart/form-data; boundary={boundary}")
+        )));
+        let curl = prepared.curl();
+        assert!(curl.contains("-F 'file=@/docs/memo.pdf'"), "{curl}");
+        assert!(!curl.contains("boundary="), "{curl}");
+
+        let fs = fs::FakeFs::new(cx.executor());
+        fs.insert_tree("/docs", serde_json::json!({ "memo.pdf": "PDF!" }))
+            .await;
+        let fs: Arc<dyn Fs> = fs;
+        let bytes = prepared.body.unwrap().into_bytes(Some(&fs)).await.unwrap();
+        let text = String::from_utf8(bytes).unwrap();
+        assert_eq!(
+            text,
+            format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\ntrix\r\n\
+                 --{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"memo.pdf\"\r\n\
+                 Content-Type: application/pdf\r\n\r\nPDF!\r\n--{boundary}--\r\n"
+            )
+        );
+
+        let draft = RequestDraft {
+            url: "{{baseUrl}}/token".to_string(),
+            form: vec![FormField {
+                name: "grant_type".to_string(),
+                value: "client credentials".to_string(),
+                is_file: false,
+                enabled: true,
+            }],
+            ..RequestDraft::default()
+        };
+        let prepared = prepare(&spec, "POST /token", &draft, &[], &variables).unwrap();
+        assert_eq!(
+            prepared.body.as_ref().map(PreparedBody::summary).as_deref(),
+            Some("grant_type=client%20credentials")
+        );
+        assert!(prepared.headers.contains(&(
+            "Content-Type".to_string(),
+            "application/x-www-form-urlencoded".to_string()
+        )));
     }
 
     #[test]

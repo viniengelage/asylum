@@ -4,7 +4,10 @@
 
 mod collection;
 mod config;
+mod cookies;
+mod example;
 mod jsonpath;
+mod lens;
 mod panel;
 mod request_view;
 mod schema;
@@ -33,6 +36,7 @@ actions!(
 
 pub fn init(cx: &mut App) {
     workspace::register_panel_item::<ApiPanel>(cx);
+    lens::init(cx);
     cx.observe_new(|workspace: &mut Workspace, _window, _cx| {
         workspace.register_action(|workspace, _: &ToggleFocus, window, cx| {
             toggle_focus(workspace, window, cx);
