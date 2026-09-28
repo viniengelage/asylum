@@ -224,7 +224,10 @@ pub fn into_open_ai(
             .tools
             .into_iter()
             .map(|tool| match tool.input {
-                LanguageModelRequestToolInput::Function { input_schema, .. } => {
+                LanguageModelRequestToolInput::Function {
+                    mut input_schema, ..
+                } => {
+                    remove_unsupported_patterns(&mut input_schema);
                     Ok(crate::ToolDefinition::Function {
                         function: FunctionDefinition {
                             name: tool.name,
@@ -322,7 +325,10 @@ pub fn into_open_ai_response(
     let tools: Vec<_> = tools
         .into_iter()
         .map(|tool| match tool.input {
-            LanguageModelRequestToolInput::Function { input_schema, .. } => {
+            LanguageModelRequestToolInput::Function {
+                mut input_schema, ..
+            } => {
+                remove_unsupported_patterns(&mut input_schema);
                 crate::responses::ToolDefinition::Function {
                     name: tool.name,
                     description: Some(tool.description),
@@ -1504,6 +1510,39 @@ fn response_reasoning_input_item_from_output(
     }
 }
 
+/// OpenAI rejects the whole request when any tool's `pattern` uses lookaround
+/// ("regex lookaround is not supported"), and context servers routinely ship
+/// such patterns. Dropping the constraint only loosens validation of that one
+/// string, which is far better than making every tool unusable.
+fn remove_unsupported_patterns(schema: &mut serde_json::Value) {
+    match schema {
+        serde_json::Value::Object(object) => {
+            if object
+                .get("pattern")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(uses_lookaround)
+            {
+                object.remove("pattern");
+            }
+            for child in object.values_mut() {
+                remove_unsupported_patterns(child);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                remove_unsupported_patterns(item);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn uses_lookaround(pattern: &str) -> bool {
+    ["(?=", "(?!", "(?<=", "(?<!"]
+        .iter()
+        .any(|lookaround| pattern.contains(lookaround))
+}
+
 #[cfg(test)]
 mod tests {
     use crate::responses::{
@@ -1524,6 +1563,37 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn removes_lookaround_patterns_from_tool_schemas() {
+        let mut schema = json!({
+            "type": "object",
+            "properties": {
+                "serverId": { "type": "string", "pattern": "^(?!-)[a-z-]+$" },
+                "name": { "type": "string", "pattern": "^[a-z]+$" },
+                "pattern": { "type": "string" },
+                "tags": {
+                    "type": "array",
+                    "items": { "type": "string", "pattern": "(?<=#)\\w+" }
+                }
+            }
+        });
+
+        remove_unsupported_patterns(&mut schema);
+
+        assert_eq!(
+            schema,
+            json!({
+                "type": "object",
+                "properties": {
+                    "serverId": { "type": "string" },
+                    "name": { "type": "string", "pattern": "^[a-z]+$" },
+                    "pattern": { "type": "string" },
+                    "tags": { "type": "array", "items": { "type": "string" } }
+                }
+            })
+        );
+    }
 
     #[test]
     fn prompt_cache_key_respects_override_fallback_and_capability() -> Result<()> {
