@@ -156,6 +156,22 @@ impl MentionSet {
             MentionUri::GitDiff { base_ref } => {
                 self.confirm_mention_for_git_diff(base_ref.into(), cx)
             }
+            MentionUri::SqlQuery { abs_path, .. } => {
+                self.confirm_mention_for_sql_query(abs_path, cx)
+            }
+            MentionUri::PullRequest {
+                number,
+                comment_id,
+                file_path,
+                ..
+            } => self.confirm_mention_for_pull_request(
+                task_agents::PullRequestReference {
+                    number,
+                    comment_id,
+                    file_path,
+                },
+                cx,
+            ),
             MentionUri::Selection {
                 abs_path: Some(abs_path),
                 line_range,
@@ -344,6 +360,22 @@ impl MentionSet {
             MentionUri::GitDiff { base_ref } => {
                 self.confirm_mention_for_git_diff(base_ref.into(), cx)
             }
+            MentionUri::SqlQuery { abs_path, .. } => {
+                self.confirm_mention_for_sql_query(abs_path, cx)
+            }
+            MentionUri::PullRequest {
+                number,
+                comment_id,
+                file_path,
+                ..
+            } => self.confirm_mention_for_pull_request(
+                task_agents::PullRequestReference {
+                    number,
+                    comment_id,
+                    file_path,
+                },
+                cx,
+            ),
             MentionUri::MergeConflict { .. } => {
                 debug_panic!("unexpected merge conflict URI");
                 Task::ready(Err(anyhow!("unexpected merge conflict URI")))
@@ -706,6 +738,42 @@ impl MentionSet {
                 })
             }
         })
+    }
+
+    fn confirm_mention_for_pull_request(
+        &self,
+        reference: task_agents::PullRequestReference,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<Mention>> {
+        let Some(project) = self.project.upgrade() else {
+            return Task::ready(Err(anyhow!("project not found")));
+        };
+        let describe = task_agents::describe_pull_request(&project, reference, cx);
+        cx.spawn(async move |_, _| {
+            let content = describe.await?;
+            Ok(Mention::Text {
+                content,
+                tracked_buffers: Vec::new(),
+            })
+        })
+    }
+
+    fn confirm_mention_for_sql_query(
+        &self,
+        abs_path: PathBuf,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<Mention>> {
+        let Some(project) = self.project.upgrade() else {
+            return Task::ready(Err(anyhow!("project not found")));
+        };
+        Task::ready(
+            task_agents::describe_sql_editor(&project, &abs_path, cx).map(|content| {
+                Mention::Text {
+                    content,
+                    tracked_buffers: Vec::new(),
+                }
+            }),
+        )
     }
 }
 

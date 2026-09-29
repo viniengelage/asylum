@@ -67,8 +67,8 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use util::{ResultExt, debug_panic, markdown::MarkdownCodeBlock, paths::PathStyle};
 use task_agents::TaskAgent;
+use util::{ResultExt, debug_panic, markdown::MarkdownCodeBlock, paths::PathStyle};
 use uuid::Uuid;
 
 const TOOL_CANCELED_MESSAGE: &str = "Tool canceled by user";
@@ -351,6 +351,8 @@ impl UserMessage {
         const OPEN_DIAGNOSTICS_TAG: &str = "<diagnostics>";
         const OPEN_DIFFS_TAG: &str = "<diffs>";
         const MERGE_CONFLICT_TAG: &str = "<merge_conflicts>";
+        const OPEN_SQL_EDITORS_TAG: &str = "<sql_editors>";
+        const OPEN_PULL_REQUESTS_TAG: &str = "<pull_requests>\nThe user pointed at these pull requests of the project's repository. Read more with the repo_* tools, never through an MCP server:\n";
         const OPEN_SKILLS_TAG: &str =
             "<skills>\nThe user has attached the following agent skills:\n";
 
@@ -364,6 +366,8 @@ impl UserMessage {
         let mut diagnostics_context = OPEN_DIAGNOSTICS_TAG.to_string();
         let mut diffs_context = OPEN_DIFFS_TAG.to_string();
         let mut merge_conflict_context = MERGE_CONFLICT_TAG.to_string();
+        let mut sql_editors_context = OPEN_SQL_EDITORS_TAG.to_string();
+        let mut pull_requests_context = OPEN_PULL_REQUESTS_TAG.to_string();
         let mut skills_context = OPEN_SKILLS_TAG.to_string();
 
         for chunk in &*self.content {
@@ -482,6 +486,12 @@ impl UserMessage {
                             )
                             .ok();
                         }
+                        MentionUri::SqlQuery { .. } => {
+                            write!(&mut sql_editors_context, "\n{}\n", content).ok();
+                        }
+                        MentionUri::PullRequest { .. } => {
+                            write!(&mut pull_requests_context, "\n{}\n", content).ok();
+                        }
                         MentionUri::Skill { name, source, .. } => {
                             let label = format!("{} ({})", name, source);
                             write!(&mut skills_context, "\nSkill: {}\n{}\n", label, content).ok();
@@ -572,6 +582,20 @@ impl UserMessage {
             message
                 .content
                 .push(language_model::MessageContent::Text(merge_conflict_context));
+        }
+
+        if pull_requests_context.len() > OPEN_PULL_REQUESTS_TAG.len() {
+            pull_requests_context.push_str("</pull_requests>\n");
+            message
+                .content
+                .push(language_model::MessageContent::Text(pull_requests_context));
+        }
+
+        if sql_editors_context.len() > OPEN_SQL_EDITORS_TAG.len() {
+            sql_editors_context.push_str("</sql_editors>\n");
+            message
+                .content
+                .push(language_model::MessageContent::Text(sql_editors_context));
         }
 
         if message.content.len() > len_before_context {
@@ -2357,7 +2381,10 @@ impl Thread {
                 {
                     self.set_profile(profile_id, cx);
                 } else {
-                    log::warn!("task agent `{}` names unknown profile `{profile}`", agent.name);
+                    log::warn!(
+                        "task agent `{}` names unknown profile `{profile}`",
+                        agent.name
+                    );
                 }
             }
             if let Some(reference) = agent.model_reference() {
@@ -4503,12 +4530,15 @@ impl Thread {
             model_name: self.model().map(|m| m.name().0.to_string()),
             date: Local::now().format("%Y-%m-%d").to_string(),
             user_agents_md,
-            task_agent: self.task_agent.as_ref().map(|agent| crate::TaskAgentPrompt {
-                name: agent.name.clone(),
-                command: agent.command.clone(),
-                description: agent.description.clone(),
-                instructions: agent.instructions.clone(),
-            }),
+            task_agent: self
+                .task_agent
+                .as_ref()
+                .map(|agent| crate::TaskAgentPrompt {
+                    name: agent.name.clone(),
+                    command: agent.command.clone(),
+                    description: agent.description.clone(),
+                    instructions: agent.instructions.clone(),
+                }),
             sandboxing: crate::sandboxing::sandboxing_enabled_for_project(
                 self.project.read(cx),
                 cx,
@@ -6029,11 +6059,9 @@ impl ToolCallEventStream {
             .as_ref()
             .and_then(|thread| thread.upgrade())
             .and_then(|thread| {
-                thread.read(cx).task_agent_decision(
-                    &context.tool_name,
-                    &context.input_values,
-                    cx,
-                )
+                thread
+                    .read(cx)
+                    .task_agent_decision(&context.tool_name, &context.input_values, cx)
             });
         match agent_decision {
             Some(ToolPermissionDecision::Allow) => Task::ready(Ok(())),
@@ -6044,6 +6072,37 @@ impl ToolCallEventStream {
             None if acts => self.authorize(title, context, cx),
             None => Task::ready(Ok(())),
         }
+    }
+
+    /// For toolkit tools that can't be undone: a deny from the settings or the task agent still
+    /// wins, but nothing can allow them without asking.
+    pub fn authorize_toolkit_tool_always_prompt(
+        &self,
+        title: impl Into<String>,
+        context: ToolPermissionContext,
+        cx: &mut App,
+    ) -> Task<Result<()>> {
+        let settings_decision = decide_permission_from_settings(
+            &context.tool_name,
+            &context.input_values,
+            agent_settings::AgentSettings::get_global(cx),
+        );
+        if let ToolPermissionDecision::Deny(reason) = settings_decision {
+            return Task::ready(Err(anyhow!(reason)));
+        }
+        let agent_decision = self
+            .thread
+            .as_ref()
+            .and_then(|thread| thread.upgrade())
+            .and_then(|thread| {
+                thread
+                    .read(cx)
+                    .task_agent_decision(&context.tool_name, &context.input_values, cx)
+            });
+        if let Some(ToolPermissionDecision::Deny(reason)) = agent_decision {
+            return Task::ready(Err(anyhow!(reason)));
+        }
+        self.authorize_always_prompt(title, context, cx)
     }
 
     /// Like [`Self::authorize`], but always prompts the user without

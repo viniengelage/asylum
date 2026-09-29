@@ -12,10 +12,13 @@ use crate::{
     statements::{self, Statement, StatementKind, Transaction},
     write_guard::{Decision, WriteGuard},
 };
-use editor::{Editor, EditorEvent, HighlightKey, MultiBufferOffset, SelectionEffects};
+use editor::{
+    Editor, EditorEvent, HighlightKey, MultiBufferOffset, SelectionEffects, ToOffset as _,
+};
 use gpui::{
-    AnyElement, ClipboardItem, Entity, EntityId, EventEmitter, FocusHandle, Focusable, FontWeight,
-    Subscription, Task, WeakEntity, px, relative,
+    AnyElement, AnyWindowHandle, ClipboardItem, DragMoveEvent, Empty, Entity, EntityId,
+    EventEmitter, FocusHandle, Focusable, FontWeight, Global, Pixels, Subscription, Task,
+    WeakEntity, px, relative,
 };
 use project::Project;
 use std::{
@@ -38,6 +41,84 @@ use workspace::{
 
 const ROW_LIMIT: usize = 1000;
 const MAX_HISTORY: usize = 50;
+const MIN_RESULTS_HEIGHT: Pixels = px(160.);
+const MIN_EDITOR_HEIGHT: Pixels = px(80.);
+
+/// Dragged by the bar between the editor and the results.
+struct DraggedResultsDivider;
+/// How much of the editor goes to the agent when the tab is mentioned.
+const MAX_AGENT_SQL_CHARS: usize = 20_000;
+
+/// Every open query tab, so the agent (which only knows its project) can list them and write
+/// into one.
+#[derive(Default)]
+struct OpenQueryViews(Vec<WeakEntity<SqlQueryView>>);
+
+impl Global for OpenQueryViews {}
+
+/// Where the agent's SQL goes in the editor.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentWriteMode {
+    /// A new statement after what is already there.
+    #[default]
+    Append,
+    /// In place of the statement under the cursor.
+    ReplaceStatement,
+    /// In place of the whole file.
+    ReplaceAll,
+}
+
+/// The query tabs of a project, most recently opened first.
+pub(crate) fn query_views(project: &Entity<Project>, cx: &App) -> Vec<Entity<SqlQueryView>> {
+    let Some(open) = cx.try_global::<OpenQueryViews>() else {
+        return Vec::new();
+    };
+    open.0
+        .iter()
+        .rev()
+        .filter_map(|view| view.upgrade())
+        .filter(|view| view.read(cx).project_id == project.entity_id())
+        .collect()
+}
+
+/// The text edit that puts `sql` into `text`: the range it replaces, what goes there, and where
+/// the statement starts afterwards, for the cursor.
+fn agent_edit(
+    text: &str,
+    cursor: usize,
+    sql: &str,
+    mode: AgentWriteMode,
+) -> (Range<usize>, String, usize) {
+    let sql = sql.trim().trim_end_matches(';').trim_end();
+    let statement_at_cursor = match mode {
+        AgentWriteMode::ReplaceStatement => {
+            let all = statements::split(text);
+            statements::statement_at(&all, cursor).map(|statement| statement.range.clone())
+        }
+        AgentWriteMode::Append | AgentWriteMode::ReplaceAll => None,
+    };
+    if let Some(range) = statement_at_cursor {
+        // The statement's range stops before its `;`, which stays.
+        let start = range.start;
+        return (range, sql.to_owned(), start);
+    }
+    if mode == AgentWriteMode::ReplaceAll || text.trim().is_empty() {
+        return (0..text.len(), format!("{sql};\n"), 0);
+    }
+    let separator = if text.ends_with("\n\n") {
+        ""
+    } else if text.ends_with('\n') {
+        "\n"
+    } else {
+        "\n\n"
+    };
+    (
+        text.len()..text.len(),
+        format!("{separator}{sql};\n"),
+        text.len() + separator.len(),
+    )
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Scope {
@@ -99,6 +180,8 @@ struct Executed {
 
 pub struct SqlQueryView {
     workspace: WeakEntity<Workspace>,
+    project_id: EntityId,
+    window: AnyWindowHandle,
     editor: Entity<Editor>,
     path: PathBuf,
     connection: SavedConnection,
@@ -111,6 +194,8 @@ pub struct SqlQueryView {
     messages: Vec<Message>,
     history: Vec<HistoryEntry>,
     tab: ResultTab,
+    /// Set once the divider above the results is dragged; until then they take 45% of the tab.
+    results_height: Option<Pixels>,
     focus_handle: FocusHandle,
     run_task: Task<()>,
     tick_task: Task<()>,
@@ -170,6 +255,10 @@ impl SqlQueryView {
         })
         .detach_and_log_err(cx);
         let grid = cx.new(|cx| ResultGrid::new(false, cx));
+        let this = cx.weak_entity();
+        let open = cx.default_global::<OpenQueryViews>();
+        open.0.retain(|view| view.upgrade().is_some());
+        open.0.push(this);
         let subscriptions = vec![cx.subscribe(&editor, |this, _, event, cx| match event {
             EditorEvent::DirtyChanged
             | EditorEvent::Saved
@@ -186,6 +275,8 @@ impl SqlQueryView {
         })];
         Self {
             workspace,
+            project_id: project.entity_id(),
+            window: window.window_handle(),
             editor,
             path,
             connection,
@@ -198,11 +289,110 @@ impl SqlQueryView {
             messages: Vec::new(),
             history: Vec::new(),
             tab: ResultTab::Result,
+            results_height: None,
             focus_handle: cx.focus_handle(),
             run_task: Task::ready(()),
             tick_task: Task::ready(()),
             _subscriptions: subscriptions,
         }
+    }
+
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub(crate) fn connection(&self) -> &SavedConnection {
+        &self.connection
+    }
+
+    pub(crate) fn window(&self) -> AnyWindowHandle {
+        self.window
+    }
+
+    /// What the agent gets when this tab is mentioned.
+    pub(crate) fn describe_for_agent(&self, cx: &App) -> String {
+        let editor = self.editor.read(cx);
+        let text = editor.text(cx);
+        let cursor = editor
+            .selections
+            .newest_anchor()
+            .head()
+            .to_offset(&editor.buffer().read(cx).snapshot(cx))
+            .0
+            .min(text.len());
+        let cursor_line = text[..cursor].matches('\n').count() + 1;
+        let connection = &self.connection;
+        let mut sql = text;
+        if sql.chars().count() > MAX_AGENT_SQL_CHARS {
+            sql = format!(
+                "{}\n-- … (cut)",
+                sql.chars().take(MAX_AGENT_SQL_CHARS).collect::<String>()
+            );
+        }
+        let path = self.path.display();
+        format!(
+            "SQL editor `{path}`, open against the connection \"{name}\" ({environment}, \
+             {address}, PostgreSQL{read_only}).\n\n\
+             When the user asks a question about the data (how many, which, show me), run a \
+             read with `database_query` and answer from the rows in the chat; don't hand them \
+             SQL to run. When they ask for SQL in this editor (write, change, fix a query), \
+             follow these rules:\n\
+             - Write the SQL with the `database_write_query` tool (path `{path}`). That is the \
+             whole answer: reply with no text at all, no explanation, no summary, and never \
+             repeat the SQL in the chat.\n\
+             - When you don't already know the tables and columns, read them with \
+             `database_schema` first so the names are right. Don't run SQL you wrote into the \
+             editor: the user runs it from there.\n\
+             - Mode `append` adds a new statement at the end, `replace_statement` rewrites the \
+             statement under the cursor (to change or fix it), `replace_all` rewrites the file.\n\
+             - Only add `--` comments when the user asks for an explanation.\n\
+             - If the request can't be written (unknown table, ambiguous), answer with one short \
+             sentence saying why, in the user's language.\n\
+             - Without the `database_write_query` tool, edit the file at that path instead, \
+             with the same rules.\n\n\
+             Current contents (cursor on line {cursor_line}):\n```sql\n{sql}\n```",
+            name = connection.name,
+            environment = connection.environment.label(),
+            address = connection.address_with_tunnel(),
+            read_only = if connection.read_only {
+                ", read-only"
+            } else {
+                ""
+            },
+        )
+    }
+
+    /// Puts the agent's SQL into the editor as one undoable edit, with the cursor on it so ⌘↵
+    /// runs it. Returns the line the statement starts on.
+    pub(crate) fn write_from_agent(
+        &mut self,
+        sql: &str,
+        mode: AgentWriteMode,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> usize {
+        self.editor.update(cx, |editor, cx| {
+            let text = editor.text(cx);
+            let cursor = editor
+                .selections
+                .newest::<MultiBufferOffset>(&editor.display_snapshot(cx))
+                .head()
+                .0;
+            let (range, new_text, statement_start) = agent_edit(&text, cursor, sql, mode);
+            editor.edit(
+                [(
+                    MultiBufferOffset(range.start)..MultiBufferOffset(range.end),
+                    new_text,
+                )],
+                cx,
+            );
+            editor.change_selections(SelectionEffects::default(), window, cx, |selections| {
+                selections.select_ranges([
+                    MultiBufferOffset(statement_start)..MultiBufferOffset(statement_start)
+                ])
+            });
+            editor.text(cx)[..statement_start].matches('\n').count() + 1
+        })
     }
 
     fn is_running(&self) -> bool {
@@ -994,10 +1184,31 @@ impl SqlQueryView {
                 .into_any_element(),
         };
         v_flex()
-            .h(relative(0.45))
-            .min_h(px(160.))
+            .relative()
+            .map(|this| match self.results_height {
+                Some(height) => this.h(height),
+                None => this.h(relative(0.45)),
+            })
+            .min_h(MIN_RESULTS_HEIGHT)
             .border_t_1()
             .border_color(cx.theme().colors().border)
+            .child(
+                div()
+                    .id("db-results-resize-handle")
+                    .absolute()
+                    .top(px(-3.))
+                    .left_0()
+                    .right_0()
+                    .h(px(6.))
+                    .cursor_row_resize()
+                    .on_drag(DraggedResultsDivider, |_, _, _, cx| cx.new(|_| Empty))
+                    .on_click(cx.listener(|this, event: &gpui::ClickEvent, _, cx| {
+                        if event.click_count() >= 2 {
+                            this.results_height = None;
+                            cx.notify();
+                        }
+                    })),
+            )
             .child(
                 h_flex()
                     .px_3()
@@ -1117,6 +1328,17 @@ impl Render for SqlQueryView {
                 this.run(Scope::Explain, window, cx)
             }))
             .on_action(cx.listener(Self::cancel))
+            .on_drag_move(cx.listener(
+                |this, event: &DragMoveEvent<DraggedResultsDivider>, _, cx| {
+                    let bounds = event.bounds;
+                    let max_height =
+                        (bounds.size.height - MIN_EDITOR_HEIGHT).max(MIN_RESULTS_HEIGHT);
+                    let height = (bounds.bottom() - event.event.position.y)
+                        .clamp(MIN_RESULTS_HEIGHT, max_height);
+                    this.results_height = Some(height);
+                    cx.notify();
+                },
+            ))
             .size_full()
             .bg(cx.theme().colors().editor_background)
             .child(self.render_toolbar(cx))
@@ -1208,7 +1430,7 @@ pub fn open(
     path: PathBuf,
     window: &mut Window,
     cx: &mut App,
-) {
+) -> Task<anyhow::Result<Entity<SqlQueryView>>> {
     let existing = workspace
         .update(cx, |workspace, cx| {
             let existing = workspace
@@ -1217,34 +1439,46 @@ pub fn open(
             if let Some(existing) = &existing {
                 workspace.activate_item(existing, true, true, window, cx);
             }
-            existing.is_some()
+            existing
         })
-        .unwrap_or(false);
-    if existing {
-        return;
+        .ok()
+        .flatten();
+    if let Some(existing) = existing {
+        return Task::ready(Ok(existing));
     }
     let buffer = project.update(cx, |project, cx| project.open_local_buffer(&path, cx));
-    window
-        .spawn(cx, async move |cx| {
-            let buffer = buffer.await?;
-            workspace.update_in(cx, |workspace, window, cx| {
-                let workspace_handle = workspace.weak_handle();
-                let view = cx.new(|cx| {
-                    SqlQueryView::new(
-                        workspace_handle,
-                        project,
-                        buffer,
-                        path,
-                        connection,
-                        session,
-                        window,
-                        cx,
-                    )
-                });
-                workspace.add_item_to_active_pane(Box::new(view), None, true, window, cx);
-            })
+    window.spawn(cx, async move |cx| {
+        let buffer = buffer.await?;
+        workspace.update_in(cx, |workspace, window, cx| {
+            let workspace_handle = workspace.weak_handle();
+            let view = cx.new(|cx| {
+                SqlQueryView::new(
+                    workspace_handle,
+                    project,
+                    buffer,
+                    path,
+                    connection,
+                    session,
+                    window,
+                    cx,
+                )
+            });
+            workspace.add_item_to_active_pane(Box::new(view.clone()), None, true, window, cx);
+            view
         })
-        .detach_and_log_err(cx);
+    })
+}
+
+/// Brings the tab to the front of its pane.
+pub(crate) fn activate(
+    view: &Entity<SqlQueryView>,
+    window: &mut Window,
+    cx: &mut App,
+) -> anyhow::Result<()> {
+    let workspace = view.read(cx).workspace.clone();
+    workspace.update(cx, |workspace, cx| {
+        workspace.activate_item(view, true, true, window, cx);
+    })
 }
 
 /// A new, empty file in `.asylum/db/queries`, named `query-N.sql`.
@@ -1280,5 +1514,47 @@ mod tests {
             Some("users.name")
         );
         assert_eq!(suggested_column("Something else."), None);
+    }
+
+    fn apply(text: &str, cursor: usize, sql: &str, mode: AgentWriteMode) -> (String, usize) {
+        let (range, new_text, statement_start) = agent_edit(text, cursor, sql, mode);
+        let mut result = text.to_owned();
+        result.replace_range(range, &new_text);
+        (result, statement_start)
+    }
+
+    #[test]
+    fn agent_sql_goes_after_the_header() {
+        let header = "-- Homologação · dev\n\n";
+        let (text, start) = apply(header, 0, "select 1", AgentWriteMode::Append);
+        assert_eq!(text, "-- Homologação · dev\n\nselect 1;\n");
+        assert_eq!(&text[start..], "select 1;\n");
+
+        let (text, start) = apply("select 1;", 0, " select 2; ", AgentWriteMode::Append);
+        assert_eq!(text, "select 1;\n\nselect 2;\n");
+        assert_eq!(&text[start..], "select 2;\n");
+
+        let (text, _) = apply("  \n", 0, "select 1", AgentWriteMode::Append);
+        assert_eq!(text, "select 1;\n");
+    }
+
+    #[test]
+    fn agent_sql_replaces_the_statement_under_the_cursor() {
+        let source = "select 1;\n\nselect * from users;\n\nselect 3;\n";
+        let cursor = source.find("users").unwrap();
+        let (text, start) = apply(
+            source,
+            cursor,
+            "select * from users where active;",
+            AgentWriteMode::ReplaceStatement,
+        );
+        assert_eq!(
+            text,
+            "select 1;\n\nselect * from users where active;\n\nselect 3;\n"
+        );
+        assert_eq!(start, source.find("select *").unwrap());
+
+        let (text, start) = apply(source, 3, "select 9", AgentWriteMode::ReplaceAll);
+        assert_eq!((text.as_str(), start), ("select 9;\n", 0));
     }
 }

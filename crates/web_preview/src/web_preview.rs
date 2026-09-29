@@ -10,6 +10,7 @@ mod runtime_discovery;
 
 #[cfg(target_os = "macos")]
 pub use runtime_discovery::browser_cache_dir_for_profile;
+pub use runtime_discovery::is_valid_request_id;
 
 use editor::Editor;
 use gpui::{
@@ -157,6 +158,12 @@ pub struct WebPreviewView {
     /// paints.
     hidden: bool,
     error: Option<PreviewError>,
+    /// The page's DevTools target id, once CEF has reported it.
+    target_id: Option<String>,
+    /// Set when a `zed://browser?id=...` link opened this tab, so the page can be
+    /// reported back to whoever asked for it.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    request_id: Option<String>,
     #[cfg(target_os = "macos")]
     cef_installer: Entity<cef_install::CefInstaller>,
 }
@@ -201,6 +208,23 @@ impl WebPreviewView {
         ) {
             workspace.add_item_to_active_pane(item, None, true, window, cx);
         }
+    }
+
+    /// Opens `url` in a new tab on behalf of a `zed://browser` link. With a `request_id`,
+    /// the page's DevTools target is written where the requester can find it.
+    pub fn open_for_request(
+        url: String,
+        request_id: Option<String>,
+        workspace: &mut Workspace,
+        window: &mut Window,
+        cx: &mut Context<Workspace>,
+    ) {
+        let view = cx.new(|cx| {
+            let mut view = Self::new_with_url(url, window, cx);
+            view.request_id = request_id;
+            view
+        });
+        Self::add_to_workspace(view, workspace, window, cx);
     }
 
     /// The layout slot browser pages are routed to.
@@ -323,7 +347,10 @@ impl WebPreviewView {
                                 if let Some(ref browser) = this.browser {
                                     browser.navigate_to(&url);
                                 }
-                                runtime_discovery::write_runtime_discovery(&url, None);
+                                runtime_discovery::write_runtime_discovery(
+                                    &url,
+                                    this.target_id.as_deref(),
+                                );
                                 cx.notify();
                             }).ok();
                         }
@@ -454,6 +481,8 @@ impl WebPreviewView {
             latest_frame: None,
             hidden: false,
             error: None,
+            target_id: None,
+            request_id: None,
             #[cfg(target_os = "macos")]
             cef_installer,
         }
@@ -586,6 +615,18 @@ impl WebPreviewView {
 
         if let Some(frame) = browser.take_frame() {
             self.latest_frame = Some(frame);
+        }
+
+        if self.target_id.is_none()
+            && let Some(target_id) = browser.target_id()
+        {
+            if let Some(request_id) = self.request_id.take() {
+                runtime_discovery::write_opened_page(&request_id, &target_id, &self.url);
+            }
+            if !self.hidden {
+                runtime_discovery::write_runtime_discovery(&self.url, Some(&target_id));
+            }
+            self.target_id = Some(target_id);
         }
     }
 
@@ -1046,7 +1087,7 @@ impl WebPreviewView {
             if let Some(ref browser) = self.browser {
                 browser.navigate_to(&url);
             }
-            runtime_discovery::write_runtime_discovery(&url, None);
+            runtime_discovery::write_runtime_discovery(&url, self.target_id.as_deref());
         }
         cx.notify();
     }
@@ -1472,6 +1513,9 @@ impl Item for WebPreviewView {
 
     fn activated(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         self.set_browser_hidden(false);
+        if self.target_id.is_some() {
+            runtime_discovery::write_runtime_discovery(&self.url, self.target_id.as_deref());
+        }
     }
 
     fn deactivated(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {

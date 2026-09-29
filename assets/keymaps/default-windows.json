@@ -1034,6 +1034,12 @@
     },
   },
   {
+    "context": "RepoPanel",
+    "bindings": {
+      "ctrl-shift-.": "repo_hosting::MentionSelectedPullRequest",
+    },
+  },
+  {
     "context": "GitPanel && (ChangesList || HistoryList) && !GitBranchSelector && !GitRepositorySelector",
     "use_key_equivalents": true,
     "bindings": {

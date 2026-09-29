@@ -52,6 +52,7 @@ struct PageInfo {
     title: String,
     loading: bool,
     hidden: bool,
+    target_id: Option<String>,
 }
 
 fn page_info(view: &Entity<WebPreviewView>, cx: &App) -> PageInfo {
@@ -68,6 +69,7 @@ fn page_info(view: &Entity<WebPreviewView>, cx: &App) -> PageInfo {
             .unwrap_or_else(|| view.title.clone()),
         loading: state.as_ref().map_or(view.loading, |state| state.loading),
         hidden: view.hidden,
+        target_id: view.target_id.clone(),
     }
 }
 
@@ -95,7 +97,9 @@ struct CdpSession {
 }
 
 impl CdpSession {
-    async fn connect(page_url: &str) -> Result<Self> {
+    /// Attaches to the tab's own target when its id is known; matching on the URL alone
+    /// picks the wrong page when a script has the same site open in several tabs.
+    async fn connect(target_id: Option<&str>, page_url: &str) -> Result<Self> {
         let port = crate::runtime_discovery::remote_debugging_port();
         let targets = http_get_json(port, "/json/list").await?;
         let targets = targets.as_array().context("a lista de páginas do CDP veio vazia")?;
@@ -110,7 +114,12 @@ impl CdpSession {
             .collect::<Vec<_>>();
         let target = pages
             .iter()
-            .find(|target| target["url"].as_str() == Some(page_url))
+            .find(|target| target_id.is_some() && target["id"].as_str() == target_id)
+            .or_else(|| {
+                pages
+                    .iter()
+                    .find(|target| target["url"].as_str() == Some(page_url))
+            })
             .or_else(|| pages.first())
             .context("nenhuma página aberta no browser")?;
         let socket_url = target["webSocketDebuggerUrl"]
@@ -279,7 +288,12 @@ async fn session_for_active_page(cx: &mut AsyncApp) -> Result<(CdpSession, PageI
     if let Some(reason) = unavailable {
         anyhow::bail!(reason);
     }
-    let session = with_timeout(CdpSession::connect(&info.url), "conectar ao browser", cx).await?;
+    let session = with_timeout(
+        CdpSession::connect(info.target_id.as_deref(), &info.url),
+        "conectar ao browser",
+        cx,
+    )
+    .await?;
     Ok((session, info))
 }
 
@@ -309,6 +323,7 @@ async fn wait_until_loaded(cx: &mut AsyncApp) -> PageInfo {
                     title: String::new(),
                     loading: true,
                     hidden: false,
+                    target_id: None,
                 };
             }
             _ => {}
@@ -673,7 +688,7 @@ mod tests {
     #[ignore]
     fn test_cdp_session_against_chromium() {
         let result: Result<()> = smol::block_on(async {
-            let mut session = CdpSession::connect("https://example.com/").await?;
+            let mut session = CdpSession::connect(None, "https://example.com/").await?;
             let (width, height, scale) = session.viewport().await?;
             anyhow::ensure!(width > 0.0 && height > 0.0);
             let shot = session

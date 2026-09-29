@@ -3,7 +3,9 @@ use agent_client_protocol::schema::v1 as acp;
 use anyhow::{Result, anyhow};
 use futures::FutureExt as _;
 use gpui::{App, AppContext as _, Entity, SharedString, Task};
-use language_model::{LanguageModelImage, LanguageModelImageExt as _, LanguageModelToolResultContent};
+use language_model::{
+    LanguageModelImage, LanguageModelImageExt as _, LanguageModelToolResultContent,
+};
 use project::Project;
 use std::sync::Arc;
 use task_agents::{ToolAccess, ToolkitCall, ToolkitContent, ToolkitTool};
@@ -59,7 +61,7 @@ impl AnyAgentTool for ToolkitToolAdapter {
     fn kind(&self) -> acp::ToolKind {
         match self.tool.access {
             ToolAccess::Read => acp::ToolKind::Read,
-            ToolAccess::Act => acp::ToolKind::Execute,
+            ToolAccess::Act | ToolAccess::AlwaysConfirm => acp::ToolKind::Execute,
         }
     }
 
@@ -89,12 +91,20 @@ impl AnyAgentTool for ToolkitToolAdapter {
 
             let authorization = cx.update(|cx| {
                 let context = ToolPermissionContext::new(self.tool.name.to_string(), inputs);
-                event_stream.authorize_toolkit_tool(
-                    title.to_string(),
-                    context,
-                    self.tool.access == ToolAccess::Act,
-                    cx,
-                )
+                if self.tool.access == ToolAccess::AlwaysConfirm {
+                    event_stream.authorize_toolkit_tool_always_prompt(
+                        title.to_string(),
+                        context,
+                        cx,
+                    )
+                } else {
+                    event_stream.authorize_toolkit_tool(
+                        title.to_string(),
+                        context,
+                        self.tool.access.acts(),
+                        cx,
+                    )
+                }
             });
             futures::select! {
                 result = authorization.fuse() => result?,
@@ -164,7 +174,10 @@ impl AnyAgentTool for ToolkitToolAdapter {
                     .update_fields(acp::ToolCallUpdateFields::new().content(tool_call_content));
             }
             Ok(AgentToolOutput {
-                raw_output: serde_json::Value::String(output.text_content()),
+                raw_output: output
+                    .raw_output
+                    .clone()
+                    .unwrap_or_else(|| serde_json::Value::String(output.text_content())),
                 llm_output,
             })
         })

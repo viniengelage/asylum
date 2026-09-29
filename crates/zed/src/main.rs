@@ -1300,6 +1300,20 @@ fn handle_open_request(request: OpenRequest, app_state: Arc<AppState>, cx: &mut 
                 })
                 .detach_and_log_err(cx);
             }
+            OpenRequestKind::Browser { url, request_id } => {
+                cx.spawn(async move |cx| {
+                    let multi_workspace =
+                        workspace::get_any_active_multi_workspace(app_state, cx.clone()).await?;
+                    multi_workspace.update(cx, |multi_workspace, window, cx| {
+                        multi_workspace.workspace().update(cx, |workspace, cx| {
+                            web_preview::WebPreviewView::open_for_request(
+                                url, request_id, workspace, window, cx,
+                            );
+                        });
+                    })
+                })
+                .detach_and_log_err(cx);
+            }
             OpenRequestKind::GitClone { repo_url } => {
                 workspace::with_active_or_new_workspace(cx, |_workspace, window, cx| {
                     if window.is_window_active() {

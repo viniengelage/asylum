@@ -26,9 +26,9 @@ impl Global for DatabaseSchemaSource {}
 /// nullability, defaults and keys, its indexes, the foreign keys in both directions, and a
 /// CREATE TABLE statement rebuilt from the catalog.
 ///
-/// This only reads the catalog; it never runs a query on the data. Use it before writing SQL
-/// against the user's database so table and column names are right. If no database is
-/// connected, tell the user to connect one in the Banco panel.
+/// This only reads the catalog; to read the data, use `database_query`. Use it before writing
+/// or running SQL against the user's database so table and column names are right. If no
+/// database is connected, tell the user to connect one in the Banco panel.
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
 pub struct DatabaseSchemaToolInput {
     /// A table or view to describe, optionally schema-qualified. Leave empty to list them all.

@@ -686,6 +686,35 @@ pub async fn post_comment(
     Ok(())
 }
 
+/// A comment on a line of the pull request's new version of `path`.
+pub async fn post_inline_comment(
+    client: &Arc<dyn HttpClient>,
+    credentials: &Credentials,
+    repository: &RemoteRepository,
+    number: u64,
+    path: &str,
+    line: u64,
+    text: &str,
+) -> Result<()> {
+    let url = format!(
+        "{}/pullrequests/{number}/comments",
+        repository_path(repository)
+    );
+    let body = serde_json::json!({
+        "content": { "raw": text },
+        "inline": { "path": path, "to": line },
+    });
+    send::<serde_json::Value>(
+        client,
+        credentials,
+        http_client::Method::POST,
+        &url,
+        Some(body),
+    )
+    .await?;
+    Ok(())
+}
+
 /// Where new pull requests should go by default: the branching model's development branch
 /// when the repository uses one (usually `develop`), else its main branch.
 pub async fn get_default_destination(
@@ -892,7 +921,7 @@ impl MergeStrategy {
         })
     }
 
-    fn api_name(self) -> &'static str {
+    pub(crate) fn api_name(self) -> &'static str {
         match self {
             MergeStrategy::MergeCommit => "merge_commit",
             MergeStrategy::Squash => "squash",

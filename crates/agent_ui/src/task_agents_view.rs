@@ -7,16 +7,23 @@ use agent_settings::AgentProfile;
 use anyhow::Result;
 use editor::Editor;
 use fs::Fs;
+use futures::StreamExt as _;
 use gpui::{
-    App, Context, Entity, EventEmitter, FocusHandle, Focusable, Subscription, Task,
-    WeakEntity, Window, actions,
+    App, Context, Entity, EventEmitter, FocusHandle, Focusable, Subscription, Task, WeakEntity,
+    Window, actions,
+};
+use language_model::{
+    CompletionIntent, LanguageModelRegistry, LanguageModelRequest, LanguageModelRequestMessage,
+    Role,
 };
 use project::Project;
-use std::path::PathBuf;
+use settings::Settings as _;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use task_agents::{
-    PermissionMode, TaskAgent, TaskAgentSource, ToolAccess, ToolPermissionRules,
-    PROJECT_AGENTS_DIR, command_slug, load_task_agents, personal_agents_dir, toolkits,
+    AuthoringCatalog, PROJECT_AGENTS_DIR, PermissionMode, ProfileSummary, TaskAgent,
+    TaskAgentSource, ToolAccess, ToolPermissionRules, ToolkitSummary, command_slug,
+    load_task_agents, personal_agents_dir, toolkits,
 };
 use ui::{Chip, ContextMenu, Divider, DropdownMenu, Switch, Tooltip, prelude::*};
 use util::ResultExt as _;
@@ -255,7 +262,8 @@ const TEMPLATES: &[Template] = &[
     },
 ];
 
-const NEW_AGENT_PROMPT: &str = "Crie um agente de tarefa novo para este projeto. Pergunte o que ele deve fazer se eu não tiver dito, depois escreva o arquivo `.asylum/agents/<comando>.md` com este formato:\n\n```markdown\n---\nname: Nome do agente\ncommand: comando-sem-barra\ndescription: Uma frase sobre o que ele faz\nprofile: ask | write | minimal\ntoolkits: [ids dos toolkits]\npermissions:\n  <ferramenta ou toolkit>: allow | confirm | deny\n---\n\nInstruções em Markdown.\n```\n\nToolkits disponíveis:\n";
+/// How many times the model may fix its own file before what it wrote is saved as is.
+const MAX_AUTHORING_REPAIRS: usize = 2;
 
 fn source_label(source: &TaskAgentSource) -> SharedString {
     match source {
@@ -296,6 +304,20 @@ struct Draft {
     instructions: Entity<Editor>,
 }
 
+/// The "Criar com IA" form: what the agent should do and whatever context helps, turned into
+/// an agent file by the default model.
+struct AgentGenerator {
+    description: Entity<Editor>,
+    context: Entity<Editor>,
+    personal: bool,
+    running: bool,
+    /// The model's latest answer, streamed as it arrives.
+    output: String,
+    progress: Option<SharedString>,
+    error: Option<SharedString>,
+    _task: Task<()>,
+}
+
 pub struct TaskAgentsView {
     project: Entity<Project>,
     workspace: WeakEntity<Workspace>,
@@ -308,6 +330,7 @@ pub struct TaskAgentsView {
     /// build the editors.
     pending_selection: Option<usize>,
     draft: Option<Draft>,
+    generator: Option<AgentGenerator>,
     status: Option<SharedString>,
     _load_task: Task<()>,
     _subscriptions: Vec<Subscription>,
@@ -331,6 +354,7 @@ impl TaskAgentsView {
             selected: None,
             pending_selection: None,
             draft: None,
+            generator: None,
             status: None,
             _load_task: Task::ready(()),
             _subscriptions: Vec::new(),
@@ -371,7 +395,11 @@ impl TaskAgentsView {
                 this.load_errors = errors;
                 let index = keep
                     .and_then(|path| this.agents.iter().position(|agent| agent.file_path == path))
-                    .or(if this.agents.is_empty() { None } else { Some(0) });
+                    .or(if this.agents.is_empty() {
+                        None
+                    } else {
+                        Some(0)
+                    });
                 this.selected = None;
                 this.draft = None;
                 if let Some(index) = index {
@@ -387,19 +415,25 @@ impl TaskAgentsView {
         let Some(agent) = self.agents.get(index).cloned() else {
             return;
         };
-        let text_editor = |text: &str, placeholder: &str, window: &mut Window, cx: &mut Context<Self>| {
-            let text = text.to_string();
-            let placeholder = placeholder.to_string();
-            cx.new(|cx| {
-                let mut editor = Editor::single_line(window, cx);
-                editor.set_placeholder_text(&placeholder, window, cx);
-                editor.set_text(text, window, cx);
-                editor
-            })
-        };
+        let text_editor =
+            |text: &str, placeholder: &str, window: &mut Window, cx: &mut Context<Self>| {
+                let text = text.to_string();
+                let placeholder = placeholder.to_string();
+                cx.new(|cx| {
+                    let mut editor = Editor::single_line(window, cx);
+                    editor.set_placeholder_text(&placeholder, window, cx);
+                    editor.set_text(text, window, cx);
+                    editor
+                })
+            };
         let name = text_editor(&agent.name, "Nome do agente", window, cx);
         let command = text_editor(&agent.command, "comando", window, cx);
-        let description = text_editor(&agent.description, "O que ele faz, em uma frase", window, cx);
+        let description = text_editor(
+            &agent.description,
+            "O que ele faz, em uma frase",
+            window,
+            cx,
+        );
         let model = text_editor(
             agent.model.as_deref().unwrap_or_default(),
             "provedor/modelo (vazio = modelo do perfil)",
@@ -417,6 +451,7 @@ impl TaskAgentsView {
             })
         };
         self.selected = Some(index);
+        self.generator = None;
         self.draft = Some(Draft {
             agent,
             name,
@@ -453,7 +488,9 @@ impl TaskAgentsView {
         if let Some(model) = &agent.model
             && task_agents::ModelReference::parse(model).is_none()
         {
-            self.status = Some("O modelo precisa ser provedor/modelo, ex.: anthropic/claude-opus-5-5.".into());
+            self.status = Some(
+                "O modelo precisa ser provedor/modelo, ex.: anthropic/claude-opus-5-5.".into(),
+            );
             cx.notify();
             return;
         }
@@ -551,7 +588,9 @@ impl TaskAgentsView {
                 .unwrap_or_else(|| command.clone()),
             name,
             command,
-            description: template.map(|t| t.description.to_string()).unwrap_or_default(),
+            description: template
+                .map(|t| t.description.to_string())
+                .unwrap_or_default(),
             profile: template.map(|t| t.profile.to_string()),
             model: None,
             toolkits: template
@@ -615,43 +654,292 @@ impl TaskAgentsView {
         .detach();
     }
 
-    /// Opens a thread whose first message asks the agent to write a new agent file, listing the
-    /// toolkits so it knows what exists.
-    fn create_with_ai(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(workspace) = self.workspace.upgrade() else {
+    fn open_generator(&mut self, personal: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let description = cx.new(|cx| {
+            let mut editor = Editor::auto_height(2, 6, window, cx);
+            editor.set_placeholder_text(
+                "Ex.: revisa o PR do branch contra a tarefa do ClickUp e aponta o que falta",
+                window,
+                cx,
+            );
+            editor.set_soft_wrap();
+            editor
+        });
+        let context = cx.new(|cx| {
+            let mut editor = Editor::auto_height(8, 24, window, cx);
+            editor.set_placeholder_text(
+                "Caminhos, convenções do time, como validar, o que nunca fazer, links… Tudo o que você diria a alguém novo fazendo essa tarefa.",
+                window,
+                cx,
+            );
+            editor.set_soft_wrap();
+            editor
+        });
+        window.focus(&description.focus_handle(cx), cx);
+        self.generator = Some(AgentGenerator {
+            description,
+            context,
+            personal,
+            running: false,
+            output: String::new(),
+            progress: None,
+            error: None,
+            _task: Task::ready(()),
+        });
+        cx.notify();
+    }
+
+    fn authoring_catalog(&self, cx: &App) -> AuthoringCatalog {
+        let settings = agent_settings::AgentSettings::get_global(cx);
+        let profiles = settings
+            .profiles
+            .iter()
+            .map(|(id, profile)| ProfileSummary {
+                id: id.0.to_string(),
+                name: profile.name.to_string(),
+                enabled_tools: profile
+                    .tools
+                    .iter()
+                    .filter(|(_, enabled)| **enabled)
+                    .map(|(name, _)| name.to_string())
+                    .collect(),
+            })
+            .collect();
+        let examples = ["revisar", "qa"]
+            .iter()
+            .filter_map(|command| {
+                TEMPLATES
+                    .iter()
+                    .find(|template| template.command == *command)
+            })
+            .filter_map(|template| {
+                task_agents::example_markdown(
+                    template.name,
+                    template.command,
+                    template.description,
+                    template.profile,
+                    template.toolkits,
+                    template.permissions,
+                    template.instructions,
+                )
+            })
+            .collect();
+        AuthoringCatalog {
+            profiles,
+            toolkits: toolkits(cx)
+                .iter()
+                .map(|toolkit| ToolkitSummary::from(toolkit.as_ref()))
+                .collect(),
+            existing_commands: self
+                .agents
+                .iter()
+                .map(|agent| agent.command.clone())
+                .collect(),
+            examples,
+        }
+    }
+
+    fn generate(&mut self, cx: &mut Context<Self>) {
+        let Some(generator) = self.generator.as_ref() else {
             return;
         };
-        let mut prompt = NEW_AGENT_PROMPT.to_string();
-        for toolkit in toolkits(cx) {
-            let tools = toolkit
-                .tools
-                .iter()
-                .map(|tool| tool.name.to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
-            prompt.push_str(&format!("- `{}` ({}): {}\n", toolkit.id, toolkit.name, tools));
+        if generator.running {
+            return;
         }
-        workspace.update(cx, |workspace, cx| {
-            workspace.focus_panel::<AgentPanel>(window, cx);
-            if let Some(panel) = workspace.panel::<AgentPanel>(cx) {
-                panel.update(cx, |panel, cx| {
-                    panel.external_thread(
-                        Some(crate::Agent::NativeAgent),
-                        None,
-                        None,
-                        Some("Novo agente".into()),
-                        Some(AgentInitialContent::ContentBlock {
-                            blocks: vec![acp::ContentBlock::Text(acp::TextContent::new(prompt))],
-                            auto_submit: false,
-                        }),
-                        true,
-                        AgentThreadSource::AgentPanel,
-                        window,
-                        cx,
-                    );
-                });
+        let description = generator.description.read(cx).text(cx);
+        let context = generator.context.read(cx).text(cx);
+        let personal = generator.personal;
+        let error = if description.trim().is_empty() {
+            Some("Diga o que o agente deve fazer.")
+        } else {
+            None
+        };
+        let model = LanguageModelRegistry::read_global(cx)
+            .default_model()
+            .map(|configured| configured.model);
+        let error = error.or(model
+            .is_none()
+            .then_some("Escolha um modelo no painel do Agent para gerar o agente."));
+        if let Some(error) = error {
+            if let Some(generator) = self.generator.as_mut() {
+                generator.error = Some(error.into());
             }
+            cx.notify();
+            return;
+        }
+        let Some(model) = model else {
+            return;
+        };
+
+        let catalog = self.authoring_catalog(cx);
+        let mut messages = vec![
+            LanguageModelRequestMessage {
+                role: Role::System,
+                content: vec![task_agents::authoring_system_prompt(&catalog).into()],
+                cache: false,
+                reasoning_details: None,
+            },
+            LanguageModelRequestMessage {
+                role: Role::User,
+                content: vec![task_agents::authoring_user_prompt(&description, &context).into()],
+                cache: false,
+                reasoning_details: None,
+            },
+        ];
+        let task = cx.spawn(async move |this, cx| {
+            let mut attempt = 0;
+            let result: Result<TaskAgent> = async {
+                loop {
+                    let request = LanguageModelRequest {
+                        intent: Some(CompletionIntent::CreateFile),
+                        messages: messages.clone(),
+                        ..Default::default()
+                    };
+                    let mut response = model.stream_completion_text(request, cx).await?;
+                    let mut text = String::new();
+                    while let Some(chunk) = response.stream.next().await {
+                        text.push_str(&chunk?);
+                        this.update(cx, |this, cx| {
+                            if let Some(generator) = this.generator.as_mut() {
+                                generator.output = text.clone();
+                            }
+                            cx.notify();
+                        })?;
+                    }
+
+                    let markdown = task_agents::extract_agent_markdown(&text);
+                    let problems = match task_agents::parse_task_agent(
+                        Path::new("gerado.md"),
+                        &markdown,
+                        TaskAgentSource::Personal,
+                    ) {
+                        Ok(mut agent) => {
+                            let problems = task_agents::review_generated_agent(&agent, &catalog);
+                            if problems.is_empty() || attempt >= MAX_AUTHORING_REPAIRS {
+                                task_agents::drop_unknown_references(&mut agent, &catalog);
+                                return Ok(agent);
+                            }
+                            problems
+                        }
+                        Err(error) if attempt < MAX_AUTHORING_REPAIRS => {
+                            vec![format!("o arquivo não abre: {error:#}")]
+                        }
+                        Err(error) => return Err(error),
+                    };
+                    attempt += 1;
+                    this.update(cx, |this, cx| {
+                        if let Some(generator) = this.generator.as_mut() {
+                            generator.progress =
+                                Some(format!("Corrigindo: {}", problems.join("; ")).into());
+                        }
+                        cx.notify();
+                    })?;
+                    messages.push(LanguageModelRequestMessage {
+                        role: Role::Assistant,
+                        content: vec![text.into()],
+                        cache: false,
+                        reasoning_details: None,
+                    });
+                    messages.push(LanguageModelRequestMessage {
+                        role: Role::User,
+                        content: vec![task_agents::authoring_repair_prompt(&problems).into()],
+                        cache: false,
+                        reasoning_details: None,
+                    });
+                }
+            }
+            .await;
+            this.update(cx, |this, cx| match result {
+                Ok(agent) => this.save_generated(agent, personal, cx),
+                Err(error) => {
+                    if let Some(generator) = this.generator.as_mut() {
+                        generator.running = false;
+                        generator.progress = None;
+                        generator.error =
+                            Some(format!("Não foi possível gerar o agente: {error:#}").into());
+                    }
+                    cx.notify();
+                }
+            })
+            .log_err();
         });
+        if let Some(generator) = self.generator.as_mut() {
+            generator.running = true;
+            generator.output.clear();
+            generator.progress = Some("Escrevendo o agente…".into());
+            generator.error = None;
+            generator._task = task;
+        }
+        cx.notify();
+    }
+
+    fn save_generated(&mut self, mut agent: TaskAgent, personal: bool, cx: &mut Context<Self>) {
+        let path = self.new_agent_path(&agent.command, personal, cx);
+        agent.id = path
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+            .unwrap_or_else(|| agent.command.clone());
+        agent.source = if path.starts_with(personal_agents_dir()) {
+            TaskAgentSource::Personal
+        } else {
+            TaskAgentSource::Project {
+                worktree_root_name: self
+                    .worktree_roots(cx)
+                    .first()
+                    .map(|(name, _)| name.clone())
+                    .unwrap_or_else(|| "projeto".into()),
+            }
+        };
+        agent.file_path = path.clone();
+        let markdown = match agent.to_markdown() {
+            Ok(markdown) => markdown,
+            Err(error) => {
+                if let Some(generator) = self.generator.as_mut() {
+                    generator.running = false;
+                    generator.error = Some(format!("Não foi possível salvar: {error}").into());
+                }
+                cx.notify();
+                return;
+            }
+        };
+        let fs = self.fs.clone();
+        cx.spawn(async move |this, cx| {
+            let result: Result<()> = async {
+                if let Some(parent) = path.parent() {
+                    fs.create_dir(parent).await?;
+                }
+                fs.atomic_write(path.clone(), markdown).await
+            }
+            .await;
+            this.update(cx, |this, cx| {
+                match result {
+                    Ok(()) => {
+                        this.generator = None;
+                        this.status = Some(
+                            format!("Criado com IA em {}. Revise antes de usar.", path.display())
+                                .into(),
+                        );
+                        this.refresh_agent_commands(cx);
+                        this.reload(Some(path), cx);
+                    }
+                    Err(error) => {
+                        if let Some(generator) = this.generator.as_mut() {
+                            generator.running = false;
+                            generator.error =
+                                Some(format!("Não foi possível salvar: {error}").into());
+                        }
+                    }
+                }
+                cx.notify();
+            })
+            .log_err();
+        })
+        .detach();
+    }
+
+    fn close_generator(&mut self, cx: &mut Context<Self>) {
+        self.generator = None;
+        cx.notify();
     }
 
     fn delete_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -661,7 +949,10 @@ impl TaskAgentsView {
         let answer = window.prompt(
             gpui::PromptLevel::Warning,
             &format!("Apagar o agente {}?", agent.name),
-            Some(&format!("{} vai para a Lixeira.", agent.file_path.display())),
+            Some(&format!(
+                "{} vai para a Lixeira.",
+                agent.file_path.display()
+            )),
             &["Apagar", "Cancelar"],
             cx,
         );
@@ -709,7 +1000,11 @@ impl TaskAgentsView {
     }
 
     fn open_file(&self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(path) = self.draft.as_ref().map(|draft| draft.agent.file_path.clone()) else {
+        let Some(path) = self
+            .draft
+            .as_ref()
+            .map(|draft| draft.agent.file_path.clone())
+        else {
             return;
         };
         if let Some(workspace) = self.workspace.upgrade() {
@@ -791,12 +1086,18 @@ impl TaskAgentsView {
             ("DO PROJETO", |source| {
                 matches!(source, TaskAgentSource::Project { .. })
             }),
-            ("SÓ PARA MIM", |source| matches!(source, TaskAgentSource::Personal)),
+            ("SÓ PARA MIM", |source| {
+                matches!(source, TaskAgentSource::Personal)
+            }),
             ("IMPORTADOS", |source| {
                 matches!(source, TaskAgentSource::Imported { .. })
             }),
         ];
-        let mut list = v_flex().id("task-agents-list").gap_1().p_2().overflow_y_scroll();
+        let mut list = v_flex()
+            .id("task-agents-list")
+            .gap_1()
+            .p_2()
+            .overflow_y_scroll();
         for (title, belongs) in sections {
             let entries = self
                 .agents
@@ -808,10 +1109,11 @@ impl TaskAgentsView {
                 continue;
             }
             list = list.child(
-                div()
-                    .pt_2()
-                    .px_1()
-                    .child(Label::new(title).size(LabelSize::XSmall).color(Color::Muted)),
+                div().pt_2().px_1().child(
+                    Label::new(title)
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted),
+                ),
             );
             for (index, agent) in entries {
                 let selected = self.selected == Some(index);
@@ -828,7 +1130,11 @@ impl TaskAgentsView {
                         })
                         .hover(|this| this.bg(cx.theme().colors().element_hover))
                         .child(Icon::new(IconName::UserGroup).size(IconSize::Small).color(
-                            if selected { Color::Accent } else { Color::Muted },
+                            if selected {
+                                Color::Accent
+                            } else {
+                                Color::Muted
+                            },
                         ))
                         .child(
                             v_flex()
@@ -876,7 +1182,11 @@ impl TaskAgentsView {
         list
     }
 
-    fn render_new_agent_menu(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_new_agent_menu(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let view = cx.entity().downgrade();
         let menu = ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
             menu = menu.header("No projeto");
@@ -887,7 +1197,11 @@ impl TaskAgentsView {
                         let template = &TEMPLATES[index];
                         h_flex()
                             .gap_2()
-                            .child(Icon::new(template.icon).size(IconSize::Small).color(Color::Muted))
+                            .child(
+                                Icon::new(template.icon)
+                                    .size(IconSize::Small)
+                                    .color(Color::Muted),
+                            )
                             .child(Label::new(template.name))
                             .child(
                                 Label::new(format!("/{}", template.command))
@@ -917,11 +1231,17 @@ impl TaskAgentsView {
                     .update(cx, |view, cx| view.create_from_template(None, true, cx))
                     .log_err();
             });
-            let ai_view = view;
+            let ai_view = view.clone();
+            let personal_ai_view = view;
             menu.separator()
-                .entry("Criar com o agente…", None, move |window, cx| {
+                .entry("Criar com IA…", None, move |window, cx| {
                     ai_view
-                        .update(cx, |view, cx| view.create_with_ai(window, cx))
+                        .update(cx, |view, cx| view.open_generator(false, window, cx))
+                        .log_err();
+                })
+                .entry("Criar com IA (só para mim)…", None, move |window, cx| {
+                    personal_ai_view
+                        .update(cx, |view, cx| view.open_generator(true, window, cx))
                         .log_err();
                 })
         });
@@ -930,7 +1250,12 @@ impl TaskAgentsView {
             .full_width(true)
     }
 
-    fn render_field(label: &'static str, hint: Option<&'static str>, editor: &Entity<Editor>, cx: &App) -> impl IntoElement {
+    fn render_field(
+        label: &'static str,
+        hint: Option<&'static str>,
+        editor: &Entity<Editor>,
+        cx: &App,
+    ) -> impl IntoElement {
         v_flex()
             .gap_1()
             .child(Label::new(label).size(LabelSize::Small).color(Color::Muted))
@@ -956,10 +1281,18 @@ impl TaskAgentsView {
             .rounded_lg()
             .border_1()
             .border_color(cx.theme().colors().border_variant)
-            .child(Label::new(title).size(LabelSize::XSmall).color(Color::Muted))
+            .child(
+                Label::new(title)
+                    .size(LabelSize::XSmall)
+                    .color(Color::Muted),
+            )
     }
 
-    fn render_profile_dropdown(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_profile_dropdown(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let current = self
             .draft
             .as_ref()
@@ -1044,21 +1377,32 @@ impl TaskAgentsView {
                 };
                 let tool_name = tool.name.to_string();
                 tools_row = tools_row.child(
-                    Button::new(SharedString::from(format!("perm-{}", tool.name)), tool.name.clone())
-                        .label_size(LabelSize::XSmall)
-                        .style(ButtonStyle::Outlined)
-                        .color(if on { Color::Default } else { Color::Muted })
-                        .start_icon(Icon::new(IconName::Circle).size(IconSize::XSmall).color(color))
-                        .disabled(!editable)
-                        .tooltip(Tooltip::text(format!(
-                            "{} · {}{}. Clique para trocar (padrão → livre → pede → nunca).",
-                            tool.title,
-                            mode_label,
-                            if tool_mode.is_none() { " (padrão)" } else { "" }
-                        )))
-                        .on_click(cx.listener(move |this, _, _window, cx| {
-                            this.cycle_permission(&tool_name, cx);
-                        })),
+                    Button::new(
+                        SharedString::from(format!("perm-{}", tool.name)),
+                        tool.name.clone(),
+                    )
+                    .label_size(LabelSize::XSmall)
+                    .style(ButtonStyle::Outlined)
+                    .color(if on { Color::Default } else { Color::Muted })
+                    .start_icon(
+                        Icon::new(IconName::Circle)
+                            .size(IconSize::XSmall)
+                            .color(color),
+                    )
+                    .disabled(!editable)
+                    .tooltip(Tooltip::text(format!(
+                        "{} · {}{}. Clique para trocar (padrão → livre → pede → nunca).",
+                        tool.title,
+                        mode_label,
+                        if tool_mode.is_none() {
+                            " (padrão)"
+                        } else {
+                            ""
+                        }
+                    )))
+                    .on_click(cx.listener(move |this, _, _window, cx| {
+                        this.cycle_permission(&tool_name, cx);
+                    })),
                 );
             }
             let toggle_id = toolkit_id.clone();
@@ -1121,7 +1465,99 @@ impl TaskAgentsView {
         column
     }
 
+    fn render_generator(generator: &AgentGenerator, cx: &mut Context<Self>) -> AnyElement {
+        let running = generator.running;
+        let field = |label: &'static str, hint: &'static str, editor: &Entity<Editor>| {
+            v_flex()
+                .gap_1()
+                .child(Label::new(label).size(LabelSize::Small).color(Color::Muted))
+                .child(
+                    div()
+                        .p_2()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(cx.theme().colors().border)
+                        .bg(cx.theme().colors().editor_background)
+                        .child(editor.clone()),
+                )
+                .child(Label::new(hint).size(LabelSize::XSmall).color(Color::Muted))
+        };
+        v_flex()
+            .id("task-agent-generator")
+            .size_full()
+            .overflow_y_scroll()
+            .p_4()
+            .gap_4()
+            .child(
+                h_flex()
+                    .gap_3()
+                    .child(Icon::new(IconName::Sparkle).size(IconSize::Medium).color(Color::Accent))
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .child(Label::new("Criar agente com IA").size(LabelSize::Large))
+                            .child(
+                                Label::new(if generator.personal {
+                                    "Vai para os seus agentes, fora do repositório."
+                                } else {
+                                    "Vai para .asylum/agents do projeto."
+                                })
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted),
+                            ),
+                    )
+                    .child(
+                        Button::new("cancel-generator", "Cancelar")
+                            .style(ButtonStyle::Subtle)
+                            .on_click(cx.listener(|this, _, _, cx| this.close_generator(cx))),
+                    )
+                    .child(
+                        Button::new("run-generator", if running { "Gerando…" } else { "Gerar" })
+                            .style(ButtonStyle::Filled)
+                            .disabled(running)
+                            .start_icon(Icon::new(IconName::Sparkle).size(IconSize::XSmall))
+                            .on_click(cx.listener(|this, _, _, cx| this.generate(cx))),
+                    ),
+            )
+            .child(field(
+                "O que ele faz",
+                "O trabalho que o agente entrega quando for chamado.",
+                &generator.description,
+            ))
+            .child(field(
+                "Contexto",
+                "A IA escolhe perfil, toolkits e permissões a partir disso e escreve as instruções. Você revisa no formulário depois.",
+                &generator.context,
+            ))
+            .when_some(generator.error.clone(), |this, error| {
+                this.child(Label::new(error).size(LabelSize::Small).color(Color::Error))
+            })
+            .when_some(generator.progress.clone(), |this, progress| {
+                this.child(Label::new(progress).size(LabelSize::Small).color(Color::Muted))
+            })
+            .when(!generator.output.is_empty(), |this| {
+                this.child(
+                    div()
+                        .p_2()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(cx.theme().colors().border)
+                        .bg(cx.theme().colors().panel_background)
+                        .child(
+                            Label::new(generator.output.clone())
+                                .size(LabelSize::Small)
+                                .buffer_font(cx),
+                        ),
+                )
+            })
+            .into_any_element()
+    }
+
     fn render_detail(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        if let Some(generator) = self.generator.as_ref() {
+            return Self::render_generator(generator, cx);
+        }
         let Some(draft) = self.draft.as_ref() else {
             return v_flex()
                 .size_full()
@@ -1297,15 +1733,19 @@ impl Render for TaskAgentsView {
                     .child(Divider::horizontal())
                     .child(
                         div().p_2().child(
-                            Label::new(
-                                "Agentes do projeto ficam em .asylum/agents e vão no git.",
-                            )
-                            .size(LabelSize::XSmall)
-                            .color(Color::Muted),
+                            Label::new("Agentes do projeto ficam em .asylum/agents e vão no git.")
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted),
                         ),
                     ),
             )
-            .child(div().flex_1().min_w_0().h_full().child(self.render_detail(window, cx)))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .child(self.render_detail(window, cx)),
+            )
     }
 }
 

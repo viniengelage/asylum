@@ -80,6 +80,11 @@ pub enum OpenRequestKind {
     GitCommit {
         sha: String,
     },
+    Browser {
+        url: String,
+        /// Names the file the opened page's DevTools target is reported in.
+        request_id: Option<String>,
+    },
 }
 
 impl std::fmt::Debug for OpenRequestKind {
@@ -118,6 +123,11 @@ impl std::fmt::Debug for OpenRequestKind {
                 .field("repo_url", repo_url)
                 .finish(),
             Self::GitCommit { sha } => f.debug_struct("GitCommit").field("sha", sha).finish(),
+            Self::Browser { url, request_id } => f
+                .debug_struct("Browser")
+                .field("url", url)
+                .field("request_id", request_id)
+                .finish(),
         }
     }
 }
@@ -192,6 +202,8 @@ impl OpenRequest {
                 this.parse_git_clone_url(clone_path)?
             } else if let Some(commit_path) = url.strip_prefix("zed://git/commit/") {
                 this.parse_git_commit_url(commit_path)?
+            } else if let Some(browser_path) = url.strip_prefix("zed://browser") {
+                this.parse_browser_url(browser_path)?
             } else if url.starts_with("ssh://") {
                 this.parse_ssh_file_path(&url, cx)?
             } else if let Some(zed_link) = parse_zed_link(&url, cx) {
@@ -257,6 +269,36 @@ impl OpenRequest {
 
         self.kind = Some(OpenRequestKind::GitClone { repo_url });
 
+        Ok(())
+    }
+
+    fn parse_browser_url(&mut self, browser_path: &str) -> Result<()> {
+        // Format: ?url=<url>&id=<request id> or /?url=<url>&id=<request id>
+        let browser_path = browser_path.strip_prefix('/').unwrap_or(browser_path);
+        let query = browser_path
+            .strip_prefix('?')
+            .context("invalid browser url: missing query string")?;
+
+        let mut url = None;
+        let mut request_id = None;
+        for (key, value) in url::form_urlencoded::parse(query.as_bytes()) {
+            match key.as_ref() {
+                "url" => url = Some(value.into_owned()),
+                "id" => request_id = Some(value.into_owned()),
+                _ => {}
+            }
+        }
+        let url = url
+            .filter(|url| !url.is_empty())
+            .context("invalid browser url: missing url query parameter")?;
+        if let Some(request_id) = &request_id {
+            anyhow::ensure!(
+                web_preview::is_valid_request_id(request_id),
+                "invalid browser url: id must be up to 64 letters, digits, '-' or '_'"
+            );
+        }
+
+        self.kind = Some(OpenRequestKind::Browser { url, request_id });
         Ok(())
     }
 
@@ -2133,6 +2175,48 @@ mod tests {
             }
             _ => panic!("Expected GitClone kind"),
         }
+    }
+
+    #[gpui::test]
+    fn test_parse_browser_url(cx: &mut TestAppContext) {
+        let _app_state = init_test(cx);
+
+        let parse = |url: &str, cx: &mut TestAppContext| {
+            cx.update(|cx| {
+                OpenRequest::parse(
+                    RawOpenRequest {
+                        urls: vec![url.into()],
+                        ..Default::default()
+                    },
+                    cx,
+                )
+            })
+        };
+
+        let request = parse(
+            "zed://browser?url=https%3A%2F%2Fexample.com%2Flist%3Fpage%3D2&id=scrape-1",
+            cx,
+        )
+        .unwrap();
+        match request.kind {
+            Some(OpenRequestKind::Browser { url, request_id }) => {
+                assert_eq!(url, "https://example.com/list?page=2");
+                assert_eq!(request_id.as_deref(), Some("scrape-1"));
+            }
+            _ => panic!("Expected Browser kind"),
+        }
+
+        let request = parse("zed://browser/?url=https://example.com", cx).unwrap();
+        match request.kind {
+            Some(OpenRequestKind::Browser { url, request_id }) => {
+                assert_eq!(url, "https://example.com");
+                assert_eq!(request_id, None);
+            }
+            _ => panic!("Expected Browser kind"),
+        }
+
+        assert!(parse("zed://browser?url=https://example.com&id=../escape", cx).is_err());
+        assert!(parse("zed://browser?id=scrape-1", cx).is_err());
     }
 
     #[gpui::test]

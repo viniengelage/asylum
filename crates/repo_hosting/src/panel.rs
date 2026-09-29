@@ -27,7 +27,7 @@ use project::{
 use std::{collections::HashSet, future::Future, sync::Arc, time::Duration, time::Instant};
 use ui::{
     Checkbox, CommonAnimationExt, ContextMenu, ContextMenuEntry, PopoverMenu, Tab, TabBar,
-    TabPosition, TabStyle, Tooltip, prelude::*,
+    TabPosition, TabStyle, Tooltip, prelude::*, right_click_menu,
 };
 use ui_input::{ErasedEditorEvent, InputField};
 use util::ResultExt as _;
@@ -115,6 +115,14 @@ struct PullRequests {
     is_syncing: bool,
     /// Why the last sync failed; the pull requests from the sync before it stay visible.
     error: Option<SharedString>,
+}
+
+/// What to do once a pull request asked for by number is open.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PullRequestFollowup {
+    Open,
+    Checkout,
+    Diff,
 }
 
 enum PendingAction {
@@ -436,6 +444,12 @@ impl RepoPanel {
             Ok((list, branch_checks)) => {
                 if matches!(self.list_tab, ListTab::Pipelines | ListTab::Issues) {
                     self.load_tab_data(cx);
+                }
+                if let Target::Hosted { repository, .. } = &self.target {
+                    let repository = repository.clone();
+                    let list = list.clone();
+                    self.store
+                        .update(cx, |store, _| store.set_pull_requests(repository, list));
                 }
                 self.pull_requests.list = list;
                 self.pull_requests.branch_checks = branch_checks;
@@ -1019,6 +1033,7 @@ impl RepoPanel {
         let opened = pull_request.clone();
         let opened_for_comment = pull_request.clone();
         let url = pull_request.url.clone();
+        let mention = mention_action(pull_request, None, None, None);
 
         Some(
             card.child(header(Some(pull_request.number)))
@@ -1108,6 +1123,21 @@ impl RepoPanel {
                                     )
                                 })),
                         )
+                        .child(
+                            Button::new("repo-branch-mention", "@ Agent")
+                                .style(ButtonStyle::Subtle)
+                                .label_size(LabelSize::Small)
+                                .tooltip(move |_window, cx| {
+                                    Tooltip::for_action(
+                                        "Mencionar no Agent",
+                                        &zed_actions::repo_hosting::MentionSelectedPullRequest,
+                                        cx,
+                                    )
+                                })
+                                .on_click(move |_, window, cx| {
+                                    window.dispatch_action(mention.boxed_clone(), cx)
+                                }),
+                        )
                         .child(div().flex_1())
                         .child(
                             Button::new("repo-branch-web", "Abrir no Bitbucket")
@@ -1132,6 +1162,8 @@ impl RepoPanel {
         cx: &Context<Self>,
     ) -> impl IntoElement {
         let opened = pull_request.clone();
+        let group = SharedString::from(format!("repo-pr-row-{}", pull_request.number));
+        let mention = mention_action(pull_request, None, None, None);
         let is_branch = self.branch.as_deref() == Some(pull_request.source_branch.as_str());
         let age = pull_request
             .updated_at
@@ -1148,11 +1180,12 @@ impl RepoPanel {
             pull_request.author.short_name().to_string()
         };
 
-        h_flex()
+        let row = h_flex()
             .id(SharedString::from(format!(
                 "repo-pr-{}",
                 pull_request.number
             )))
+            .group(group.clone())
             .items_start()
             .gap(DynamicSpacing::Base10.px(cx))
             .px(DynamicSpacing::Base08.px(cx))
@@ -1248,8 +1281,36 @@ impl RepoPanel {
                                 Color::Muted
                             },
                         ))
-                    }),
-            )
+                    })
+                    .child(
+                        IconButton::new(
+                            SharedString::from(format!("repo-pr-mention-{}", pull_request.number)),
+                            IconName::AtSign,
+                        )
+                        .icon_size(IconSize::Small)
+                        .icon_color(Color::Muted)
+                        .visible_on_hover(group)
+                        .tooltip(Tooltip::text("Mencionar no Agent"))
+                        .on_click(move |_, window, cx| {
+                            window.dispatch_action(mention.boxed_clone(), cx)
+                        }),
+                    ),
+            );
+
+        let menu_pull_request = pull_request.clone();
+        let this = cx.weak_entity();
+        right_click_menu(SharedString::from(format!(
+            "repo-pr-menu-{}",
+            pull_request.number
+        )))
+        .trigger(move |_, _, _| row)
+        .menu(move |window, cx| {
+            let pull_request = menu_pull_request.clone();
+            let this = this.clone();
+            ContextMenu::build(window, cx, move |menu, _, _| {
+                pull_request_menu(menu, &pull_request, this)
+            })
+        })
     }
 
     fn render_group_header(
@@ -1470,6 +1531,101 @@ impl RepoPanel {
         });
         self.reload_open_pull_request(cx);
         cx.notify();
+    }
+
+    /// Opens a pull request by number, as the agent's cards and mentions ask for it. One the
+    /// list doesn't have (merged, declined, or not synced yet) is fetched first.
+    pub(crate) fn show_pull_request(
+        &mut self,
+        number: u64,
+        followup: PullRequestFollowup,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let known = self
+            .open_pull_request
+            .as_ref()
+            .map(|open_pull_request| &open_pull_request.summary)
+            .filter(|pull_request| pull_request.number == number)
+            .or_else(|| {
+                self.pull_requests
+                    .list
+                    .iter()
+                    .find(|pull_request| pull_request.number == number)
+            })
+            .cloned();
+        if let Some(pull_request) = known {
+            if self
+                .open_pull_request
+                .as_ref()
+                .is_none_or(|open_pull_request| open_pull_request.summary.number != number)
+            {
+                self.open_pull_request(pull_request, false, window, cx);
+            }
+            self.run_followup(followup, window, cx);
+            return;
+        }
+
+        let Target::Hosted { repository, .. } = self.target.clone() else {
+            return;
+        };
+        let Some(credentials) = self.store.read(cx).bitbucket_credentials() else {
+            return;
+        };
+        let http_client = self.store.read(cx).http_client();
+        let workspace = self.workspace.clone();
+        let load = cx.background_spawn(async move {
+            bitbucket::get_pull_request_detail(&http_client, &credentials, &repository, number)
+                .await
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            match load.await {
+                Ok(detail) => this.update_in(cx, |this, window, cx| {
+                    this.open_pull_request(detail.pull_request, false, window, cx);
+                    this.run_followup(followup, window, cx);
+                })?,
+                Err(error) => workspace.update(cx, |workspace, cx| {
+                    workspace.show_error(
+                        error.context(format!("Não deu para abrir o PR #{number}")),
+                        cx,
+                    )
+                })?,
+            }
+            anyhow::Ok(())
+        })
+        .detach_and_log_err(cx);
+    }
+
+    fn run_followup(
+        &mut self,
+        followup: PullRequestFollowup,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match followup {
+            PullRequestFollowup::Open => {}
+            PullRequestFollowup::Checkout => self.checkout(window, cx),
+            PullRequestFollowup::Diff => self.open_branch_diff(window, cx),
+        }
+    }
+
+    fn mention_selected(
+        &mut self,
+        _: &zed_actions::repo_hosting::MentionSelectedPullRequest,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let pull_request = self
+            .open_pull_request
+            .as_ref()
+            .map(|open_pull_request| &open_pull_request.summary)
+            .or_else(|| self.branch_pull_request());
+        if let Some(pull_request) = pull_request {
+            window.dispatch_action(
+                mention_action(pull_request, None, None, None).boxed_clone(),
+                cx,
+            );
+        }
     }
 
     fn close_pull_request(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -2131,7 +2287,7 @@ impl RepoPanel {
                 cx,
             ));
         for (index, file) in detail.files.iter().enumerate() {
-            list = list.child(render_file_row(index, file, cx));
+            list = list.child(render_file_row(index, file, &open_pull_request.summary, cx));
         }
         list.into_any_element()
     }
@@ -2631,7 +2787,7 @@ impl RepoPanel {
             );
         }
         for comment in comments {
-            content = content.child(render_comment(comment, now, cx));
+            content = content.child(render_comment(comment, pull_request, now, cx));
         }
         if let Some(detail) = detail {
             for (index, event) in activity_events(&detail.pull_request, &detail.checks, now)
@@ -2693,6 +2849,21 @@ impl RepoPanel {
                             .color(Color::Muted)
                             .mr(DynamicSpacing::Base04.px(cx)),
                     )
+                    .child({
+                        let mention = mention_action(pull_request, None, None, None);
+                        IconButton::new("repo-pr-mention", IconName::AtSign)
+                            .icon_size(IconSize::Small)
+                            .tooltip(move |_window, cx| {
+                                Tooltip::for_action(
+                                    "Mencionar no Agent",
+                                    &zed_actions::repo_hosting::MentionSelectedPullRequest,
+                                    cx,
+                                )
+                            })
+                            .on_click(move |_, window, cx| {
+                                window.dispatch_action(mention.boxed_clone(), cx)
+                            })
+                    })
                     .child(
                         IconButton::new("repo-pr-review-agent", IconName::ZedAgent)
                             .icon_size(IconSize::Small)
@@ -5473,7 +5644,81 @@ fn avatar(name: &str, color: Color, cx: &App) -> impl IntoElement {
         )
 }
 
-fn render_file_row(index: usize, file: &api::ChangedFile, cx: &App) -> impl IntoElement {
+const REVIEW_PROMPT: &str = "Revise este PR: leia o diff com repo_pr_diff e aponte bugs, riscos \
+     e melhorias com arquivo:linha. Não publique nada no PR sem eu pedir.";
+const FIX_CHECKS_PROMPT: &str = "Veja quais checks deste PR falharam e por quê, corrija no código e \
+     rode os testes localmente. Não faça commit nem push sem eu confirmar.";
+const RESOLVE_COMMENT_PROMPT: &str = "Resolva no código o que este comentário pede. Não responda no \
+     PR sem eu pedir.";
+
+/// Puts the pull request, or one of its comments or files, into the agent panel. With a prompt
+/// the agent starts on it right away in a thread of its own.
+fn mention_action(
+    pull_request: &PullRequest,
+    comment_id: Option<u64>,
+    file_path: Option<String>,
+    prompt: Option<&str>,
+) -> zed_actions::agent::MentionPullRequest {
+    zed_actions::agent::MentionPullRequest {
+        number: pull_request.number,
+        title: pull_request.title.clone(),
+        comment_id,
+        file_path,
+        prompt: prompt.map(str::to_string),
+        submit: prompt.is_some(),
+    }
+}
+
+fn pull_request_menu(
+    menu: ContextMenu,
+    pull_request: &PullRequest,
+    panel: WeakEntity<RepoPanel>,
+) -> ContextMenu {
+    let mention = mention_action(pull_request, None, None, None);
+    let review = mention_action(pull_request, None, None, Some(REVIEW_PROMPT));
+    let fix_checks = mention_action(pull_request, None, None, Some(FIX_CHECKS_PROMPT));
+    let number = pull_request.number;
+    let url = pull_request.url.clone();
+    let copied_url = pull_request.url.clone();
+    let checkout_panel = panel.clone();
+    menu.entry("Mencionar no Agent", None, move |window, cx| {
+        window.dispatch_action(mention.boxed_clone(), cx)
+    })
+    .entry("Revisar com o Agent", None, move |window, cx| {
+        window.dispatch_action(review.boxed_clone(), cx)
+    })
+    .entry("Corrigir os checks com o Agent", None, move |window, cx| {
+        window.dispatch_action(fix_checks.boxed_clone(), cx)
+    })
+    .separator()
+    .entry("Checkout", None, move |window, cx| {
+        checkout_panel
+            .update(cx, |panel, cx| {
+                panel.show_pull_request(number, PullRequestFollowup::Checkout, window, cx)
+            })
+            .log_err();
+    })
+    .entry("Abrir diff", None, move |window, cx| {
+        panel
+            .update(cx, |panel, cx| {
+                panel.show_pull_request(number, PullRequestFollowup::Diff, window, cx)
+            })
+            .log_err();
+    })
+    .entry("Abrir no Bitbucket", None, move |_, cx| cx.open_url(&url))
+    .entry("Copiar link", None, move |_, cx| {
+        cx.write_to_clipboard(ClipboardItem::new_string(copied_url.clone()))
+    })
+}
+
+fn render_file_row(
+    index: usize,
+    file: &api::ChangedFile,
+    pull_request: &PullRequest,
+    cx: &App,
+) -> impl IntoElement {
+    let group = SharedString::from(format!("repo-pr-file-{index}"));
+    let mention = mention_action(pull_request, None, Some(file.path.clone()), None);
     let (name, directory) = match file.path.rsplit_once('/') {
         Some((directory, name)) => (name.to_string(), directory.to_string()),
         None => (file.path.clone(), String::new()),
@@ -5498,6 +5743,7 @@ fn render_file_row(index: usize, file: &api::ChangedFile, cx: &App) -> impl Into
     }
     h_flex()
         .id(("repo-pr-file", index))
+        .group(group.clone())
         .gap(DynamicSpacing::Base08.px(cx))
         .p(DynamicSpacing::Base08.px(cx))
         .rounded_md()
@@ -5533,6 +5779,14 @@ fn render_file_row(index: usize, file: &api::ChangedFile, cx: &App) -> impl Into
                 }),
         )
         .child(
+            IconButton::new(("repo-pr-file-mention", index), IconName::AtSign)
+                .icon_size(IconSize::Small)
+                .icon_color(Color::Muted)
+                .visible_on_hover(group)
+                .tooltip(Tooltip::text("Mencionar o arquivo no Agent"))
+                .on_click(move |_, window, cx| window.dispatch_action(mention.boxed_clone(), cx)),
+        )
+        .child(
             div()
                 .flex_none()
                 .px(DynamicSpacing::Base04.px(cx))
@@ -5547,7 +5801,19 @@ fn render_file_row(index: usize, file: &api::ChangedFile, cx: &App) -> impl Into
         )
 }
 
-fn render_comment(comment: &api::Comment, now: DateTime<Utc>, cx: &App) -> impl IntoElement {
+fn render_comment(
+    comment: &api::Comment,
+    pull_request: &PullRequest,
+    now: DateTime<Utc>,
+    cx: &App,
+) -> impl IntoElement {
+    let mention = mention_action(pull_request, Some(comment.id), None, None);
+    let resolve = mention_action(
+        pull_request,
+        Some(comment.id),
+        None,
+        Some(RESOLVE_COMMENT_PROMPT),
+    );
     let mut meta = Vec::new();
     if let Some((path, line)) = &comment.inline {
         let file = path.rsplit('/').next().unwrap_or(path);
@@ -5590,7 +5856,32 @@ fn render_comment(comment: &api::Comment, now: DateTime<Utc>, cx: &App) -> impl 
                                 .truncate(),
                         ),
                 )
-                .child(Label::new(comment.body.trim().to_string()).size(LabelSize::Small)),
+                .child(Label::new(comment.body.trim().to_string()).size(LabelSize::Small))
+                .child(
+                    h_flex()
+                        .gap(DynamicSpacing::Base02.px(cx))
+                        .child(
+                            Button::new(("repo-pr-comment-mention", comment.id), "@ Agent")
+                                .style(ButtonStyle::Subtle)
+                                .label_size(LabelSize::XSmall)
+                                .tooltip(Tooltip::text("Mencionar o comentário no Agent"))
+                                .on_click(move |_, window, cx| {
+                                    window.dispatch_action(mention.boxed_clone(), cx)
+                                }),
+                        )
+                        .child(
+                            Button::new(
+                                ("repo-pr-comment-resolve", comment.id),
+                                "Pedir ao Agent para resolver",
+                            )
+                            .style(ButtonStyle::Subtle)
+                            .label_size(LabelSize::XSmall)
+                            .color(Color::Muted)
+                            .on_click(move |_, window, cx| {
+                                window.dispatch_action(resolve.boxed_clone(), cx)
+                            }),
+                        ),
+                ),
         )
 }
 
@@ -5753,6 +6044,7 @@ impl Render for RepoPanel {
         v_flex()
             .key_context("RepoPanel")
             .track_focus(&self.focus_handle)
+            .on_action(cx.listener(Self::mention_selected))
             .size_full()
             .child(content)
     }

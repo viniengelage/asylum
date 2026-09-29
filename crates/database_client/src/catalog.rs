@@ -47,6 +47,22 @@ pub async fn list_relations(session: &Session) -> anyhow::Result<Vec<Relation>> 
     Ok(rows.into_iter().filter_map(parse_relation).collect())
 }
 
+/// The databases on the server that accept connections, to point elsewhere when the current
+/// one has nothing to list.
+pub async fn list_databases(session: &Session) -> anyhow::Result<Vec<String>> {
+    let rows = session
+        .query_text(
+            "select datname from pg_catalog.pg_database
+              where datallowconn and not datistemplate
+              order by datname",
+        )
+        .await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| row.into_iter().next().flatten())
+        .collect())
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ColumnInfo {
     pub name: String,

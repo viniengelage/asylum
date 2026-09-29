@@ -69,6 +69,20 @@ pub enum MentionUri {
     MergeConflict {
         file_path: String,
     },
+    /// A SQL editor tab open against a database: the agent writes the query into it.
+    SqlQuery {
+        abs_path: PathBuf,
+        connection: String,
+    },
+    /// A pull request of the project's repository, or one of its comments or files.
+    PullRequest {
+        number: u64,
+        title: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        comment_id: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        file_path: Option<String>,
+    },
     Skill {
         name: String,
         source: String,
@@ -239,6 +253,31 @@ impl MentionUri {
                 } else if path.starts_with("/agent/merge-conflict") {
                     let file_path = single_query_param(&url, "path")?.unwrap_or_default();
                     Ok(Self::MergeConflict { file_path })
+                } else if path.starts_with("/agent/sql-query") {
+                    validate_query_params(&url, &["path", "connection"])?;
+                    let abs_path =
+                        query_param(&url, "path").context("Missing path for SQL query")?;
+                    let connection = query_param(&url, "connection").unwrap_or_default();
+                    Ok(Self::SqlQuery {
+                        abs_path: abs_path.into(),
+                        connection,
+                    })
+                } else if path.starts_with("/agent/pull-request") {
+                    validate_query_params(&url, &["number", "title", "comment", "path"])?;
+                    let number = query_param(&url, "number")
+                        .context("Missing number for pull request")?
+                        .parse::<u64>()
+                        .context("Invalid pull request number")?;
+                    let comment_id = query_param(&url, "comment")
+                        .map(|comment| comment.parse::<u64>())
+                        .transpose()
+                        .context("Invalid pull request comment id")?;
+                    Ok(Self::PullRequest {
+                        number,
+                        title: query_param(&url, "title").unwrap_or_default(),
+                        comment_id,
+                        file_path: query_param(&url, "path"),
+                    })
                 } else if path.starts_with("/agent/skill") {
                     let mut name = None;
                     let mut source = None;
@@ -328,7 +367,9 @@ impl MentionUri {
             | MentionUri::Fetch { .. }
             | MentionUri::TerminalSelection { .. }
             | MentionUri::GitDiff { .. }
-            | MentionUri::MergeConflict { .. } => None,
+            | MentionUri::MergeConflict { .. }
+            | MentionUri::SqlQuery { .. }
+            | MentionUri::PullRequest { .. } => None,
         }
     }
 
@@ -358,6 +399,37 @@ impl MentionUri {
                     .unwrap_or_default()
                     .to_string_lossy();
                 format!("Merge Conflict ({name})")
+            }
+            MentionUri::SqlQuery {
+                abs_path,
+                connection,
+            } => {
+                let name = abs_path.file_name().unwrap_or_default().to_string_lossy();
+                if connection.is_empty() {
+                    name.into_owned()
+                } else {
+                    format!("{name} · {connection}")
+                }
+            }
+            MentionUri::PullRequest {
+                number,
+                title,
+                comment_id,
+                file_path,
+            } => {
+                if let Some(file_path) = file_path {
+                    let name = Path::new(file_path)
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy();
+                    format!("#{number} · {name}")
+                } else if comment_id.is_some() {
+                    format!("#{number} · comentário")
+                } else if title.is_empty() {
+                    format!("#{number}")
+                } else {
+                    format!("#{number} {title}")
+                }
             }
             MentionUri::Selection {
                 abs_path: path,
@@ -429,6 +501,18 @@ impl MentionUri {
             MentionUri::Skill {
                 skill_file_path, ..
             } => Some(skill_file_path.to_string_lossy().into_owned().into()),
+            MentionUri::SqlQuery { abs_path, .. } => {
+                Some(abs_path.to_string_lossy().into_owned().into())
+            }
+            MentionUri::PullRequest {
+                number,
+                title,
+                file_path: Some(file_path),
+                ..
+            } => Some(format!("#{number} {title} · {file_path}").into()),
+            MentionUri::PullRequest { number, title, .. } if !title.is_empty() => {
+                Some(format!("#{number} {title}").into())
+            }
             _ => None,
         }
     }
@@ -450,6 +534,8 @@ impl MentionUri {
             MentionUri::Fetch { .. } => IconName::ToolWeb.path().into(),
             MentionUri::GitDiff { .. } => IconName::GitBranch.path().into(),
             MentionUri::MergeConflict { .. } => IconName::GitMergeConflict.path().into(),
+            MentionUri::SqlQuery { .. } => IconName::Database.path().into(),
+            MentionUri::PullRequest { .. } => IconName::PullRequest.path().into(),
             MentionUri::Skill { .. } => IconName::Sparkle.path().into(),
         }
     }
@@ -567,6 +653,36 @@ impl MentionUri {
             MentionUri::MergeConflict { file_path } => {
                 let mut url = Url::parse("zed:///agent/merge-conflict").unwrap();
                 url.query_pairs_mut().append_pair("path", file_path);
+                url
+            }
+            MentionUri::SqlQuery {
+                abs_path,
+                connection,
+            } => {
+                let mut url = Url::parse("zed:///agent/sql-query").unwrap();
+                url.query_pairs_mut()
+                    .append_pair("path", &abs_path.to_string_lossy())
+                    .append_pair("connection", connection);
+                url
+            }
+            MentionUri::PullRequest {
+                number,
+                title,
+                comment_id,
+                file_path,
+            } => {
+                let mut url = Url::parse("zed:///agent/pull-request").unwrap();
+                {
+                    let mut query = url.query_pairs_mut();
+                    query.append_pair("number", &number.to_string());
+                    query.append_pair("title", title);
+                    if let Some(comment_id) = comment_id {
+                        query.append_pair("comment", &comment_id.to_string());
+                    }
+                    if let Some(file_path) = file_path {
+                        query.append_pair("path", file_path);
+                    }
+                }
                 url
             }
             MentionUri::Skill {
@@ -875,6 +991,61 @@ mod tests {
             _ => panic!("Expected File variant"),
         }
         assert_eq!(parsed.to_uri().to_string(), file_uri);
+    }
+
+    #[test]
+    fn test_sql_query_uri_round_trips() {
+        let mention = MentionUri::SqlQuery {
+            abs_path: path!("/project/.asylum/db/queries/query-2.sql").into(),
+            connection: "Homologação".to_string(),
+        };
+        let uri = mention.to_uri().to_string();
+        assert_eq!(
+            MentionUri::parse(&uri, PathStyle::local()).unwrap(),
+            mention
+        );
+        assert_eq!(mention.name(), "query-2.sql · Homologação");
+    }
+
+    #[test]
+    fn test_pull_request_uri_round_trips() {
+        let mentions = [
+            MentionUri::PullRequest {
+                number: 157,
+                title: "feat: checkout via Pix".to_string(),
+                comment_id: None,
+                file_path: None,
+            },
+            MentionUri::PullRequest {
+                number: 157,
+                title: "feat: checkout via Pix".to_string(),
+                comment_id: Some(4211),
+                file_path: None,
+            },
+            MentionUri::PullRequest {
+                number: 157,
+                title: "feat: checkout via Pix".to_string(),
+                comment_id: None,
+                file_path: Some("src/checkout/usePix.ts".to_string()),
+            },
+        ];
+        for mention in mentions {
+            let uri = mention.to_uri().to_string();
+            assert_eq!(
+                MentionUri::parse(&uri, PathStyle::local()).unwrap(),
+                mention
+            );
+        }
+        assert_eq!(
+            MentionUri::PullRequest {
+                number: 157,
+                title: "feat: checkout via Pix".to_string(),
+                comment_id: None,
+                file_path: Some("src/checkout/usePix.ts".to_string()),
+            }
+            .name(),
+            "#157 · usePix.ts"
+        );
     }
 
     #[test]

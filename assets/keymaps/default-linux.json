@@ -1040,6 +1040,12 @@
     },
   },
   {
+    "context": "RepoPanel",
+    "bindings": {
+      "ctrl->": "repo_hosting::MentionSelectedPullRequest",
+    },
+  },
+  {
     "context": "GitPanel && (ChangesList || HistoryList) && !GitBranchSelector && !GitRepositorySelector",
     "bindings": {
       "up": "menu::SelectPrevious",

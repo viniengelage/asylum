@@ -163,6 +163,8 @@ pub(crate) enum PromptContextType {
     Skill,
     Diagnostics,
     BranchDiff,
+    SqlQuery,
+    PullRequest,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -247,6 +249,8 @@ impl TryFrom<&str> for PromptContextType {
             "skill" => Ok(Self::Skill),
             "diagnostics" => Ok(Self::Diagnostics),
             "diff" => Ok(Self::BranchDiff),
+            "sql" => Ok(Self::SqlQuery),
+            "pr" => Ok(Self::PullRequest),
             _ => Err(format!("Invalid context picker mode: {}", value)),
         }
     }
@@ -262,6 +266,8 @@ impl PromptContextType {
             Self::Skill => "skill",
             Self::Diagnostics => "diagnostics",
             Self::BranchDiff => "branch diff",
+            Self::SqlQuery => "sql query",
+            Self::PullRequest => "pr",
         }
     }
 
@@ -274,6 +280,8 @@ impl PromptContextType {
             Self::Skill => "Skills",
             Self::Diagnostics => "Diagnostics",
             Self::BranchDiff => "Branch Diff",
+            Self::SqlQuery => "SQL Query",
+            Self::PullRequest => "Pull Request",
         }
     }
 
@@ -286,6 +294,8 @@ impl PromptContextType {
             Self::Skill => IconName::Sparkle,
             Self::Diagnostics => IconName::Warning,
             Self::BranchDiff => IconName::GitBranch,
+            Self::SqlQuery => IconName::Database,
+            Self::PullRequest => IconName::PullRequest,
         }
     }
 }
@@ -299,6 +309,8 @@ pub(crate) enum Match {
     Skill(AvailableSkill),
     Entry(EntryMatch),
     BranchDiff(BranchDiffMatch),
+    SqlQuery(task_agents::SqlEditorTab),
+    PullRequest(task_agents::PullRequestEntry),
 }
 
 #[derive(Debug, Clone)]
@@ -317,6 +329,8 @@ impl Match {
             Match::Skill(_) => 1.,
             Match::Fetch(_) => 1.,
             Match::BranchDiff(_) => 1.,
+            Match::SqlQuery(_) => 1.,
+            Match::PullRequest(_) => 1.,
         }
     }
 }
@@ -388,8 +402,9 @@ impl AvailableCommand {
     fn category_order(&self) -> u8 {
         match self.category {
             Some(acp_thread::CommandCategory::Native) => 0,
-            Some(acp_thread::CommandCategory::Mcp) => 1,
-            None => 2,
+            Some(acp_thread::CommandCategory::TaskAgent) => 1,
+            Some(acp_thread::CommandCategory::Mcp) => 2,
+            None => 3,
         }
     }
 
@@ -398,6 +413,7 @@ impl AvailableCommand {
         let (key, label) = match self.category {
             Some(acp_thread::CommandCategory::Native) => ("commands", "Commands"),
             Some(acp_thread::CommandCategory::Mcp) => ("mcp-commands", "MCP Server Commands"),
+            Some(acp_thread::CommandCategory::TaskAgent) => ("task-agents", "Agentes"),
             None => ("acp-commands", "Commands"),
         };
         CompletionGroup {
@@ -965,6 +981,129 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
         }
     }
 
+    fn build_sql_query_completion(
+        tab: task_agents::SqlEditorTab,
+        source_range: Range<Anchor>,
+        source: Arc<T>,
+        editor: WeakEntity<Editor>,
+        mention_set: WeakEntity<MentionSet>,
+        workspace: Entity<Workspace>,
+        cx: &mut App,
+    ) -> Completion {
+        let uri = MentionUri::SqlQuery {
+            abs_path: tab.abs_path,
+            connection: tab.connection.to_string(),
+        };
+        let crease_text: SharedString = uri.name().into();
+        let display_text = format!("@{}", crease_text);
+        let new_text = format!("[{}]({}) ", display_text, uri.to_uri());
+        let new_text_len = new_text.len();
+        let icon_path = uri.icon_path(cx);
+
+        Completion {
+            replace_range: source_range.clone(),
+            new_text,
+            label: CodeLabel::plain(format!("Query {crease_text}"), None),
+            documentation: None,
+            source: project::CompletionSource::Custom,
+            icon_path: Some(icon_path),
+            icon_color: None,
+            match_start: None,
+            snippet_deduplication_key: None,
+            insert_text_mode: None,
+            confirm: Some(confirm_completion_callback(
+                crease_text,
+                source_range.start,
+                new_text_len - 1,
+                uri,
+                source,
+                editor,
+                mention_set,
+                workspace,
+            )),
+            group: None,
+        }
+    }
+
+    fn build_pull_request_completion(
+        entry: task_agents::PullRequestEntry,
+        source_range: Range<Anchor>,
+        source: Arc<T>,
+        editor: WeakEntity<Editor>,
+        mention_set: WeakEntity<MentionSet>,
+        workspace: Entity<Workspace>,
+        cx: &mut App,
+    ) -> Completion {
+        let label = if entry.is_current_branch {
+            format!("#{} {} · do seu branch", entry.number, entry.title)
+        } else {
+            format!("#{} {} · {}", entry.number, entry.title, entry.author)
+        };
+        let uri = MentionUri::PullRequest {
+            number: entry.number,
+            title: entry.title,
+            comment_id: None,
+            file_path: None,
+        };
+        let crease_text: SharedString = uri.name().into();
+        let display_text = format!("@{}", crease_text);
+        let new_text = format!("[{}]({}) ", display_text, uri.to_uri());
+        let new_text_len = new_text.len();
+        let icon_path = uri.icon_path(cx);
+
+        Completion {
+            replace_range: source_range.clone(),
+            new_text,
+            label: CodeLabel::plain(label, None),
+            documentation: None,
+            source: project::CompletionSource::Custom,
+            icon_path: Some(icon_path),
+            icon_color: None,
+            match_start: None,
+            snippet_deduplication_key: None,
+            insert_text_mode: None,
+            confirm: Some(confirm_completion_callback(
+                crease_text,
+                source_range.start,
+                new_text_len - 1,
+                uri,
+                source,
+                editor,
+                mention_set,
+                workspace,
+            )),
+            group: None,
+        }
+    }
+
+    fn pull_request_entries(
+        &self,
+        workspace: &Entity<Workspace>,
+        cx: &App,
+    ) -> Vec<task_agents::PullRequestEntry> {
+        if !self
+            .source
+            .supports_context(PromptContextType::PullRequest, cx)
+        {
+            return Vec::new();
+        }
+        task_agents::pull_requests(workspace.read(cx).project(), cx)
+    }
+
+    fn sql_query_tabs(
+        &self,
+        workspace: &Entity<Workspace>,
+        cx: &App,
+    ) -> Vec<task_agents::SqlEditorTab> {
+        if !self
+            .source
+            .supports_context(PromptContextType::SqlQuery, cx)
+        {
+            return Vec::new();
+        }
+        task_agents::sql_editor_tabs(workspace.read(cx).project(), cx)
+    }
+
     fn build_branch_diff_completion(
         base_ref: SharedString,
         source_range: Range<Anchor>,
@@ -1159,6 +1298,38 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
 
             Some(PromptContextType::BranchDiff) => Task::ready(Vec::new()),
 
+            Some(PromptContextType::SqlQuery) => Task::ready(
+                self.sql_query_tabs(&workspace, cx)
+                    .into_iter()
+                    .map(Match::SqlQuery)
+                    .collect(),
+            ),
+
+            Some(PromptContextType::PullRequest) => {
+                let entries = self.pull_request_entries(&workspace, cx);
+                if query.is_empty() {
+                    Task::ready(entries.into_iter().map(Match::PullRequest).collect())
+                } else {
+                    let candidates = pull_request_candidates(&entries, false);
+                    cx.spawn(async move |cx| {
+                        fuzzy::match_strings(
+                            &candidates,
+                            &query,
+                            false,
+                            true,
+                            candidates.len(),
+                            &Arc::new(AtomicBool::default()),
+                            cx.background_executor().clone(),
+                        )
+                        .await
+                        .into_iter()
+                        .filter_map(|mat| entries.get(mat.candidate_id).cloned())
+                        .map(Match::PullRequest)
+                        .collect()
+                    })
+                }
+            }
+
             None if query.is_empty() => {
                 let recent_task = self.recent_context_picker_entries(&workspace, cx);
                 let entries = self
@@ -1180,9 +1351,19 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
                 } else {
                     None
                 };
+                let sql_queries = self.sql_query_tabs(&workspace, cx);
+                let branch_pull_request = self
+                    .pull_request_entries(&workspace, cx)
+                    .into_iter()
+                    .find(|entry| entry.is_current_branch);
 
                 cx.spawn(async move |_cx| {
-                    let mut matches = recent_task.await;
+                    let mut matches = branch_pull_request
+                        .into_iter()
+                        .map(Match::PullRequest)
+                        .collect::<Vec<_>>();
+                    matches.extend(sql_queries.into_iter().map(Match::SqlQuery));
+                    matches.extend(recent_task.await);
                     matches.extend(entries);
 
                     if let Some(branch_diff_task) = branch_diff_task {
@@ -1215,6 +1396,25 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
                 } else {
                     None
                 };
+                let pull_requests = self.pull_request_entries(&workspace, cx);
+                let pull_request_candidates = pull_request_candidates(&pull_requests, true);
+                let sql_queries = self.sql_query_tabs(&workspace, cx);
+                let sql_query_candidates = sql_queries
+                    .iter()
+                    .enumerate()
+                    .map(|(ix, tab)| {
+                        let file_name = tab.abs_path.file_name().unwrap_or_default();
+                        StringMatchCandidate::new(
+                            ix,
+                            &format!(
+                                "{} {} {}",
+                                PromptContextType::SqlQuery.keyword(),
+                                file_name.to_string_lossy(),
+                                tab.connection
+                            ),
+                        )
+                    })
+                    .collect::<Vec<_>>();
 
                 cx.spawn(async move |cx| {
                     let mut matches = search_files_task
@@ -1222,6 +1422,44 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
                         .into_iter()
                         .map(Match::File)
                         .collect::<Vec<_>>();
+
+                    if !pull_request_candidates.is_empty() {
+                        let pull_request_matches = fuzzy::match_strings(
+                            &pull_request_candidates,
+                            &query,
+                            false,
+                            true,
+                            pull_request_candidates.len(),
+                            &Arc::new(AtomicBool::default()),
+                            cx.background_executor().clone(),
+                        )
+                        .await;
+                        matches.extend(pull_request_matches.into_iter().filter_map(|mat| {
+                            pull_requests
+                                .get(mat.candidate_id)
+                                .cloned()
+                                .map(Match::PullRequest)
+                        }));
+                    }
+
+                    if !sql_query_candidates.is_empty() {
+                        let sql_query_matches = fuzzy::match_strings(
+                            &sql_query_candidates,
+                            &query,
+                            false,
+                            true,
+                            sql_query_candidates.len(),
+                            &Arc::new(AtomicBool::default()),
+                            cx.background_executor().clone(),
+                        )
+                        .await;
+                        matches.extend(sql_query_matches.into_iter().filter_map(|mat| {
+                            sql_queries
+                                .get(mat.candidate_id)
+                                .cloned()
+                                .map(Match::SqlQuery)
+                        }));
+                    }
 
                     let entry_matches = fuzzy::match_strings(
                         &entry_candidates,
@@ -1389,6 +1627,10 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
 
         if self.source.supports_context(PromptContextType::Fetch, cx) {
             entries.push(PromptContextEntry::Mode(PromptContextType::Fetch));
+        }
+
+        if !self.pull_request_entries(workspace, cx).is_empty() {
+            entries.push(PromptContextEntry::Mode(PromptContextType::PullRequest));
         }
 
         if self
@@ -1732,6 +1974,7 @@ impl<T: PromptCompletionProviderDelegate> CompletionProvider for PromptCompletio
                                 is_recent: true, ..
                             })
                             | Match::RecentThread(_) => 0,
+                            Match::SqlQuery(_) | Match::PullRequest(_) => 0,
                             Match::Entry(_) | Match::BranchDiff(_) => 1,
                             _ => 2,
                         });
@@ -1749,6 +1992,14 @@ impl<T: PromptCompletionProviderDelegate> CompletionProvider for PromptCompletio
                                         | Match::RecentThread(_) => Some(CompletionGroup {
                                             key: "recent".into(),
                                             label: None,
+                                        }),
+                                        Match::SqlQuery(_) => Some(CompletionGroup {
+                                            key: "sql".into(),
+                                            label: None,
+                                        }),
+                                        Match::PullRequest(_) => Some(CompletionGroup {
+                                            key: "pull-requests".into(),
+                                            label: Some("Pull requests".into()),
                                         }),
                                         Match::Entry(_) | Match::BranchDiff(_) => {
                                             Some(CompletionGroup {
@@ -1862,6 +2113,26 @@ impl<T: PromptCompletionProviderDelegate> CompletionProvider for PromptCompletio
                                     Match::BranchDiff(branch_diff) => {
                                         Some(Self::build_branch_diff_completion(
                                             branch_diff.base_ref,
+                                            source_range.clone(),
+                                            source.clone(),
+                                            editor.clone(),
+                                            mention_set.clone(),
+                                            workspace.clone(),
+                                            cx,
+                                        ))
+                                    }
+                                    Match::SqlQuery(tab) => Some(Self::build_sql_query_completion(
+                                        tab,
+                                        source_range.clone(),
+                                        source.clone(),
+                                        editor.clone(),
+                                        mention_set.clone(),
+                                        workspace.clone(),
+                                        cx,
+                                    )),
+                                    Match::PullRequest(entry) => {
+                                        Some(Self::build_pull_request_completion(
+                                            entry,
                                             source_range.clone(),
                                             source.clone(),
                                             editor.clone(),
@@ -3431,4 +3702,28 @@ mod tests {
             assert!(source.read_selection(workspace, false, cx).is_none());
         });
     }
+}
+
+/// Pull requests match by number, title, branch and author. Mixed in with files, only a query
+/// that names the pull request should bring it up, so the keyword leads the text there.
+fn pull_request_candidates(
+    entries: &[task_agents::PullRequestEntry],
+    with_keyword: bool,
+) -> Vec<StringMatchCandidate> {
+    entries
+        .iter()
+        .enumerate()
+        .map(|(ix, entry)| {
+            let text = format!(
+                "#{} {} {} {}",
+                entry.number, entry.title, entry.source_branch, entry.author
+            );
+            let text = if with_keyword {
+                format!("{} {text}", PromptContextType::PullRequest.keyword())
+            } else {
+                text
+            };
+            StringMatchCandidate::new(ix, &text)
+        })
+        .collect()
 }

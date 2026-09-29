@@ -633,6 +633,26 @@ pub mod agent {
         pub base_ref: SharedString,
     }
 
+    /// Mentions a pull request, one of its comments or one of its files in the agent panel.
+    /// Without a prompt the mention goes into the message being written; with one, a new
+    /// thread starts with it.
+    #[derive(Clone, PartialEq, Deserialize, JsonSchema, Action)]
+    #[action(namespace = agent)]
+    #[serde(deny_unknown_fields)]
+    pub struct MentionPullRequest {
+        pub number: u64,
+        pub title: String,
+        #[serde(default)]
+        pub comment_id: Option<u64>,
+        #[serde(default)]
+        pub file_path: Option<String>,
+        #[serde(default)]
+        pub prompt: Option<String>,
+        /// Sends the prompt right away instead of leaving it in the message editor.
+        #[serde(default)]
+        pub submit: bool,
+    }
+
     /// A single merge conflict region extracted from a file.
     #[derive(Clone, Debug, PartialEq, Deserialize, JsonSchema)]
     pub struct ConflictContent {
@@ -942,6 +962,44 @@ pub mod web_preview {
     pub struct OpenUrlInWebPreview {
         pub url: String,
     }
+}
+
+/// Declared here so the agent's cards and mentions can drive the Repo dock without depending on
+/// it.
+pub mod repo_hosting {
+    use gpui::Action;
+    use schemars::JsonSchema;
+    use serde::Deserialize;
+
+    /// Opens a pull request of the project's repository in the Repo dock.
+    #[derive(Clone, PartialEq, Deserialize, JsonSchema, Action)]
+    #[action(namespace = repo_hosting)]
+    #[serde(deny_unknown_fields)]
+    pub struct OpenPullRequest {
+        pub number: u64,
+    }
+
+    /// Checks out the branch of a pull request.
+    #[derive(Clone, PartialEq, Deserialize, JsonSchema, Action)]
+    #[action(namespace = repo_hosting)]
+    #[serde(deny_unknown_fields)]
+    pub struct CheckoutPullRequest {
+        pub number: u64,
+    }
+
+    /// Opens the diff of a pull request against its destination branch.
+    #[derive(Clone, PartialEq, Deserialize, JsonSchema, Action)]
+    #[action(namespace = repo_hosting)]
+    #[serde(deny_unknown_fields)]
+    pub struct DiffPullRequest {
+        pub number: u64,
+    }
+
+    /// Mentions the selected pull request in the agent's message.
+    #[derive(Clone, PartialEq, Default, Deserialize, JsonSchema, Action)]
+    #[action(namespace = repo_hosting)]
+    #[serde(deny_unknown_fields)]
+    pub struct MentionSelectedPullRequest;
 }
 
 pub mod agents_sidebar {

@@ -224,7 +224,14 @@ fn open_mention_uri(
         | MentionUri::Diagnostics { .. }
         | MentionUri::TerminalSelection { .. }
         | MentionUri::GitDiff { .. }
-        | MentionUri::MergeConflict { .. } => {}
+        | MentionUri::MergeConflict { .. }
+        | MentionUri::SqlQuery { .. } => {}
+        MentionUri::PullRequest { number, .. } => {
+            window.dispatch_action(
+                Box::new(zed_actions::repo_hosting::OpenPullRequest { number }),
+                cx,
+            );
+        }
     });
 }
 

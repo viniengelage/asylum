@@ -8,13 +8,14 @@ mod bitbucket;
 mod panel;
 
 pub use agent_toolkit::register_toolkit as register_agent_toolkit;
+use panel::PullRequestFollowup;
 pub use panel::RepoPanel;
 
 use anyhow::Result;
 use credentials_provider::CredentialsProvider;
 use gpui::{Entity, Global, Subscription, Task, WeakEntity, actions};
 use http_client::HttpClient;
-use std::{any::TypeId, sync::Arc};
+use std::{any::TypeId, collections::HashMap, sync::Arc};
 use ui::{Tooltip, prelude::*};
 use util::ResultExt as _;
 use workspace::{HideStatusItem, ItemHandle, StatusItemView, Workspace, dock::StatusBarButton};
@@ -34,10 +35,44 @@ const BITBUCKET_CREDENTIALS_URL: &str = "https://bitbucket.org/asylum";
 
 pub fn init(cx: &mut App) {
     workspace::register_panel_item::<RepoPanel>(cx);
-    cx.observe_new(|workspace: &mut Workspace, _window, _cx| {
+    cx.observe_new(|workspace: &mut Workspace, _window, cx| {
+        agent_toolkit::prefetch_pull_requests(workspace.project().clone(), cx);
         workspace.register_action(|workspace, _: &ToggleFocus, window, cx| {
             toggle_focus(workspace, window, cx);
         });
+        workspace.register_action(
+            |workspace, action: &zed_actions::repo_hosting::OpenPullRequest, window, cx| {
+                show_pull_request(
+                    workspace,
+                    action.number,
+                    PullRequestFollowup::Open,
+                    window,
+                    cx,
+                );
+            },
+        );
+        workspace.register_action(
+            |workspace, action: &zed_actions::repo_hosting::CheckoutPullRequest, window, cx| {
+                show_pull_request(
+                    workspace,
+                    action.number,
+                    PullRequestFollowup::Checkout,
+                    window,
+                    cx,
+                );
+            },
+        );
+        workspace.register_action(
+            |workspace, action: &zed_actions::repo_hosting::DiffPullRequest, window, cx| {
+                show_pull_request(
+                    workspace,
+                    action.number,
+                    PullRequestFollowup::Diff,
+                    window,
+                    cx,
+                );
+            },
+        );
         workspace.register_action(|_workspace, _: &DisconnectBitbucket, _window, cx| {
             RepoStore::global(cx)
                 .update(cx, |store, cx| store.disconnect(cx))
@@ -58,6 +93,21 @@ pub fn open(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Wor
         workspace.add_panel(panel, window, cx);
     }
     workspace.focus_panel::<RepoPanel>(window, cx);
+}
+
+fn show_pull_request(
+    workspace: &mut Workspace,
+    number: u64,
+    followup: PullRequestFollowup,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    open(workspace, window, cx);
+    if let Some(panel) = workspace.panel::<RepoPanel>(cx) {
+        panel.update(cx, |panel, cx| {
+            panel.show_pull_request(number, followup, window, cx)
+        });
+    }
 }
 
 fn toggle_focus(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
@@ -94,9 +144,12 @@ pub struct RepoStore {
     credentials_provider: Arc<dyn CredentialsProvider>,
     bitbucket: Connection,
     load_task: Option<Task<()>>,
+    /// The open pull requests each repository had when last listed, which the agent's `@` menu
+    /// offers without asking the host again.
+    pull_requests: HashMap<api::RemoteRepository, Vec<api::PullRequest>>,
 }
 
-struct GlobalRepoStore(Entity<RepoStore>);
+pub(crate) struct GlobalRepoStore(pub(crate) Entity<RepoStore>);
 
 impl Global for GlobalRepoStore {}
 
@@ -112,6 +165,7 @@ impl RepoStore {
                 credentials_provider: zed_credentials_provider::global(cx),
                 bitbucket: Connection::Loading,
                 load_task: None,
+                pull_requests: HashMap::default(),
             };
             store.load(cx);
             store
@@ -135,6 +189,21 @@ impl RepoStore {
             Connection::Connected(account) => Some(account.credentials.clone()),
             _ => None,
         }
+    }
+
+    pub(crate) fn cached_pull_requests(
+        &self,
+        repository: &api::RemoteRepository,
+    ) -> Option<&[api::PullRequest]> {
+        self.pull_requests.get(repository).map(Vec::as_slice)
+    }
+
+    pub(crate) fn set_pull_requests(
+        &mut self,
+        repository: api::RemoteRepository,
+        pull_requests: Vec<api::PullRequest>,
+    ) {
+        self.pull_requests.insert(repository, pull_requests);
     }
 
     /// Called when a request made with the saved token came back unauthorized.

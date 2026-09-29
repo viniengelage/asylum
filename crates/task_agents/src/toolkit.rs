@@ -1,10 +1,13 @@
 use anyhow::Result;
 use base64::Engine as _;
-use gpui::{App, Entity, Global, SharedString, Task};
+use gpui::{App, Entity, Global, SharedString, Task, Window};
 use project::Project;
 use schemars::JsonSchema;
-use serde::de::DeserializeOwned;
-use std::sync::Arc;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 /// Whether a tool only looks at things or changes them. Acting tools go through the tool
 /// permission prompt; reading tools run without asking.
@@ -12,6 +15,15 @@ use std::sync::Arc;
 pub enum ToolAccess {
     Read,
     Act,
+    /// Acts in a way that can't be undone, such as merging a pull request: it asks every time,
+    /// even when a rule or the task agent would allow it.
+    AlwaysConfirm,
+}
+
+impl ToolAccess {
+    pub fn acts(self) -> bool {
+        self != Self::Read
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -23,13 +35,25 @@ pub enum ToolkitContent {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ToolkitOutput {
     pub content: Vec<ToolkitContent>,
+    /// Kept with the tool call instead of the text, so the thread can draw the result itself
+    /// (live and when the thread is reopened). The model only sees `content`.
+    pub raw_output: Option<serde_json::Value>,
 }
 
 impl ToolkitOutput {
     pub fn text(text: impl Into<String>) -> Self {
         Self {
             content: vec![ToolkitContent::Text(text.into())],
+            raw_output: None,
         }
+    }
+
+    pub fn with_raw_output(mut self, raw_output: impl Serialize) -> Self {
+        match serde_json::to_value(raw_output) {
+            Ok(value) => self.raw_output = Some(value),
+            Err(error) => log::error!("toolkit raw output could not be serialized: {error}"),
+        }
+        self
     }
 
     pub fn push_text(&mut self, text: impl Into<String>) {
@@ -118,7 +142,10 @@ impl ToolkitTool {
         title: impl Into<SharedString>,
         description: impl Into<SharedString>,
         access: ToolAccess,
-        run: impl Fn(Entity<Project>, I, &mut App) -> Task<Result<ToolkitOutput>> + Send + Sync + 'static,
+        run: impl Fn(Entity<Project>, I, &mut App) -> Task<Result<ToolkitOutput>>
+        + Send
+        + Sync
+        + 'static,
     ) -> Self
     where
         I: JsonSchema + DeserializeOwned + 'static,
@@ -131,10 +158,12 @@ impl ToolkitTool {
             description: description.into(),
             input_schema,
             access,
-            run: Arc::new(move |call, cx| match serde_json::from_value::<I>(call.input) {
-                Ok(input) => run(call.project, input, cx),
-                Err(error) => Task::ready(Err(anyhow::anyhow!("invalid input: {error}"))),
-            }),
+            run: Arc::new(
+                move |call, cx| match serde_json::from_value::<I>(call.input) {
+                    Ok(input) => run(call.project, input, cx),
+                    Err(error) => Task::ready(Err(anyhow::anyhow!("invalid input: {error}"))),
+                },
+            ),
         }
     }
 
@@ -179,7 +208,9 @@ impl Global for ToolkitRegistry {}
 /// the earlier toolkit.
 pub fn register_toolkit(toolkit: Toolkit, cx: &mut App) {
     let registry = cx.default_global::<ToolkitRegistry>();
-    registry.toolkits.retain(|existing| existing.id != toolkit.id);
+    registry
+        .toolkits
+        .retain(|existing| existing.id != toolkit.id);
     registry.toolkits.push(Arc::new(toolkit));
 }
 
@@ -193,6 +224,253 @@ pub fn toolkit_for_tool(tool_name: &str, cx: &App) -> Option<Arc<Toolkit>> {
     toolkits(cx)
         .into_iter()
         .find(|toolkit| toolkit.tools.iter().any(|tool| tool.name == tool_name))
+}
+
+/// A SQL editor tab open against a database, which the user can point the agent at with `@`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct SqlEditorTab {
+    pub abs_path: PathBuf,
+    /// The connection the tab runs against, e.g. "Homologação · dev".
+    pub connection: SharedString,
+}
+
+type ListSqlEditors = Arc<dyn Fn(&Entity<Project>, &App) -> Vec<SqlEditorTab>>;
+type DescribeSqlEditor = Arc<dyn Fn(&Entity<Project>, &Path, &App) -> Result<String>>;
+type OpenQuery = Arc<dyn Fn(&Entity<Project>, String, &mut Window, &mut App) -> Result<()>>;
+type FocusSqlEditor = Arc<dyn Fn(&Entity<Project>, &Path, &mut Window, &mut App) -> Result<()>>;
+
+/// Installed by the database client, so the agent's `@` menu can offer its editors without
+/// depending on it.
+#[derive(Clone)]
+pub struct SqlEditorSource {
+    /// The project's SQL editors, most recently opened first.
+    pub list: ListSqlEditors,
+    /// What the agent receives when a tab is mentioned: the connection, the SQL in it, and how
+    /// to write into it.
+    pub describe: DescribeSqlEditor,
+    /// Opens the SQL in a new query tab against the dock's connection and runs it.
+    pub open_query: OpenQuery,
+    /// Brings an open SQL editor tab to the front.
+    pub focus: FocusSqlEditor,
+}
+
+impl Global for SqlEditorSource {}
+
+pub fn register_sql_editor_source(source: SqlEditorSource, cx: &mut App) {
+    cx.set_global(source);
+}
+
+pub fn sql_editor_tabs(project: &Entity<Project>, cx: &App) -> Vec<SqlEditorTab> {
+    cx.try_global::<SqlEditorSource>()
+        .map(|source| (source.list)(project, cx))
+        .unwrap_or_default()
+}
+
+pub fn describe_sql_editor(project: &Entity<Project>, abs_path: &Path, cx: &App) -> Result<String> {
+    let source = cx
+        .try_global::<SqlEditorSource>()
+        .ok_or_else(|| anyhow::anyhow!("This build has no database client."))?;
+    (source.describe)(project, abs_path, cx)
+}
+
+pub fn open_query_in_database(
+    project: &Entity<Project>,
+    sql: String,
+    window: &mut Window,
+    cx: &mut App,
+) -> Result<()> {
+    let open_query = cx
+        .try_global::<SqlEditorSource>()
+        .map(|source| source.open_query.clone())
+        .ok_or_else(|| anyhow::anyhow!("This build has no database client."))?;
+    open_query(project, sql, window, cx)
+}
+
+pub fn focus_sql_editor(
+    project: &Entity<Project>,
+    abs_path: &Path,
+    window: &mut Window,
+    cx: &mut App,
+) -> Result<()> {
+    let focus = cx
+        .try_global::<SqlEditorSource>()
+        .map(|source| source.focus.clone())
+        .ok_or_else(|| anyhow::anyhow!("This build has no database client."))?;
+    focus(project, abs_path, window, cx)
+}
+
+pub const DATABASE_QUERY_TOOL: &str = "database_query";
+pub const DATABASE_WRITE_QUERY_TOOL: &str = "database_write_query";
+
+/// The connection a database tool ran against, as the thread shows it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct DatabaseConnectionInfo {
+    pub name: String,
+    pub database: String,
+    /// `local`, `dev`, `staging` or `prod`.
+    pub environment: String,
+}
+
+impl DatabaseConnectionInfo {
+    pub fn is_production(&self) -> bool {
+        self.environment == "prod"
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct DatabaseColumn {
+    pub name: String,
+    /// The Postgres type name (`int8`, `text`, `timestamptz`…), when the server said.
+    pub type_name: Option<String>,
+}
+
+/// What `database_query` keeps for the thread: the rows the model got, so the card draws them
+/// instead of the model retyping them as a table.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct DatabaseQueryResult {
+    pub connection: DatabaseConnectionInfo,
+    pub sql: String,
+    /// The relation after the first FROM, when the query reads a single one.
+    pub source: Option<String>,
+    pub columns: Vec<DatabaseColumn>,
+    /// Every value as the server prints it; `None` is SQL NULL. Capped, see `total_rows`.
+    pub rows: Vec<Vec<Option<String>>>,
+    /// How many rows the query returned, which can be more than `rows` holds.
+    pub total_rows: usize,
+    /// The query had more rows than the limit.
+    pub truncated: bool,
+    pub limit: usize,
+    pub elapsed_ms: u64,
+}
+
+/// What `database_write_query` keeps for the thread: where the SQL went. The SQL itself is in
+/// the tool input.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct DatabaseWriteResult {
+    pub connection: DatabaseConnectionInfo,
+    pub abs_path: PathBuf,
+    pub line: usize,
+}
+
+pub const REPO_PULL_REQUEST_TOOL: &str = "repo_pull_request";
+pub const REPO_MERGE_TOOL: &str = "repo_pr_merge";
+
+/// A pull request of the project's repository, as the agent's `@` menu offers it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PullRequestEntry {
+    pub number: u64,
+    pub title: String,
+    pub author: String,
+    pub source_branch: String,
+    pub destination_branch: String,
+    /// Opened from the checked-out branch.
+    pub is_current_branch: bool,
+}
+
+/// What a mention points at: the pull request itself, one of its comments or one of its files.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PullRequestReference {
+    pub number: u64,
+    pub comment_id: Option<u64>,
+    pub file_path: Option<String>,
+}
+
+type ListPullRequests = Arc<dyn Fn(&Entity<Project>, &App) -> Vec<PullRequestEntry>>;
+type DescribePullRequest =
+    Arc<dyn Fn(&Entity<Project>, PullRequestReference, &mut App) -> Task<Result<String>>>;
+
+/// Installed by the Repo dock, so the agent can offer and read its pull requests without
+/// depending on it.
+#[derive(Clone)]
+pub struct PullRequestSource {
+    /// The open pull requests from the dock's last sync, the checked-out branch's first.
+    pub list: ListPullRequests,
+    /// What the agent receives when the pull request is mentioned.
+    pub describe: DescribePullRequest,
+}
+
+impl Global for PullRequestSource {}
+
+pub fn register_pull_request_source(source: PullRequestSource, cx: &mut App) {
+    cx.set_global(source);
+}
+
+pub fn pull_requests(project: &Entity<Project>, cx: &App) -> Vec<PullRequestEntry> {
+    cx.try_global::<PullRequestSource>()
+        .map(|source| (source.list)(project, cx))
+        .unwrap_or_default()
+}
+
+pub fn describe_pull_request(
+    project: &Entity<Project>,
+    reference: PullRequestReference,
+    cx: &mut App,
+) -> Task<Result<String>> {
+    match cx.try_global::<PullRequestSource>() {
+        Some(source) => {
+            let describe = source.describe.clone();
+            describe(project, reference, cx)
+        }
+        None => Task::ready(Err(anyhow::anyhow!("This build has no Repo dock."))),
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PullRequestCheckState {
+    Passed,
+    Failed,
+    #[default]
+    Running,
+    Stopped,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PullRequestCheckCard {
+    pub name: String,
+    pub state: PullRequestCheckState,
+    pub url: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PullRequestReviewerCard {
+    pub name: String,
+    pub approved: bool,
+    pub requested_changes: bool,
+}
+
+/// What `repo_pull_request` keeps for the thread, so the card draws the pull request instead of
+/// the model retyping its checks and reviews.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PullRequestCard {
+    pub number: u64,
+    pub title: String,
+    pub url: String,
+    /// `open`, `merged`, `declined` or `superseded`.
+    pub state: String,
+    pub draft: bool,
+    pub author: String,
+    pub source_branch: String,
+    pub destination_branch: String,
+    pub is_current_branch: bool,
+    pub checks: Vec<PullRequestCheckCard>,
+    pub reviewers: Vec<PullRequestReviewerCard>,
+    pub file_count: usize,
+    pub lines_added: u64,
+    pub lines_removed: u64,
+    pub conflict_count: usize,
+    pub comment_count: u64,
+    pub open_task_count: u64,
+}
+
+/// What `repo_pr_merge` keeps for the thread.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PullRequestMergeCard {
+    pub number: u64,
+    pub title: String,
+    pub url: String,
+    pub destination_branch: String,
+    pub strategy: String,
 }
 
 #[cfg(test)]
@@ -219,6 +497,9 @@ mod tests {
         let input = serde_json::json!({ "url": "http://localhost", "x": 10, "full": true });
         let mut inputs = ToolkitTool::permission_inputs(&input);
         inputs.sort();
-        assert_eq!(inputs, vec!["10".to_string(), "http://localhost".to_string()]);
+        assert_eq!(
+            inputs,
+            vec!["10".to_string(), "http://localhost".to_string()]
+        );
     }
 }

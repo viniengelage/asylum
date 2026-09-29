@@ -53,6 +53,9 @@ use super::elicitation::{
 };
 use super::*;
 
+mod database_card;
+mod repo_card;
+
 /// The message the "Executar" button sends. The plan card also looks for it to
 /// tell an executed plan apart from one the user replied to with feedback.
 pub(super) const EXECUTE_PLAN_PROMPT: &str = "Execute o plano aprovado.";
@@ -773,6 +776,7 @@ pub struct ThreadView {
     pub list_state: ListState,
     pub session_capabilities: SharedSessionCapabilities,
     pub expanded_tool_call_raw_inputs: HashSet<acp::ToolCallId>,
+    expanded_database_sql: HashSet<acp::ToolCallId>,
     collapsed_sandbox_authorization_details: HashSet<acp::ToolCallId>,
     collapsed_sandbox_network_details: HashSet<acp::ToolCallId>,
     /// Sandbox escalation prompts whose "surprising Unicode" warning the user
@@ -1206,6 +1210,7 @@ impl ThreadView {
             last_token_limit_telemetry: None,
             thread_feedback: Default::default(),
             expanded_tool_call_raw_inputs: HashSet::default(),
+            expanded_database_sql: HashSet::default(),
             collapsed_sandbox_authorization_details: HashSet::default(),
             collapsed_sandbox_network_details: HashSet::default(),
             acknowledged_confusable_warnings: HashSet::default(),
@@ -9449,6 +9454,14 @@ impl ThreadView {
                     window,
                     cx,
                 ))
+                .when(layout != ToolCallLayout::Floating, |this| {
+                    this.when_some(database_card::database_card(tool_call), |this, card| {
+                        this.child(self.render_database_card(entry_ix, tool_call, card, layout, cx))
+                    })
+                    .when_some(repo_card::repo_card(tool_call), |this, card| {
+                        this.child(self.render_repo_card(entry_ix, card, layout, cx))
+                    })
+                })
             }
         })
     }
@@ -13959,6 +13972,13 @@ pub(crate) fn open_link(
             MentionUri::TerminalSelection { .. } => {}
             MentionUri::GitDiff { .. } => {}
             MentionUri::MergeConflict { .. } => {}
+            MentionUri::SqlQuery { .. } => {}
+            MentionUri::PullRequest { number, .. } => {
+                window.dispatch_action(
+                    Box::new(zed_actions::repo_hosting::OpenPullRequest { number }),
+                    cx,
+                );
+            }
             MentionUri::Rule { name, .. } => {
                 crate::ui::open_migrated_rule(workspace, &name, window, cx);
             }
@@ -14130,6 +14150,13 @@ mod tests {
         // argument the agent consumes, and they echo as normal user messages.
         assert_eq!(leading_native_command("/deploy prod", &commands), None);
         assert_eq!(leading_native_command("/deploy", &commands), None);
+
+        // A task agent's request is the text after its command, so it must go out in the same
+        // message instead of being queued behind a bare command turn.
+        let task_agent = acp::AvailableCommand::new("qa", "").meta(
+            acp_thread::meta_with_command_category(acp_thread::CommandCategory::TaskAgent),
+        );
+        assert_eq!(leading_native_command("/qa testar o login", &[task_agent]), None);
 
         // Unknown command, or not a slash command at all.
         assert_eq!(leading_native_command("/unknown foo", &commands), None);

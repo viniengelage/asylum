@@ -92,6 +92,9 @@ pub enum CommandCategory {
     Native,
     /// Commands sourced from MCP server prompts.
     Mcp,
+    /// Task agents from the Agentes tab. Unlike native commands, the text after the command is
+    /// the request itself and goes out in the same message.
+    TaskAgent,
 }
 
 impl CommandCategory {
@@ -99,6 +102,7 @@ impl CommandCategory {
         match self {
             Self::Native => "native",
             Self::Mcp => "mcp",
+            Self::TaskAgent => "task-agent",
         }
     }
 
@@ -106,6 +110,7 @@ impl CommandCategory {
         match value {
             "native" => Some(Self::Native),
             "mcp" => Some(Self::Mcp),
+            "task-agent" => Some(Self::TaskAgent),
             _ => None,
         }
     }
@@ -5123,10 +5128,14 @@ mod tests {
         // Exhaustive list of variants. The match below has no wildcard arm, so
         // adding a `CommandCategory` variant fails to compile here until it's
         // covered, keeping the `as_str`/`from_str` wire contract in sync.
-        let all = [CommandCategory::Native, CommandCategory::Mcp];
+        let all = [
+            CommandCategory::Native,
+            CommandCategory::Mcp,
+            CommandCategory::TaskAgent,
+        ];
         for category in all {
             match category {
-                CommandCategory::Native | CommandCategory::Mcp => {}
+                CommandCategory::Native | CommandCategory::Mcp | CommandCategory::TaskAgent => {}
             }
             let meta = meta_with_command_category(category);
             assert_eq!(command_category_from_meta(&Some(meta)), Some(category));

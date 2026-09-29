@@ -91,11 +91,12 @@ impl SavedConnection {
         format!("{}@{}:{}", self.user, self.host, self.port)
     }
 
-    /// `user@host:port`, plus the SSH host when the connection goes through one.
+    /// `user@host:port/database`, plus the SSH host when the connection goes through one.
     pub fn address_with_tunnel(&self) -> String {
+        let address = format!("{}/{}", self.address(), self.database);
         match &self.ssh {
-            Some(ssh) => format!("{} · via ssh {}", self.address(), ssh.label()),
-            None => self.address(),
+            Some(ssh) => format!("{address} · via ssh {}", ssh.label()),
+            None => address,
         }
     }
 

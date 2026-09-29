@@ -1695,7 +1695,7 @@ impl NativeAgent {
             };
             acp::AvailableCommand::new(agent.command.clone(), description)
                 .meta(acp_thread::meta_with_command_category(
-                    acp_thread::CommandCategory::Native,
+                    acp_thread::CommandCategory::TaskAgent,
                 ))
                 .input(acp::AvailableCommandInput::Unstructured(
                     acp::UnstructuredCommandInput::new("<pedido>"),
@@ -4235,9 +4235,13 @@ mod internal_tests {
 
         cx.update(|cx| {
             let commands = acp_thread.read(cx).available_commands();
-            assert!(
-                commands.iter().any(|command| command.name == "qa"),
-                "the agent's command should be offered in the slash menu"
+            let command = commands
+                .iter()
+                .find(|command| command.name == "qa")
+                .expect("the agent's command should be offered in the slash menu");
+            assert_eq!(
+                acp_thread::command_category_from_meta(&command.meta),
+                Some(acp_thread::CommandCategory::TaskAgent)
             );
         });
 

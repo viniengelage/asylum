@@ -8,6 +8,7 @@ use crate::{
     session::Session,
     table_view,
 };
+use anyhow::Context as _;
 use collections::{HashMap, HashSet};
 use credentials_provider::CredentialsProvider;
 use db::kvp::KeyValueStore;
@@ -45,6 +46,8 @@ pub enum ActiveState {
     Connected {
         session: Arc<Session>,
         relations: Vec<Relation>,
+        /// Filled only when `relations` is empty.
+        other_databases: Vec<String>,
         latency: Duration,
     },
     Failed(SharedString),
@@ -286,7 +289,7 @@ impl DatabasePanel {
                     return;
                 }
                 active.state = match result {
-                    Ok((session, relations, latency)) => {
+                    Ok((session, relations, other_databases, latency)) => {
                         if this.expanded.is_empty() {
                             this.expanded.insert(schema_key("public"));
                             this.expanded.insert(group_key("public", "tables"));
@@ -294,6 +297,7 @@ impl DatabasePanel {
                         ActiveState::Connected {
                             session: Arc::new(session),
                             relations,
+                            other_databases,
                             latency,
                         }
                     }
@@ -415,7 +419,8 @@ impl DatabasePanel {
                 path,
                 window,
                 cx,
-            ),
+            )
+            .detach_and_log_err(cx),
             None => {
                 self.workspace
                     .update(cx, |workspace, cx| {
@@ -426,6 +431,50 @@ impl DatabasePanel {
                     .log_err();
             }
         }
+    }
+
+    /// For the agent's "Abrir no Banco": a new query file with the agent's SQL, run right away,
+    /// so the user sees every row in the grid.
+    pub(crate) fn open_agent_query(
+        &mut self,
+        sql: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> anyhow::Result<()> {
+        let root = self
+            .root
+            .clone()
+            .context("O projeto não tem pasta para guardar a query.")?;
+        let (connection, session) = self
+            .session()
+            .context("Nenhum banco conectado no painel Banco.")?;
+        let header = format!(
+            "-- {} · {} · consulta do agente",
+            connection.name,
+            connection.environment.label()
+        );
+        let fs = self.fs.clone();
+        let workspace = self.workspace.clone();
+        let project = self.project.clone();
+        cx.spawn_in(window, async move |this, cx| {
+            let path = query_view::create_query_file(fs.as_ref(), &root, &header).await?;
+            this.update(cx, |this, cx| {
+                this.saved_queries.push(path.clone());
+                this.saved_queries.sort();
+                cx.notify();
+            })?;
+            let view = cx
+                .update(|window, cx| {
+                    query_view::open(workspace, project, connection, session, path, window, cx)
+                })?
+                .await?;
+            view.update_in(cx, |view, window, cx| {
+                view.write_from_agent(&sql, query_view::AgentWriteMode::Append, window, cx);
+                view.run_statement(window, cx);
+            })
+        })
+        .detach_and_log_err(cx);
+        Ok(())
     }
 
     pub(crate) fn new_query(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -876,6 +925,8 @@ impl DatabasePanel {
                     .full_width()
                     .style(ButtonStyle::Filled)
                     .size(ButtonSize::Large)
+                    // The two-line content is taller than any `ButtonSize`, whose heights are fixed.
+                    .height(rems_from_px(52_f32).into())
                     .child(
                         h_flex()
                             .w_full()
@@ -1155,6 +1206,17 @@ impl DatabasePanel {
                             ),
                     )
                 }
+                ActiveState::Connected {
+                    relations,
+                    other_databases,
+                    ..
+                } if relations.is_empty() => this
+                    .child(self.render_empty_database(
+                        &active.connection.database,
+                        other_databases,
+                        cx,
+                    ))
+                    .child(self.render_tree(row_count, cx)),
                 ActiveState::Connected { .. } => this
                     .child(div().px_3().pt_2().child(self.filter_input.clone()))
                     .child(
@@ -1165,31 +1227,75 @@ impl DatabasePanel {
                                 .color(Color::Muted),
                         ),
                     )
-                    .child(
-                        div().flex_1().min_h_0().px_1().child(
-                            uniform_list(
-                                "db-tree",
-                                row_count,
-                                cx.processor(move |this, range: Range<usize>, _window, cx| {
-                                    let rows = this.tree_rows(cx);
-                                    range
-                                        .filter_map(|index| {
-                                            rows.get(index)
-                                                .cloned()
-                                                .map(|row| this.render_row(index, row, cx))
-                                        })
-                                        .collect()
-                                }),
-                            )
-                            .size_full(),
-                        ),
-                    ),
+                    .child(self.render_tree(row_count, cx)),
             })
             .when(
                 !matches!(active.state, ActiveState::Connected { .. }),
                 |this| this.child(div().flex_1()),
             )
             .child(self.render_footer(summary, cx))
+            .into_any_element()
+    }
+
+    fn render_tree(&self, row_count: usize, cx: &mut Context<Self>) -> Div {
+        div().flex_1().min_h_0().px_1().child(
+            uniform_list(
+                "db-tree",
+                row_count,
+                cx.processor(move |this, range: Range<usize>, _window, cx| {
+                    let rows = this.tree_rows(cx);
+                    range
+                        .filter_map(|index| {
+                            rows.get(index)
+                                .cloned()
+                                .map(|row| this.render_row(index, row, cx))
+                        })
+                        .collect()
+                }),
+            )
+            .size_full(),
+        )
+    }
+
+    fn render_empty_database(
+        &self,
+        database: &str,
+        other_databases: &[String],
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        v_flex()
+            .m_3()
+            .p_3()
+            .gap_1p5()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().colors().border)
+            .child(
+                h_flex()
+                    .gap_1p5()
+                    .child(
+                        Icon::new(IconName::Info)
+                            .size(IconSize::Small)
+                            .color(Color::Muted),
+                    )
+                    .child(
+                        Label::new(format!("Nenhuma tabela em {database}"))
+                            .size(LabelSize::Small)
+                            .weight(FontWeight::SEMIBOLD),
+                    ),
+            )
+            .child(
+                Label::new(if other_databases.is_empty() {
+                    "O banco não tem tabelas nem views fora dos schemas do sistema.".to_owned()
+                } else {
+                    format!(
+                        "Outros bancos neste servidor: {}. Edite a conexão para trocar de banco.",
+                        other_databases.join(", ")
+                    )
+                })
+                .size(LabelSize::XSmall)
+                .color(Color::Muted),
+            )
             .into_any_element()
     }
 
@@ -1452,7 +1558,7 @@ async fn open_session(
     credentials_provider: Arc<dyn CredentialsProvider>,
     fs: Arc<dyn Fs>,
     cx: &AsyncApp,
-) -> anyhow::Result<(Session, Vec<Relation>, Duration)> {
+) -> anyhow::Result<(Session, Vec<Relation>, Vec<String>, Duration)> {
     let password = match credentials_provider
         .read_credentials(&connection.keychain_url(), cx)
         .await
@@ -1483,9 +1589,20 @@ async fn open_session(
     let target = connection.open_target(password).await?;
     let session = Session::connect(&target).await?;
     let relations = catalog::list_relations(&session).await?;
+    let other_databases = if relations.is_empty() {
+        catalog::list_databases(&session)
+            .await
+            .log_err()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|database| *database != connection.database)
+            .collect()
+    } else {
+        Vec::new()
+    };
     let started = Instant::now();
     session.run("select 1", 1).await?;
-    Ok((session, relations, started.elapsed()))
+    Ok((session, relations, other_databases, started.elapsed()))
 }
 
 async fn list_queries(fs: &dyn Fs, root: &Path) -> Vec<PathBuf> {

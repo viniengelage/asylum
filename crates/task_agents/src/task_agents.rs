@@ -1,5 +1,7 @@
+mod authoring;
 mod toolkit;
 
+pub use authoring::*;
 pub use toolkit::*;
 
 use anyhow::{Context as _, Result};

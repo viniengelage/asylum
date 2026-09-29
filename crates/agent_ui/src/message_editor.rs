@@ -103,6 +103,8 @@ impl SessionCapabilities {
                 PromptContextType::Fetch,
                 PromptContextType::Skill,
                 PromptContextType::BranchDiff,
+                PromptContextType::SqlQuery,
+                PromptContextType::PullRequest,
             ]);
         }
         supported
@@ -1565,6 +1567,64 @@ impl MessageEditor {
             Some(text_anchor)
         });
 
+        let Some(start_anchor) = start_anchor else {
+            return;
+        };
+
+        self.mention_set
+            .update(cx, |mention_set, cx| {
+                mention_set.confirm_mention_completion(
+                    crease_text,
+                    start_anchor,
+                    content_len,
+                    mention_uri,
+                    false,
+                    self.editor.clone(),
+                    &workspace,
+                    window,
+                    cx,
+                )
+            })
+            .detach();
+    }
+
+    /// Adds a mention at the cursor, resolved the same way as one picked from the `@` menu.
+    pub fn insert_mention(
+        &mut self,
+        mention_uri: MentionUri,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(workspace) = self.workspace.upgrade() else {
+            return;
+        };
+
+        let link_text = mention_uri.as_link().to_string();
+        let content_len = link_text.len();
+        let crease_text: SharedString = mention_uri.name().into();
+
+        let start_anchor = self.editor.update(cx, |editor, cx| {
+            let follows_word = {
+                let snapshot = editor.buffer().read(cx).snapshot(cx);
+                let cursor = editor.selections.newest_anchor().start.to_offset(&snapshot);
+                snapshot
+                    .reversed_chars_at(cursor)
+                    .next()
+                    .is_some_and(|character| !character.is_whitespace())
+            };
+            if follows_word {
+                editor.insert(" ", window, cx);
+            }
+
+            let snapshot = editor.buffer().read(cx).snapshot(cx);
+            let buffer_snapshot = snapshot.as_singleton()?;
+            let text_anchor = snapshot
+                .anchor_to_buffer_anchor(editor.selections.newest_anchor().start)?
+                .0
+                .bias_left(buffer_snapshot);
+            editor.insert(&format!("{link_text} "), window, cx);
+            Some(text_anchor)
+        });
         let Some(start_anchor) = start_anchor else {
             return;
         };

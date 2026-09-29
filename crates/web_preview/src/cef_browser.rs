@@ -676,6 +676,11 @@ pub(crate) struct WebPreviewHandler {
     view_width: Arc<Mutex<i32>>,
     view_height: Arc<Mutex<i32>>,
     scale_factor: Arc<Mutex<f32>>,
+    /// The page's DevTools target id, which is what lets a script driving the CDP port
+    /// tell this tab apart from every other page Chromium has open.
+    target_id: Arc<Mutex<Option<String>>>,
+    /// Keeps the observer that receives the target id answer registered.
+    devtools_registration: Arc<Mutex<Option<Registration>>>,
 }
 
 impl WebPreviewHandler {
@@ -691,6 +696,8 @@ impl WebPreviewHandler {
             view_width: Arc::new(Mutex::new(width)),
             view_height: Arc::new(Mutex::new(height)),
             scale_factor: Arc::new(Mutex::new(scale_factor)),
+            target_id: Arc::new(Mutex::new(None)),
+            devtools_registration: Arc::new(Mutex::new(None)),
         }))
     }
 
@@ -804,9 +811,10 @@ wrap_life_span_handler! {
                         frame.load_url(Some(&CefString::from(url.as_str())));
                     }
                     if let Ok(mut stored) = inner.browser.lock() {
-                        *stored = Some(browser);
+                        *stored = Some(browser.clone());
                     }
                 }
+                request_target_id(&self.inner, &browser);
             }
         }
 
@@ -816,6 +824,66 @@ wrap_life_span_handler! {
 
         fn on_before_close(&self, _browser: Option<&mut Browser>) {
             log::info!("web_preview: browser closed");
+        }
+    }
+}
+
+/// Id of the one DevTools call the browser makes on its own behalf.
+const TARGET_INFO_MESSAGE_ID: i32 = 1;
+
+/// Asks Chromium which DevTools target this browser is. `Target.getTargetInfo` without a
+/// `targetId` describes the session's own page, so the answer can't be confused with
+/// another tab showing the same URL.
+fn request_target_id(handler: &Arc<Mutex<WebPreviewHandler>>, browser: &Browser) {
+    let Some(host) = browser.host() else {
+        log::warn!("web_preview: browser has no host to ask for its DevTools target");
+        return;
+    };
+    let mut observer = TargetIdObserver::new(handler.clone());
+    let registration = host.add_dev_tools_message_observer(Some(&mut observer));
+    if let Ok(inner) = handler.lock()
+        && let Ok(mut stored) = inner.devtools_registration.lock()
+    {
+        *stored = registration;
+    }
+    let method = CefString::from("Target.getTargetInfo");
+    if host.execute_dev_tools_method(TARGET_INFO_MESSAGE_ID, Some(&method), None) == 0 {
+        log::warn!("web_preview: Chromium refused to report the page's DevTools target");
+    }
+}
+
+wrap_dev_tools_message_observer! {
+    struct TargetIdObserver {
+        inner: Arc<Mutex<WebPreviewHandler>>,
+    }
+
+    impl DevToolsMessageObserver {
+        fn on_dev_tools_method_result(
+            &self,
+            _browser: Option<&mut Browser>,
+            message_id: ::std::os::raw::c_int,
+            success: ::std::os::raw::c_int,
+            result: Option<&[u8]>,
+        ) {
+            if message_id != TARGET_INFO_MESSAGE_ID {
+                return;
+            }
+            let target_id = (success != 0)
+                .then_some(result)
+                .flatten()
+                .and_then(|result| serde_json::from_slice::<serde_json::Value>(result).ok())
+                .and_then(|result| result["targetInfo"]["targetId"].as_str().map(str::to_string));
+            let Some(target_id) = target_id else {
+                log::warn!("web_preview: could not read the page's DevTools target id");
+                return;
+            };
+            log::info!("web_preview: page is DevTools target {target_id}");
+            if let Ok(inner) = self.inner.lock() {
+                if let Ok(mut stored) = inner.target_id.lock() {
+                    *stored = Some(target_id);
+                }
+                inner.state_version.fetch_add(1, Ordering::Relaxed);
+            }
         }
     }
 }
@@ -1158,6 +1226,14 @@ impl CefBrowserInstance {
             handler,
             input_queue: Arc::new(Mutex::new(Vec::new())),
         })
+    }
+
+    /// The page's DevTools target id, once Chromium has reported it.
+    pub fn target_id(&self) -> Option<String> {
+        self.handler
+            .lock()
+            .ok()
+            .and_then(|inner| inner.target_id.lock().ok().and_then(|id| id.clone()))
     }
 
     pub fn channel(&self) -> BrowserChannel {
