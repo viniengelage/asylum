@@ -1735,6 +1735,7 @@ pub struct Workspace {
     _dev_container_task: Option<Task<Result<()>>>,
     _panels_task: Option<Task<Result<()>>>,
     sidebar_focus_handle: Option<FocusHandle>,
+    traffic_light_pane: Option<WeakEntity<Pane>>,
     multi_workspace: Option<WeakEntity<MultiWorkspace>>,
     /// Shared with the parent `MultiWorkspace` and any sibling workspaces: holds
     /// the id of the single workspace currently presented in this OS window.
@@ -2207,6 +2208,7 @@ impl Workspace {
             modal_layer,
             toast_layer,
             titlebar_item: None,
+            traffic_light_pane: None,
             titlebar_focus_handle: cx.focus_handle(),
             region_focus_handles: RegionFocusHandles::new(cx),
             notifications: Notifications::default(),
@@ -10563,6 +10565,50 @@ impl Render for DraggedDock {
     }
 }
 
+impl Workspace {
+    /// The title bar lives in the left dock's header, so once that dock is gone the top-left
+    /// pane's tab bar is what sits under the macOS traffic lights and has to make room for them.
+    fn sync_traffic_light_pane(
+        &mut self,
+        centered_layout: bool,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        let left_dock_visible = !Self::unified_panes(cx)
+            && self.left_dock.read(cx).is_open()
+            && self.zoomed_position != Some(DockPosition::Left);
+        let sidebar_on_left = self
+            .multi_workspace
+            .as_ref()
+            .and_then(|multi_workspace| multi_workspace.upgrade())
+            .is_some_and(|multi_workspace| {
+                let sidebar = multi_workspace.read(cx).sidebar_render_state(cx);
+                sidebar.open && sidebar.side == SidebarSide::Left
+            });
+        let pane = (PlatformStyle::platform() == PlatformStyle::Mac
+            && !window.is_fullscreen()
+            && !centered_layout
+            && !left_dock_visible
+            && !sidebar_on_left)
+            .then(|| self.center.first_pane());
+
+        let previous = self
+            .traffic_light_pane
+            .as_ref()
+            .and_then(|pane| pane.upgrade());
+        if previous == pane {
+            return;
+        }
+        if let Some(previous) = previous {
+            previous.update(cx, |pane, cx| pane.set_reserve_traffic_lights(false, cx));
+        }
+        if let Some(pane) = &pane {
+            pane.update(cx, |pane, cx| pane.set_reserve_traffic_lights(true, cx));
+        }
+        self.traffic_light_pane = pane.as_ref().map(|pane| pane.downgrade());
+    }
+}
+
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         static FIRST_PAINT: AtomicBool = AtomicBool::new(true);
@@ -10595,6 +10641,7 @@ impl Render for Workspace {
         } else {
             (None, None)
         };
+        self.sync_traffic_light_pane(centered_layout, window, cx);
         let ui_font = theme_settings::setup_ui_font(window, cx);
         let card_half_gap = pane_group::workspace_card_gap(cx) / 2.;
 

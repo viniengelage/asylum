@@ -476,6 +476,8 @@ pub struct Pane {
     /// Is None if navigation buttons are permanently turned off (and should not react to setting changes).
     /// Otherwise, when `display_nav_history_buttons` is Some, it determines whether nav buttons should be displayed.
     display_nav_history_buttons: Option<bool>,
+    /// Set by the workspace on the pane whose tab bar sits under the macOS traffic lights.
+    reserve_traffic_lights: bool,
     double_click_dispatch_action: Box<dyn Action>,
     save_modals_spawned: HashSet<EntityId>,
     close_pane_if_empty: bool,
@@ -686,6 +688,7 @@ impl Pane {
             display_nav_history_buttons: Some(
                 TabBarSettings::get_global(cx).show_nav_history_buttons,
             ),
+            reserve_traffic_lights: false,
             _subscriptions: subscriptions,
             double_click_dispatch_action,
             save_modals_spawned: HashSet::default(),
@@ -965,6 +968,13 @@ impl Pane {
             toolbar.set_can_navigate(can_navigate, cx);
         });
         cx.notify();
+    }
+
+    pub(crate) fn set_reserve_traffic_lights(&mut self, reserve: bool, cx: &mut Context<Self>) {
+        if self.reserve_traffic_lights != reserve {
+            self.reserve_traffic_lights = reserve;
+            cx.notify();
+        }
     }
 
     pub fn set_render_tab_bar<F>(&mut self, cx: &mut Context<Self>, render: F)
@@ -3700,6 +3710,14 @@ impl Pane {
         cx: &mut Context<Pane>,
     ) -> TabBar {
         tab_bar
+            .when(self.reserve_traffic_lights, |tab_bar| {
+                // The spacer and the tab bar's own padding and slot gap together clear the
+                // traffic lights by the same amount the left island's header does.
+                let spacer_width = px(ui::utils::TRAFFIC_LIGHT_PADDING)
+                    - DynamicSpacing::Base08.px(cx)
+                    - DynamicSpacing::Base06.px(cx);
+                tab_bar.start_child(div().flex_none().w(spacer_width))
+            })
             .when(
                 self.display_nav_history_buttons.unwrap_or_default(),
                 |tab_bar| {
