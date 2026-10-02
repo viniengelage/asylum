@@ -51,6 +51,11 @@ pub fn init(cx: &mut App) {
     .detach();
 }
 
+/// Kept as switches rather than deleting upstream's code, so merges from Zed still apply. Both
+/// point at Zed's own releases and products, which an Asylum build shouldn't advertise.
+const SHOW_ZED_RELEASE_NOTES: bool = false;
+const SHOW_ZED_ANNOUNCEMENTS: bool = false;
+
 #[derive(Deserialize)]
 struct ReleaseNotesBody {
     title: String,
@@ -93,10 +98,9 @@ fn view_release_notes_locally(
 ) {
     let release_channel = ReleaseChannel::global(cx);
 
-    if matches!(
-        release_channel,
-        ReleaseChannel::Nightly | ReleaseChannel::Dev
-    ) {
+    // Zed's release notes API describes Zed's releases, not Asylum's, whose notes live on the
+    // GitHub Releases the updater installs from.
+    if !SHOW_ZED_RELEASE_NOTES {
         if let Some(url) = release_notes_url(cx) {
             cx.open_url(&url);
         }
@@ -202,6 +206,9 @@ impl Dismissable for DeltaAnnouncement {
 }
 
 fn announcement_for_version(version: &Version, cx: &App) -> Option<AnnouncementContent> {
+    if !SHOW_ZED_ANNOUNCEMENTS {
+        return None;
+    }
     let version_with_delta = Version::new(1, 22, 0);
     if *version < version_with_delta
         || DisableAiSettings::get_global(cx).disable_ai

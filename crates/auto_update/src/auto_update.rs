@@ -508,10 +508,9 @@ pub fn release_notes_url(cx: &mut App) -> Option<String> {
         ReleaseChannel::Stable | ReleaseChannel::Preview => {
             format!("https://github.com/{}/releases", asylum_releases_repo())
         }
-        ReleaseChannel::Nightly => {
-            "https://github.com/zed-industries/zed/commits/nightly/".to_string()
+        ReleaseChannel::Nightly | ReleaseChannel::Dev => {
+            format!("https://github.com/{}/commits/main/", asylum_releases_repo())
         }
-        ReleaseChannel::Dev => "https://github.com/zed-industries/zed/commits/main/".to_string(),
     };
     Some(url)
 }
