@@ -1585,13 +1585,22 @@ impl Element for TerminalElement {
             let terminal_view = self.terminal_view.read(cx);
             let scroll_top = terminal_view.scroll_top;
             let mouse_input_mode = terminal_view.mouse_input_mode();
+            let corner_radii = match terminal_view.background_corner_radii {
+                Some(radii) => radii
+                    .map(|radius| radius.to_pixels(window.rem_size()))
+                    .clamp_radii_for_quad_size(bounds.size),
+                None => {
+                    let bottom_radius = ui::pane_corner_radius_px(window);
+                    Corners {
+                        bottom_left: bottom_radius,
+                        bottom_right: bottom_radius,
+                        ..Corners::default()
+                    }
+                }
+            };
 
-            let bottom_radius = ui::pane_corner_radius_px(window);
-            window.paint_quad(fill(bounds, layout.background_color).corner_radii(Corners {
-                bottom_left: bottom_radius,
-                bottom_right: bottom_radius,
-                ..Corners::default()
-            }));
+            window.paint_quad(fill(bounds, layout.background_color).corner_radii(corner_radii));
+
             let origin = layout.dimensions.bounds.origin - GpuiPoint::new(px(0.), scroll_top);
             let scale_factor = window.scale_factor();
             let snap_px = |value: Pixels| {

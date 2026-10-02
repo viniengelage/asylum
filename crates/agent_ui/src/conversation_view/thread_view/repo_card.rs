@@ -13,7 +13,7 @@ pub(super) enum RepoCard {
 }
 
 pub(super) fn repo_card(tool_call: &ToolCall) -> Option<RepoCard> {
-    if !matches!(tool_call.status, ToolCallStatus::Completed) {
+    if !matches!(tool_call.status(), ToolCallStatus::Completed) {
         return None;
     }
     let raw_output = tool_call.raw_output.clone()?;

@@ -754,9 +754,13 @@ impl TaskAgentsView {
         } else {
             None
         };
-        let model = LanguageModelRegistry::read_global(cx)
-            .default_model()
-            .map(|configured| configured.model);
+        let registry = LanguageModelRegistry::read_global(cx);
+        let model = registry.default_model().and_then(|model| {
+            registry
+                .provider_for_model(&model)
+                .log_err()
+                .map(|provider| (model, provider))
+        });
         let error = error.or(model
             .is_none()
             .then_some("Escolha um modelo no painel do Agent para gerar o agente."));
@@ -767,7 +771,7 @@ impl TaskAgentsView {
             cx.notify();
             return;
         }
-        let Some(model) = model else {
+        let Some((model, provider)) = model else {
             return;
         };
 
@@ -795,7 +799,7 @@ impl TaskAgentsView {
                         messages: messages.clone(),
                         ..Default::default()
                     };
-                    let mut response = model.stream_completion_text(request, cx).await?;
+                    let mut response = provider.stream_completion_text(&model, request, cx).await?;
                     let mut text = String::new();
                     while let Some(chunk) = response.stream.next().await {
                         text.push_str(&chunk?);

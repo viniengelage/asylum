@@ -37,7 +37,7 @@ enum Presentation {
 pub(super) fn database_card(tool_call: &ToolCall) -> Option<DatabaseCard> {
     let tool_name = tool_call.tool_name.as_deref()?;
     let raw_output = tool_call.raw_output.clone()?;
-    match (&tool_call.status, tool_name) {
+    match (tool_call.status(), tool_name) {
         (ToolCallStatus::Completed, DATABASE_QUERY_TOOL) => serde_json::from_value(raw_output)
             .ok()
             .map(DatabaseCard::Query),

@@ -39,9 +39,20 @@ use windows::{
 use crate::*;
 use gpui::*;
 
+struct TrackedWindow {
+    handle: SafeHwnd,
+    frame_signal: Arc<PlatformFrameSignal>,
+}
+
+impl TrackedWindow {
+    fn as_raw(&self) -> HWND {
+        self.handle.as_raw()
+    }
+}
+
 pub struct WindowsPlatform {
     inner: Rc<WindowsPlatformInner>,
-    raw_window_handles: Arc<RwLock<SmallVec<[SafeHwnd; 4]>>>,
+    raw_window_handles: Arc<RwLock<SmallVec<[TrackedWindow; 4]>>>,
     // The below members will never change throughout the entire lifecycle of the app.
     headless: bool,
     icon: HICON,
@@ -63,7 +74,7 @@ pub struct WindowsPlatform {
 
 struct WindowsPlatformInner {
     state: WindowsPlatformState,
-    raw_window_handles: std::sync::Weak<RwLock<SmallVec<[SafeHwnd; 4]>>>,
+    raw_window_handles: std::sync::Weak<RwLock<SmallVec<[TrackedWindow; 4]>>>,
     // The below members will never change throughout the entire lifecycle of the app.
     validation_number: usize,
     main_receiver: PriorityQueueReceiver<RunnableVariant>,
@@ -382,7 +393,8 @@ impl WindowsPlatform {
             .spawn(move || {
                 let vsync_provider = VSyncProvider::new();
                 loop {
-                    vsync_provider.wait_for_vsync();
+                    let signal_source = vsync_provider.wait_for_vsync();
+                    let signal_at = PlatformFrameSignal::capture(scheduler::Instant::now);
                     if check_device_lost(&directx_device.device)
                         || invalidate_devices.fetch_and(false, Ordering::Acquire)
                     {
@@ -401,7 +413,19 @@ impl WindowsPlatform {
                     };
                     for hwnd in all_windows.read().iter() {
                         unsafe {
-                            let _ = RedrawWindow(Some(hwnd.as_raw()), None, None, RDW_INVALIDATE);
+                            if let Some(signal_at) = signal_at {
+                                if IsWindowVisible(hwnd.as_raw()).as_bool()
+                                    && !IsIconic(hwnd.as_raw()).as_bool()
+                                {
+                                    hwnd.frame_signal.record(signal_at, signal_source);
+                                } else {
+                                    // Hidden windows may not consume WM_PAINT until shown again.
+                                    hwnd.frame_signal.take();
+                                }
+                            }
+                            RedrawWindow(Some(hwnd.as_raw()), None, None, RDW_INVALIDATE)
+                                .ok()
+                                .log_err();
                         }
                     }
                 }
@@ -643,7 +667,10 @@ impl Platform for WindowsPlatform {
     ) -> Result<Box<dyn PlatformWindow>> {
         let window = WindowsWindow::new(handle, options, self.generate_creation_info())?;
         let handle = window.get_raw_handle();
-        self.raw_window_handles.write().push(handle.into());
+        self.raw_window_handles.write().push(TrackedWindow {
+            handle: handle.into(),
+            frame_signal: window.state.frame_signal.clone(),
+        });
 
         Ok(Box::new(window))
     }
@@ -964,19 +991,13 @@ impl Platform for WindowsPlatform {
             }
 
             if credentials.is_null() {
-                Ok(None)
-            } else {
-                let username: String = unsafe { (*credentials).UserName.to_string()? };
-                let credential_blob = unsafe {
-                    std::slice::from_raw_parts(
-                        (*credentials).CredentialBlob,
-                        (*credentials).CredentialBlobSize as usize,
-                    )
-                };
-                let password = credential_blob.to_vec();
-                unsafe { CredFree(credentials as *const _ as _) };
-                Ok(Some((username, password)))
+                return Ok(None);
             }
+
+            // SAFETY: `CredReadW` succeeded, so this points to a valid `CREDENTIALW` until `CredFree` below.
+            let result = unsafe { username_and_password(&*credentials) };
+            unsafe { CredFree(credentials as *const _ as _) };
+            result.map(Some)
         })
     }
 
@@ -1282,7 +1303,7 @@ pub(crate) struct WindowCreationInfo {
 
 struct PlatformWindowCreateContext {
     inner: Option<Result<Rc<WindowsPlatformInner>>>,
-    raw_window_handles: std::sync::Weak<RwLock<SmallVec<[SafeHwnd; 4]>>>,
+    raw_window_handles: std::sync::Weak<RwLock<SmallVec<[TrackedWindow; 4]>>>,
     validation_number: usize,
     main_sender: Option<PriorityQueueSender<RunnableVariant>>,
     main_receiver: Option<PriorityQueueReceiver<RunnableVariant>>,
@@ -1510,7 +1531,7 @@ fn handle_gpu_device_lost(
     directx_devices: &mut DirectXDevices,
     platform_window: HWND,
     validation_number: usize,
-    all_windows: &std::sync::Weak<RwLock<SmallVec<[SafeHwnd; 4]>>>,
+    all_windows: &std::sync::Weak<RwLock<SmallVec<[TrackedWindow; 4]>>>,
     text_system: &std::sync::Weak<DirectWriteTextSystem>,
 ) -> Result<()> {
     // Here we wait a bit to ensure the system has time to recover from the device lost state.
@@ -1634,14 +1655,104 @@ unsafe extern "system" fn window_procedure(
     result
 }
 
+/// Copies the username and secret out of a credential returned by `CredReadW`.
+///
+/// Both `UserName` and `CredentialBlob` are optional in Credential Manager and
+/// come back as null pointers when absent, so they are treated as empty here.
+///
+/// # Safety
+///
+/// A non-null `UserName` must point to a NUL-terminated wide string and a
+/// non-null `CredentialBlob` must be readable for `CredentialBlobSize` bytes,
+/// as is the case for credentials returned by `CredReadW`.
+unsafe fn username_and_password(credential: &CREDENTIALW) -> Result<(String, Vec<u8>)> {
+    let username = if credential.UserName.is_null() {
+        String::new()
+    } else {
+        // SAFETY: guaranteed by the caller.
+        unsafe { credential.UserName.to_string()? }
+    };
+    let password = if credential.CredentialBlob.is_null() {
+        Vec::new()
+    } else {
+        // SAFETY: guaranteed by the caller.
+        unsafe {
+            std::slice::from_raw_parts(
+                credential.CredentialBlob,
+                credential.CredentialBlobSize as usize,
+            )
+        }
+        .to_vec()
+    };
+    Ok((username, password))
+}
+
 #[cfg(test)]
 mod tests {
     use std::ffi::{OsStr, OsString};
 
     use crate::{read_from_clipboard, write_to_clipboard};
     use gpui::ClipboardItem;
+    use windows::Win32::Security::Credentials::{
+        CRED_PERSIST_SESSION, CRED_TYPE_GENERIC, CREDENTIALW, CredDeleteW, CredFree, CredReadW,
+        CredWriteW,
+    };
+    use windows::core::{PCWSTR, PWSTR};
 
-    use super::encode_restart_arguments;
+    use super::{encode_restart_arguments, username_and_password};
+
+    #[test]
+    fn test_read_credential_with_username() {
+        assert_eq!(
+            round_trip_credential(Some("alice"), b"secret"),
+            ("alice".to_string(), b"secret".to_vec())
+        );
+    }
+
+    #[test]
+    fn test_read_credential_without_username() {
+        assert_eq!(
+            round_trip_credential(None, b"secret"),
+            (String::new(), b"secret".to_vec())
+        );
+    }
+
+    fn round_trip_credential(username: Option<&str>, secret: &[u8]) -> (String, Vec<u8>) {
+        let mut target_name: Vec<u16> = format!(
+            "zed-test-{}-{}",
+            std::process::id(),
+            username.unwrap_or_default()
+        )
+        .encode_utf16()
+        .chain(Some(0))
+        .collect();
+        let mut username: Vec<u16> = username
+            .map(|username| username.encode_utf16().chain(Some(0)).collect())
+            .unwrap_or_default();
+        let mut secret = secret.to_vec();
+        let credential = CREDENTIALW {
+            Type: CRED_TYPE_GENERIC,
+            TargetName: PWSTR::from_raw(target_name.as_mut_ptr()),
+            CredentialBlobSize: secret.len() as u32,
+            CredentialBlob: secret.as_mut_ptr(),
+            Persist: CRED_PERSIST_SESSION,
+            UserName: if username.is_empty() {
+                PWSTR::null()
+            } else {
+                PWSTR::from_raw(username.as_mut_ptr())
+            },
+            ..CREDENTIALW::default()
+        };
+        let target_name = PCWSTR::from_raw(target_name.as_ptr());
+        unsafe { CredWriteW(&credential, 0) }.unwrap();
+
+        let mut credentials: *mut CREDENTIALW = std::ptr::null_mut();
+        unsafe { CredReadW(target_name, CRED_TYPE_GENERIC, None, &mut credentials) }.unwrap();
+        let result = unsafe { username_and_password(&*credentials) };
+        unsafe { CredFree(credentials as *const _ as _) };
+        unsafe { CredDeleteW(target_name, CRED_TYPE_GENERIC, None) }.unwrap();
+        result.unwrap()
+    }
 
     #[test]
     fn test_encode_restart_arguments() {
@@ -1672,5 +1783,16 @@ mod tests {
         let item = ClipboardItem::new_string_with_json_metadata("abcdef".to_string(), vec![3, 4]);
         write_to_clipboard(item.clone());
         assert_eq!(read_from_clipboard(), Some(item));
+
+        let item =
+            ClipboardItem::new_string_with_json_metadata("before\0after".to_string(), vec![12]);
+        write_to_clipboard(item);
+        assert_eq!(
+            read_from_clipboard(),
+            Some(ClipboardItem::new_string_with_json_metadata(
+                "before after".to_string(),
+                vec![12],
+            )),
+        );
     }
 }

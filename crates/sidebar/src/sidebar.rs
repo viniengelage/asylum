@@ -2862,10 +2862,14 @@ impl Sidebar {
         let key_for_toggle = key.clone();
         let key_for_focus = key.clone();
 
+        let color = cx.theme().colors();
+        let base_bg = sidebar_row_background(cx);
+
         // The fade gradient renders as a visible patch on transparent windows,
         // so truncate the label instead.
-        let opaque_window =
-            cx.theme().window_background_appearance() == WindowBackgroundAppearance::Opaque;
+        let opaque_window = cx.theme().window_background_appearance()
+            == WindowBackgroundAppearance::Opaque
+            && base_bg.a >= 1.0;
 
         let label = if highlight_positions.is_empty() {
             Label::new(label.clone())
@@ -2879,13 +2883,12 @@ impl Sidebar {
                 .into_any_element()
         };
 
-        let color = cx.theme().colors();
-        let base_bg = sidebar_row_background(cx);
         let hover_solid = sidebar_row_hover_background(cx);
+        let active_solid = hover_solid;
 
         let group_name_for_gradient = group_name.clone();
         let gradient_overlay = move || {
-            GradientFade::new(base_bg, hover_solid, hover_solid)
+            GradientFade::new(base_bg, hover_solid, active_solid)
                 .width(px(92.0))
                 .right(px(-2.0))
                 .gradient_stop(0.7)
@@ -2905,14 +2908,18 @@ impl Sidebar {
             .pr_1p5()
             .justify_between()
             .border_1()
+            .border_r_2()
             .map(|this| {
                 if is_focused {
-                    this.border_color(color.border_focused)
+                    this.border_color(color.panel_focused_border)
                 } else {
                     this.border_color(gpui::transparent_black())
                 }
             })
-            .when(!has_filter, |this| this.hover(|s| s.bg(hover_solid)))
+            .when(!has_filter, |this| {
+                this.hover(|s| s.bg(color.ghost_element_hover))
+                    .group_active(&group_name, |s| s.bg(color.ghost_element_active))
+            })
             .child(
                 h_flex()
                     .relative()
@@ -2978,22 +2985,31 @@ impl Sidebar {
             .children(opaque_window.then(|| gradient_overlay()))
             .child(
                 h_flex()
-                    .gap_px()
-                    .pr_1p5()
                     .children(opaque_window.then(|| gradient_overlay()))
-                    .child(self.render_new_thread_button(ix, id_prefix, key, &group_name, cx))
-                    .child(self.render_project_header_ellipsis_menu(
-                        ix,
-                        id_prefix,
-                        key,
-                        is_active,
-                        has_threads,
-                        &group_name,
-                        cx,
-                    ))
-                    .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
-                        cx.stop_propagation();
-                    }),
+                    .child(
+                        h_flex()
+                            .gap_px()
+                            .pr_1p5()
+                            .child(self.render_new_thread_button(
+                                ix,
+                                id_prefix,
+                                key,
+                                &group_name,
+                                cx,
+                            ))
+                            .child(self.render_project_header_ellipsis_menu(
+                                ix,
+                                id_prefix,
+                                key,
+                                is_active,
+                                has_threads,
+                                &group_name,
+                                cx,
+                            ))
+                            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
+                                cx.stop_propagation();
+                            }),
+                    ),
             )
             .on_mouse_down(gpui::MouseButton::Right, {
                 let menu_handle = self
@@ -3063,6 +3079,12 @@ impl Sidebar {
             SharedString::from(format!("{id_prefix}project-header-new-thread-{ix}")),
             IconName::Plus,
         )
+        .when(!is_menu_open && !self.has_filter_query(cx), |button| {
+            let color = cx.theme().colors();
+            button
+                .hover_background(color.element_background)
+                .active_background(color.element_active)
+        })
         .selected_style(ButtonStyle::Tinted(TintColor::Accent))
         .icon_size(IconSize::Small)
         .when(!is_menu_open, |this| this.visible_on_hover(group_name));
@@ -3367,6 +3389,12 @@ impl Sidebar {
             .with_handle(menu_handle)
             .trigger(
                 IconButton::new(trigger_id, IconName::Ellipsis)
+                    .when(!is_menu_open && !self.has_filter_query(cx), |button| {
+                        let color = cx.theme().colors();
+                        button
+                            .hover_background(color.element_background)
+                            .active_background(color.element_active)
+                    })
                     .selected_style(ButtonStyle::Tinted(TintColor::Accent))
                     .icon_size(IconSize::Small)
                     .when(!is_menu_open, |el| el.visible_on_hover(group_name)),
@@ -4363,9 +4391,7 @@ impl Sidebar {
             }
         }
 
-        let Some(configured_model) =
-            LanguageModelRegistry::read_global(cx).thread_summary_model(cx)
-        else {
+        let Some(model) = LanguageModelRegistry::read_global(cx).thread_summary_model(cx) else {
             if let Some(workspace) = self.active_workspace(cx) {
                 Self::show_no_thread_summary_model_toast(workspace, cx);
             }
@@ -4376,7 +4402,6 @@ impl Sidebar {
             return;
         }
 
-        let model = configured_model.model;
         let temperature = AgentSettings::temperature_for_model(&model, cx);
 
         let thread_store = ThreadStore::global(cx);
@@ -6779,6 +6804,9 @@ impl Sidebar {
         } else {
             sidebar_row_background(cx)
         };
+        let color = cx.theme().colors();
+        let button_hover_bg = color.element_background;
+        let button_active_bg = color.element_active;
 
         let timestamp: SharedString = if is_empty_draft {
             SharedString::default()
@@ -6843,6 +6871,8 @@ impl Sidebar {
             })
             .when(is_hovered && !is_renaming, |this| {
                 let rename_button = IconButton::new(("rename-thread", ix), IconName::Pencil)
+                    .hover_background(button_hover_bg)
+                    .active_background(button_active_bg)
                     .icon_size(IconSize::Small)
                     .tooltip({
                         let focus_handle = focus_handle.clone();
@@ -6885,6 +6915,8 @@ impl Sidebar {
                         Some(DraftKind::Empty) => None,
                         Some(DraftKind::WithContent) => Some(
                             IconButton::new("discard_thread", IconName::Close)
+                                .hover_background(button_hover_bg)
+                                .active_background(button_active_bg)
                                 .icon_size(IconSize::Small)
                                 .tooltip(Tooltip::text("Discard Draft"))
                                 .on_click({
@@ -6902,6 +6934,8 @@ impl Sidebar {
                         ),
                         None => Some(
                             IconButton::new("archive-thread", IconName::Archive)
+                                .hover_background(button_hover_bg)
+                                .active_background(button_active_bg)
                                 .icon_size(IconSize::Small)
                                 .tooltip({
                                     let focus_handle = focus_handle.clone();
@@ -7105,6 +7139,9 @@ impl Sidebar {
         } else {
             sidebar_row_background(cx)
         };
+        let color = cx.theme().colors();
+        let button_hover_bg = color.element_background;
+        let button_active_bg = color.element_active;
         let metadata = terminal.metadata.clone();
         let workspace = terminal.workspace.clone();
         let focus_handle = self.focus_handle.clone();
@@ -7149,6 +7186,8 @@ impl Sidebar {
             .when(is_hovered && !is_renaming, |this| {
                 this.action_slot(
                     IconButton::new("close-terminal", IconName::Close)
+                        .hover_background(button_hover_bg)
+                        .active_background(button_active_bg)
                         .icon_size(IconSize::Small)
                         .icon_color(Color::Muted)
                         .tooltip({

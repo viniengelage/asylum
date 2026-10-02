@@ -5,7 +5,6 @@
 //! an origin at the bottom left of the main display.
 
 mod core_simulator;
-mod dispatcher;
 mod display;
 mod display_link;
 mod events;
@@ -47,9 +46,9 @@ use std::{
     ops::Range,
 };
 
-pub(crate) use dispatcher::*;
 pub(crate) use display::*;
 pub(crate) use display_link::*;
+pub(crate) use gpui_apple::{AppleActivity, AppleDispatcher};
 pub(crate) use keyboard::*;
 pub(crate) use platform::*;
 pub(crate) use window::*;

@@ -614,13 +614,9 @@ impl ProfileStore {
             .filter(|provider| provider.is_authenticated(cx))
             .map(|provider| provider.name().0.to_string())
             .collect();
-        let default_model = registry.default_model().map(|configured| {
-            format!(
-                "{} · {}",
-                configured.provider.name().0,
-                configured.model.name().0
-            )
-        });
+        let default_model = registry
+            .default_model()
+            .map(|model| format!("{} · {}", model.provider_name.0, model.name.0));
         let agent_settings = AgentSettings::get_global(cx);
         let agent_profile = agent_settings
             .profiles
