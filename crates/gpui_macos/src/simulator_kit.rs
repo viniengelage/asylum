@@ -6,11 +6,20 @@ use cocoa::{
 };
 use gpui::{Pixels, Size};
 use objc::{
-    class, msg_send,
-    runtime::{BOOL, Class, NO, Object},
+    class,
+    declare::ClassDecl,
+    msg_send,
+    runtime::{BOOL, Class, NO, Object, Sel, YES},
     sel, sel_impl,
 };
-use std::ffi::c_void;
+use objc2_app_kit::{
+    NSWorkspaceApplicationKey, NSWorkspaceDidActivateApplicationNotification,
+    NSWorkspaceDidLaunchApplicationNotification,
+};
+use std::{
+    ffi::{CStr, c_void},
+    sync::Once,
+};
 
 const SIMULATOR_KIT_PATH: &str =
     "/Applications/Xcode.app/Contents/SharedFrameworks/SimulatorKit.framework";
@@ -21,6 +30,10 @@ const INVALID_SIMULATOR_KIT_OBJECTS: i32 = 1;
 const CONNECTION_FAILED: i32 = 2;
 
 static DEVICE_SCREEN_ASSOCIATION_KEY: u8 = 0;
+
+/// DeviceHub replaced Simulator.app in Xcode 27; both are listed so older Xcodes behave the same.
+const DEVICE_HUB_BUNDLE_IDENTIFIERS: [&[u8]; 2] =
+    [b"com.apple.dt.Devices", b"com.apple.iphonesimulator"];
 
 unsafe extern "C" {
     fn objc_setAssociatedObject(
@@ -94,7 +107,106 @@ pub(crate) fn create_sim_display_view(device: id, size: Size<Pixels>) -> Result<
         );
         let _: () = msg_send![device_screen, release];
 
+        hide_device_hub_while_embedded();
         Ok(display_view)
+    }
+}
+
+/// `expo run:ios` and `react-native run-ios` open DeviceHub on every build and launch, on top
+/// of the simulator already embedded here. They only check that the app is running, so it is
+/// hidden rather than quit: quitting makes Expo wait for it until it times out, and the next
+/// launch would open it again anyway.
+fn hide_device_hub_while_embedded() {
+    static INSTALL: Once = Once::new();
+    INSTALL.call_once(|| unsafe {
+        let Some(mut decl) = ClassDecl::new("GPUIDeviceHubObserver", class!(NSObject)) else {
+            log::error!("could not declare the DeviceHub observer class");
+            return;
+        };
+        decl.add_method(
+            sel!(applicationDidChange:),
+            hide_embedded_device_hub as extern "C" fn(&Object, Sel, id),
+        );
+        let observer_class = decl.register();
+        // Lives as long as the process, like the notification registrations pointing at it.
+        let observer: id = msg_send![observer_class, new];
+
+        let workspace: id = msg_send![class!(NSWorkspace), sharedWorkspace];
+        let center: id = msg_send![workspace, notificationCenter];
+        for name in [
+            NSWorkspaceDidLaunchApplicationNotification,
+            NSWorkspaceDidActivateApplicationNotification,
+        ] {
+            let name: *const objc2_foundation::NSString = name;
+            let _: () = msg_send![
+                center,
+                addObserver: observer
+                selector: sel!(applicationDidChange:)
+                name: name as id
+                object: nil
+            ];
+        }
+    });
+}
+
+extern "C" fn hide_embedded_device_hub(_: &Object, _: Sel, notification: id) {
+    unsafe {
+        let user_info: id = msg_send![notification, userInfo];
+        let application_key: *const objc2_foundation::NSString = NSWorkspaceApplicationKey;
+        let application: id = msg_send![user_info, objectForKey: application_key as id];
+        if application == nil || !is_device_hub(application) || !has_embedded_simulator() {
+            return;
+        }
+
+        let was_active: BOOL = msg_send![application, isActive];
+        let _: BOOL = msg_send![application, hide];
+        // Hiding the frontmost app does not hand focus back to the workspace it covered.
+        if was_active != NO {
+            let app: id = msg_send![class!(NSApplication), sharedApplication];
+            let _: () = msg_send![app, activateIgnoringOtherApps: YES];
+        }
+    }
+}
+
+unsafe fn is_device_hub(application: id) -> bool {
+    unsafe {
+        let bundle_identifier: id = msg_send![application, bundleIdentifier];
+        if bundle_identifier == nil {
+            return false;
+        }
+        let utf8: *const std::os::raw::c_char = msg_send![bundle_identifier, UTF8String];
+        if utf8.is_null() {
+            return false;
+        }
+        let bundle_identifier = CStr::from_ptr(utf8).to_bytes();
+        DEVICE_HUB_BUNDLE_IDENTIFIERS.contains(&bundle_identifier)
+    }
+}
+
+/// A display view hidden along with its tab still counts: the device is in use here, and
+/// DeviceHub coming forward would only cover the workspace.
+unsafe fn has_embedded_simulator() -> bool {
+    unsafe {
+        let Some(display_view_class) = Class::get("SimulatorKit.SimDisplayView") else {
+            return false;
+        };
+        let app: id = msg_send![class!(NSApplication), sharedApplication];
+        let windows: id = msg_send![app, windows];
+        let window_count: usize = msg_send![windows, count];
+        (0..window_count).any(|window_index| {
+            let window: id = msg_send![windows, objectAtIndex: window_index];
+            let content_view: id = msg_send![window, contentView];
+            if content_view == nil {
+                return false;
+            }
+            let subviews: id = msg_send![content_view, subviews];
+            let subview_count: usize = msg_send![subviews, count];
+            (0..subview_count).any(|subview_index| {
+                let subview: id = msg_send![subviews, objectAtIndex: subview_index];
+                let is_display_view: BOOL = msg_send![subview, isKindOfClass: display_view_class];
+                is_display_view != NO
+            })
+        })
     }
 }
 
@@ -198,9 +310,7 @@ pub(crate) fn send_sim_display_input(display_view: id, input: gpui::SimulatorInp
                 ];
                 let (event_type, pressure) = match phase {
                     gpui::SimulatorPointerPhase::Down => (NS_EVENT_TYPE_LEFT_MOUSE_DOWN, 1.0f32),
-                    gpui::SimulatorPointerPhase::Drag => {
-                        (NS_EVENT_TYPE_LEFT_MOUSE_DRAGGED, 1.0f32)
-                    }
+                    gpui::SimulatorPointerPhase::Drag => (NS_EVENT_TYPE_LEFT_MOUSE_DRAGGED, 1.0f32),
                     gpui::SimulatorPointerPhase::Up => (NS_EVENT_TYPE_LEFT_MOUSE_UP, 0.0f32),
                 };
                 let event: id = msg_send![
