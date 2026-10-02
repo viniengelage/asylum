@@ -642,6 +642,7 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
         let api_button = cx.new(|cx| api_client::ApiToolkitButton::new(workspace, cx));
         let database_button =
             cx.new(|cx| database_client::DatabaseToolkitButton::new(workspace, cx));
+        let elastic_button = cx.new(|cx| elastic::ElasticToolkitButton::new(workspace, cx));
         let task_agents_button =
             cx.new(|cx| agent_ui::task_agents_view::TaskAgentsToolkitButton::new(workspace, cx));
         let dock_toggle_buttons =
@@ -667,6 +668,7 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
             status_bar.add_toolkit_item(repo_button, window, cx);
             status_bar.add_toolkit_item(api_button, window, cx);
             status_bar.add_toolkit_item(database_button, window, cx);
+            status_bar.add_toolkit_item(elastic_button, window, cx);
             status_bar.add_toolkit_item(task_agents_button, window, cx);
             // Editor info renders right items in reverse, so this sits at its right end,
             // next to the toolkit.
@@ -6073,6 +6075,7 @@ mod tests {
                 "diagnostics",
                 "edit_prediction",
                 "editor",
+                "elastic",
                 "encoding_selector",
                 "feedback",
                 "file_finder",

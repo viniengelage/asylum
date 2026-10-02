@@ -25,9 +25,9 @@ use serde::{Deserialize, Serialize};
 use zed_actions::{
     DecreaseBufferFontSize, IncreaseBufferFontSize, ResetBufferFontSize,
     agent::{
-        AddSelectionToThread, ConflictContent, LogoutAgent, MentionPullRequest, OpenSettings,
-        ReauthenticateAgent, ResetAgentZoom, ResetOnboarding, ResolveConflictedFilesWithAgent,
-        ResolveConflictsWithAgent, ReviewBranchDiff, SelectAgent,
+        AddSelectionToThread, ConflictContent, LogoutAgent, MentionLogs, MentionPullRequest,
+        OpenSettings, ReauthenticateAgent, ResetAgentZoom, ResetOnboarding,
+        ResolveConflictedFilesWithAgent, ResolveConflictsWithAgent, ReviewBranchDiff, SelectAgent,
     },
     assistant::{
         FocusAgent, ManageSkills, OpenGlobalAgentsMdRules, OpenProjectAgentsMdRules, Toggle,
@@ -575,6 +575,9 @@ pub fn init(cx: &mut App) {
                 })
                 .register_action(|workspace, action: &MentionPullRequest, window, cx| {
                     mention_pull_request(workspace, action, window, cx);
+                })
+                .register_action(|workspace, action: &MentionLogs, window, cx| {
+                    mention_logs(workspace, action, window, cx);
                 })
                 .register_action(
                     |workspace, action: &ResolveConflictsWithAgent, window, cx| {
@@ -6982,6 +6985,90 @@ fn mention_pull_request(
         },
         cx,
     );
+    let prompt = action.prompt.clone();
+    let submit = action.submit;
+    let panel = panel.downgrade();
+    cx.spawn_in(window, async move |workspace, cx| {
+        let content = match describe.await {
+            Ok(content) => content,
+            Err(error) => {
+                workspace.update(cx, |workspace, cx| workspace.show_error(error, cx))?;
+                return anyhow::Ok(());
+            }
+        };
+        let mut blocks = vec![acp::ContentBlock::Resource(acp::EmbeddedResource::new(
+            acp::EmbeddedResourceResource::TextResourceContents(acp::TextResourceContents::new(
+                content,
+                mention_uri.to_uri().to_string(),
+            )),
+        ))];
+        blocks.push(acp::ContentBlock::Text(acp::TextContent::new(
+            match prompt {
+                Some(prompt) => format!(" {prompt}"),
+                None => " ".to_string(),
+            },
+        )));
+        panel.update_in(cx, |panel, window, cx| {
+            panel.external_thread(
+                None,
+                None,
+                None,
+                None,
+                Some(AgentInitialContent::ContentBlock {
+                    blocks,
+                    auto_submit: submit,
+                }),
+                true,
+                AgentThreadSource::AgentPanel,
+                window,
+                cx,
+            );
+        })?;
+        anyhow::Ok(())
+    })
+    .detach_and_log_err(cx);
+}
+
+/// Puts logs from the Elastic dock into the agent, the same way pull requests go in: a bare
+/// mention joins the message being written, one with a prompt starts its own thread.
+fn mention_logs(
+    workspace: &mut Workspace,
+    action: &MentionLogs,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    let Some(panel) = workspace.panel::<AgentPanel>(cx) else {
+        return;
+    };
+    let mention_uri = MentionUri::Logs {
+        id: action.id.clone(),
+        title: action.title.clone(),
+    };
+    if !panel.focus_handle(cx).contains_focused(window, cx) {
+        workspace.focus_panel::<AgentPanel>(window, cx);
+    }
+
+    let active_editor = panel.read(cx).active_conversation_view().and_then(|view| {
+        view.read(cx)
+            .active_thread()
+            .map(|thread| thread.read(cx).active_editor(cx))
+    });
+    if action.prompt.is_none()
+        && let Some(editor) = active_editor
+    {
+        panel.update(cx, |_, cx| {
+            cx.defer_in(window, move |_, window, cx| {
+                editor.update(cx, |editor, cx| {
+                    editor.insert_mention(mention_uri, window, cx);
+                    editor.focus_handle(cx).focus(window, cx);
+                });
+            });
+        });
+        return;
+    }
+
+    let project = workspace.project().clone();
+    let describe = task_agents::describe_log_mention(&project, &action.id, cx);
     let prompt = action.prompt.clone();
     let submit = action.submit;
     let panel = panel.downgrade();

@@ -1727,6 +1727,44 @@
     },
   },
   {
+    // Elastic (crates/elastic), declared here for the same reason as the database client's.
+    "context": "EsqlQueryView > Editor",
+    "use_key_equivalents": true,
+    "bindings": {
+      "ctrl-enter": "elastic::RunQuery",
+      "ctrl-.": "elastic::CancelQuery",
+    },
+  },
+  {
+    "context": "EsqlQueryView",
+    "use_key_equivalents": true,
+    "bindings": {
+      "ctrl-enter": "elastic::RunQuery",
+      "ctrl-.": "elastic::CancelQuery",
+    },
+  },
+  {
+    "context": "ElasticConnectView",
+    "use_key_equivalents": true,
+    "bindings": {
+      "ctrl-enter": "elastic::SaveConnection",
+    },
+  },
+  {
+    "context": "ElasticFollowView",
+    "use_key_equivalents": true,
+    "bindings": {
+      "ctrl-.": "elastic::TogglePause",
+    },
+  },
+  {
+    "context": "ElasticFollowFilter > Editor",
+    "use_key_equivalents": true,
+    "bindings": {
+      "enter": "elastic::ApplyFollowFilter",
+    },
+  },
+  {
     "context": "DatabaseTableFilter > Editor",
     "use_key_equivalents": true,
     "bindings": {

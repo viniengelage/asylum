@@ -299,6 +299,106 @@ pub fn focus_sql_editor(
     focus(project, abs_path, window, cx)
 }
 
+/// Something from the Elastic dock the user can point the agent at with `@`: an ES|QL tab, a
+/// log document, a trace.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct LogMention {
+    /// Opaque to the agent: `esql:<path>`, `trace:<id>`, `doc:<n>`…
+    pub id: SharedString,
+    pub title: SharedString,
+    /// The connection, e.g. "trix-logs".
+    pub detail: SharedString,
+}
+
+type ListLogMentions = Arc<dyn Fn(&Entity<Project>, &App) -> Vec<LogMention>>;
+type DescribeLogMention = Arc<dyn Fn(&Entity<Project>, &str, &mut App) -> Task<Result<String>>>;
+type OpenLogMention = Arc<dyn Fn(&Entity<Project>, &str, &mut Window, &mut App) -> Result<()>>;
+type OpenLogQuery = Arc<dyn Fn(&Entity<Project>, String, u32, &mut Window, &mut App) -> Result<()>>;
+type FollowLogs = Arc<dyn Fn(&Entity<Project>, String, &mut Window, &mut App) -> Result<()>>;
+
+/// Installed by the Elastic dock, so the agent can offer and read its logs without depending on
+/// it.
+#[derive(Clone)]
+pub struct LogSource {
+    /// The open ES|QL tabs, most recently opened first.
+    pub list: ListLogMentions,
+    /// What the agent receives when the mention is sent, with personal data masked.
+    pub describe: DescribeLogMention,
+    /// Brings what the mention points at to the front.
+    pub open: OpenLogMention,
+    /// Opens an ES|QL query in a new tab of the Elastic dock, with a window in minutes, and
+    /// runs it.
+    pub open_query: OpenLogQuery,
+    /// Follows a data stream in a tab of the Elastic dock.
+    pub follow: FollowLogs,
+}
+
+impl Global for LogSource {}
+
+pub fn register_log_source(source: LogSource, cx: &mut App) {
+    cx.set_global(source);
+}
+
+pub fn log_mentions(project: &Entity<Project>, cx: &App) -> Vec<LogMention> {
+    cx.try_global::<LogSource>()
+        .map(|source| (source.list)(project, cx))
+        .unwrap_or_default()
+}
+
+pub fn describe_log_mention(
+    project: &Entity<Project>,
+    id: &str,
+    cx: &mut App,
+) -> Task<Result<String>> {
+    match cx.try_global::<LogSource>() {
+        Some(source) => {
+            let describe = source.describe.clone();
+            describe(project, id, cx)
+        }
+        None => Task::ready(Err(anyhow::anyhow!("This build has no Elastic dock."))),
+    }
+}
+
+pub fn open_log_mention(
+    project: &Entity<Project>,
+    id: &str,
+    window: &mut Window,
+    cx: &mut App,
+) -> Result<()> {
+    let open = cx
+        .try_global::<LogSource>()
+        .map(|source| source.open.clone())
+        .ok_or_else(|| anyhow::anyhow!("This build has no Elastic dock."))?;
+    open(project, id, window, cx)
+}
+
+pub fn open_log_query(
+    project: &Entity<Project>,
+    query: String,
+    window_minutes: u32,
+    window: &mut Window,
+    cx: &mut App,
+) -> Result<()> {
+    let open_query = cx
+        .try_global::<LogSource>()
+        .map(|source| source.open_query.clone())
+        .ok_or_else(|| anyhow::anyhow!("This build has no Elastic dock."))?;
+    open_query(project, query, window_minutes, window, cx)
+}
+
+pub fn follow_logs(
+    project: &Entity<Project>,
+    source: String,
+    window: &mut Window,
+    cx: &mut App,
+) -> Result<()> {
+    let follow = cx
+        .try_global::<LogSource>()
+        .map(|source| source.follow.clone())
+        .ok_or_else(|| anyhow::anyhow!("This build has no Elastic dock."))?;
+    follow(project, source, window, cx)
+}
+
 pub const DATABASE_QUERY_TOOL: &str = "database_query";
 pub const DATABASE_WRITE_QUERY_TOOL: &str = "database_write_query";
 
@@ -350,6 +450,76 @@ pub struct DatabaseWriteResult {
     pub connection: DatabaseConnectionInfo,
     pub abs_path: PathBuf,
     pub line: usize,
+}
+
+pub const ELASTIC_ESQL_TOOL: &str = "elastic_esql";
+pub const ELASTIC_WIDE_ESQL_TOOL: &str = "elastic_wide_esql";
+pub const ELASTIC_TRACE_TOOL: &str = "elastic_trace";
+pub const ELASTIC_RECENT_ERRORS_TOOL: &str = "elastic_recent_errors";
+
+/// The Elasticsearch connection a tool read through, as the thread shows it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ElasticConnectionInfo {
+    pub name: String,
+    /// `dev`, `staging` or `prod`.
+    pub environment: String,
+}
+
+impl ElasticConnectionInfo {
+    pub fn is_production(&self) -> bool {
+        self.environment == "prod"
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ElasticColumn {
+    pub name: String,
+    /// The ES|QL type (`long`, `keyword`, `date`…).
+    pub kind: String,
+}
+
+/// What `elastic_esql` and `elastic_recent_errors` keep for the thread: the rows as the dock
+/// shows them, unmasked, since only the user sees the card; the model got a masked copy.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ElasticQueryResult {
+    pub connection: ElasticConnectionInfo,
+    pub query: String,
+    pub window_minutes: u32,
+    /// The first index pattern after FROM, for the title and "Seguir".
+    pub source: Option<String>,
+    pub columns: Vec<ElasticColumn>,
+    /// Values as text; `None` is null. Capped, see `total_rows`.
+    pub rows: Vec<Vec<Option<String>>>,
+    pub total_rows: usize,
+    pub limit: usize,
+    pub took_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ElasticTraceSpan {
+    pub name: String,
+    pub service: String,
+    /// `transaction` or `span`.
+    pub event: String,
+    pub kind: Option<String>,
+    pub depth: usize,
+    /// From the start of the trace.
+    pub offset_us: u64,
+    pub duration_us: u64,
+    pub failed: bool,
+    pub status: Option<u64>,
+}
+
+/// What `elastic_trace` keeps for the thread: the waterfall, capped to its first spans.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ElasticTraceResult {
+    pub connection: ElasticConnectionInfo,
+    pub trace_id: String,
+    pub duration_us: u64,
+    pub spans: Vec<ElasticTraceSpan>,
+    pub total_spans: usize,
+    pub errors: Vec<String>,
+    pub log_count: usize,
 }
 
 pub const REPO_PULL_REQUEST_TOOL: &str = "repo_pull_request";

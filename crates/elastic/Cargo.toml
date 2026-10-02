@@ -1,0 +1,47 @@
+[package]
+name = "elastic"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+license = "GPL-3.0-or-later"
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/elastic.rs"
+
+[dependencies]
+anyhow.workspace = true
+base64.workspace = true
+chrono.workspace = true
+collections.workspace = true
+credentials_provider.workspace = true
+db.workspace = true
+editor.workspace = true
+fs.workspace = true
+futures.workspace = true
+gpui.workspace = true
+http_client.workspace = true
+language.workspace = true
+log.workspace = true
+project.workspace = true
+regex.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+task_agents.workspace = true
+thiserror.workspace = true
+ui.workspace = true
+ui_input.workspace = true
+urlencoding.workspace = true
+util.workspace = true
+uuid.workspace = true
+workspace.workspace = true
+zed_actions.workspace = true
+zed_credentials_provider.workspace = true
+
+[dev-dependencies]
+http_client = { workspace = true, features = ["test-support"] }
+reqwest_client.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread"] }

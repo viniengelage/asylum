@@ -55,6 +55,7 @@ use super::elicitation::{
 use super::*;
 
 mod database_card;
+mod elastic_card;
 mod repo_card;
 
 /// The message the "Executar" button sends. The plan card also looks for it to
@@ -784,6 +785,7 @@ pub struct ThreadView {
     pub session_capabilities: SharedSessionCapabilities,
     pub expanded_tool_call_raw_inputs: HashSet<acp_v1::ToolCallId>,
     expanded_database_sql: HashSet<acp_v1::ToolCallId>,
+    expanded_elastic_queries: HashSet<acp_v1::ToolCallId>,
     collapsed_sandbox_authorization_details: HashSet<acp_v1::ToolCallId>,
     collapsed_sandbox_network_details: HashSet<acp_v1::ToolCallId>,
     /// Sandbox escalation prompts whose "surprising Unicode" warning the user
@@ -1222,6 +1224,7 @@ impl ThreadView {
             thread_feedback: Default::default(),
             expanded_tool_call_raw_inputs: HashSet::default(),
             expanded_database_sql: HashSet::default(),
+            expanded_elastic_queries: HashSet::default(),
             collapsed_sandbox_authorization_details: HashSet::default(),
             collapsed_sandbox_network_details: HashSet::default(),
             acknowledged_confusable_warnings: HashSet::default(),
@@ -9901,6 +9904,14 @@ impl ThreadView {
                     .when_some(repo_card::repo_card(tool_call), |this, card| {
                         this.child(self.render_repo_card(entry_ix, card, layout, cx))
                     })
+                    .when_some(
+                        elastic_card::elastic_card(tool_call),
+                        |this, card| {
+                            this.child(
+                                self.render_elastic_card(entry_ix, tool_call, card, layout, cx),
+                            )
+                        },
+                    )
                 })
             }
         })
@@ -14597,6 +14608,10 @@ pub(crate) fn open_link(
                     Box::new(zed_actions::repo_hosting::OpenPullRequest { number }),
                     cx,
                 );
+            }
+            MentionUri::Logs { id, .. } => {
+                let project = workspace.project().clone();
+                task_agents::open_log_mention(&project, &id, window, cx).log_err();
             }
             MentionUri::Rule { name, .. } => {
                 crate::ui::open_migrated_rule(workspace, &name, window, cx);

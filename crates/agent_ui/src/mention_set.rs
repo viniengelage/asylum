@@ -159,6 +159,7 @@ impl MentionSet {
             MentionUri::SqlQuery { abs_path, .. } => {
                 self.confirm_mention_for_sql_query(abs_path, cx)
             }
+            MentionUri::Logs { id, .. } => self.confirm_mention_for_logs(id, cx),
             MentionUri::PullRequest {
                 number,
                 comment_id,
@@ -363,6 +364,7 @@ impl MentionSet {
             MentionUri::SqlQuery { abs_path, .. } => {
                 self.confirm_mention_for_sql_query(abs_path, cx)
             }
+            MentionUri::Logs { id, .. } => self.confirm_mention_for_logs(id, cx),
             MentionUri::PullRequest {
                 number,
                 comment_id,
@@ -749,6 +751,24 @@ impl MentionSet {
             return Task::ready(Err(anyhow!("project not found")));
         };
         let describe = task_agents::describe_pull_request(&project, reference, cx);
+        cx.spawn(async move |_, _| {
+            let content = describe.await?;
+            Ok(Mention::Text {
+                content,
+                tracked_buffers: Vec::new(),
+            })
+        })
+    }
+
+    fn confirm_mention_for_logs(
+        &self,
+        id: String,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<Mention>> {
+        let Some(project) = self.project.upgrade() else {
+            return Task::ready(Err(anyhow!("project not found")));
+        };
+        let describe = task_agents::describe_log_mention(&project, &id, cx);
         cx.spawn(async move |_, _| {
             let content = describe.await?;
             Ok(Mention::Text {

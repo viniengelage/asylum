@@ -105,6 +105,7 @@ impl SessionCapabilities {
                 PromptContextType::BranchDiff,
                 PromptContextType::SqlQuery,
                 PromptContextType::PullRequest,
+                PromptContextType::Logs,
             ]);
         }
         supported

@@ -88,6 +88,12 @@ pub enum MentionUri {
         source: String,
         skill_file_path: PathBuf,
     },
+    /// Something from the Elastic dock: an ES|QL tab, a log document, followed lines or an APM
+    /// trace. The dock resolves `id`.
+    Logs {
+        id: String,
+        title: String,
+    },
 }
 
 impl MentionUri {
@@ -278,6 +284,12 @@ impl MentionUri {
                         comment_id,
                         file_path: query_param(&url, "path"),
                     })
+                } else if path.starts_with("/agent/logs") {
+                    validate_query_params(&url, &["id", "title"])?;
+                    Ok(Self::Logs {
+                        id: query_param(&url, "id").context("Missing id for logs")?,
+                        title: query_param(&url, "title").unwrap_or_default(),
+                    })
                 } else if path.starts_with("/agent/skill") {
                     let mut name = None;
                     let mut source = None;
@@ -369,7 +381,8 @@ impl MentionUri {
             | MentionUri::GitDiff { .. }
             | MentionUri::MergeConflict { .. }
             | MentionUri::SqlQuery { .. }
-            | MentionUri::PullRequest { .. } => None,
+            | MentionUri::PullRequest { .. }
+            | MentionUri::Logs { .. } => None,
         }
     }
 
@@ -438,6 +451,7 @@ impl MentionUri {
             } => selection_name(path.as_deref(), line_range),
             MentionUri::Fetch { url } => url.to_string(),
             MentionUri::Skill { name, .. } => name.clone(),
+            MentionUri::Logs { title, .. } => title.clone(),
         }
     }
 
@@ -536,6 +550,7 @@ impl MentionUri {
             MentionUri::MergeConflict { .. } => IconName::GitMergeConflict.path().into(),
             MentionUri::SqlQuery { .. } => IconName::Database.path().into(),
             MentionUri::PullRequest { .. } => IconName::PullRequest.path().into(),
+            MentionUri::Logs { .. } => IconName::CloudPulse.path().into(),
             MentionUri::Skill { .. } => IconName::Sparkle.path().into(),
         }
     }
@@ -683,6 +698,13 @@ impl MentionUri {
                         query.append_pair("path", file_path);
                     }
                 }
+                url
+            }
+            MentionUri::Logs { id, title } => {
+                let mut url = Url::parse("zed:///agent/logs").unwrap();
+                url.query_pairs_mut()
+                    .append_pair("id", id)
+                    .append_pair("title", title);
                 url
             }
             MentionUri::Skill {
@@ -1005,6 +1027,20 @@ mod tests {
             mention
         );
         assert_eq!(mention.name(), "query-2.sql · Homologação");
+    }
+
+    #[test]
+    fn test_logs_uri_round_trips() {
+        let mention = MentionUri::Logs {
+            id: "trace:4bf92f3577b34da6a3ce929d0e0e4736".to_string(),
+            title: "trace 4bf92f35".to_string(),
+        };
+        let uri = mention.to_uri().to_string();
+        assert_eq!(
+            MentionUri::parse(&uri, PathStyle::local()).unwrap(),
+            mention
+        );
+        assert_eq!(mention.name(), "trace 4bf92f35");
     }
 
     #[test]

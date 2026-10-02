@@ -12,6 +12,7 @@ use rope::Point;
 use settings::Settings;
 use theme_settings::ThemeSettings;
 use ui::{ButtonLike, TintColor, Tooltip, prelude::*};
+use util::ResultExt as _;
 use workspace::{OpenOptions, Workspace};
 
 use crate::open_abs_path_at_point;
@@ -231,6 +232,10 @@ fn open_mention_uri(
                 Box::new(zed_actions::repo_hosting::OpenPullRequest { number }),
                 cx,
             );
+        }
+        MentionUri::Logs { id, .. } => {
+            let project = workspace.project().clone();
+            task_agents::open_log_mention(&project, &id, window, cx).log_err();
         }
     });
 }

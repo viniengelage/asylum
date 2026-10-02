@@ -165,6 +165,7 @@ pub(crate) enum PromptContextType {
     BranchDiff,
     SqlQuery,
     PullRequest,
+    Logs,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -251,6 +252,7 @@ impl TryFrom<&str> for PromptContextType {
             "diff" => Ok(Self::BranchDiff),
             "sql" => Ok(Self::SqlQuery),
             "pr" => Ok(Self::PullRequest),
+            "log" => Ok(Self::Logs),
             _ => Err(format!("Invalid context picker mode: {}", value)),
         }
     }
@@ -268,6 +270,7 @@ impl PromptContextType {
             Self::BranchDiff => "branch diff",
             Self::SqlQuery => "sql query",
             Self::PullRequest => "pr",
+            Self::Logs => "log",
         }
     }
 
@@ -282,6 +285,7 @@ impl PromptContextType {
             Self::BranchDiff => "Branch Diff",
             Self::SqlQuery => "SQL Query",
             Self::PullRequest => "Pull Request",
+            Self::Logs => "Logs (Elastic)",
         }
     }
 
@@ -296,6 +300,7 @@ impl PromptContextType {
             Self::BranchDiff => IconName::GitBranch,
             Self::SqlQuery => IconName::Database,
             Self::PullRequest => IconName::PullRequest,
+            Self::Logs => IconName::CloudPulse,
         }
     }
 }
@@ -311,6 +316,7 @@ pub(crate) enum Match {
     BranchDiff(BranchDiffMatch),
     SqlQuery(task_agents::SqlEditorTab),
     PullRequest(task_agents::PullRequestEntry),
+    Logs(task_agents::LogMention),
 }
 
 #[derive(Debug, Clone)]
@@ -331,6 +337,7 @@ impl Match {
             Match::BranchDiff(_) => 1.,
             Match::SqlQuery(_) => 1.,
             Match::PullRequest(_) => 1.,
+            Match::Logs(_) => 1.,
         }
     }
 }
@@ -1076,6 +1083,62 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
         }
     }
 
+    fn build_logs_completion(
+        entry: task_agents::LogMention,
+        source_range: Range<Anchor>,
+        source: Arc<T>,
+        editor: WeakEntity<Editor>,
+        mention_set: WeakEntity<MentionSet>,
+        workspace: Entity<Workspace>,
+        cx: &mut App,
+    ) -> Completion {
+        let label = format!("{} · {}", entry.title, entry.detail);
+        let uri = MentionUri::Logs {
+            id: entry.id.to_string(),
+            title: entry.title.to_string(),
+        };
+        let crease_text: SharedString = uri.name().into();
+        let display_text = format!("@{}", crease_text);
+        let new_text = format!("[{}]({}) ", display_text, uri.to_uri());
+        let new_text_len = new_text.len();
+        let icon_path = uri.icon_path(cx);
+
+        Completion {
+            replace_range: source_range.clone(),
+            new_text,
+            label: CodeLabel::plain(label, None),
+            documentation: None,
+            source: project::CompletionSource::Custom,
+            icon_path: Some(icon_path),
+            icon_color: None,
+            match_start: None,
+            snippet_deduplication_key: None,
+            insert_text_mode: None,
+            confirm: Some(confirm_completion_callback(
+                crease_text,
+                source_range.start,
+                new_text_len - 1,
+                uri,
+                source,
+                editor,
+                mention_set,
+                workspace,
+            )),
+            group: None,
+        }
+    }
+
+    fn log_mentions(
+        &self,
+        workspace: &Entity<Workspace>,
+        cx: &App,
+    ) -> Vec<task_agents::LogMention> {
+        if !self.source.supports_context(PromptContextType::Logs, cx) {
+            return Vec::new();
+        }
+        task_agents::log_mentions(workspace.read(cx).project(), cx)
+    }
+
     fn pull_request_entries(
         &self,
         workspace: &Entity<Workspace>,
@@ -1305,6 +1368,13 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
                     .collect(),
             ),
 
+            Some(PromptContextType::Logs) => Task::ready(
+                self.log_mentions(&workspace, cx)
+                    .into_iter()
+                    .map(Match::Logs)
+                    .collect(),
+            ),
+
             Some(PromptContextType::PullRequest) => {
                 let entries = self.pull_request_entries(&workspace, cx);
                 if query.is_empty() {
@@ -1352,6 +1422,7 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
                     None
                 };
                 let sql_queries = self.sql_query_tabs(&workspace, cx);
+                let log_mentions = self.log_mentions(&workspace, cx);
                 let branch_pull_request = self
                     .pull_request_entries(&workspace, cx)
                     .into_iter()
@@ -1363,6 +1434,7 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
                         .map(Match::PullRequest)
                         .collect::<Vec<_>>();
                     matches.extend(sql_queries.into_iter().map(Match::SqlQuery));
+                    matches.extend(log_mentions.into_iter().map(Match::Logs));
                     matches.extend(recent_task.await);
                     matches.extend(entries);
 
@@ -1415,6 +1487,22 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
                         )
                     })
                     .collect::<Vec<_>>();
+                let log_mentions = self.log_mentions(&workspace, cx);
+                let log_candidates = log_mentions
+                    .iter()
+                    .enumerate()
+                    .map(|(ix, entry)| {
+                        StringMatchCandidate::new(
+                            ix,
+                            &format!(
+                                "{} {} {}",
+                                PromptContextType::Logs.keyword(),
+                                entry.title,
+                                entry.detail
+                            ),
+                        )
+                    })
+                    .collect::<Vec<_>>();
 
                 cx.spawn(async move |cx| {
                     let mut matches = search_files_task
@@ -1458,6 +1546,22 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
                                 .get(mat.candidate_id)
                                 .cloned()
                                 .map(Match::SqlQuery)
+                        }));
+                    }
+
+                    if !log_candidates.is_empty() {
+                        let log_matches = fuzzy::match_strings(
+                            &log_candidates,
+                            &query,
+                            false,
+                            true,
+                            log_candidates.len(),
+                            &Arc::new(AtomicBool::default()),
+                            cx.background_executor().clone(),
+                        )
+                        .await;
+                        matches.extend(log_matches.into_iter().filter_map(|mat| {
+                            log_mentions.get(mat.candidate_id).cloned().map(Match::Logs)
                         }));
                     }
 
@@ -1631,6 +1735,10 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
 
         if !self.pull_request_entries(workspace, cx).is_empty() {
             entries.push(PromptContextEntry::Mode(PromptContextType::PullRequest));
+        }
+
+        if !self.log_mentions(workspace, cx).is_empty() {
+            entries.push(PromptContextEntry::Mode(PromptContextType::Logs));
         }
 
         if self
@@ -1974,7 +2082,7 @@ impl<T: PromptCompletionProviderDelegate> CompletionProvider for PromptCompletio
                                 is_recent: true, ..
                             })
                             | Match::RecentThread(_) => 0,
-                            Match::SqlQuery(_) | Match::PullRequest(_) => 0,
+                            Match::SqlQuery(_) | Match::PullRequest(_) | Match::Logs(_) => 0,
                             Match::Entry(_) | Match::BranchDiff(_) => 1,
                             _ => 2,
                         });
@@ -2000,6 +2108,10 @@ impl<T: PromptCompletionProviderDelegate> CompletionProvider for PromptCompletio
                                         Match::PullRequest(_) => Some(CompletionGroup {
                                             key: "pull-requests".into(),
                                             label: Some("Pull requests".into()),
+                                        }),
+                                        Match::Logs(_) => Some(CompletionGroup {
+                                            key: "logs".into(),
+                                            label: Some("Logs".into()),
                                         }),
                                         Match::Entry(_) | Match::BranchDiff(_) => {
                                             Some(CompletionGroup {
@@ -2141,6 +2253,15 @@ impl<T: PromptCompletionProviderDelegate> CompletionProvider for PromptCompletio
                                             cx,
                                         ))
                                     }
+                                    Match::Logs(entry) => Some(Self::build_logs_completion(
+                                        entry,
+                                        source_range.clone(),
+                                        source.clone(),
+                                        editor.clone(),
+                                        mention_set.clone(),
+                                        workspace.clone(),
+                                        cx,
+                                    )),
                                 };
                                 if let Some(completion) = &mut completion {
                                     completion.group = group;

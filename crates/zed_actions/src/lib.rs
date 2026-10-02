@@ -653,6 +653,23 @@ pub mod agent {
         pub submit: bool,
     }
 
+    /// Mentions something from the Elastic dock in the agent panel: an ES|QL tab, a log
+    /// document, followed lines or an APM trace. Without a prompt the mention goes into the
+    /// message being written; with one, a new thread starts with it.
+    #[derive(Clone, PartialEq, Deserialize, JsonSchema, Action)]
+    #[action(namespace = agent)]
+    #[serde(deny_unknown_fields)]
+    pub struct MentionLogs {
+        /// Opaque to the agent panel; the Elastic dock resolves it.
+        pub id: String,
+        pub title: String,
+        #[serde(default)]
+        pub prompt: Option<String>,
+        /// Sends the prompt right away instead of leaving it in the message editor.
+        #[serde(default)]
+        pub submit: bool,
+    }
+
     /// A single merge conflict region extracted from a file.
     #[derive(Clone, Debug, PartialEq, Deserialize, JsonSchema)]
     pub struct ConflictContent {
