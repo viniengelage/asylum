@@ -81,7 +81,6 @@ use uuid::Uuid;
 pub use app_menu::*;
 
 /// Where a synthetic pointer event is in the gesture it belongs to.
-#[cfg(target_os = "macos")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SimulatorPointerPhase {
     /// The finger touches the screen.
@@ -93,7 +92,6 @@ pub enum SimulatorPointerPhase {
 }
 
 /// Input synthesized for a SimulatorKit display view, as if the user clicked or typed on it.
-#[cfg(target_os = "macos")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum SimulatorInput {
     /// A point given as fractions of the display view's width and height, from the top left.

@@ -264,11 +264,18 @@ fn ios_view(target: &DeviceTarget) -> Result<(u64, AnyWindowHandle)> {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn send_ios_input(target: &DeviceTarget, input: SimulatorInput, cx: &mut AsyncApp) -> Result<()> {
     let (subview_id, window) = ios_view(target)?;
     window
         .update(cx, |_, window, _cx| window.send_simulator_input(subview_id, input))
         .context("a janela do simulador foi fechada")?
+}
+
+#[cfg(not(target_os = "macos"))]
+fn send_ios_input(target: &DeviceTarget, _input: SimulatorInput, _cx: &mut AsyncApp) -> Result<()> {
+    ios_view(target)?;
+    Err(anyhow!("O simulador iOS só está disponível no macOS."))
 }
 
 async fn ios_pointer_path(
