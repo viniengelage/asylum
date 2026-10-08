@@ -75,6 +75,7 @@ fn system_image_package() -> String {
 
 #[derive(Clone)]
 struct AndroidPaths {
+    root: PathBuf,
     jdk_dir: PathBuf,
     sdk_dir: PathBuf,
     avd_home: PathBuf,
@@ -84,13 +85,17 @@ struct AndroidPaths {
 
 impl AndroidPaths {
     fn new() -> Self {
-        let root = paths::android_dir().clone();
+        Self::at(paths::android_dir().clone())
+    }
+
+    fn at(root: PathBuf) -> Self {
         Self {
             jdk_dir: root.join("jdk"),
             sdk_dir: root.join("sdk"),
             avd_home: root.join("avd_home"),
             user_home: root.join("user_home"),
             downloads_dir: root.join("downloads"),
+            root,
         }
     }
 
@@ -2466,6 +2471,274 @@ async fn adb_devices(paths: &AndroidPaths) -> Result<Vec<String>> {
         .collect())
 }
 
+const CLEANUP_PERIOD: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+const CLEANUP_CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
+/// Delay the first check so the cleanup doesn't compete with startup work.
+const CLEANUP_STARTUP_DELAY: Duration = Duration::from_secs(5 * 60);
+/// Leftovers younger than this may belong to an install that is still running.
+const CLEANUP_TEMPORARY_FILE_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+const CLEANUP_METADATA_CACHE_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+/// A package installed this recently may be in use by a Gradle build that
+/// just downloaded it.
+const CLEANUP_PACKAGE_GRACE_PERIOD: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+const CLEANUP_SNAPSHOT_AGE: Duration = Duration::from_secs(30 * 24 * 60 * 60);
+/// SDK directories where Gradle installs versions side by side and never
+/// removes the old ones.
+const CLEANUP_VERSIONED_PACKAGE_DIRS: &[&str] = &["ndk", "build-tools"];
+
+/// Starts the periodic cleanup of the Android directory. Does nothing until
+/// the Android SDK has been installed.
+pub fn init(cx: &mut App) {
+    cx.spawn(async move |cx| {
+        cx.background_executor().timer(CLEANUP_STARTUP_DELAY).await;
+        loop {
+            cx.background_spawn(async {
+                let paths = AndroidPaths::new();
+                if let Err(error) = run_scheduled_cleanup(&paths, std::time::SystemTime::now()) {
+                    log::warn!("Android directory cleanup failed: {error:#}");
+                }
+            })
+            .await;
+            cx.background_executor().timer(CLEANUP_CHECK_INTERVAL).await;
+        }
+    })
+    .detach();
+}
+
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct CleanupState {
+    last_run_unix_seconds: u64,
+    /// SDK packages (relative to the SDK dir) this cleanup removed.
+    removed_packages: Vec<String>,
+    /// Packages that came back after being removed, meaning some project
+    /// pins them. Removing them again would only cause a re-download.
+    required_packages: Vec<String>,
+}
+
+#[derive(Debug, Default, PartialEq)]
+struct CleanupReport {
+    removed_paths: Vec<PathBuf>,
+    freed_bytes: u64,
+}
+
+fn cleanup_state_path(paths: &AndroidPaths) -> PathBuf {
+    paths.root.join("cleanup.json")
+}
+
+fn run_scheduled_cleanup(paths: &AndroidPaths, now: std::time::SystemTime) -> Result<()> {
+    if !paths.sdk_dir.exists() {
+        return Ok(());
+    }
+
+    let state_path = cleanup_state_path(paths);
+    let mut state = match std::fs::read(&state_path) {
+        Ok(contents) => serde_json::from_slice(&contents).unwrap_or_else(|error| {
+            log::warn!("ignoring unreadable {}: {error:#}", state_path.display());
+            CleanupState::default()
+        }),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => CleanupState::default(),
+        Err(error) => return Err(error).context("reading Android cleanup state"),
+    };
+    let now_unix_seconds = now
+        .duration_since(std::time::UNIX_EPOCH)
+        .context("system clock is before the Unix epoch")?
+        .as_secs();
+    if now_unix_seconds.saturating_sub(state.last_run_unix_seconds) < CLEANUP_PERIOD.as_secs() {
+        return Ok(());
+    }
+
+    let report = clean_android_dir(paths, &mut state, now);
+    if report.removed_paths.is_empty() {
+        log::info!("Android directory cleanup found nothing to remove");
+    } else {
+        log::info!(
+            "Android directory cleanup freed {:.1} MB: {}",
+            report.freed_bytes as f64 / (1024.0 * 1024.0),
+            report
+                .removed_paths
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+
+    state.last_run_unix_seconds = now_unix_seconds;
+    std::fs::write(&state_path, serde_json::to_vec_pretty(&state)?)
+        .with_context(|| format!("writing {}", state_path.display()))?;
+    Ok(())
+}
+
+fn clean_android_dir(
+    paths: &AndroidPaths,
+    state: &mut CleanupState,
+    now: std::time::SystemTime,
+) -> CleanupReport {
+    let mut report = CleanupReport::default();
+
+    for directory in [&paths.downloads_dir, &paths.sdk_dir.join(".temp")] {
+        for entry in directory_entries(directory) {
+            if is_older_than(&entry, CLEANUP_TEMPORARY_FILE_AGE, now) {
+                remove_for_cleanup(&entry, &mut report);
+            }
+        }
+    }
+
+    for entry in directory_entries(&paths.user_home.join("cache")) {
+        if is_older_than(&entry, CLEANUP_METADATA_CACHE_AGE, now) {
+            remove_for_cleanup(&entry, &mut report);
+        }
+    }
+
+    let removed_packages = std::mem::take(&mut state.removed_packages);
+    for package in removed_packages {
+        if paths.sdk_dir.join(&package).exists() {
+            if !state.required_packages.contains(&package) {
+                log::info!("keeping Android SDK package {package}: it was reinstalled after cleanup");
+                state.required_packages.push(package);
+            }
+        } else {
+            state.removed_packages.push(package);
+        }
+    }
+
+    for package_dir in CLEANUP_VERSIONED_PACKAGE_DIRS {
+        let versions = directory_entries(&paths.sdk_dir.join(package_dir))
+            .into_iter()
+            .filter(|path| path.is_dir())
+            .filter_map(|path| Some(path.file_name()?.to_str()?.to_string()))
+            .collect::<Vec<_>>();
+        for version in superseded_versions(&versions) {
+            let package = format!("{package_dir}/{version}");
+            let path = paths.sdk_dir.join(&package);
+            if state.required_packages.contains(&package)
+                || !is_older_than(&path, CLEANUP_PACKAGE_GRACE_PERIOD, now)
+            {
+                continue;
+            }
+            if remove_for_cleanup(&path, &mut report) {
+                state.removed_packages.push(package);
+            }
+        }
+    }
+
+    let running_avds = running_avd_names();
+    for avd_dir in directory_entries(&paths.avd_home) {
+        if avd_dir.extension().is_none_or(|extension| extension != "avd") {
+            continue;
+        }
+        let Some(avd_name) = avd_dir.file_stem().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if running_avds.iter().any(|running| running == avd_name) {
+            continue;
+        }
+        for snapshot in directory_entries(&avd_dir.join("snapshots")) {
+            // The emulator rewrites the files inside a snapshot when saving it,
+            // so the directory's own mtime doesn't reflect the last use.
+            let last_used = directory_entries(&snapshot)
+                .iter()
+                .filter_map(|file| std::fs::metadata(file).ok()?.modified().ok())
+                .max();
+            let is_stale = last_used.is_some_and(|last_used| {
+                now.duration_since(last_used)
+                    .is_ok_and(|age| age >= CLEANUP_SNAPSHOT_AGE)
+            });
+            if is_stale {
+                remove_for_cleanup(&snapshot, &mut report);
+            }
+        }
+    }
+
+    report
+}
+
+/// Returns every version except the newest. Unparseable names are kept, since
+/// there's no way to tell whether they're older.
+fn superseded_versions(versions: &[String]) -> Vec<String> {
+    fn version_key(version: &str) -> Option<Vec<u64>> {
+        version
+            .split(['.', '-'])
+            .map(|part| part.parse::<u64>().ok())
+            .collect()
+    }
+
+    let mut parsed = versions
+        .iter()
+        .filter_map(|version| Some((version_key(version)?, version)))
+        .collect::<Vec<_>>();
+    parsed.sort();
+    parsed.pop();
+    parsed
+        .into_iter()
+        .map(|(_, version)| version.clone())
+        .collect()
+}
+
+/// Names of AVDs with an emulator discovery file. Files of dead emulators can
+/// linger, which only makes the cleanup more conservative.
+fn running_avd_names() -> Vec<String> {
+    let running_dir = paths::home_dir().join("Library/Caches/TemporaryItems/avd/running");
+    directory_entries(&running_dir)
+        .into_iter()
+        .filter(|path| path.extension().is_some_and(|extension| extension == "ini"))
+        .filter_map(|path| {
+            let contents = std::fs::read_to_string(path).ok()?;
+            contents
+                .lines()
+                .find_map(|line| line.strip_prefix("avd.name="))
+                .map(str::to_string)
+        })
+        .collect()
+}
+
+fn directory_entries(directory: &Path) -> Vec<PathBuf> {
+    match std::fs::read_dir(directory) {
+        Ok(entries) => entries.flatten().map(|entry| entry.path()).collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+fn is_older_than(path: &Path, age: Duration, now: std::time::SystemTime) -> bool {
+    std::fs::symlink_metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .is_ok_and(|modified| now.duration_since(modified).is_ok_and(|elapsed| elapsed >= age))
+}
+
+fn disk_usage(path: &Path) -> u64 {
+    let Ok(metadata) = std::fs::symlink_metadata(path) else {
+        return 0;
+    };
+    if metadata.is_dir() {
+        directory_entries(path)
+            .iter()
+            .map(|entry| disk_usage(entry))
+            .sum()
+    } else {
+        metadata.len()
+    }
+}
+
+fn remove_for_cleanup(path: &Path, report: &mut CleanupReport) -> bool {
+    let size = disk_usage(path);
+    let result = if std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_dir()) {
+        std::fs::remove_dir_all(path)
+    } else {
+        std::fs::remove_file(path)
+    };
+    match result {
+        Ok(()) => {
+            report.freed_bytes += size;
+            report.removed_paths.push(path.to_path_buf());
+            true
+        }
+        Err(error) => {
+            log::warn!("failed to remove {} during cleanup: {error:#}", path.display());
+            false
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2525,6 +2798,99 @@ id: 60 or "wearos_square"
         // Profile ids are free-form enough to contain spaces and quotes.
         assert_eq!(avd_name_for_device("Galaxy Nexus"), "zed-Galaxy_Nexus");
         assert_eq!(avd_name_for_device("7in WSVGA (Tablet)"), "zed-7in_WSVGA__Tablet_");
+    }
+
+    #[test]
+    fn only_the_newest_parseable_version_is_superseding() {
+        let versions = ["27.0.12077973", "27.1.12297006", "26.1.10909125", "canary"]
+            .map(String::from);
+        let mut superseded = superseded_versions(&versions);
+        superseded.sort();
+        assert_eq!(superseded, ["26.1.10909125", "27.0.12077973"]);
+        assert!(superseded_versions(&["36.0.0".to_string()]).is_empty());
+    }
+
+    #[test]
+    fn cleanup_removes_superseded_packages_until_they_come_back() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let paths = AndroidPaths::at(root.path().to_path_buf());
+        for directory in [
+            "sdk/ndk/27.0.12077973",
+            "sdk/ndk/27.1.12297006",
+            "sdk/build-tools/36.0.0",
+            "sdk/platforms/android-34",
+            "sdk/platforms/android-35",
+            "downloads",
+            "user_home/cache",
+            "avd_home/zed-cleanup-test.avd/snapshots/default_boot",
+        ] {
+            std::fs::create_dir_all(root.path().join(directory))?;
+        }
+        std::fs::write(root.path().join("sdk/ndk/27.0.12077973/source.properties"), "x")?;
+        std::fs::write(root.path().join("downloads/jdk.tar.gz"), "x")?;
+        std::fs::write(root.path().join("user_home/cache/sdkbin-1_repository2-3_xml"), "x")?;
+        std::fs::write(
+            root.path()
+                .join("avd_home/zed-cleanup-test.avd/snapshots/default_boot/ram.bin"),
+            "x",
+        )?;
+        std::fs::write(
+            root.path().join("avd_home/zed-cleanup-test.avd/userdata-qemu.img.qcow2"),
+            "x",
+        )?;
+
+        let mut state = CleanupState::default();
+        let recent_report = clean_android_dir(&paths, &mut state, std::time::SystemTime::now());
+        assert_eq!(recent_report, CleanupReport::default());
+
+        let later = std::time::SystemTime::now() + Duration::from_secs(60 * 24 * 60 * 60);
+        let report = clean_android_dir(&paths, &mut state, later);
+        let mut removed = report
+            .removed_paths
+            .iter()
+            .map(|path| path.strip_prefix(root.path()).map(Path::to_path_buf))
+            .collect::<Result<Vec<_>, _>>()?;
+        removed.sort();
+        assert_eq!(
+            removed,
+            [
+                "avd_home/zed-cleanup-test.avd/snapshots/default_boot",
+                "downloads/jdk.tar.gz",
+                "sdk/ndk/27.0.12077973",
+                "user_home/cache/sdkbin-1_repository2-3_xml",
+            ]
+            .map(PathBuf::from)
+        );
+        assert_eq!(report.freed_bytes, 4);
+        assert!(root.path().join("sdk/platforms/android-34").exists());
+        assert!(root.path().join("avd_home/zed-cleanup-test.avd/userdata-qemu.img.qcow2").exists());
+        assert_eq!(state.removed_packages, ["ndk/27.0.12077973"]);
+
+        std::fs::create_dir_all(root.path().join("sdk/ndk/27.0.12077973"))?;
+        let report = clean_android_dir(&paths, &mut state, later);
+        assert!(report.removed_paths.is_empty());
+        assert!(root.path().join("sdk/ndk/27.0.12077973").exists());
+        assert!(state.removed_packages.is_empty());
+        assert_eq!(state.required_packages, ["ndk/27.0.12077973"]);
+        Ok(())
+    }
+
+    #[test]
+    fn scheduled_cleanup_runs_at_most_once_per_period() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let paths = AndroidPaths::at(root.path().to_path_buf());
+        std::fs::create_dir_all(&paths.sdk_dir)?;
+        std::fs::create_dir_all(&paths.downloads_dir)?;
+        let later = std::time::SystemTime::now() + Duration::from_secs(60 * 24 * 60 * 60);
+
+        run_scheduled_cleanup(&paths, later)?;
+        std::fs::write(paths.downloads_dir.join("leftover.zip"), "x")?;
+        run_scheduled_cleanup(&paths, later + Duration::from_secs(60 * 60))?;
+        assert!(paths.downloads_dir.join("leftover.zip").exists());
+
+        run_scheduled_cleanup(&paths, later + CLEANUP_PERIOD)?;
+        assert!(!paths.downloads_dir.join("leftover.zip").exists());
+        Ok(())
     }
 
     #[test]
