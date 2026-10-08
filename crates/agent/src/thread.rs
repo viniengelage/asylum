@@ -1747,6 +1747,7 @@ impl Thread {
                 cancellation_rx,
                 self.sandbox_grants.clone(),
                 Some(cx.weak_entity()),
+                self.effective_task_agent(),
             );
             tool.replay(input, output, tool_event_stream, cx).log_err();
         }
@@ -2473,24 +2474,11 @@ impl Thread {
         cx.notify();
     }
 
-    /// The task agent's decision for a tool call, or `None` when the agent has no rule for it
-    /// (or no agent is active) and the user's settings decide alone.
-    pub(crate) fn task_agent_decision(
-        &self,
-        tool_name: &str,
-        inputs: &[String],
-        cx: &App,
-    ) -> Option<ToolPermissionDecision> {
-        let agent = self
-            .task_agent
-            .as_ref()
-            .or(self.parent_task_agent.as_ref())?;
-        let toolkit = task_agents::toolkit_for_tool(tool_name, cx);
-        let rules = agent.permission_rules(
-            tool_name,
-            toolkit.as_ref().map(|toolkit| toolkit.id.as_ref()),
-        )?;
-        crate::task_agent_permission_decision(&agent.name, rules, tool_name, inputs)
+    /// The task agent whose permission rules apply to this thread's tool calls.
+    fn effective_task_agent(&self) -> Option<Arc<TaskAgent>> {
+        self.task_agent
+            .clone()
+            .or_else(|| self.parent_task_agent.clone())
     }
 
     pub fn cancel(&mut self, cx: &mut Context<Self>) -> Task<()> {
@@ -3873,6 +3861,7 @@ impl Thread {
             cancellation_rx,
             self.sandbox_grants.clone(),
             Some(cx.weak_entity()),
+            self.effective_task_agent(),
         );
         tool_event_stream.update_fields(
             acp::ToolCallUpdateFields::new().status(acp::ToolCallStatus::InProgress),
@@ -5610,7 +5599,7 @@ where
 /// one for the tool, replaces the settings' answer. A task agent can loosen a confirmation but
 /// never a denial.
 fn combined_permission_decision(
-    thread: Option<&WeakEntity<Thread>>,
+    task_agent: Option<&TaskAgent>,
     tool_name: &str,
     inputs: &[String],
     cx: &App,
@@ -5623,10 +5612,25 @@ fn combined_permission_decision(
     if matches!(settings_decision, ToolPermissionDecision::Deny(_)) {
         return settings_decision;
     }
-    thread
-        .and_then(|thread| thread.upgrade())
-        .and_then(|thread| thread.read(cx).task_agent_decision(tool_name, inputs, cx))
+    task_agent
+        .and_then(|agent| task_agent_decision(agent, tool_name, inputs, cx))
         .unwrap_or(settings_decision)
+}
+
+/// The task agent's decision for a tool call, or `None` when the agent has no rule for it and
+/// the user's settings decide alone.
+fn task_agent_decision(
+    agent: &TaskAgent,
+    tool_name: &str,
+    inputs: &[String],
+    cx: &App,
+) -> Option<ToolPermissionDecision> {
+    let toolkit = task_agents::toolkit_for_tool(tool_name, cx);
+    let rules = agent.permission_rules(
+        tool_name,
+        toolkit.as_ref().map(|toolkit| toolkit.id.as_ref()),
+    )?;
+    crate::task_agent_permission_decision(&agent.name, rules, tool_name, inputs)
 }
 
 /// Builds the ACP-facing tool call id for a tool use in the message at
@@ -5855,6 +5859,9 @@ pub struct ToolCallEventStream {
     /// sandbox grant is recorded so it survives reopening. `None` in tests and
     /// for streams not tied to a live thread.
     thread: Option<WeakEntity<Thread>>,
+    /// The owning thread's task agent, captured up front because tools ask for permission
+    /// from `run`, while the thread is still being updated and can't be read.
+    task_agent: Option<Arc<TaskAgent>>,
 }
 
 impl ToolCallEventStream {
@@ -5886,6 +5893,7 @@ impl ToolCallEventStream {
             cancellation_rx,
             sandbox_grants,
             None,
+            None,
         );
 
         (stream, ToolCallEventStreamReceiver(events_rx))
@@ -5906,6 +5914,7 @@ impl ToolCallEventStream {
             None,
             cancellation_rx,
             Rc::new(RefCell::new(ThreadSandboxGrants::default())),
+            None,
             None,
         );
 
@@ -5930,6 +5939,7 @@ impl ToolCallEventStream {
         cancellation_rx: watch::Receiver<bool>,
         sandbox_grants: Rc<RefCell<ThreadSandboxGrants>>,
         thread: Option<WeakEntity<Thread>>,
+        task_agent: Option<Arc<TaskAgent>>,
     ) -> Self {
         Self {
             tool_use_id,
@@ -5939,6 +5949,7 @@ impl ToolCallEventStream {
             cancellation_rx,
             sandbox_grants,
             thread,
+            task_agent,
         }
     }
 
@@ -6081,10 +6092,10 @@ impl ToolCallEventStream {
         // MCP tools are gated only by tool id (no per-input pattern
         // matching), so we pass a single empty input value just to satisfy
         // `decide_permission_from_settings`' signature.
-        let thread = self.thread.clone();
+        let task_agent = self.task_agent.clone();
         let check_settings: Box<dyn Fn(&App) -> ToolPermissionDecision> =
             Box::new(move |cx: &App| {
-                combined_permission_decision(thread.as_ref(), &tool_id, &[String::new()], cx)
+                combined_permission_decision(task_agent.as_deref(), &tool_id, &[String::new()], cx)
             });
 
         self.run_authorization_loop(title, options, None, Some(check_settings), cx)
@@ -6118,10 +6129,10 @@ impl ToolCallEventStream {
 
         let tool_name = context.tool_name.clone();
         let input_values = context.input_values.clone();
-        let thread = self.thread.clone();
+        let task_agent = self.task_agent.clone();
         let check_settings: Box<dyn Fn(&App) -> ToolPermissionDecision> =
             Box::new(move |cx: &App| {
-                combined_permission_decision(thread.as_ref(), &tool_name, &input_values, cx)
+                combined_permission_decision(task_agent.as_deref(), &tool_name, &input_values, cx)
             });
 
         self.run_authorization_loop(title, options, Some(context), Some(check_settings), cx)
@@ -6144,15 +6155,9 @@ impl ToolCallEventStream {
         if let ToolPermissionDecision::Deny(reason) = settings_decision {
             return Task::ready(Err(anyhow!(reason)));
         }
-        let agent_decision = self
-            .thread
-            .as_ref()
-            .and_then(|thread| thread.upgrade())
-            .and_then(|thread| {
-                thread
-                    .read(cx)
-                    .task_agent_decision(&context.tool_name, &context.input_values, cx)
-            });
+        let agent_decision = self.task_agent.as_deref().and_then(|agent| {
+            task_agent_decision(agent, &context.tool_name, &context.input_values, cx)
+        });
         match agent_decision {
             Some(ToolPermissionDecision::Allow) => Task::ready(Ok(())),
             Some(ToolPermissionDecision::Deny(reason)) => Task::ready(Err(anyhow!(reason))),
@@ -6180,15 +6185,9 @@ impl ToolCallEventStream {
         if let ToolPermissionDecision::Deny(reason) = settings_decision {
             return Task::ready(Err(anyhow!(reason)));
         }
-        let agent_decision = self
-            .thread
-            .as_ref()
-            .and_then(|thread| thread.upgrade())
-            .and_then(|thread| {
-                thread
-                    .read(cx)
-                    .task_agent_decision(&context.tool_name, &context.input_values, cx)
-            });
+        let agent_decision = self.task_agent.as_deref().and_then(|agent| {
+            task_agent_decision(agent, &context.tool_name, &context.input_values, cx)
+        });
         if let Some(ToolPermissionDecision::Deny(reason)) = agent_decision {
             return Task::ready(Err(anyhow!(reason)));
         }
