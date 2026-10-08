@@ -1370,6 +1370,9 @@ pub struct Thread {
     /// The task agent invoked with `/command` in this thread. Its instructions, tools and
     /// permission rules apply to every later turn, and it is saved with the thread.
     task_agent: Option<Arc<TaskAgent>>,
+    /// In a subagent, the task agent of the thread that spawned it. Only its permission
+    /// rules apply here, so a subagent doesn't ask for what its parent's agent already allows.
+    parent_task_agent: Option<Arc<TaskAgent>>,
 }
 
 impl Thread {
@@ -1514,6 +1517,7 @@ impl Thread {
             sandboxed_terminal_temp_dir: None,
             sandbox_grants: Rc::new(RefCell::new(ThreadSandboxGrants::default())),
             task_agent: None,
+            parent_task_agent: None,
         }
     }
 
@@ -1530,6 +1534,10 @@ impl Thread {
         self.profile_id = parent.profile_id.clone();
         self.profile_downgraded_for_restricted_workspace =
             parent.profile_downgraded_for_restricted_workspace;
+        self.parent_task_agent = parent
+            .task_agent
+            .clone()
+            .or_else(|| parent.parent_task_agent.clone());
     }
 
     fn apply_model_selection(
@@ -1895,6 +1903,7 @@ impl Thread {
                 &db_thread.sandbox_grants,
             ))),
             task_agent: db_thread.task_agent.map(Arc::new),
+            parent_task_agent: None,
         }
     }
 
@@ -2472,7 +2481,10 @@ impl Thread {
         inputs: &[String],
         cx: &App,
     ) -> Option<ToolPermissionDecision> {
-        let agent = self.task_agent.as_ref()?;
+        let agent = self
+            .task_agent
+            .as_ref()
+            .or(self.parent_task_agent.as_ref())?;
         let toolkit = task_agents::toolkit_for_tool(tool_name, cx);
         let rules = agent.permission_rules(
             tool_name,
@@ -6069,10 +6081,10 @@ impl ToolCallEventStream {
         // MCP tools are gated only by tool id (no per-input pattern
         // matching), so we pass a single empty input value just to satisfy
         // `decide_permission_from_settings`' signature.
+        let thread = self.thread.clone();
         let check_settings: Box<dyn Fn(&App) -> ToolPermissionDecision> =
             Box::new(move |cx: &App| {
-                let settings = agent_settings::AgentSettings::get_global(cx);
-                decide_permission_from_settings(&tool_id, &[String::new()], settings)
+                combined_permission_decision(thread.as_ref(), &tool_id, &[String::new()], cx)
             });
 
         self.run_authorization_loop(title, options, None, Some(check_settings), cx)

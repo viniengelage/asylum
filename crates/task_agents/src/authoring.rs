@@ -68,6 +68,12 @@ impl AuthoringCatalog {
     fn is_known_toolkit(&self, id: &str) -> bool {
         self.toolkits.iter().any(|toolkit| toolkit.id == id)
     }
+
+    fn is_known_permission_key(&self, key: &str) -> bool {
+        key == crate::ALL_TOOLS_PERMISSION_KEY
+            || self.is_known_tool(key)
+            || self.is_known_toolkit(key)
+    }
 }
 
 pub fn authoring_system_prompt(catalog: &AuthoringCatalog) -> String {
@@ -102,7 +108,7 @@ permissions:
 - `profile`: o ponto de partida das ferramentas. Use o perfil mais restrito que ainda deixa o agente terminar o trabalho: um agente que só lê e relata não precisa de um perfil que edita arquivos.
 - `toolkits`: liga todas as ferramentas do toolkit. Ligue só os que as instruções realmente usam.
 - `tools`: exceções por ferramenta sobre o perfil e os toolkits. Omita o campo quando não houver exceção.
-- `permissions`: chave é o nome de uma ferramenta ou o id de um toolkit (vale para todas as ferramentas dele). `allow` roda sem perguntar, `confirm` pede confirmação, `deny` nunca roda. Ferramentas de leitura já rodam sem perguntar; dê `allow` a ferramentas que agem só quando o trabalho depende de muitas chamadas seguras (ex.: tocar na tela de um simulador), e `confirm` para o que publica, apaga, envia ou é irreversível. Para o terminal, prefira regras com regex (`allow: ['^npm test']`) a liberar tudo. Omita o campo quando não houver regra.
+- `permissions`: chave é o nome de uma ferramenta, o id de um toolkit (vale para todas as ferramentas dele) ou `'*'` (vale para toda ferramenta sem regra própria, MCP inclusive). `allow` roda sem perguntar, `confirm` pede confirmação, `deny` nunca roda. Ferramentas de leitura já rodam sem perguntar; dê `allow` a ferramentas que agem só quando o trabalho depende de muitas chamadas seguras (ex.: tocar na tela de um simulador), e `confirm` para o que publica, apaga, envia ou é irreversível. Para o terminal, prefira regras com regex (`allow: ['^npm test']`) a liberar tudo. Omita o campo quando não houver regra.
 - Não escreva `model`: o agente usa o modelo da thread.
 
 ## Instruções
@@ -242,7 +248,7 @@ pub fn review_generated_agent(agent: &TaskAgent, catalog: &AuthoringCatalog) -> 
         }
     }
     for key in agent.permissions.keys() {
-        if !catalog.is_known_tool(key) && !catalog.is_known_toolkit(key) {
+        if !catalog.is_known_permission_key(key) {
             problems.push(format!(
                 "`{key}` em `permissions` não é uma ferramenta nem um toolkit"
             ));
@@ -267,7 +273,7 @@ pub fn drop_unknown_references(agent: &mut TaskAgent, catalog: &AuthoringCatalog
     agent.tools.retain(|tool, _| catalog.is_known_tool(tool));
     agent
         .permissions
-        .retain(|key, _| catalog.is_known_tool(key) || catalog.is_known_toolkit(key));
+        .retain(|key, _| catalog.is_known_permission_key(key));
     agent.model = None;
 }
 

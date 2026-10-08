@@ -184,6 +184,10 @@ impl std::fmt::Display for ModelReference {
     }
 }
 
+/// The `permissions` key whose rules apply to every tool without an entry of its own,
+/// MCP tools included.
+pub const ALL_TOOLS_PERMISSION_KEY: &str = "*";
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskAgent {
     /// The file stem; stable across renames of `name`.
@@ -223,7 +227,8 @@ impl TaskAgent {
         None
     }
 
-    /// The agent's rules for a tool: the tool's own entry wins over its toolkit's.
+    /// The agent's rules for a tool: the tool's own entry wins over its toolkit's, and both
+    /// win over the [`ALL_TOOLS_PERMISSION_KEY`] entry.
     pub fn permission_rules(
         &self,
         tool_name: &str,
@@ -232,6 +237,7 @@ impl TaskAgent {
         self.permissions
             .get(tool_name)
             .or_else(|| toolkit_id.and_then(|toolkit_id| self.permissions.get(toolkit_id)))
+            .or_else(|| self.permissions.get(ALL_TOOLS_PERMISSION_KEY))
     }
 
     pub fn to_markdown(&self) -> Result<String> {
@@ -381,8 +387,7 @@ pub async fn load_task_agents_from_directory(
         let Ok(path) = entry else {
             continue;
         };
-        if path.extension().and_then(|extension| extension.to_str()) == Some(AGENT_FILE_EXTENSION)
-        {
+        if path.extension().and_then(|extension| extension.to_str()) == Some(AGENT_FILE_EXTENSION) {
             paths.push(path);
         }
     }
@@ -505,9 +510,15 @@ mod tests {
                 model: "claude-opus-5-5".into()
             })
         );
-        assert_eq!(agent.toolkits, vec!["repo".to_string(), "clickup".to_string()]);
+        assert_eq!(
+            agent.toolkits,
+            vec!["repo".to_string(), "clickup".to_string()]
+        );
         assert_eq!(agent.tool_override("edit_file", None), Some(false));
-        assert_eq!(agent.tool_override("repo_pr_diff", Some("repo")), Some(true));
+        assert_eq!(
+            agent.tool_override("repo_pr_diff", Some("repo")),
+            Some(true)
+        );
         assert_eq!(agent.tool_override("read_file", None), None);
         assert_eq!(
             agent
@@ -534,6 +545,36 @@ mod tests {
         assert_eq!(mode("devices"), Some(PermissionMode::Allow));
         assert_eq!(mode("api_send"), Some(PermissionMode::Confirm));
         assert_eq!(mode("database_query"), Some(PermissionMode::Deny));
+    }
+
+    #[test]
+    fn test_all_tools_permission_is_the_last_fallback() {
+        let content = "---\nname: Livre\npermissions:\n  '*': allow\n  repo: confirm\n  delete_path: deny\n---\nTrabalhe.";
+        let agent = parse_task_agent(Path::new("/x/livre.md"), content, project_source())
+            .expect("agent should parse");
+        let mode = |name: &str, toolkit: Option<&str>| {
+            agent
+                .permission_rules(name, toolkit)
+                .and_then(|rules| rules.default)
+        };
+        assert_eq!(mode("terminal", None), Some(PermissionMode::Allow));
+        assert_eq!(
+            mode("mcp:github:create_issue", None),
+            Some(PermissionMode::Allow)
+        );
+        assert_eq!(
+            mode("repo_pr_comment", Some("repo")),
+            Some(PermissionMode::Confirm)
+        );
+        assert_eq!(mode("delete_path", None), Some(PermissionMode::Deny));
+
+        let reparsed = parse_task_agent(
+            Path::new("/x/livre.md"),
+            &agent.to_markdown().expect("serializes"),
+            project_source(),
+        )
+        .expect("round trip should parse");
+        assert_eq!(reparsed.permissions, agent.permissions);
     }
 
     #[test]
@@ -616,7 +657,10 @@ mod tests {
             .iter()
             .map(|agent| (agent.command.as_str(), agent.instructions.as_str()))
             .collect::<Vec<_>>();
-        assert_eq!(commands, vec![("revisar", "Projeto."), ("explain", "Explique.")]);
+        assert_eq!(
+            commands,
+            vec![("revisar", "Projeto."), ("explain", "Explique.")]
+        );
         assert_eq!(errors.len(), 1);
         assert!(errors[0].path.ends_with("broken.md"));
     }

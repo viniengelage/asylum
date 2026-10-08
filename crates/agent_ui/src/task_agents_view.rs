@@ -2,8 +2,9 @@
 //! form for its command, profile, model, toolkits and per-tool permissions, and its instructions.
 
 use crate::{AgentInitialContent, AgentPanel, AgentThreadSource};
+use agent::AgentTool as _;
 use agent_client_protocol::schema::v1 as acp;
-use agent_settings::AgentProfile;
+use agent_settings::{AgentProfile, AgentSettings};
 use anyhow::Result;
 use editor::Editor;
 use fs::Fs;
@@ -17,12 +18,16 @@ use language_model::{
     Role,
 };
 use project::Project;
-use settings::Settings as _;
+use settings::{
+    LanguageModelProviderSetting, LanguageModelSelection, Settings as _, SettingsStore,
+    update_settings_file,
+};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
 use task_agents::{
-    AuthoringCatalog, PROJECT_AGENTS_DIR, PermissionMode, ProfileSummary, TaskAgent,
-    TaskAgentSource, ToolAccess, ToolPermissionRules, ToolkitSummary, command_slug,
+    ALL_TOOLS_PERMISSION_KEY, AuthoringCatalog, PROJECT_AGENTS_DIR, PermissionMode, ProfileSummary,
+    TaskAgent, TaskAgentSource, ToolAccess, ToolPermissionRules, ToolkitSummary, command_slug,
     load_task_agents, personal_agents_dir, toolkits,
 };
 use ui::{Chip, ContextMenu, Divider, DropdownMenu, Switch, Tooltip, prelude::*};
@@ -286,6 +291,20 @@ fn permission_label(mode: Option<PermissionMode>) -> &'static str {
     }
 }
 
+/// The Zed Agent's tools that ask before acting, with what they do.
+const BUILTIN_PERMISSION_TOOLS: &[(&str, &str)] = &[
+    (agent::TerminalTool::NAME, "Roda comandos no terminal"),
+    (agent::EditFileTool::NAME, "Edita arquivos"),
+    (agent::WriteFileTool::NAME, "Cria e sobrescreve arquivos"),
+    (agent::DeletePathTool::NAME, "Apaga arquivos e pastas"),
+    (agent::MovePathTool::NAME, "Move e renomeia arquivos"),
+    (agent::CopyPathTool::NAME, "Copia arquivos"),
+    (agent::CreateDirectoryTool::NAME, "Cria pastas"),
+    (agent::FetchTool::NAME, "Busca uma URL"),
+    (agent::WebSearchTool::NAME, "Pesquisa na web"),
+    (agent::SkillTool::NAME, "Roda uma skill"),
+];
+
 fn next_permission(mode: Option<PermissionMode>) -> Option<PermissionMode> {
     match mode {
         None => Some(PermissionMode::Allow),
@@ -300,7 +319,6 @@ struct Draft {
     name: Entity<Editor>,
     command: Entity<Editor>,
     description: Entity<Editor>,
-    model: Entity<Editor>,
     instructions: Entity<Editor>,
 }
 
@@ -357,7 +375,13 @@ impl TaskAgentsView {
             generator: None,
             status: None,
             _load_task: Task::ready(()),
-            _subscriptions: Vec::new(),
+            _subscriptions: vec![
+                cx.subscribe(
+                    &LanguageModelRegistry::global(cx),
+                    |_, _, _: &language_model::Event, cx| cx.notify(),
+                ),
+                cx.observe_global::<SettingsStore>(|_, cx| cx.notify()),
+            ],
         };
         this.reload(None, cx);
         this
@@ -434,12 +458,6 @@ impl TaskAgentsView {
             window,
             cx,
         );
-        let model = text_editor(
-            agent.model.as_deref().unwrap_or_default(),
-            "provedor/modelo (vazio = modelo do perfil)",
-            window,
-            cx,
-        );
         let instructions = {
             let text = agent.instructions.clone();
             cx.new(|cx| {
@@ -457,7 +475,6 @@ impl TaskAgentsView {
             name,
             command,
             description,
-            model,
             instructions,
         });
         self.status = None;
@@ -470,8 +487,6 @@ impl TaskAgentsView {
         agent.name = draft.name.read(cx).text(cx).trim().to_string();
         agent.command = command_slug(&draft.command.read(cx).text(cx));
         agent.description = draft.description.read(cx).text(cx).trim().to_string();
-        let model = draft.model.read(cx).text(cx).trim().to_string();
-        agent.model = (!model.is_empty()).then_some(model);
         agent.instructions = draft.instructions.read(cx).text(cx);
         Some(agent)
     }
@@ -1078,6 +1093,13 @@ impl TaskAgentsView {
         cx.notify();
     }
 
+    fn set_model(&mut self, model: Option<String>, cx: &mut Context<Self>) {
+        if let Some(draft) = self.draft.as_mut() {
+            draft.agent.model = model;
+            cx.notify();
+        }
+    }
+
     fn set_profile(&mut self, profile: Option<String>, cx: &mut Context<Self>) {
         if let Some(draft) = self.draft.as_mut() {
             draft.agent.profile = profile;
@@ -1334,6 +1356,145 @@ impl TaskAgentsView {
         DropdownMenu::new("task-agent-profile", label, menu).style(ui::DropdownStyle::Outlined)
     }
 
+    fn render_model_dropdown(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let current = self
+            .draft
+            .as_ref()
+            .and_then(|draft| draft.agent.model.clone());
+        let view = cx.entity().downgrade();
+        model_dropdown(
+            "task-agent-model",
+            current,
+            "Modelo da thread",
+            move |model, cx| {
+                view.update(cx, |view, cx| view.set_model(model, cx))
+                    .log_err();
+            },
+            window,
+            cx,
+        )
+    }
+
+    fn render_subagent_model_dropdown(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let current = AgentSettings::get_global(cx)
+            .subagent_model
+            .as_ref()
+            .map(|selection| format!("{}/{}", selection.provider.0, selection.model));
+        let fs = self.fs.clone();
+        model_dropdown(
+            "subagent-default-model",
+            current,
+            "Mesmo modelo da thread",
+            move |model, cx| {
+                let selection = model
+                    .as_deref()
+                    .and_then(task_agents::ModelReference::parse)
+                    .map(|reference| LanguageModelSelection {
+                        provider: LanguageModelProviderSetting(reference.provider),
+                        model: reference.model,
+                        enable_thinking: false,
+                        effort: None,
+                        speed: None,
+                    });
+                update_settings_file(fs.clone(), cx, move |settings, _cx| {
+                    settings.agent.get_or_insert_default().subagent_model = selection;
+                });
+            },
+            window,
+            cx,
+        )
+    }
+
+    fn render_builtin_permissions(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let Some(draft) = self.draft.as_ref() else {
+            return v_flex();
+        };
+        let agent = &draft.agent;
+        let editable = agent.source.is_editable();
+        let mode_of = |key: &str| agent.permissions.get(key).and_then(|rules| rules.default);
+        let all_mode = mode_of(ALL_TOOLS_PERMISSION_KEY);
+        let mut tools_row = h_flex().flex_wrap().gap_1();
+        for (name, title) in BUILTIN_PERMISSION_TOOLS {
+            let tool_mode = mode_of(name);
+            let effective = tool_mode.or(all_mode);
+            let color = match effective {
+                Some(PermissionMode::Allow) => Color::Success,
+                Some(PermissionMode::Confirm) => Color::Warning,
+                Some(PermissionMode::Deny) => Color::Error,
+                None => Color::Muted,
+            };
+            let patterns = agent
+                .permissions
+                .get(*name)
+                .map(|rules| rules.allow.len() + rules.confirm.len() + rules.deny.len())
+                .unwrap_or(0);
+            let tool_name = name.to_string();
+            tools_row = tools_row.child(
+                Button::new(SharedString::from(format!("builtin-perm-{name}")), *name)
+                    .label_size(LabelSize::XSmall)
+                    .style(ButtonStyle::Outlined)
+                    .start_icon(
+                        Icon::new(IconName::Circle)
+                            .size(IconSize::XSmall)
+                            .color(color),
+                    )
+                    .disabled(!editable)
+                    .tooltip(Tooltip::text(format!(
+                        "{title} · {}{}{}. Clique para trocar (padrão → livre → pede → nunca).",
+                        permission_label(effective),
+                        if tool_mode.is_none() && all_mode.is_some() {
+                            " (de todas as ferramentas)"
+                        } else {
+                            ""
+                        },
+                        if patterns > 0 {
+                            format!(" · {patterns} regra(s) por regex no arquivo")
+                        } else {
+                            String::new()
+                        },
+                    )))
+                    .on_click(cx.listener(move |this, _, _window, cx| {
+                        this.cycle_permission(&tool_name, cx);
+                    })),
+            );
+        }
+        v_flex()
+            .gap_1p5()
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(
+                        Label::new("Todas as ferramentas")
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
+                    )
+                    .child(
+                        Button::new(
+                            "builtin-perm-all",
+                            format!("tudo: {}", permission_label(all_mode)),
+                        )
+                        .label_size(LabelSize::XSmall)
+                        .style(ButtonStyle::Subtle)
+                        .disabled(!editable)
+                        .tooltip(Tooltip::text(
+                            "Vale para toda ferramenta sem permissão própria, toolkits e MCP inclusive",
+                        ))
+                        .on_click(cx.listener(|this, _, _window, cx| {
+                            this.cycle_permission(ALL_TOOLS_PERMISSION_KEY, cx);
+                        })),
+                    ),
+            )
+            .child(tools_row)
+    }
+
     fn render_toolkits(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(draft) = self.draft.as_ref() else {
             return v_flex();
@@ -1341,6 +1502,10 @@ impl TaskAgentsView {
         let agent = &draft.agent;
         let editable = agent.source.is_editable();
         let mut column = v_flex().gap_2();
+        let all_mode = agent
+            .permissions
+            .get(ALL_TOOLS_PERMISSION_KEY)
+            .and_then(|rules| rules.default);
         let registered = toolkits(cx);
         if registered.is_empty() {
             column = column.child(
@@ -1362,7 +1527,7 @@ impl TaskAgentsView {
                     .permissions
                     .get(tool.name.as_ref())
                     .and_then(|rules| rules.default);
-                let effective = tool_mode.or(toolkit_mode);
+                let effective = tool_mode.or(toolkit_mode).or(all_mode);
                 let color = match effective {
                     Some(PermissionMode::Allow) => Color::Success,
                     Some(PermissionMode::Confirm) => Color::Warning,
@@ -1674,12 +1839,28 @@ impl TaskAgentsView {
                                 .color(Color::Muted),
                             ),
                     )
-                    .child(Self::render_field(
-                        "Modelo",
-                        Some("Vazio usa o modelo da thread. Ex.: anthropic/claude-opus-5-5"),
-                        &draft.model,
-                        cx,
-                    )),
+                    .child(
+                        v_flex()
+                            .gap_1()
+                            .child(Label::new("Modelo").size(LabelSize::Small).color(Color::Muted))
+                            .child(self.render_model_dropdown(window, cx))
+                            .child(
+                                Label::new("Só aparecem modelos dos provedores conectados.")
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted),
+                            ),
+                    ),
+            )
+            .child(
+                Self::render_card("PERMISSÕES DO ZED AGENT", cx)
+                    .child(
+                        Label::new(
+                            "Decide o que o agente e os subagents dele rodam sem perguntar. Padrão segue as suas configurações; o que você nega nelas continua negado.",
+                        )
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted),
+                    )
+                    .child(self.render_builtin_permissions(cx)),
             )
             .child(
                 Self::render_card("FERRAMENTAS DO ASYLUM", cx)
@@ -1705,6 +1886,81 @@ impl TaskAgentsView {
             )
             .into_any_element()
     }
+}
+
+/// A dropdown of every model of the connected providers, grouped by provider. `current` and
+/// the value given to `on_select` are `provider/model`; `None` is the `empty_label` entry.
+fn model_dropdown(
+    id: &'static str,
+    current: Option<String>,
+    empty_label: &'static str,
+    on_select: impl Fn(Option<String>, &mut App) + 'static,
+    window: &mut Window,
+    cx: &mut App,
+) -> DropdownMenu {
+    let registry = LanguageModelRegistry::read_global(cx);
+    let mut groups: Vec<(SharedString, Vec<(String, SharedString)>)> = Vec::new();
+    for provider in registry.visible_providers() {
+        if !provider.is_authenticated(cx) {
+            continue;
+        }
+        let models: Vec<_> = provider
+            .provided_models(cx)
+            .into_iter()
+            .map(|model| {
+                (
+                    format!("{}/{}", model.provider_id().0, model.id().0),
+                    model.name().0,
+                )
+            })
+            .collect();
+        if !models.is_empty() {
+            groups.push((provider.name().0, models));
+        }
+    }
+    let label: SharedString = match current.as_deref() {
+        None => empty_label.into(),
+        Some(reference) => groups
+            .iter()
+            .find_map(|(provider, models)| {
+                models
+                    .iter()
+                    .find(|(id, _)| id == reference)
+                    .map(|(_, name)| format!("{name} · {provider}").into())
+            })
+            // A model whose provider is signed out still shows, so it is not lost silently.
+            .unwrap_or_else(|| format!("{reference} (indisponível)").into()),
+    };
+    let on_select = Rc::new(on_select);
+    let menu = ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
+        let keep = on_select.clone();
+        menu = menu.toggleable_entry(
+            empty_label,
+            current.is_none(),
+            IconPosition::Start,
+            None,
+            move |_window, cx| keep(None, cx),
+        );
+        if groups.is_empty() {
+            menu = menu.separator().header("Nenhum provedor conectado");
+        }
+        for (provider, models) in groups {
+            menu = menu.separator().header(provider);
+            for (reference, name) in models {
+                let on_select = on_select.clone();
+                let toggled = current.as_deref() == Some(reference.as_str());
+                menu = menu.toggleable_entry(
+                    name,
+                    toggled,
+                    IconPosition::Start,
+                    None,
+                    move |_window, cx| on_select(Some(reference.clone()), cx),
+                );
+            }
+        }
+        menu
+    });
+    DropdownMenu::new(id, label, menu).style(ui::DropdownStyle::Outlined)
 }
 
 impl TaskAgentsView {
@@ -1734,6 +1990,25 @@ impl Render for TaskAgentsView {
                     .child(div().p_2().child(self.render_new_agent_menu(window, cx)))
                     .child(Divider::horizontal())
                     .child(div().flex_1().min_h_0().child(self.render_list(cx)))
+                    .child(Divider::horizontal())
+                    .child(
+                        v_flex()
+                            .p_2()
+                            .gap_1()
+                            .child(
+                                Label::new("Modelo padrão dos subagents")
+                                    .size(LabelSize::Small)
+                                    .color(Color::Muted),
+                            )
+                            .child(self.render_subagent_model_dropdown(window, cx))
+                            .child(
+                                Label::new(
+                                    "Vale para todo subagent do Zed Agent que não peça um modelo.",
+                                )
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted),
+                            ),
+                    )
                     .child(Divider::horizontal())
                     .child(
                         div().p_2().child(
