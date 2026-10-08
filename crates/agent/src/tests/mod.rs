@@ -1330,6 +1330,66 @@ async fn test_replayed_tool_call_ids_scoped_across_messages(cx: &mut TestAppCont
     );
 }
 
+#[gpui::test]
+async fn test_saved_thread_includes_in_progress_response(cx: &mut TestAppContext) {
+    let ThreadTest {
+        model,
+        fake,
+        thread,
+        ..
+    } = setup(cx, TestModel::Fake).await;
+
+    thread.update(cx, |thread, _cx| {
+        thread.add_tool(InfiniteTool);
+    });
+
+    thread
+        .update(cx, |thread, cx| {
+            thread.send(ClientUserMessageId::new(), ["Run the infinite tool"], cx)
+        })
+        .unwrap();
+    cx.run_until_parked();
+    fake.send_last_text(&model, "Running it now");
+    fake.send_last_event(
+        &model,
+        LanguageModelCompletionEvent::ToolUse(LanguageModelToolUse {
+            id: "call_1".into(),
+            name: InfiniteTool::NAME.into(),
+            raw_input: json!({}).to_string(),
+            input: language_model::LanguageModelToolUseInput::Json(json!({})),
+            is_input_complete: true,
+            thought_signature: None,
+        }),
+    );
+    fake.end_last(&model);
+    cx.run_until_parked();
+
+    // The tool never finishes, so the round is still open, as it is when the
+    // app reloads in the middle of a turn.
+    let db_thread = thread.read_with(cx, |thread, cx| thread.to_db(cx)).await;
+
+    assert_eq!(db_thread.messages.len(), 2);
+    let Message::Agent(agent_message) = db_thread.messages[1].as_ref() else {
+        panic!("expected the in-progress agent message to be saved");
+    };
+    assert!(agent_message.content.iter().any(
+        |content| matches!(content, AgentMessageContent::Text(text) if text == "Running it now")
+    ));
+    let tool_result = agent_message
+        .tool_results
+        .get(&language_model::LanguageModelToolUseId::from("call_1"))
+        .expect("the unfinished tool use should get a result");
+    assert!(tool_result.is_error);
+
+    thread.read_with(cx, |thread, _cx| {
+        assert_eq!(
+            thread.message_count(),
+            1,
+            "saving must not flush the live in-progress message"
+        );
+    });
+}
+
 async fn expect_tool_call(events: &mut UnboundedReceiver<Result<ThreadEvent>>) -> acp::ToolCall {
     let event = events
         .next()

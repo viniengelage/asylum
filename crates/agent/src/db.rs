@@ -534,11 +534,13 @@ impl ThreadsDatabase {
             version: DbThread::VERSION,
         })?;
 
-        let connection = connection.lock();
-
         let compressed = zstd::encode_all(json_data.as_bytes(), COMPRESSION_LEVEL)?;
         let data_type = DataType::Zstd;
         let data = compressed;
+
+        // Locked only for the write: compressing a large thread under the lock
+        // stalls every other save, including the bounded flush on quit.
+        let connection = connection.lock();
 
         // Use the thread's updated_at as created_at for new threads.
         // This ensures the creation time reflects when the thread was conceptually

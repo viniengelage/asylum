@@ -1969,9 +1969,21 @@ impl Thread {
 
     pub fn to_db(&self, cx: &App) -> Task<DbThread> {
         let initial_project_snapshot = self.initial_project_snapshot.clone();
+        // The in-progress response only joins `messages` when its round ends, so
+        // without it an interrupted turn (a reload, a quit) loses everything the
+        // agent did since the last round, which with long tool calls or subagents
+        // can be minutes of work.
+        let mut messages = self.messages.clone();
+        if let Some(message) = self
+            .pending_message
+            .clone()
+            .and_then(Self::finalize_agent_message)
+        {
+            messages.push(Arc::new(Message::Agent(message)));
+        }
         let mut thread = DbThread {
             title: self.title().unwrap_or_default(),
-            messages: self.messages.clone(),
+            messages,
             updated_at: self.updated_at,
             detailed_summary: self.summary.clone(),
             initial_project_snapshot: None,
@@ -2203,6 +2215,11 @@ impl Thread {
 
     pub fn last_message(&self) -> Option<&Message> {
         self.messages.last().map(std::ops::Deref::deref)
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn message_count(&self) -> usize {
+        self.messages.len()
     }
 
     #[cfg(any(test, feature = "test-support"))]
@@ -4217,12 +4234,24 @@ impl Thread {
     }
 
     fn flush_pending_message(&mut self, cx: &mut Context<Self>) {
-        let Some(mut message) = self.pending_message.take() else {
+        let Some(message) = self.pending_message.take() else {
+            return;
+        };
+        let Some(message) = Self::finalize_agent_message(message) else {
             return;
         };
 
+        self.messages.push(Arc::new(Message::Agent(message)));
+        self.updated_at = Utc::now();
+        self.clear_summary();
+        cx.notify()
+    }
+
+    /// Gives every tool use without a result a canceled result, so the message
+    /// is valid to send back to the model. Returns `None` for an empty message.
+    fn finalize_agent_message(mut message: AgentMessage) -> Option<AgentMessage> {
         if message.content.is_empty() {
-            return;
+            return None;
         }
 
         for content in &message.content {
@@ -4246,10 +4275,7 @@ impl Thread {
             }
         }
 
-        self.messages.push(Arc::new(Message::Agent(message)));
-        self.updated_at = Utc::now();
-        self.clear_summary();
-        cx.notify()
+        Some(message)
     }
 
     pub(crate) fn build_completion_request(
