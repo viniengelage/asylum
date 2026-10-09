@@ -6706,6 +6706,28 @@ async fn test_subagent_thread_model_selection(cx: &mut TestAppContext) {
         assert!(!subagent_thread.thinking_enabled());
         assert_eq!(subagent_thread.thinking_effort(), None);
     });
+
+    // An agent's own subagent model wins over the setting, for its subagents' subagents too.
+    let task_agent = task_agents::parse_task_agent(
+        std::path::Path::new("/test/.asylum/agents/pesado.md"),
+        "---\nname: Pesado\nsubagent_model: fake-corp/explicit-model\n---\nTrabalhe.",
+        task_agents::TaskAgentSource::Personal,
+    )
+    .unwrap();
+    parent_thread.update(cx, |parent_thread, cx| {
+        parent_thread.set_task_agent(Some(task_agent), cx);
+    });
+    let agent_subagent_thread = cx.new(|cx| Thread::new_subagent(&parent_thread, None, cx));
+    let nested_subagent_thread =
+        cx.new(|cx| Thread::new_subagent(&agent_subagent_thread, None, cx));
+    for thread in [&agent_subagent_thread, &nested_subagent_thread] {
+        thread.read_with(cx, |thread, _cx| {
+            assert_eq!(
+                thread.model().map(|model| model.id()),
+                Some(explicit_model.id())
+            );
+        });
+    }
 }
 
 #[gpui::test]

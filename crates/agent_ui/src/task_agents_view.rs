@@ -500,8 +500,10 @@ impl TaskAgentsView {
             cx.notify();
             return;
         }
-        if let Some(model) = &agent.model
-            && task_agents::ModelReference::parse(model).is_none()
+        if [&agent.model, &agent.subagent_model]
+            .into_iter()
+            .flatten()
+            .any(|model| task_agents::ModelReference::parse(model).is_none())
         {
             self.status = Some(
                 "O modelo precisa ser provedor/modelo, ex.: anthropic/claude-opus-5-5.".into(),
@@ -608,6 +610,7 @@ impl TaskAgentsView {
                 .unwrap_or_default(),
             profile: template.map(|t| t.profile.to_string()),
             model: None,
+            subagent_model: None,
             toolkits: template
                 .map(|t| t.toolkits.iter().map(|id| id.to_string()).collect())
                 .unwrap_or_default(),
@@ -1100,6 +1103,13 @@ impl TaskAgentsView {
         }
     }
 
+    fn set_subagent_model(&mut self, model: Option<String>, cx: &mut Context<Self>) {
+        if let Some(draft) = self.draft.as_mut() {
+            draft.agent.subagent_model = model;
+            cx.notify();
+        }
+    }
+
     fn set_profile(&mut self, profile: Option<String>, cx: &mut Context<Self>) {
         if let Some(draft) = self.draft.as_mut() {
             draft.agent.profile = profile;
@@ -1372,6 +1382,29 @@ impl TaskAgentsView {
             "Modelo da thread",
             move |model, cx| {
                 view.update(cx, |view, cx| view.set_model(model, cx))
+                    .log_err();
+            },
+            window,
+            cx,
+        )
+    }
+
+    fn render_agent_subagent_model_dropdown(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let current = self
+            .draft
+            .as_ref()
+            .and_then(|draft| draft.agent.subagent_model.clone());
+        let view = cx.entity().downgrade();
+        model_dropdown(
+            "task-agent-subagent-model",
+            current,
+            "Modelo padrão dos subagents",
+            move |model, cx| {
+                view.update(cx, |view, cx| view.set_subagent_model(model, cx))
                     .log_err();
             },
             window,
@@ -1849,6 +1882,23 @@ impl TaskAgentsView {
                                     .size(LabelSize::XSmall)
                                     .color(Color::Muted),
                             ),
+                    )
+                    .child(
+                        v_flex()
+                            .gap_1()
+                            .child(
+                                Label::new("Modelo dos subagents")
+                                    .size(LabelSize::Small)
+                                    .color(Color::Muted),
+                            )
+                            .child(self.render_agent_subagent_model_dropdown(window, cx))
+                            .child(
+                                Label::new(
+                                    "Vale para os subagents que este agente abre sem pedir um modelo.",
+                                )
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted),
+                            ),
                     ),
             )
             .child(
@@ -2003,7 +2053,7 @@ impl Render for TaskAgentsView {
                             .child(self.render_subagent_model_dropdown(window, cx))
                             .child(
                                 Label::new(
-                                    "Vale para todo subagent do Zed Agent que não peça um modelo.",
+                                    "Vale para todo subagent do Zed Agent que não peça um modelo e cujo agente não defina um.",
                                 )
                                 .size(LabelSize::XSmall)
                                 .color(Color::Muted),

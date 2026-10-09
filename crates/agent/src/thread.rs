@@ -1412,6 +1412,17 @@ impl Thread {
         thread.inherit_parent_settings(parent_thread, cx);
         let model_selection = model_selection
             .cloned()
+            .or_else(|| {
+                let reference = thread.parent_task_agent.as_ref()?.subagent_model_reference()?;
+                // The parent's thinking and speed carry over; models without them drop them.
+                Some(LanguageModelSelection {
+                    provider: settings::LanguageModelProviderSetting(reference.provider),
+                    model: reference.model,
+                    enable_thinking: thread.thinking_enabled,
+                    effort: thread.thinking_effort.clone(),
+                    speed: thread.speed,
+                })
+            })
             .or_else(|| AgentSettings::get_global(cx).subagent_model.clone());
         if let Some(model_selection) = model_selection {
             thread.inherits_parent_model_settings = false;

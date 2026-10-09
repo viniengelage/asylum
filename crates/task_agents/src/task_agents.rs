@@ -133,6 +133,7 @@ struct Frontmatter {
     description: String,
     profile: Option<String>,
     model: Option<String>,
+    subagent_model: Option<String>,
     toolkits: Option<ToolkitsEntry>,
     tools: Option<ToolsEntry>,
     #[serde(default)]
@@ -149,6 +150,8 @@ struct FrontmatterOut<'a> {
     profile: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     model: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    subagent_model: Option<&'a str>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     toolkits: &'a Vec<String>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
@@ -199,6 +202,8 @@ pub struct TaskAgent {
     /// The agent profile whose tools are the starting point.
     pub profile: Option<String>,
     pub model: Option<String>,
+    /// The model of the subagents this agent spawns, over the `subagent_model` setting.
+    pub subagent_model: Option<String>,
     /// Toolkit ids whose tools are all turned on.
     pub toolkits: Vec<String>,
     /// Per-tool overrides on top of the profile and the toolkits.
@@ -213,6 +218,10 @@ pub struct TaskAgent {
 impl TaskAgent {
     pub fn model_reference(&self) -> Option<ModelReference> {
         self.model.as_deref().and_then(ModelReference::parse)
+    }
+
+    pub fn subagent_model_reference(&self) -> Option<ModelReference> {
+        self.subagent_model.as_deref().and_then(ModelReference::parse)
     }
 
     /// Whether the agent turns a tool on or off, given which toolkit the tool belongs to.
@@ -247,6 +256,7 @@ impl TaskAgent {
             description: &self.description,
             profile: self.profile.as_deref(),
             model: self.model.as_deref(),
+            subagent_model: self.subagent_model.as_deref(),
             toolkits: &self.toolkits,
             tools: &self.tools,
             permissions: self
@@ -326,6 +336,9 @@ pub fn parse_task_agent(path: &Path, content: &str, source: TaskAgentSource) -> 
     let model = frontmatter
         .model
         .filter(|model| ModelReference::parse(model).is_some());
+    let subagent_model = frontmatter
+        .subagent_model
+        .filter(|model| ModelReference::parse(model).is_some());
 
     Ok(TaskAgent {
         id,
@@ -334,6 +347,7 @@ pub fn parse_task_agent(path: &Path, content: &str, source: TaskAgentSource) -> 
         description: frontmatter.description.trim().to_string(),
         profile: frontmatter.profile.filter(|profile| !profile.is_empty()),
         model,
+        subagent_model,
         toolkits,
         tools,
         permissions: frontmatter
@@ -492,7 +506,7 @@ mod tests {
 
     #[test]
     fn test_parse_full_agent() {
-        let content = "---\nname: Revisor de PR\ncommand: /revisar\ndescription: Revisa o PR\nprofile: ask\nmodel: anthropic/claude-opus-5-5\ntoolkits: [repo, clickup]\ntools:\n  edit_file: false\npermissions:\n  repo_pr_comment: confirm\n  terminal:\n    default: confirm\n    allow: ['^npm test']\n    deny: ['rm -rf']\n---\n\nVocê revisa o PR.\n";
+        let content = "---\nname: Revisor de PR\ncommand: /revisar\ndescription: Revisa o PR\nprofile: ask\nmodel: anthropic/claude-opus-5-5\nsubagent_model: anthropic/claude-haiku-5-5\ntoolkits: [repo, clickup]\ntools:\n  edit_file: false\npermissions:\n  repo_pr_comment: confirm\n  terminal:\n    default: confirm\n    allow: ['^npm test']\n    deny: ['rm -rf']\n---\n\nVocê revisa o PR.\n";
         let agent = parse_task_agent(
             Path::new("/app/.asylum/agents/revisar-pr.md"),
             content,
@@ -503,6 +517,13 @@ mod tests {
         assert_eq!(agent.name, "Revisor de PR");
         assert_eq!(agent.command, "revisar");
         assert_eq!(agent.profile.as_deref(), Some("ask"));
+        assert_eq!(
+            agent.subagent_model_reference(),
+            Some(ModelReference {
+                provider: "anthropic".into(),
+                model: "claude-haiku-5-5".into()
+            })
+        );
         assert_eq!(
             agent.model_reference(),
             Some(ModelReference {

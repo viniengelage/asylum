@@ -109,7 +109,7 @@ permissions:
 - `toolkits`: liga todas as ferramentas do toolkit. Ligue só os que as instruções realmente usam.
 - `tools`: exceções por ferramenta sobre o perfil e os toolkits. Omita o campo quando não houver exceção.
 - `permissions`: chave é o nome de uma ferramenta, o id de um toolkit (vale para todas as ferramentas dele) ou `'*'` (vale para toda ferramenta sem regra própria, MCP inclusive). `allow` roda sem perguntar, `confirm` pede confirmação, `deny` nunca roda. Ferramentas de leitura já rodam sem perguntar; dê `allow` a ferramentas que agem só quando o trabalho depende de muitas chamadas seguras (ex.: tocar na tela de um simulador), e `confirm` para o que publica, apaga, envia ou é irreversível. Para o terminal, prefira regras com regex (`allow: ['^npm test']`) a liberar tudo. Omita o campo quando não houver regra.
-- Não escreva `model`: o agente usa o modelo da thread.
+- Não escreva `model` nem `subagent_model`: o agente e os subagents dele usam o modelo da thread.
 
 ## Instruções
 
@@ -275,6 +275,7 @@ pub fn drop_unknown_references(agent: &mut TaskAgent, catalog: &AuthoringCatalog
         .permissions
         .retain(|key, _| catalog.is_known_permission_key(key));
     agent.model = None;
+    agent.subagent_model = None;
 }
 
 /// A template rendered as a finished file, for the prompt's examples.
@@ -294,6 +295,7 @@ pub fn example_markdown(
         description: description.to_string(),
         profile: Some(profile.to_string()),
         model: None,
+        subagent_model: None,
         toolkits: toolkits.iter().map(|id| id.to_string()).collect(),
         tools: Default::default(),
         permissions: permissions
