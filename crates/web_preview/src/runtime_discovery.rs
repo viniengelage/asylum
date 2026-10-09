@@ -17,12 +17,20 @@ struct RuntimeInfo {
 
 /// The port Chromium serves CDP on. Profiles run their own CEF side by side, so
 /// a non-default profile takes whichever port is free and publishes it in its
-/// `runtime.json`.
+/// `runtime.json`. The default profile does the same when something else already
+/// listens on the default port: Chromium can't bind it then, and every CDP client
+/// would end up talking to that other program instead.
 pub fn remote_debugging_port() -> u16 {
     static PORT: OnceLock<u16> = OnceLock::new();
     *PORT.get_or_init(|| {
         if paths::active_profile_id().is_none() {
-            return DEFAULT_REMOTE_DEBUGGING_PORT;
+            if TcpListener::bind((Ipv4Addr::LOCALHOST, DEFAULT_REMOTE_DEBUGGING_PORT)).is_ok() {
+                return DEFAULT_REMOTE_DEBUGGING_PORT;
+            }
+            log::warn!(
+                "web_preview: port {DEFAULT_REMOTE_DEBUGGING_PORT} is taken by another program, \
+                 serving CDP on a free port instead"
+            );
         }
         match TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).and_then(|listener| listener.local_addr())
         {

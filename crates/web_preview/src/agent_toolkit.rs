@@ -10,9 +10,16 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::time::Duration;
 use task_agents::{ToolAccess, Toolkit, ToolkitOutput, ToolkitTool, scale_screenshot};
+use util::ResultExt as _;
 
 const CDP_TIMEOUT: Duration = Duration::from_secs(15);
+const EVAL_TIMEOUT: Duration = Duration::from_secs(60);
 const LOAD_TIMEOUT: Duration = Duration::from_secs(20);
+const BROWSER_START_TIMEOUT: Duration = Duration::from_secs(15);
+/// Chromium reports the page's DevTools target right after creating it; a browser still
+/// without one by then is used anyway, matching its page by URL.
+const TARGET_ID_GRACE: Duration = Duration::from_secs(3);
+const READY_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const CONSOLE_COLLECT_TIME: Duration = Duration::from_millis(400);
 
 /// Every browser tab, in the order they were opened, so agent tools find the page the user is
@@ -78,7 +85,16 @@ async fn with_timeout<T>(
     what: &str,
     cx: &AsyncApp,
 ) -> Result<T> {
-    let timer = cx.background_executor().timer(CDP_TIMEOUT);
+    with_timeout_of(CDP_TIMEOUT, future, what, cx).await
+}
+
+async fn with_timeout_of<T>(
+    timeout: Duration,
+    future: impl std::future::Future<Output = Result<T>>,
+    what: &str,
+    cx: &AsyncApp,
+) -> Result<T> {
+    let timer = cx.background_executor().timer(timeout);
     futures::pin_mut!(future);
     match futures::future::select(future, timer).await {
         futures::future::Either::Left((result, _)) => result,
@@ -255,38 +271,29 @@ async fn http_get_json(port: u16, path: &str) -> Result<Value> {
     serde_json::from_str(body.trim()).context("o CDP não respondeu JSON")
 }
 
-async fn session_for_active_page(cx: &mut AsyncApp) -> Result<(CdpSession, PageInfo)> {
-    let (info, unavailable) = cx.update(|cx| {
-        let view = active_view(cx).context(
-            "Nenhuma aba de Browser aberta. Use browser_open com a URL para abrir uma.",
-        )?;
-        let unavailable = {
-            let view = view.read(cx);
-            if view.browser.is_some() {
-                None
-            } else if let Some(error) = &view.error {
-                Some(format!("O browser não abriu: {} — {}", error.headline, error.detail))
-            } else if !crate::cef_paths::is_installed() {
-                Some(
-                    "O Chromium ainda não foi baixado. Peça para abrir a aba de Browser e baixar."
-                        .to_string(),
-                )
-            } else if view.hidden || view.last_bounds.is_none() {
-                Some(
-                    "A aba de Browser não está visível; o Chromium só sobe quando a aba aparece na tela."
-                        .to_string(),
-                )
-            } else {
-                Some(
-                    "A aba de Browser ainda está carregando o Chromium; tente de novo em alguns segundos."
-                        .to_string(),
-                )
-            }
-        };
-        anyhow::Ok((page_info(&view, cx), unavailable))
-    })?;
-    if let Some(reason) = unavailable {
-        anyhow::bail!(reason);
+/// Which pages a tool can work with. Painting and input wait on the renderer, which
+/// stops producing frames for a tab the Devices panel has hidden, so those tools would
+/// only time out there.
+#[derive(Clone, Copy, PartialEq)]
+enum PageUse {
+    Script,
+    PaintOrInput,
+}
+
+async fn session_for_active_page(
+    page_use: PageUse,
+    cx: &mut AsyncApp,
+) -> Result<(CdpSession, PageInfo)> {
+    let view = cx
+        .update(|cx| active_view(cx))
+        .context("Nenhuma aba de Browser aberta. Use browser_open com a URL para abrir uma.")?;
+    wait_for_browser(&view, cx).await?;
+    let info = cx.update(|cx| page_info(&view, cx));
+    if page_use == PageUse::PaintOrInput && info.hidden {
+        anyhow::bail!(
+            "A aba de Browser está escondida no painel Devices, e uma página escondida não \
+             desenha nem recebe input. Peça para mostrá-la; browser_eval funciona assim mesmo."
+        );
     }
     let session = with_timeout(
         CdpSession::connect(info.target_id.as_deref(), &info.url),
@@ -297,37 +304,148 @@ async fn session_for_active_page(cx: &mut AsyncApp) -> Result<(CdpSession, PageI
     Ok((session, info))
 }
 
+/// Chromium is only started once the tab lays out, so a tab that never reached the screen
+/// (opened in the background, or behind another tab) is brought forward instead of
+/// leaving every tool to fail on it.
+async fn wait_for_browser(view: &Entity<WebPreviewView>, cx: &mut AsyncApp) -> Result<()> {
+    let started_at = std::time::Instant::now();
+    let mut browser_started_at = None;
+    let mut activated = false;
+    loop {
+        let (has_browser, has_target, failure, needs_screen) = cx.update(|cx| {
+            let view = view.read(cx);
+            let failure = if let Some(error) = &view.error {
+                Some(format!("O browser não abriu: {} — {}", error.headline, error.detail))
+            } else if !crate::cef_paths::is_installed() {
+                Some(
+                    "O Chromium ainda não foi baixado. Peça para abrir a aba de Browser e baixar."
+                        .to_string(),
+                )
+            } else {
+                None
+            };
+            (
+                view.browser.is_some(),
+                view.target_id.is_some(),
+                failure,
+                view.last_bounds.is_none(),
+            )
+        });
+        if let Some(failure) = failure {
+            anyhow::bail!(failure);
+        }
+        if has_browser {
+            let browser_started_at = *browser_started_at.get_or_insert_with(std::time::Instant::now);
+            if has_target || browser_started_at.elapsed() > TARGET_ID_GRACE {
+                return Ok(());
+            }
+        } else if needs_screen && !activated {
+            activated = true;
+            show_view(view, cx);
+        }
+        if started_at.elapsed() > BROWSER_START_TIMEOUT {
+            anyhow::bail!(if needs_screen {
+                "A aba de Browser não apareceu na tela, e o Chromium só sobe quando ela aparece. \
+                 Peça para deixá-la visível."
+            } else {
+                "O Chromium não subiu a tempo; tente de novo em alguns segundos."
+            });
+        }
+        cx.background_executor().timer(Duration::from_millis(100)).await;
+    }
+}
+
+fn show_view(view: &Entity<WebPreviewView>, cx: &mut AsyncApp) {
+    let workspaces = cx.update(|cx| {
+        workspace::AppState::global(cx)
+            .workspace_store
+            .read(cx)
+            .workspaces_with_windows()
+            .filter_map(|(window, workspace)| Some((window, workspace.upgrade()?)))
+            .collect::<Vec<_>>()
+    });
+    for (window, workspace) in workspaces {
+        let shown = window
+            .update(cx, |_, window, cx| {
+                workspace.update(cx, |workspace, cx| {
+                    workspace.activate_item(view, true, false, window, cx)
+                })
+            })
+            .unwrap_or(false);
+        if shown {
+            return;
+        }
+    }
+}
+
 fn page_line(info: &PageInfo) -> String {
     let mut line = format!("{} — {}", info.title, info.url);
     if info.loading {
         line.push_str(" (carregando)");
     }
     if info.hidden {
-        line.push_str(" (a aba está escondida; a imagem pode estar desatualizada)");
+        line.push_str(" (a aba está escondida no painel Devices)");
     }
     line
 }
 
-async fn wait_until_loaded(cx: &mut AsyncApp) -> PageInfo {
-    let started = std::time::Instant::now();
+/// Waits for the page itself rather than for the tab's loading flag: right after a
+/// navigation is requested that flag still describes the previous page, and a brand new
+/// tab reports the blank page it starts on as loaded before Chromium even exists.
+async fn wait_until_loaded(navigating_to: &str, cx: &mut AsyncApp) -> Result<PageInfo> {
+    let view = cx
+        .update(|cx| active_view(cx))
+        .context("a aba de Browser fechou antes de a página carregar")?;
+    wait_for_browser(&view, cx).await?;
+    let started_at = std::time::Instant::now();
+    let mut session = None;
     loop {
-        cx.background_executor()
-            .timer(Duration::from_millis(250))
-            .await;
-        let info = cx.update(|cx| active_view(cx).map(|view| page_info(&view, cx)));
-        match info {
-            Some(info) if !info.loading || started.elapsed() > LOAD_TIMEOUT => return info,
-            None if started.elapsed() > LOAD_TIMEOUT => {
-                return PageInfo {
-                    url: String::new(),
-                    title: String::new(),
-                    loading: true,
-                    hidden: false,
-                    target_id: None,
-                };
-            }
-            _ => {}
+        let info = cx.update(|cx| page_info(&view, cx));
+        if session.is_none() {
+            session = with_timeout(
+                CdpSession::connect(info.target_id.as_deref(), &info.url),
+                "conectar ao browser",
+                cx,
+            )
+            .await
+            .log_err();
         }
+        // A navigation replaces the page's JavaScript context, so an evaluation that
+        // fails here is simply retried on the next round.
+        let page = match session.as_mut() {
+            Some(session) => with_timeout(
+                session.evaluate("[document.readyState, location.href, document.title]"),
+                "ler o estado da página",
+                cx,
+            )
+            .await
+            .ok(),
+            None => None,
+        };
+        if let Some(page) = page {
+            let ready_state = page[0].as_str().unwrap_or_default();
+            let url = page[1].as_str().unwrap_or_default().to_string();
+            let title = page[2].as_str().unwrap_or_default().to_string();
+            if url.starts_with("chrome-error://") {
+                anyhow::bail!("A página {navigating_to} não carregou (erro de rede ou endereço inválido).");
+            }
+            let left_blank_page = url != "about:blank" || navigating_to == "about:blank";
+            if ready_state == "complete" && left_blank_page {
+                return Ok(PageInfo {
+                    url,
+                    title,
+                    loading: false,
+                    ..info
+                });
+            }
+        }
+        if started_at.elapsed() > LOAD_TIMEOUT {
+            return Ok(PageInfo {
+                loading: true,
+                ..info
+            });
+        }
+        cx.background_executor().timer(READY_POLL_INTERVAL).await;
     }
 }
 
@@ -428,13 +546,16 @@ pub fn register_toolkit(cx: &mut App) {
             async |project, input: OpenInput, cx| {
                 let has_view = cx.update(|cx| active_view(cx).is_some());
                 if has_view {
-                    let (mut session, _) = session_for_active_page(cx).await?;
-                    with_timeout(
+                    let (mut session, _) = session_for_active_page(PageUse::Script, cx).await?;
+                    let navigation = with_timeout(
                         session.call("Page.navigate", json!({ "url": input.url })),
                         "navegar",
                         cx,
                     )
                     .await?;
+                    if let Some(error) = navigation["errorText"].as_str().filter(|error| !error.is_empty()) {
+                        anyhow::bail!("A página {} não carregou: {error}", input.url);
+                    }
                 } else {
                     let target = cx.update(|cx| {
                         workspace::AppState::global(cx)
@@ -457,7 +578,7 @@ pub fn register_toolkit(cx: &mut App) {
                         })
                     })?;
                 }
-                let info = wait_until_loaded(cx).await;
+                let info = wait_until_loaded(&input.url, cx).await?;
                 Ok(ToolkitOutput::text(format!("Página: {}", page_line(&info))))
             },
         ),
@@ -468,7 +589,7 @@ pub fn register_toolkit(cx: &mut App) {
              browser_click and browser_scroll are in the pixels of this image.",
             ToolAccess::Read,
             async |_project, _input: NoInput, cx| {
-                let (mut session, info) = session_for_active_page(cx).await?;
+                let (mut session, info) = session_for_active_page(PageUse::PaintOrInput, cx).await?;
                 let (width, height, scale) = with_timeout(session.viewport(), "medir a página", cx).await?;
                 let result = with_timeout(
                     session.call(
@@ -508,7 +629,7 @@ pub fn register_toolkit(cx: &mut App) {
             "Clicks the page at a point given in the pixels of the latest browser_screenshot.",
             ToolAccess::Act,
             async |_project, input: ClickInput, cx| {
-                let (mut session, _) = session_for_active_page(cx).await?;
+                let (mut session, _) = session_for_active_page(PageUse::PaintOrInput, cx).await?;
                 let (_, _, scale) = with_timeout(session.viewport(), "medir a página", cx).await?;
                 let x = input.x / scale;
                 let y = input.y / scale;
@@ -542,7 +663,7 @@ pub fn register_toolkit(cx: &mut App) {
             "Types text into the focused element of the page.",
             ToolAccess::Act,
             async |_project, input: TypeInput, cx| {
-                let (mut session, _) = session_for_active_page(cx).await?;
+                let (mut session, _) = session_for_active_page(PageUse::PaintOrInput, cx).await?;
                 with_timeout(
                     session.call("Input.insertText", json!({ "text": input.text })),
                     "digitar",
@@ -563,7 +684,7 @@ pub fn register_toolkit(cx: &mut App) {
             async |_project, input: KeyInput, cx| {
                 let key = input.key.trim().to_lowercase();
                 let (name, code, key_code) = key_event(&key)?;
-                let (mut session, _) = session_for_active_page(cx).await?;
+                let (mut session, _) = session_for_active_page(PageUse::PaintOrInput, cx).await?;
                 for event_type in ["rawKeyDown", "keyUp"] {
                     let mut params = json!({
                         "type": event_type,
@@ -587,7 +708,7 @@ pub fn register_toolkit(cx: &mut App) {
             "Scrolls the page with the mouse wheel.",
             ToolAccess::Act,
             async |_project, input: ScrollInput, cx| {
-                let (mut session, _) = session_for_active_page(cx).await?;
+                let (mut session, _) = session_for_active_page(PageUse::PaintOrInput, cx).await?;
                 let (width, height, scale) = with_timeout(session.viewport(), "medir a página", cx).await?;
                 let x = input.x.map_or(width / 2.0, |x| x / scale);
                 let y = input.y.map_or(height / 2.0, |y| y / scale);
@@ -607,11 +728,19 @@ pub fn register_toolkit(cx: &mut App) {
             "browser_eval",
             "Rodou JavaScript na página",
             "Evaluates a JavaScript expression in the page and returns the result as JSON. Use it \
-             to read the DOM, storage or app state that a screenshot can't show.",
+             to read the DOM, storage or app state that a screenshot can't show. Promises are \
+             awaited for at most 60 seconds; to navigate, use browser_open instead of \
+             assigning `location`.",
             ToolAccess::Act,
             async |_project, input: EvalInput, cx| {
-                let (mut session, _) = session_for_active_page(cx).await?;
-                let value = with_timeout(session.evaluate(&input.expression), "avaliar", cx).await?;
+                let (mut session, _) = session_for_active_page(PageUse::Script, cx).await?;
+                let value = with_timeout_of(
+                    EVAL_TIMEOUT,
+                    session.evaluate(&input.expression),
+                    "avaliar",
+                    cx,
+                )
+                .await?;
                 let text = serde_json::to_string_pretty(&value)?;
                 let text: String = text.chars().take(20_000).collect();
                 Ok(ToolkitOutput::text(text))
@@ -624,7 +753,7 @@ pub fn register_toolkit(cx: &mut App) {
              requests) buffered since the page loaded.",
             ToolAccess::Read,
             async |_project, _input: NoInput, cx| {
-                let (mut session, info) = session_for_active_page(cx).await?;
+                let (mut session, info) = session_for_active_page(PageUse::Script, cx).await?;
                 with_timeout(session.call("Console.enable", json!({})), "console", cx).await?;
                 with_timeout(session.call("Log.enable", json!({})), "log", cx).await?;
                 session.collect_events(CONSOLE_COLLECT_TIME, cx).await;
