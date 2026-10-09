@@ -14,7 +14,7 @@ use objc::{
 };
 use objc2_app_kit::{
     NSWorkspaceApplicationKey, NSWorkspaceDidActivateApplicationNotification,
-    NSWorkspaceDidLaunchApplicationNotification,
+    NSWorkspaceDidLaunchApplicationNotification, NSWorkspaceDidUnhideApplicationNotification,
 };
 use std::{
     ffi::{CStr, c_void},
@@ -117,6 +117,22 @@ pub(crate) fn create_sim_display_view(device: id, size: Size<Pixels>) -> Result<
 /// hidden rather than quit: quitting makes Expo wait for it until it times out, and the next
 /// launch would open it again anyway.
 fn hide_device_hub_while_embedded() {
+    install_device_hub_observer();
+    // DeviceHub may already be on screen from a run that happened before this device was embedded.
+    unsafe {
+        let workspace: id = msg_send![class!(NSWorkspace), sharedWorkspace];
+        let applications: id = msg_send![workspace, runningApplications];
+        let application_count: usize = msg_send![applications, count];
+        for application_index in 0..application_count {
+            let application: id = msg_send![applications, objectAtIndex: application_index];
+            if is_device_hub(application) {
+                hide_device_hub(application);
+            }
+        }
+    }
+}
+
+fn install_device_hub_observer() {
     static INSTALL: Once = Once::new();
     INSTALL.call_once(|| unsafe {
         let Some(mut decl) = ClassDecl::new("GPUIDeviceHubObserver", class!(NSObject)) else {
@@ -133,9 +149,12 @@ fn hide_device_hub_while_embedded() {
 
         let workspace: id = msg_send![class!(NSWorkspace), sharedWorkspace];
         let center: id = msg_send![workspace, notificationCenter];
+        // DeviceHub unhides itself without becoming active when it handles the `devices://`
+        // URL that follows its launch, so hiding on launch alone is undone half a second later.
         for name in [
             NSWorkspaceDidLaunchApplicationNotification,
             NSWorkspaceDidActivateApplicationNotification,
+            NSWorkspaceDidUnhideApplicationNotification,
         ] {
             let name: *const objc2_foundation::NSString = name;
             let _: () = msg_send![
@@ -157,7 +176,12 @@ extern "C" fn hide_embedded_device_hub(_: &Object, _: Sel, notification: id) {
         if application == nil || !is_device_hub(application) || !has_embedded_simulator() {
             return;
         }
+        hide_device_hub(application);
+    }
+}
 
+unsafe fn hide_device_hub(application: id) {
+    unsafe {
         let was_active: BOOL = msg_send![application, isActive];
         let _: BOOL = msg_send![application, hide];
         // Hiding the frontmost app does not hand focus back to the workspace it covered.
