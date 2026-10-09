@@ -72,6 +72,12 @@ impl std::error::Error for MaxOutputTokensError {}
 /// Legacy ACP metadata key used before tool calls had a dedicated name field.
 pub const TOOL_NAME_META_KEY: &str = "tool_name";
 
+/// How long a new turn waits for the canceled one to wind down. A tool that ignores
+/// cancellation would otherwise leave every later message stuck before reaching the agent.
+const CANCELED_TURN_TIMEOUT: Duration = Duration::from_secs(5);
+/// The checkpoint is optional, so a git operation that never finishes must not hold the prompt.
+const CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Extracts a tool name from the legacy ACP metadata field.
 pub fn tool_name_from_meta(meta: &Option<acp_v1::Meta>) -> Option<SharedString> {
     meta.as_ref()
@@ -6030,11 +6036,21 @@ impl AcpThread {
                 })
                 .ok();
 
-                let old_checkpoint = git_store
-                    .update(cx, |git, cx| git.checkpoint(cx))
-                    .await
-                    .context("failed to get old checkpoint")
-                    .log_err();
+                let checkpoint = git_store.update(cx, |git, cx| git.checkpoint(cx));
+                let checkpoint_timeout = cx.background_executor().timer(CHECKPOINT_TIMEOUT);
+                let old_checkpoint =
+                    match futures::future::select(checkpoint, checkpoint_timeout).await {
+                        futures::future::Either::Left((checkpoint, _)) => checkpoint
+                            .context("failed to get old checkpoint")
+                            .log_err(),
+                        futures::future::Either::Right(_) => {
+                            log::warn!(
+                                "git checkpoint did not finish within {CHECKPOINT_TIMEOUT:?}; \
+                                 sending the message without one"
+                            );
+                            None
+                        }
+                    };
                 this.update(cx, |this, _cx| {
                     if let Some((_ix, message)) = this.last_user_message() {
                         message.checkpoint = old_checkpoint.map(|git_checkpoint| Checkpoint {
@@ -6105,7 +6121,15 @@ impl AcpThread {
             id: turn_id,
             first_entry_index,
             send_task: cx.spawn(async move |this, cx| {
-                cancel_task.await;
+                let cancel_timeout = cx.background_executor().timer(CANCELED_TURN_TIMEOUT);
+                if let futures::future::Either::Right(_) =
+                    futures::future::select(cancel_task, cancel_timeout).await
+                {
+                    log::warn!(
+                        "the canceled turn did not finish within {CANCELED_TURN_TIMEOUT:?}; \
+                         starting the next turn without it"
+                    );
+                }
                 tx.send(f(this, cx).await).ok();
             }),
         });

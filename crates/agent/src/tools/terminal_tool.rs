@@ -22,6 +22,10 @@ use crate::sandboxing::{
 use crate::{AgentTool, ThreadEnvironment, ToolCallEventStream, ToolInput};
 
 const COMMAND_OUTPUT_LIMIT: u64 = 16 * 1024;
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+const IDLE_TIMEOUT: Duration = Duration::from_secs(2 * 60);
+const IDLE_POLL_INTERVAL: Duration = Duration::from_secs(1);
+const KILL_GRACE_PERIOD: Duration = Duration::from_secs(5);
 
 /// Executes a shell one-liner and returns the combined output.
 ///
@@ -37,7 +41,7 @@ const COMMAND_OUTPUT_LIMIT: u64 = 16 * 1024;
 ///
 /// Do not use this tool for commands that run indefinitely, such as servers (like `npm run start`, `npm run dev`, `python -m http.server`, etc) or file watchers that don't terminate on their own.
 ///
-/// For potentially long-running commands, prefer specifying `timeout_ms` to bound runtime and prevent indefinite hangs.
+/// Without `timeout_ms`, the command is stopped after 5 minutes, or after 2 minutes without new output. For builds or tests that may take longer or stay silent for a while, set `timeout_ms` explicitly; it replaces both limits.
 ///
 /// Remember that each invocation of this tool will spawn a new shell process, so you can't rely on any state from previous invocations.
 ///
@@ -55,7 +59,7 @@ pub struct TerminalToolInput {
     pub command: String,
     /// Working directory: a project root directory or any subdirectory of one, given by name or absolute path. E.g. `my-project/src`, `/home/user/my-project`, or on Windows `my-project\src` or `C:\Users\me\my-project`.
     pub cd: String,
-    /// Optional maximum runtime (in milliseconds). If exceeded, the running terminal task is killed.
+    /// Optional maximum runtime (in milliseconds). If exceeded, the running terminal task is killed. When omitted, the command is killed after 5 minutes, or after 2 minutes without new output.
     pub timeout_ms: Option<u64>,
     /// Return only the first N lines of terminal output to the model after the command finishes. Do not pipe output to `head`; use this parameter instead so the user can still see live output. Avoid requesting too many lines, or the response may waste tokens or exceed the context window.
     #[serde(default)]
@@ -79,7 +83,7 @@ pub struct TerminalToolInput {
 ///
 /// Do not use this tool for commands that run indefinitely, such as servers (like `npm run start`, `npm run dev`, `python -m http.server`, etc) or file watchers that don't terminate on their own.
 ///
-/// For potentially long-running commands, prefer specifying `timeout_ms` to bound runtime and prevent indefinite hangs.
+/// Without `timeout_ms`, the command is stopped after 5 minutes, or after 2 minutes without new output. For builds or tests that may take longer or stay silent for a while, set `timeout_ms` explicitly; it replaces both limits.
 ///
 /// Remember that each invocation of this tool will spawn a new shell process, so you can't rely on any state from previous invocations.
 ///
@@ -97,7 +101,7 @@ pub struct SandboxedTerminalToolInput {
     pub command: String,
     /// Working directory: a project root directory or any subdirectory of one, given by name or absolute path. E.g. `my-project/src`, `/home/user/my-project`, or on Windows `my-project\src` or `C:\Users\me\my-project`.
     pub cd: String,
-    /// Optional maximum runtime (in milliseconds). If exceeded, the running terminal task is killed.
+    /// Optional maximum runtime (in milliseconds). If exceeded, the running terminal task is killed. When omitted, the command is killed after 5 minutes, or after 2 minutes without new output.
     pub timeout_ms: Option<u64>,
     /// Return only the first N lines of terminal output to the model after the command finishes. Do not pipe output to `head`; use this parameter instead so the user can still see live output. Avoid requesting too many lines, or the response may waste tokens or exceed the context window.
     #[serde(default)]
@@ -993,41 +997,63 @@ async fn run_terminal_tool(
         event_stream.update_fields(fields);
     }
 
-    let timeout = input.timeout_ms.map(Duration::from_millis);
+    // Models rarely set `timeout_ms`, and without one a server, watcher or retry loop would keep
+    // the turn waiting forever. Commands that go quiet are usually done with what the model
+    // needs, so they are also stopped when their output stops changing.
+    let (timeout, idle_timeout) = match input.timeout_ms {
+        Some(timeout_ms) => (Duration::from_millis(timeout_ms), None),
+        None => (DEFAULT_TIMEOUT, Some(IDLE_TIMEOUT)),
+    };
 
     let mut timed_out = false;
+    let mut stopped_while_idle = false;
     let mut user_stopped_via_signal = false;
     let wait_for_exit = terminal.wait_for_exit(cx).map_err(|e| e.to_string())?;
+    let mut exited = wait_for_exit.clone().fuse();
+    let mut timeout_task = cx.background_executor().timer(timeout).fuse();
+    let mut cancelled_by_user = event_stream.cancelled_by_user().boxed_local().fuse();
+    let mut last_output = String::new();
+    let mut last_output_changed_at = cx.background_executor().now();
 
-    match timeout {
-        Some(timeout) => {
-            let timeout_task = cx.background_executor().timer(timeout);
-
-            futures::select! {
-                _ = wait_for_exit.clone().fuse() => {},
-                _ = timeout_task.fuse() => {
+    loop {
+        let mut idle_poll = match idle_timeout {
+            Some(_) => cx.background_executor().timer(IDLE_POLL_INTERVAL).boxed_local(),
+            None => futures::future::pending().boxed_local(),
+        }
+        .fuse();
+        futures::select! {
+            _ = exited => break,
+            _ = timeout_task => {
+                timed_out = true;
+                terminal.kill(cx).map_err(|e| e.to_string())?;
+                wait_for_exit_after_kill(wait_for_exit, cx).await;
+                break;
+            }
+            _ = cancelled_by_user => {
+                user_stopped_via_signal = true;
+                terminal.kill(cx).map_err(|e| e.to_string())?;
+                wait_for_exit_after_kill(wait_for_exit, cx).await;
+                break;
+            }
+            _ = idle_poll => {
+                let Some(idle_timeout) = idle_timeout else {
+                    continue;
+                };
+                let output = terminal.current_output(cx).map_err(|e| e.to_string())?.output;
+                let now = cx.background_executor().now();
+                if output != last_output {
+                    last_output = output;
+                    last_output_changed_at = now;
+                } else if now.duration_since(last_output_changed_at) >= idle_timeout {
                     timed_out = true;
+                    stopped_while_idle = true;
                     terminal.kill(cx).map_err(|e| e.to_string())?;
-                    wait_for_exit.await;
-                }
-                _ = event_stream.cancelled_by_user().fuse() => {
-                    user_stopped_via_signal = true;
-                    terminal.kill(cx).map_err(|e| e.to_string())?;
-                    wait_for_exit.await;
+                    wait_for_exit_after_kill(wait_for_exit, cx).await;
+                    break;
                 }
             }
         }
-        None => {
-            futures::select! {
-                _ = wait_for_exit.clone().fuse() => {},
-                _ = event_stream.cancelled_by_user().fuse() => {
-                    user_stopped_via_signal = true;
-                    terminal.kill(cx).map_err(|e| e.to_string())?;
-                    wait_for_exit.await;
-                }
-            }
-        }
-    };
+    }
 
     let user_stopped_via_signal = user_stopped_via_signal || event_stream.was_cancelled_by_user();
     let user_stopped_via_terminal = terminal.was_stopped_by_user(cx).unwrap_or(false);
@@ -1036,12 +1062,45 @@ async fn run_terminal_tool(
     let output = terminal.current_output(cx).map_err(|e| e.to_string())?;
 
     let result = process_content(output, &input.command, timed_out, user_stopped, selection);
-    let notes = sandbox_note.into_iter().collect::<Vec<_>>();
+    let automatic_stop_note = (timed_out && input.timeout_ms.is_none()).then(|| {
+        let reason = if stopped_while_idle {
+            format!(
+                "its output did not change for {} seconds",
+                IDLE_TIMEOUT.as_secs()
+            )
+        } else {
+            format!("it ran for {} minutes", DEFAULT_TIMEOUT.as_secs() / 60)
+        };
+        format!(
+            "Note: no `timeout_ms` was set, so the command was stopped automatically because \
+             {reason}. If the output below already has what you need, continue from it. \
+             Do not rerun servers or watchers; if a slow build or test was cut short, rerun it \
+             with an explicit `timeout_ms`."
+        )
+    });
+    let notes = sandbox_note
+        .into_iter()
+        .chain(automatic_stop_note)
+        .collect::<Vec<_>>();
     Ok(if notes.is_empty() {
         result
     } else {
         format!("{}\n\n{result}", notes.join("\n\n"))
     })
+}
+
+/// A process that survives the kill (or a pty kept open by a child that escaped its process
+/// group) must not keep the tool, and with it the whole turn, waiting.
+async fn wait_for_exit_after_kill(
+    wait_for_exit: futures::future::Shared<Task<acp::TerminalExitStatus>>,
+    cx: &AsyncApp,
+) {
+    let grace_period = cx.background_executor().timer(KILL_GRACE_PERIOD);
+    if let futures::future::Either::Right(_) =
+        futures::future::select(wait_for_exit, grace_period).await
+    {
+        log::warn!("terminal did not exit within {KILL_GRACE_PERIOD:?} of being killed");
+    }
 }
 
 /// Resolve model-requested write paths into absolute paths.
