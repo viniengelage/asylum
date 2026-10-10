@@ -350,12 +350,21 @@ fn try_init_cef() -> Result<()> {
 
     let mut app = WebPreviewApp::new();
 
+    // Chromium installs its own SIGCHLD handler during initialization, replacing the one
+    // signal-hook registered for every terminal's pty. Without it no terminal learns that its
+    // shell exited: the shell stays a zombie and the agent's terminal tool waits forever.
+    let sigchld_action = current_signal_action(libc::SIGCHLD);
+
     let result = initialize(
         Some(args.as_main_args()),
         Some(&settings),
         Some(&mut app),
         std::ptr::null_mut(),
     );
+
+    if let Some(sigchld_action) = sigchld_action {
+        restore_signal_action(libc::SIGCHLD, &sigchld_action);
+    }
 
     if result != 1 {
         return Err(anyhow!("cef_initialize returned {result}"));
@@ -370,6 +379,32 @@ fn try_init_cef() -> Result<()> {
     );
 
     Ok(())
+}
+
+fn current_signal_action(signal: libc::c_int) -> Option<libc::sigaction> {
+    let mut action = std::mem::MaybeUninit::<libc::sigaction>::zeroed();
+    // SAFETY: a null new action only reads the current disposition into `action`.
+    let status = unsafe { libc::sigaction(signal, std::ptr::null(), action.as_mut_ptr()) };
+    if status != 0 {
+        log::warn!(
+            "web_preview: reading the handler of signal {signal} failed: {}",
+            std::io::Error::last_os_error()
+        );
+        return None;
+    }
+    // SAFETY: `sigaction` succeeded and filled the struct.
+    Some(unsafe { action.assume_init() })
+}
+
+fn restore_signal_action(signal: libc::c_int, action: &libc::sigaction) {
+    // SAFETY: `action` came from `sigaction` for this same signal.
+    let status = unsafe { libc::sigaction(signal, action, std::ptr::null_mut()) };
+    if status != 0 {
+        log::warn!(
+            "web_preview: restoring the handler of signal {signal} failed: {}",
+            std::io::Error::last_os_error()
+        );
+    }
 }
 
 fn profile_directory() -> PathBuf {

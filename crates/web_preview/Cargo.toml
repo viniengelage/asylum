@@ -44,6 +44,7 @@ async-tar.workspace = true
 cef = { version = "150", default-features = false, features = ["build-util"] }
 futures.workspace = true
 http_client.workspace = true
+libc.workspace = true
 smol.workspace = true
 core-foundation.workspace = true
 core-video.workspace = true
