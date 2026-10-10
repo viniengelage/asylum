@@ -23,6 +23,10 @@ use std::time::{Duration, Instant};
 /// `Settings::framework_dir_path`.
 const FRAMEWORK_DIR_PATH_SWITCH: &str = "framework-dir-path";
 
+/// The SIGCHLD disposition from before CEF initialized; see `restore_original_sigchld_action`.
+static ORIGINAL_SIGCHLD_ACTION: OnceLock<libc::sigaction> = OnceLock::new();
+static SIGCHLD_REPLACEMENT_LOGGED: AtomicBool = AtomicBool::new(false);
+
 /// Frames CEF paints per second. Offscreen rendering is capped by this rather than by
 /// the display, and CEF's default of 30 is visible as stutter while scrolling.
 const WINDOWLESS_FRAME_RATE: i32 = 60;
@@ -190,6 +194,7 @@ pub fn pump_message_loop() -> Duration {
         // `do_message_loop_work`, and that request must survive this reset.
         PUMP_DEADLINE_MS.store(u64::MAX, Ordering::Relaxed);
         do_message_loop_work();
+        restore_original_sigchld_action();
         LAST_PUMP_MS.store(now_ms(), Ordering::Relaxed);
     }
 
@@ -350,10 +355,9 @@ fn try_init_cef() -> Result<()> {
 
     let mut app = WebPreviewApp::new();
 
-    // Chromium installs its own SIGCHLD handler during initialization, replacing the one
-    // signal-hook registered for every terminal's pty. Without it no terminal learns that its
-    // shell exited: the shell stays a zombie and the agent's terminal tool waits forever.
-    let sigchld_action = current_signal_action(libc::SIGCHLD);
+    if let Some(action) = current_signal_action(libc::SIGCHLD) {
+        ORIGINAL_SIGCHLD_ACTION.set(action).ok();
+    }
 
     let result = initialize(
         Some(args.as_main_args()),
@@ -362,9 +366,7 @@ fn try_init_cef() -> Result<()> {
         std::ptr::null_mut(),
     );
 
-    if let Some(sigchld_action) = sigchld_action {
-        restore_signal_action(libc::SIGCHLD, &sigchld_action);
-    }
+    restore_original_sigchld_action();
 
     if result != 1 {
         return Err(anyhow!("cef_initialize returned {result}"));
@@ -396,12 +398,29 @@ fn current_signal_action(signal: libc::c_int) -> Option<libc::sigaction> {
     Some(unsafe { action.assume_init() })
 }
 
-fn restore_signal_action(signal: libc::c_int, action: &libc::sigaction) {
-    // SAFETY: `action` came from `sigaction` for this same signal.
-    let status = unsafe { libc::sigaction(signal, action, std::ptr::null_mut()) };
+/// Chromium installs its own SIGCHLD handler, replacing the one signal-hook registered for
+/// every terminal's pty and for async-process. CEF is never shut down, so from then on no
+/// terminal in the app learns that its shell exited: the shell stays a zombie and the agent's
+/// terminal tool waits forever, even in threads that never opened a browser. Checked after
+/// every pump too, since child processes Chromium launches later may install it again.
+fn restore_original_sigchld_action() {
+    let Some(original) = ORIGINAL_SIGCHLD_ACTION.get() else {
+        return;
+    };
+    let Some(current) = current_signal_action(libc::SIGCHLD) else {
+        return;
+    };
+    if current.sa_sigaction == original.sa_sigaction && current.sa_flags == original.sa_flags {
+        return;
+    }
+    if !SIGCHLD_REPLACEMENT_LOGGED.swap(true, Ordering::Relaxed) {
+        log::warn!("web_preview: CEF replaced the SIGCHLD handler; restoring it");
+    }
+    // SAFETY: `original` came from `sigaction` for this same signal.
+    let status = unsafe { libc::sigaction(libc::SIGCHLD, original, std::ptr::null_mut()) };
     if status != 0 {
         log::warn!(
-            "web_preview: restoring the handler of signal {signal} failed: {}",
+            "web_preview: restoring the SIGCHLD handler failed: {}",
             std::io::Error::last_os_error()
         );
     }
