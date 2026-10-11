@@ -660,15 +660,15 @@ impl WebPreviewView {
             .w(px(frame.content_width as f32 / scale))
             .h(px(frame.content_height as f32 / scale))
             .overflow_hidden()
-            .child(
-                gpui::surface(frame.pixel_buffer.clone())
+            .children(gpui_pixel_buffer(&frame.pixel_buffer).map(|pixel_buffer| {
+                gpui::surface(pixel_buffer)
                     .object_fit(gpui::ObjectFit::Fill)
                     .absolute()
                     .left_0()
                     .top_0()
                     .w(px(surface_width / scale))
-                    .h(px(surface_height / scale)),
-            )
+                    .h(px(surface_height / scale))
+            }))
             .into_any_element()
     }
 
@@ -1880,4 +1880,20 @@ impl KeyCodes {
             Self::new(windows, native)
         })
     }
+}
+
+#[cfg(target_os = "macos")]
+/// GPUI takes the `objc2` binding of a pixel buffer, while the CEF side still builds them with
+/// the `core-video` crate. Both wrap the same CoreFoundation object, so this only retains it.
+fn gpui_pixel_buffer(
+    pixel_buffer: &core_video::pixel_buffer::CVPixelBuffer,
+) -> Option<objc2_core_foundation::CFRetained<objc2_core_video::CVPixelBuffer>> {
+    use core_foundation::base::TCFType as _;
+
+    let pointer = std::ptr::NonNull::new(
+        pixel_buffer.as_concrete_TypeRef() as *mut objc2_core_video::CVPixelBuffer
+    )?;
+    // SAFETY: the pointer is a live CVPixelBuffer owned by `pixel_buffer`, and retaining it
+    // gives the returned handle its own reference.
+    Some(unsafe { objc2_core_foundation::CFRetained::retain(pointer) })
 }

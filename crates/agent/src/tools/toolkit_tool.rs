@@ -1,5 +1,5 @@
 use crate::{AgentToolOutput, AnyAgentTool, ToolCallEventStream, ToolInput, ToolPermissionContext};
-use agent_client_protocol::schema::v1 as acp;
+use agent_client_protocol::schema::v2 as acp;
 use anyhow::{Result, anyhow};
 use futures::FutureExt as _;
 use gpui::{App, AppContext as _, Entity, SharedString, Task};
@@ -134,18 +134,18 @@ impl AnyAgentTool for ToolkitToolAdapter {
             for content in &output.content {
                 match content {
                     ToolkitContent::Text(text) => {
-                        tool_call_content.push(acp::ToolCallContent::Content(acp::Content::new(
+                        tool_call_content.push(acp::ToolCallContent::Content(Box::new(acp::Content::new(
                             acp::ContentBlock::Text(acp::TextContent::new(text.clone())),
-                        )));
+                        ))));
                         llm_output.push(LanguageModelToolResultContent::Text(text.as_str().into()));
                     }
                     ToolkitContent::Image { base64_png } => {
-                        tool_call_content.push(acp::ToolCallContent::Content(acp::Content::new(
+                        tool_call_content.push(acp::ToolCallContent::Content(Box::new(acp::Content::new(
                             acp::ContentBlock::Image(acp::ImageContent::new(
                                 base64_png.clone(),
                                 "image/png",
                             )),
-                        )));
+                        ))));
                         let image = cx
                             .background_spawn({
                                 let base64_png = base64_png.clone();
@@ -170,8 +170,7 @@ impl AnyAgentTool for ToolkitToolAdapter {
                 llm_output.push(LanguageModelToolResultContent::Text("OK".into()));
             }
             if !tool_call_content.is_empty() {
-                event_stream
-                    .update_fields(acp::ToolCallUpdateFields::new().content(tool_call_content));
+                event_stream.update_fields(|update| update.content(tool_call_content));
             }
             Ok(AgentToolOutput {
                 raw_output: output

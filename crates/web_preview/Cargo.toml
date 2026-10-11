@@ -49,6 +49,8 @@ smol.workspace = true
 core-foundation.workspace = true
 core-video.workspace = true
 objc2 = "0.6"
+objc2-core-foundation.workspace = true
+objc2-core-video = { workspace = true, features = ["CVPixelBuffer"] }
 objc2-app-kit = { version = "0.3", default-features = false, features = [
     "NSView",
     "NSWindow",

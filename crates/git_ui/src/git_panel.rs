@@ -45,8 +45,8 @@ use git::{
 };
 use git::{
     ExpandCommitEditor, GitHostingProviderRegistry, GitRemote, RestoreTrackedFiles, StageAll,
-    StashAll, StashApply, StashPop, StashStaged, StashTracked, ToggleFillCommitEditor,
-    TrashUntrackedFiles, UnstageAll, ViewFile, parse_git_remote_url,
+    StashAll, StashApply, StashPop, StashStaged, StashTracked, ToggleCommitEditor,
+    ToggleFillCommitEditor, TrashUntrackedFiles, UnstageAll, ViewFile, parse_git_remote_url,
 };
 use gpui::{
     AbsoluteLength, Action, Anchor, AnyElement, AsyncApp, AsyncWindowContext, ClickEvent,
@@ -76,8 +76,8 @@ use prompt_store::RULES_FILE_NAMES;
 
 use serde::{Deserialize, Serialize};
 use settings::{
-    GitPanelClickBehavior, GitPanelGroupBy, GitPanelSortBy, Settings, SettingsStore, StatusStyle,
-    update_settings_file,
+    GitPanelClickBehavior, GitPanelCommitEditor, GitPanelGroupBy, GitPanelSortBy, Settings,
+    SettingsStore, StatusStyle, update_settings_file,
 };
 use smallvec::SmallVec;
 use std::cell::Cell;
@@ -522,6 +522,13 @@ pub fn register(workspace: &mut Workspace) {
             });
         }
     });
+    workspace.register_action(|workspace, _: &ToggleCommitEditor, window, cx| {
+        if let Some(panel) = workspace.panel::<GitPanel>(cx) {
+            panel.update(cx, |panel, cx| {
+                panel.toggle_commit_editor(&Default::default(), window, cx)
+            });
+        }
+    });
     workspace.register_action(|workspace, _: &git::Init, window, cx| {
         if let Some(panel) = workspace.panel::<GitPanel>(cx) {
             panel.update(cx, |panel, cx| panel.git_init(window, cx));
@@ -547,6 +554,9 @@ struct SerializedGitPanel {
     signoff_enabled: bool,
     #[serde(default)]
     commit_messages: BTreeMap<String, SerializedCommitMessage>,
+    /// `None` means the user never toggled it, so the setting decides.
+    #[serde(default)]
+    commit_editor_collapsed: Option<bool>,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -1117,6 +1127,11 @@ pub struct GitPanel {
     pub(crate) commit_editor: Entity<Editor>,
     /// Whether the commit editor should fill the vertical height of the panel.
     commit_editor_expanded: bool,
+    /// Whether the commit editor is hidden, leaving only the commit button row.
+    commit_editor_collapsed: bool,
+    /// Set once the user toggles the editor here, so an untouched workspace keeps
+    /// following `git_panel.commit_editor` instead of pinning its first value.
+    commit_editor_toggled: bool,
     conflicted_count: usize,
     conflicted_staged_count: usize,
     add_coauthors: bool,
@@ -1277,6 +1292,15 @@ impl GitPanel {
         let signoff_enabled = serialized_panel
             .as_ref()
             .is_some_and(|panel| panel.signoff_enabled);
+        let commit_editor_was_serialized = serialized_panel
+            .as_ref()
+            .is_some_and(|panel| panel.commit_editor_collapsed.is_some());
+        let commit_editor_collapsed = serialized_panel
+            .as_ref()
+            .and_then(|panel| panel.commit_editor_collapsed)
+            .unwrap_or_else(|| {
+                GitPanelSettings::get_global(cx).commit_editor == GitPanelCommitEditor::Collapsed
+            });
         let active_work_directory_abs_path = active_repository.as_ref().map(|repository| {
             repository
                 .read(cx)
@@ -1316,6 +1340,7 @@ impl GitPanel {
             let mut was_file_icons = GitPanelSettings::get_global(cx).file_icons;
             let mut was_folder_indicator = GitPanelSettings::get_global(cx).folder_indicator;
             let mut was_diff_stats = GitPanelSettings::get_global(cx).diff_stats;
+            let mut was_commit_editor = GitPanelSettings::get_global(cx).commit_editor;
             cx.observe_global_in::<SettingsStore>(window, move |this, window, cx| {
                 let settings = GitPanelSettings::get_global(cx);
                 let sort_by = settings.sort_by;
@@ -1324,6 +1349,15 @@ impl GitPanel {
                 let file_icons = settings.file_icons;
                 let folder_indicator = settings.folder_indicator;
                 let diff_stats = settings.diff_stats;
+                let commit_editor = settings.commit_editor;
+                // Changing the setting is an explicit request, so it wins over
+                // whatever this workspace last persisted.
+                if commit_editor != was_commit_editor {
+                    let collapsed = commit_editor == GitPanelCommitEditor::Collapsed;
+                    if collapsed != this.commit_editor_collapsed {
+                        this.toggle_commit_editor(&Default::default(), window, cx);
+                    }
+                }
                 if tree_view != was_tree_view {
                     match (&mut this.view_mode, tree_view) {
                         (GitPanelViewMode::Tree(state), false) => {
@@ -1358,6 +1392,7 @@ impl GitPanel {
                 was_file_icons = file_icons;
                 was_folder_indicator = folder_indicator;
                 was_diff_stats = diff_stats;
+                was_commit_editor = commit_editor;
             })
             .detach();
 
@@ -1435,6 +1470,8 @@ impl GitPanel {
                 active_repository,
                 commit_editor,
                 commit_editor_expanded: false,
+                commit_editor_collapsed,
+                commit_editor_toggled: commit_editor_was_serialized,
                 conflicted_count: 0,
                 conflicted_staged_count: 0,
                 add_coauthors: true,
@@ -1916,6 +1953,9 @@ impl GitPanel {
 
     fn serialize(&mut self, cx: &mut Context<Self>) {
         let signoff_enabled = self.signoff_enabled;
+        let commit_editor_collapsed = self
+            .commit_editor_toggled
+            .then_some(self.commit_editor_collapsed);
         let commit_messages = self.serialized_commit_messages(cx);
         let kvp = KeyValueStore::global(cx);
 
@@ -1943,6 +1983,7 @@ impl GitPanel {
                         serde_json::to_string(&SerializedGitPanel {
                             signoff_enabled,
                             commit_messages,
+                            commit_editor_collapsed,
                         })?,
                     )
                     .await?;
@@ -6559,6 +6600,23 @@ impl GitPanel {
         cx.notify();
     }
 
+    fn toggle_commit_editor(
+        &mut self,
+        _: &ToggleCommitEditor,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.commit_editor_collapsed = !self.commit_editor_collapsed;
+        self.commit_editor_toggled = true;
+        // Filling the panel and being hidden are mutually exclusive states, so
+        // collapsing has to undo the fill rather than leave it dangling.
+        if self.commit_editor_collapsed && self.commit_editor_expanded {
+            self.toggle_fill_commit_editor(&Default::default(), window, cx);
+        }
+        self.serialize(cx);
+        cx.notify();
+    }
+
     fn expand_commit_editor(
         &mut self,
         _: &ExpandCommitEditor,
@@ -6815,6 +6873,8 @@ impl GitPanel {
             .child(
                 IconButton::new("expand-commit-editor", IconName::MaximizeAlt)
                     .icon_size(IconSize::Small)
+                    .icon_color(Color::Hidden)
+                    .hover_color(Color::Muted)
                     .tooltip({
                         move |_window, cx| {
                             Tooltip::for_action_in(
@@ -6841,6 +6901,8 @@ impl GitPanel {
 
                 IconButton::new("fill-commit-editor", icon)
                     .icon_size(IconSize::Small)
+                    .icon_color(Color::Hidden)
+                    .hover_color(Color::Muted)
                     .tooltip({
                         move |_window, cx| {
                             Tooltip::for_action_in(
@@ -6857,6 +6919,25 @@ impl GitPanel {
                         }
                     }))
             });
+
+        let collapsed = self.commit_editor_collapsed;
+        let toggle_commit_editor_button = {
+            let (icon, label) = if collapsed {
+                (IconName::ChevronUp, "Show Commit Editor")
+            } else {
+                (IconName::ChevronDown, "Hide Commit Editor")
+            };
+            let focus_handle = self.focus_handle.clone();
+
+            IconButton::new("toggle-commit-editor", icon)
+                .icon_size(IconSize::Small)
+                .tooltip(move |_window, cx| {
+                    Tooltip::for_action_in(label, &git::ToggleCommitEditor, &focus_handle, cx)
+                })
+                .on_click(cx.listener(move |_, _, window, cx| {
+                    window.dispatch_action(git::ToggleCommitEditor.boxed_clone(), cx)
+                }))
+        };
 
         let hint_row = if title_exceeds_limit {
             h_flex()
@@ -6911,29 +6992,31 @@ impl GitPanel {
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                 window.focus(&this.commit_editor.focus_handle(cx), cx);
             }))
-            .child(
-                h_flex()
-                    .w_full()
-                    .items_start()
-                    .gap(DynamicSpacing::Base08.px(cx))
-                    .when(self.commit_editor_expanded, |this| this.flex_1().min_h_0())
-                    .child(
-                        div()
-                            .h_full()
-                            .min_w_0()
-                            .flex_grow_1()
-                            .cursor_text()
-                            .on_action(|&zed_actions::editor::MoveUp, _, cx| {
-                                cx.stop_propagation();
-                            })
-                            .on_action(|&zed_actions::editor::MoveDown, _, cx| {
-                                cx.stop_propagation();
-                            })
-                            .child(EditorElement::new(&self.commit_editor, panel_editor_style)),
-                    )
-                    .child(vertical_buttons),
-            )
-            .child(hint_row)
+            .when(!collapsed, |this| {
+                this.child(
+                    h_flex()
+                        .w_full()
+                        .items_start()
+                        .gap(DynamicSpacing::Base08.px(cx))
+                        .when(self.commit_editor_expanded, |this| this.flex_1().min_h_0())
+                        .child(
+                            div()
+                                .h_full()
+                                .min_w_0()
+                                .flex_grow_1()
+                                .cursor_text()
+                                .on_action(|&zed_actions::editor::MoveUp, _, cx| {
+                                    cx.stop_propagation();
+                                })
+                                .on_action(|&zed_actions::editor::MoveDown, _, cx| {
+                                    cx.stop_propagation();
+                                })
+                                .child(EditorElement::new(&self.commit_editor, panel_editor_style)),
+                        )
+                        .child(vertical_buttons),
+                )
+                .child(hint_row)
+            })
             .child(
                 h_flex()
                     .id("commit-footer")
@@ -6941,8 +7024,10 @@ impl GitPanel {
                     .gap(DynamicSpacing::Base06.px(cx))
                     .justify_between()
                     .child(
-                        self.render_generate_commit_message_button(true, cx)
-                            .unwrap_or_else(|| div().into_any_element()),
+                        h_flex()
+                            .gap(DynamicSpacing::Base04.px(cx))
+                            .child(toggle_commit_editor_button)
+                            .children(self.render_generate_commit_message_button(true, cx)),
                     )
                     .child(
                         h_flex()
@@ -7496,7 +7581,10 @@ impl GitPanel {
             self._repo_subscriptions.push(cx.subscribe(
                 &active_repository,
                 |this, _repo, event, cx| {
-                    if let RepositoryEvent::GraphEvent(_, _) = event {
+                    if matches!(
+                        event,
+                        RepositoryEvent::GraphEvent(_, _) | RepositoryEvent::TagsChanged
+                    ) {
                         if this.active_tab == GitPanelTab::History {
                             this.fetch_commit_history_entries(cx);
                         }
@@ -9523,6 +9611,7 @@ impl Render for GitPanel {
             .on_action(cx.listener(Self::focus_changes_list))
             .on_action(cx.listener(Self::focus_editor))
             .on_action(cx.listener(Self::expand_commit_editor))
+            .on_action(cx.listener(Self::toggle_commit_editor))
             .when(has_write_access && has_co_authors, |git_panel| {
                 git_panel.on_action(cx.listener(Self::toggle_fill_co_authors))
             })
@@ -9627,6 +9716,7 @@ impl editor::Addon for GitPanelAddon {
 impl Panel for GitPanel {
     fn activation_focus_handle(&self, cx: &App) -> FocusHandle {
         if self.active_tab == GitPanelTab::Changes
+            && !self.commit_editor_collapsed
             && (self.entries.is_empty() || self.commit_editor_expanded)
         {
             self.commit_editor.focus_handle(cx)
@@ -13015,6 +13105,7 @@ mod tests {
             SerializedGitPanel {
                 signoff_enabled: false,
                 commit_messages: panel.serialized_commit_messages(cx),
+                commit_editor_collapsed: None,
             }
         });
 
@@ -13058,6 +13149,7 @@ mod tests {
 
         let mismatched_serialized_panel = SerializedGitPanel {
             signoff_enabled: false,
+            commit_editor_collapsed: None,
             commit_messages: BTreeMap::from_iter([(
                 path!("/root/other-project").to_string(),
                 SerializedCommitMessage {
@@ -13156,6 +13248,7 @@ mod tests {
         let serialized_panel = panel.update(cx, |panel, cx| SerializedGitPanel {
             signoff_enabled: false,
             commit_messages: panel.serialized_commit_messages(cx),
+            commit_editor_collapsed: None,
         });
         let buffer = repository.read_with(cx, |repository, _| {
             repository.commit_message_buffer().unwrap().clone()
@@ -13251,6 +13344,7 @@ mod tests {
         let serialized_panel = panel.update(cx, |panel, cx| SerializedGitPanel {
             signoff_enabled: false,
             commit_messages: panel.serialized_commit_messages(cx),
+            commit_editor_collapsed: None,
         });
 
         // Simulate a restart and restore from the serialized state.
@@ -14714,6 +14808,50 @@ mod tests {
             ));
 
             panel.toggle_fill_commit_editor(&ToggleFillCommitEditor, window, cx);
+            assert!(!panel.commit_editor_expanded);
+            assert!(matches!(
+                panel.commit_editor.read(cx).mode().clone(),
+                EditorMode::AutoHeight { .. }
+            ));
+        });
+    }
+
+    #[gpui::test]
+    async fn test_toggle_commit_editor_collapsed(cx: &mut TestAppContext) {
+        init_test(cx);
+        let fs = FakeFs::new(cx.background_executor.clone());
+        fs.insert_tree(
+            "/root",
+            json!({ "project": { ".git": {}, "src": { "main.rs": "fn main() {}" } } }),
+        )
+        .await;
+
+        let project = Project::test(fs.clone(), [Path::new(path!("/root/project"))], cx).await;
+        let window_handle =
+            cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+        let workspace = window_handle
+            .read_with(cx, |mw, _| mw.workspace().clone())
+            .unwrap();
+        let cx = &mut VisualTestContext::from_window(window_handle.into(), cx);
+        cx.executor().run_until_parked();
+
+        let panel = workspace.update_in(cx, GitPanel::new);
+
+        panel.update_in(cx, |panel, window, cx| {
+            assert!(!panel.commit_editor_collapsed);
+
+            panel.toggle_commit_editor(&ToggleCommitEditor, window, cx);
+            assert!(panel.commit_editor_collapsed);
+
+            panel.toggle_commit_editor(&ToggleCommitEditor, window, cx);
+            assert!(!panel.commit_editor_collapsed);
+
+            panel.toggle_fill_commit_editor(&ToggleFillCommitEditor, window, cx);
+            assert!(panel.commit_editor_expanded);
+
+            // Collapsing has to undo the fill, the two states can't both hold.
+            panel.toggle_commit_editor(&ToggleCommitEditor, window, cx);
+            assert!(panel.commit_editor_collapsed);
             assert!(!panel.commit_editor_expanded);
             assert!(matches!(
                 panel.commit_editor.read(cx).mode().clone(),

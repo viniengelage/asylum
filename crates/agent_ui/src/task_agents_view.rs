@@ -3,7 +3,7 @@
 
 use crate::{AgentInitialContent, AgentPanel, AgentThreadSource};
 use agent::AgentTool as _;
-use agent_client_protocol::schema::v1 as acp;
+use agent_client_protocol::schema::v2 as acp;
 use agent_settings::{AgentProfile, AgentSettings};
 use anyhow::Result;
 use editor::Editor;

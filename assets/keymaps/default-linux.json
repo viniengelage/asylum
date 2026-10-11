@@ -1809,4 +1809,13 @@
       "ctrl-enter": "api_client::SendRequest",
     },
   },
+  {
+    "context": "TableView",
+    "bindings": {
+      "up": ["tabular_data::MoveFocusedCell", { "direction": "up" }],
+      "down": ["tabular_data::MoveFocusedCell", { "direction": "down" }],
+      "left": ["tabular_data::MoveFocusedCell", { "direction": "left" }],
+      "right": ["tabular_data::MoveFocusedCell", { "direction": "right" }],
+    },
+  },
 ]
