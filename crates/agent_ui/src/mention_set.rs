@@ -147,8 +147,10 @@ impl MentionSet {
                 ..
             } => self.confirm_mention_for_symbol(abs_path, line_range, cx),
             MentionUri::Skill {
-                skill_file_path, ..
-            } => self.confirm_mention_for_skill(skill_file_path, cx),
+                skill_file_path,
+                subcommand,
+                ..
+            } => self.confirm_mention_for_skill(skill_file_path, subcommand, cx),
             MentionUri::Diagnostics {
                 include_errors,
                 include_warnings,
@@ -338,8 +340,10 @@ impl MentionSet {
                 ..
             } => self.confirm_mention_for_symbol(abs_path, line_range, cx),
             MentionUri::Skill {
-                skill_file_path, ..
-            } => self.confirm_mention_for_skill(skill_file_path, cx),
+                skill_file_path,
+                subcommand,
+                ..
+            } => self.confirm_mention_for_skill(skill_file_path, subcommand, cx),
             MentionUri::Diagnostics {
                 include_errors,
                 include_warnings,
@@ -529,6 +533,7 @@ impl MentionSet {
     fn confirm_mention_for_skill(
         &self,
         skill_file_path: PathBuf,
+        subcommand: Option<String>,
         cx: &mut Context<Self>,
     ) -> Task<Result<Mention>> {
         // Built-in skills have synthetic paths that don't exist on disk;
@@ -540,13 +545,36 @@ impl MentionSet {
             }));
         }
         cx.background_spawn(async move {
-            let content = std::fs::read_to_string(&skill_file_path).map_err(|e| {
+            let mut content = std::fs::read_to_string(&skill_file_path).map_err(|e| {
                 anyhow!(
                     "Failed to read skill file {}: {}",
                     skill_file_path.display(),
                     e
                 )
             })?;
+            if let Some(subcommand) = subcommand {
+                let subcommand_path =
+                    agent_skills::subcommand_file_path(&skill_file_path, &subcommand);
+                let subcommand_content =
+                    std::fs::read_to_string(&subcommand_path).map_err(|e| {
+                        anyhow!(
+                            "Failed to read subcommand file {}: {}",
+                            subcommand_path.display(),
+                            e
+                        )
+                    })?;
+                let subcommand_body = agent_skills::read_skill_subcommand_body_from_content(
+                    &subcommand_path,
+                    &subcommand_content,
+                )?;
+                content = format!(
+                    "{}\n\n<subcommand name=\"{}\">\n<file>{}</file>\n{}\n</subcommand>",
+                    content.trim_end(),
+                    subcommand,
+                    subcommand_path.display(),
+                    subcommand_body
+                );
+            }
             Ok(Mention::Text {
                 content,
                 tracked_buffers: Vec::new(),

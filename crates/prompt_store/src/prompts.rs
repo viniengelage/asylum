@@ -151,6 +151,8 @@ mod tests {
             load_warnings: Vec::new(),
             disable_model_invocation: false,
             embedded_body: None,
+            argument_hint: None,
+            subcommands: Vec::new(),
         };
         let summary = SkillSummary::from(&skill);
 

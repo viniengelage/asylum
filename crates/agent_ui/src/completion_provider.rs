@@ -8,6 +8,7 @@ use crate::DEFAULT_THREAD_TITLE;
 use crate::thread_metadata_store::{ThreadMetadata, ThreadMetadataStore};
 use acp_thread::MentionUri;
 use agent_client_protocol::schema::v1 as acp;
+use agent_skills::SkillSubcommand;
 use anyhow::Result;
 use editor::{CompletionProvider, Editor, code_context_menus::COMPLETION_MENU_MAX_WIDTH};
 use futures::FutureExt as _;
@@ -368,6 +369,7 @@ pub struct AvailableSkill {
     pub source: SharedString,
     pub skill_file_path: PathBuf,
     pub warning: Option<SharedString>,
+    pub subcommands: Arc<[SkillSubcommand]>,
 }
 
 fn skill_completion_icon_path(
@@ -384,6 +386,18 @@ fn skill_completion_icon_path(
 
 fn skill_completion_icon_color(skill: &AvailableSkill, cx: &App) -> Option<Hsla> {
     skill.warning.is_some().then(|| cx.theme().status().warning)
+}
+
+fn skill_subcommand_completion_documentation(
+    subcommand: &SkillSubcommand,
+) -> CompletionDocumentation {
+    let text = match (subcommand.description.is_empty(), &subcommand.argument_hint) {
+        (false, Some(hint)) => format!("{}\n\n{hint}", subcommand.description),
+        (false, None) => subcommand.description.clone(),
+        (true, Some(hint)) => hint.clone(),
+        (true, None) => String::new(),
+    };
+    CompletionDocumentation::MultiLinePlainText(text.into())
 }
 
 fn skill_completion_documentation(skill: &AvailableSkill) -> CompletionDocumentation {
@@ -433,6 +447,12 @@ impl AvailableCommand {
 #[derive(Debug, Clone)]
 enum SlashCompletionCandidate {
     Skill(AvailableSkill),
+    SkillSubcommand {
+        skill: AvailableSkill,
+        subcommand: SkillSubcommand,
+        /// `<skill> <subcommand>`, as shown in the popup.
+        label: Arc<str>,
+    },
     Command(AvailableCommand),
     LocalCommand(PromptLocalCommand),
 }
@@ -441,9 +461,21 @@ impl SlashCompletionCandidate {
     fn name(&self) -> &str {
         match self {
             Self::Skill(skill) => &skill.name,
+            Self::SkillSubcommand { label, .. } => label,
             Self::Command(command) => &command.name,
             Self::LocalCommand(command) => command.keyword(),
         }
+    }
+
+    fn skill_subcommands(skill: &AvailableSkill) -> impl Iterator<Item = Self> + '_ {
+        skill
+            .subcommands
+            .iter()
+            .map(|subcommand| Self::SkillSubcommand {
+                skill: skill.clone(),
+                subcommand: subcommand.clone(),
+                label: format!("{} {}", skill.name, subcommand.name).into(),
+            })
     }
 }
 
@@ -453,7 +485,7 @@ impl SlashCompletionCandidate {
 /// [`group_by_relevance`]).
 fn slash_completion_group_key(candidate: &SlashCompletionCandidate) -> u32 {
     match candidate {
-        SlashCompletionCandidate::Skill(_) => 0,
+        SlashCompletionCandidate::Skill(_) | SlashCompletionCandidate::SkillSubcommand { .. } => 0,
         SlashCompletionCandidate::Command(command) => 1 + command.category_order() as u32,
         SlashCompletionCandidate::LocalCommand(_) => 4,
     }
@@ -627,6 +659,7 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
             name: skill.name.to_string(),
             source: skill.source.to_string(),
             skill_file_path: skill.skill_file_path.clone(),
+            subcommand: None,
         };
         let new_text = format!("{} ", uri.as_link());
         let new_text_len = new_text.len();
@@ -1213,6 +1246,7 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
     fn search_slash_commands(
         &self,
         query: String,
+        argument: Option<String>,
         cx: &mut App,
     ) -> Task<Vec<SlashCompletionCandidate>> {
         // Notify the delegate that slash autocomplete is being
@@ -1223,35 +1257,66 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
         // invocation.
         self.source.slash_autocomplete_invoked(cx);
 
+        let skills = self.source.available_skills(cx);
+
+        // Past `/<skill> `, only that skill's subcommands are offered, matched
+        // against the subcommand name the user is typing.
+        if let Some(argument) = argument {
+            let candidates = skills
+                .iter()
+                .filter(|skill| *skill.name == *query)
+                .flat_map(SlashCompletionCandidate::skill_subcommands)
+                .collect::<Vec<_>>();
+            return Self::fuzzy_match_slash_candidates(candidates, argument, cx, |candidate| {
+                match candidate {
+                    SlashCompletionCandidate::SkillSubcommand { subcommand, .. } => {
+                        subcommand.name.as_str()
+                    }
+                    other => other.name(),
+                }
+            });
+        }
+
         let mut candidates = self
             .source
             .available_commands(cx)
             .into_iter()
             .map(SlashCompletionCandidate::Command)
             .collect::<Vec<_>>();
+        // Subcommands show up once the skill's full name is typed, so a bare
+        // `/` lists skills rather than every skill's subcommands.
         candidates.extend(
-            self.source
-                .available_skills(cx)
-                .into_iter()
-                .map(SlashCompletionCandidate::Skill),
+            skills
+                .iter()
+                .filter(|skill| *skill.name == *query)
+                .flat_map(SlashCompletionCandidate::skill_subcommands),
         );
+        candidates.extend(skills.into_iter().map(SlashCompletionCandidate::Skill));
         candidates.extend(
             self.source
                 .available_local_commands(cx)
                 .into_iter()
                 .map(SlashCompletionCandidate::LocalCommand),
         );
+        Self::fuzzy_match_slash_candidates(candidates, query, cx, SlashCompletionCandidate::name)
+    }
+
+    fn fuzzy_match_slash_candidates(
+        candidates: Vec<SlashCompletionCandidate>,
+        query: String,
+        cx: &mut App,
+        match_text: impl Fn(&SlashCompletionCandidate) -> &str,
+    ) -> Task<Vec<SlashCompletionCandidate>> {
         if candidates.is_empty() {
             return Task::ready(Vec::new());
         }
 
+        let string_match_candidates = candidates
+            .iter()
+            .enumerate()
+            .map(|(id, candidate)| StringMatchCandidate::new(id, match_text(candidate)))
+            .collect::<Vec<_>>();
         cx.spawn(async move |cx| {
-            let string_match_candidates = candidates
-                .iter()
-                .enumerate()
-                .map(|(id, candidate)| StringMatchCandidate::new(id, candidate.name()))
-                .collect::<Vec<_>>();
-
             let matches = fuzzy::match_strings(
                 &string_match_candidates,
                 &query,
@@ -1796,7 +1861,8 @@ impl<T: PromptCompletionProviderDelegate> CompletionProvider for PromptCompletio
             PromptCompletion::SlashCommand(SlashCommandCompletion {
                 command, argument, ..
             }) => {
-                let search_task = self.search_slash_commands(command.unwrap_or_default(), cx);
+                let search_task =
+                    self.search_slash_commands(command.unwrap_or_default(), argument.clone(), cx);
                 // Keep the category section headers visible while the user is
                 // still narrowing the command name (`/c`); only drop them once
                 // they've moved on to typing the command's argument, where
@@ -1828,6 +1894,38 @@ impl<T: PromptCompletionProviderDelegate> CompletionProvider for PromptCompletio
                                             name: skill.name.to_string(),
                                             source: skill.source.to_string(),
                                             skill_file_path: skill.skill_file_path.clone(),
+                                            subcommand: None,
+                                        };
+                                        let new_text = format!("{} ", uri.as_link());
+                                        let new_text_len = new_text.len();
+                                        let icon_path = skill_completion_icon_path(skill, &uri, cx);
+                                        let icon_color = skill_completion_icon_color(skill, cx);
+                                        let crease_text: SharedString = uri.name().into();
+                                        let confirm = confirm_completion_callback(
+                                            crease_text,
+                                            source_range.start,
+                                            new_text_len - 1,
+                                            uri,
+                                            source.clone(),
+                                            editor.clone(),
+                                            mention_set.clone(),
+                                            workspace.clone(),
+                                        );
+                                        (
+                                            candidate,
+                                            Some((new_text, icon_path, icon_color, confirm)),
+                                        )
+                                    }
+                                    SlashCompletionCandidate::SkillSubcommand {
+                                        skill,
+                                        subcommand,
+                                        ..
+                                    } => {
+                                        let uri = MentionUri::Skill {
+                                            name: skill.name.to_string(),
+                                            source: skill.source.to_string(),
+                                            skill_file_path: skill.skill_file_path.clone(),
+                                            subcommand: Some(subcommand.name.clone()),
                                         };
                                         let new_text = format!("{} ", uri.as_link());
                                         let new_text_len = new_text.len();
@@ -1890,6 +1988,42 @@ impl<T: PromptCompletionProviderDelegate> CompletionProvider for PromptCompletio
                                     new_text,
                                     label,
                                     documentation: Some(skill_completion_documentation(&skill)),
+                                    source: project::CompletionSource::Custom,
+                                    icon_path: Some(icon_path),
+                                    icon_color,
+                                    match_start: None,
+                                    snippet_deduplication_key: None,
+                                    insert_text_mode: None,
+                                    confirm: Some(confirm),
+                                    group: show_section_headers.then(|| CompletionGroup {
+                                        key: "skills".into(),
+                                        label: Some("Skills".into()),
+                                    }),
+                                }
+                            }
+                            SlashCompletionCandidate::SkillSubcommand {
+                                skill,
+                                subcommand,
+                                label,
+                            } => {
+                                let label = build_slash_item_label(
+                                    &label,
+                                    Some(&skill.source),
+                                    source_highlight_id,
+                                );
+                                let Some((new_text, icon_path, icon_color, confirm)) = skill_info
+                                else {
+                                    unreachable!(
+                                        "skill subcommand candidates always have confirm callbacks"
+                                    )
+                                };
+                                Completion {
+                                    replace_range: source_range.clone(),
+                                    new_text,
+                                    label,
+                                    documentation: Some(skill_subcommand_completion_documentation(
+                                        &subcommand,
+                                    )),
                                     source: project::CompletionSource::Custom,
                                     icon_path: Some(icon_path),
                                     icon_color,
@@ -2300,16 +2434,20 @@ impl<T: PromptCompletionProviderDelegate> CompletionProvider for PromptCompletio
         let mut lines = buffer.text_for_range(line_start..position).lines();
         if let Some(line) = lines.next() {
             PromptCompletion::try_parse(line, offset_to_line, &self.source.supported_modes(cx))
-                .filter(|completion| {
-                    // Right now we don't support completing arguments of slash commands
-                    let is_slash_command_with_argument = matches!(
-                        completion,
-                        PromptCompletion::SlashCommand(SlashCommandCompletion {
-                            argument: Some(_),
-                            ..
-                        })
-                    );
-                    !is_slash_command_with_argument
+                .filter(|completion| match completion {
+                    // The only argument completed is a skill's subcommand,
+                    // while its first word is still being typed.
+                    PromptCompletion::SlashCommand(SlashCommandCompletion {
+                        command: Some(command),
+                        argument: Some(argument),
+                        ..
+                    }) => {
+                        !argument.contains(char::is_whitespace)
+                            && self.source.available_skills(cx).iter().any(|skill| {
+                                *skill.name == **command && !skill.subcommands.is_empty()
+                            })
+                    }
+                    _ => true,
                 })
                 .map(|completion| {
                     completion.source_range().start <= offset_to_line + position.column as usize

@@ -129,6 +129,42 @@ mod tests {
     }
 
     #[test]
+    fn test_system_prompt_lists_skill_subcommands() {
+        let skill = |name: &str, subcommands: &str| agent_skills::SkillSummary {
+            name: name.to_string(),
+            description: format!("{name} description"),
+            location: format!("/skills/{name}/SKILL.md"),
+            subcommands: subcommands.to_string(),
+        };
+        let project = prompt_store::ProjectContext::default().with_skills(vec![
+            skill("feature", "implement, plan"),
+            skill("review", ""),
+        ]);
+        let template = SystemPromptTemplate {
+            project: &project,
+            available_tools: vec!["skill".into()],
+            model_name: None,
+            date: "2026-01-01".to_string(),
+            user_agents_md: None,
+            task_agent: None,
+            sandboxing: false,
+            is_linux: false,
+            is_windows: false,
+        };
+        let rendered = template.render(&Templates::new()).unwrap();
+
+        assert!(
+            rendered.contains("<subcommands>implement, plan</subcommands>"),
+            "{rendered}"
+        );
+        assert_eq!(rendered.matches("</subcommands>").count(), 1, "{rendered}");
+        assert!(
+            rendered.contains("<location>/skills/review/SKILL.md</location>\n  </skill>"),
+            "a skill without subcommands keeps its original shape: {rendered}"
+        );
+    }
+
+    #[test]
     fn test_system_prompt_renders_user_agents_md_before_project_rules() {
         use prompt_store::{ProjectContext, RulesFileContext, WorktreeContext};
         use util::rel_path::RelPath;

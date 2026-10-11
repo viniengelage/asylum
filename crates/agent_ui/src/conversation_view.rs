@@ -3599,6 +3599,7 @@ fn native_available_skills(
             source: skill.source,
             skill_file_path: skill.skill_file_path,
             warning: skill.warning,
+            subcommands: skill.subcommands.into(),
         })
         .collect()
 }

@@ -1,5 +1,5 @@
 use agent_client_protocol::schema::v1 as acp;
-use agent_skills::Skill;
+use agent_skills::{Skill, SkillSubcommand};
 use anyhow::Result;
 use gpui::{App, AsyncApp, SharedString, Task};
 use language_model::LanguageModelToolResultContent;
@@ -44,6 +44,17 @@ fn neutralize_envelope_tags(input: &str) -> String {
 /// than stored on `Skill` so that loading N skills costs O(total
 /// frontmatter), not O(total file size).
 pub fn render_skill_envelope(skill: &Skill, body: &str) -> String {
+    render_skill_envelope_with_subcommand(skill, body, None)
+}
+
+/// Like [`render_skill_envelope`], with the chosen subcommand's body appended
+/// inside the same envelope so the model reads the skill's shared
+/// instructions first and then the ones for this subcommand.
+pub fn render_skill_envelope_with_subcommand(
+    skill: &Skill,
+    body: &str,
+    subcommand: Option<(&SkillSubcommand, &str)>,
+) -> String {
     let source = match &skill.source {
         agent_skills::SkillSource::BuiltIn => "built-in",
         agent_skills::SkillSource::Global => "global",
@@ -73,6 +84,22 @@ pub fn render_skill_envelope(skill: &Skill, body: &str) -> String {
     writeln!(out, "<directory>{}</directory>", xml_escape(&directory)).unwrap();
     out.push_str("Relative paths in this skill resolve against <directory>.\n\n");
     out.push_str(&neutralize_envelope_tags(body.trim()));
+    if let Some((subcommand, subcommand_body)) = subcommand {
+        writeln!(
+            out,
+            "\n\n<subcommand name=\"{}\">",
+            xml_escape(&subcommand.name)
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "<file>{}</file>",
+            xml_escape(&subcommand.file_path.to_string_lossy())
+        )
+        .unwrap();
+        out.push_str(&neutralize_envelope_tags(subcommand_body.trim()));
+        out.push_str("\n</subcommand>");
+    }
     out.push_str("\n</skill_content>\n");
     out
 }
@@ -82,6 +109,9 @@ pub fn render_skill_envelope(skill: &Skill, body: &str) -> String {
 pub struct SkillToolInput {
     /// The name of the skill to retrieve
     pub name: String,
+    /// One of the skill's listed subcommands, when the request matches it
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subcommand: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -116,10 +146,13 @@ impl From<SkillToolOutput> for LanguageModelToolResultContent {
 pub type SkillsResolver = Arc<dyn Fn(&App) -> Arc<Vec<Skill>> + Send + Sync>;
 pub type SkillBodyResolver =
     Arc<dyn Fn(Skill, &mut AsyncApp) -> Task<Result<String>> + Send + Sync>;
+pub type SkillSubcommandBodyResolver =
+    Arc<dyn Fn(Skill, SkillSubcommand, &mut AsyncApp) -> Task<Result<String>> + Send + Sync>;
 
 pub struct SkillTool {
     skills: SkillsResolver,
     body_resolver: SkillBodyResolver,
+    subcommand_body_resolver: Option<SkillSubcommandBodyResolver>,
 }
 
 impl SkillTool {
@@ -131,7 +164,19 @@ impl SkillTool {
         Self {
             skills: Arc::new(skills),
             body_resolver: Arc::new(body_resolver),
+            subcommand_body_resolver: None,
         }
+    }
+
+    pub fn with_subcommand_body_resolver<R>(mut self, subcommand_body_resolver: R) -> Self
+    where
+        R: Fn(Skill, SkillSubcommand, &mut AsyncApp) -> Task<Result<String>>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.subcommand_body_resolver = Some(Arc::new(subcommand_body_resolver));
+        self
     }
 }
 
@@ -155,7 +200,10 @@ impl AgentTool for SkillTool {
         _cx: &mut App,
     ) -> SharedString {
         if let Ok(input) = input {
-            format!("`{}` Skill", input.name).into()
+            match input.subcommand {
+                Some(subcommand) => format!("`{} {}` Skill", input.name, subcommand).into(),
+                None => format!("`{}` Skill", input.name).into(),
+            }
         } else {
             "Skill".into()
         }
@@ -203,6 +251,32 @@ impl AgentTool for SkillTool {
                 (skill.clone(), path_string)
             };
 
+            let subcommand = match input.subcommand.as_deref() {
+                Some(name) => {
+                    let Some(subcommand) = skill.subcommand(name) else {
+                        let available = skill
+                            .subcommands
+                            .iter()
+                            .map(|subcommand| subcommand.name.as_str())
+                            .collect::<Vec<_>>();
+                        return Err(SkillToolOutput::Error {
+                            error: if available.is_empty() {
+                                format!("Skill '{}' has no subcommands.", skill.name)
+                            } else {
+                                format!(
+                                    "Skill '{}' has no subcommand '{}'. Available subcommands: {}",
+                                    skill.name,
+                                    name,
+                                    available.join(", ")
+                                )
+                            },
+                        });
+                    };
+                    Some(subcommand.clone())
+                }
+                None => None,
+            };
+
             // For built-in skills the body is already in memory (compiled
             // into the binary). For user skills, read on demand from disk.
             let body = if let Some(embedded) = skill.embedded_body {
@@ -214,7 +288,26 @@ impl AgentTool for SkillTool {
                     }
                 })?
             };
-            let rendered = render_skill_envelope(&skill, &body);
+            let rendered = match subcommand {
+                Some(subcommand) => {
+                    let resolver = self.subcommand_body_resolver.clone().ok_or_else(|| {
+                        SkillToolOutput::Error {
+                            error: "Skill subcommands aren't available here.".to_string(),
+                        }
+                    })?;
+                    let subcommand_body = resolver(skill.clone(), subcommand.clone(), cx)
+                        .await
+                        .map_err(|e| SkillToolOutput::Error {
+                            error: e.to_string(),
+                        })?;
+                    render_skill_envelope_with_subcommand(
+                        &skill,
+                        &body,
+                        Some((&subcommand, &subcommand_body)),
+                    )
+                }
+                None => render_skill_envelope(&skill, &body),
+            };
 
             // Built-in skills ship with Zed and are trusted by default,
             // so they skip the authorization prompt. User-installed skills
@@ -344,6 +437,62 @@ mod tests {
                 panic!("expected Found, got Error: {error}");
             }
         }
+    }
+
+    #[gpui::test]
+    async fn test_skill_tool_loads_subcommand(cx: &mut TestAppContext) {
+        init_test(cx);
+
+        let (mut skill, body) = create_test_skill("feature", "Feature flow", "Shared rules.");
+        let subcommand = SkillSubcommand {
+            name: "implement".into(),
+            description: "Implement it".into(),
+            argument_hint: None,
+            file_path: PathBuf::from("/skills/feature/commands/implement.md"),
+        };
+        skill.subcommands.push(subcommand.clone());
+        let bodies = vec![(skill.skill_file_path.clone(), body)];
+        let skills = Arc::new(vec![skill]);
+
+        let tool = Arc::new(
+            SkillTool::with_body_resolver(move |_cx| skills.clone(), stub_body_resolver(bodies))
+                .with_subcommand_body_resolver(|_skill, subcommand, _cx| {
+                    Task::ready(Ok(format!("Body of {}.", subcommand.name)))
+                }),
+        );
+
+        let (mut sender, input) = ToolInput::<SkillToolInput>::test();
+        sender.send_full(json!({ "name": "feature", "subcommand": "implement" }));
+        let (event_stream, _rx) = ToolCallEventStream::test();
+        let output = cx
+            .update(|cx| tool.clone().run(input, event_stream, cx))
+            .await
+            .unwrap();
+        let SkillToolOutput::Found { rendered } = output else {
+            panic!("expected Found, got {output:?}");
+        };
+        assert!(rendered.contains("Shared rules."), "{rendered}");
+        assert!(
+            rendered.contains("<subcommand name=\"implement\">"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("Body of implement."), "{rendered}");
+        let subcommand_end = rendered.find("</subcommand>").expect("closed subcommand");
+        let envelope_end = rendered.find("</skill_content>").expect("closed envelope");
+        assert!(subcommand_end < envelope_end);
+
+        let (mut sender, input) = ToolInput::<SkillToolInput>::test();
+        sender.send_full(json!({ "name": "feature", "subcommand": "deploy" }));
+        let (event_stream, _rx) = ToolCallEventStream::test();
+        let error = cx
+            .update(|cx| tool.run(input, event_stream, cx))
+            .await
+            .expect_err("unknown subcommand");
+        let SkillToolOutput::Error { error } = error else {
+            panic!("expected Error, got {error:?}");
+        };
+        assert!(error.contains("no subcommand 'deploy'"), "{error}");
+        assert!(error.contains("implement"), "{error}");
     }
 
     #[gpui::test]

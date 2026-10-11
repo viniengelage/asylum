@@ -14617,11 +14617,19 @@ pub(crate) fn open_link(
                 crate::ui::open_migrated_rule(workspace, &name, window, cx);
             }
             MentionUri::Skill {
-                skill_file_path, ..
+                skill_file_path,
+                subcommand,
+                ..
             } => {
+                let file_path = match subcommand {
+                    Some(subcommand) => {
+                        agent_skills::subcommand_file_path(&skill_file_path, &subcommand)
+                    }
+                    None => skill_file_path,
+                };
                 workspace
                     .open_abs_path(
-                        skill_file_path,
+                        file_path,
                         workspace::OpenOptions {
                             focus: Some(true),
                             ..Default::default()

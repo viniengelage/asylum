@@ -4328,8 +4328,14 @@ impl SettingsWindow {
 
         self.skill_creator_page = Some((page.clone(), subscription));
 
+        let title: SharedString = match &open_mode {
+            pages::SkillCreatorOpenMode::Subcommand(target) => {
+                format!("Add Subcommand to {}", target.skill_name).into()
+            }
+            _ => "Create Skill".into(),
+        };
         let sub_page_link = SubPageLink {
-            title: "Create Skill".into(),
+            title,
             r#type: SubPageType::SkillCreator,
             description: None,
             search_aliases: &[],

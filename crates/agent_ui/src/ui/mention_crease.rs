@@ -210,9 +210,17 @@ fn open_mention_uri(
             open_thread(workspace, id, name, window, cx);
         }
         MentionUri::Skill {
-            skill_file_path, ..
+            skill_file_path,
+            subcommand,
+            ..
         } => {
-            open_skill_file(workspace, skill_file_path, window, cx);
+            let file_path = match subcommand {
+                Some(subcommand) => {
+                    agent_skills::subcommand_file_path(&skill_file_path, &subcommand)
+                }
+                None => skill_file_path,
+            };
+            open_skill_file(workspace, file_path, window, cx);
         }
         MentionUri::Rule { name, .. } => {
             open_migrated_rule(workspace, &name, window, cx);

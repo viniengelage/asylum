@@ -87,6 +87,10 @@ pub enum MentionUri {
         name: String,
         source: String,
         skill_file_path: PathBuf,
+        /// A subcommand from the skill's `commands/` directory, picked by
+        /// typing `/<skill> <subcommand>`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subcommand: Option<String>,
     },
     /// Something from the Elastic dock: an ES|QL tab, a log document, followed lines or an APM
     /// trace. The dock resolves `id`.
@@ -294,6 +298,7 @@ impl MentionUri {
                     let mut name = None;
                     let mut source = None;
                     let mut skill_file_path = None;
+                    let mut subcommand = None;
 
                     for (key, value) in url.query_pairs() {
                         match key.as_ref() {
@@ -315,6 +320,11 @@ impl MentionUri {
                                     bail!("duplicate skill file path query parameter");
                                 }
                             }
+                            "subcommand" => {
+                                if subcommand.replace(value.to_string()).is_some() {
+                                    bail!("duplicate skill subcommand query parameter");
+                                }
+                            }
                             _ => bail!("invalid query parameter"),
                         }
                     }
@@ -323,6 +333,7 @@ impl MentionUri {
                         name: name.context("missing skill name")?,
                         source: source.context("missing skill source")?,
                         skill_file_path: skill_file_path.context("missing skill file path")?,
+                        subcommand,
                     })
                 } else {
                     bail!("invalid zed url: {:?}", input);
@@ -450,7 +461,12 @@ impl MentionUri {
                 ..
             } => selection_name(path.as_deref(), line_range),
             MentionUri::Fetch { url } => url.to_string(),
-            MentionUri::Skill { name, .. } => name.clone(),
+            MentionUri::Skill {
+                name, subcommand, ..
+            } => match subcommand {
+                Some(subcommand) => format!("{name} {subcommand}"),
+                None => name.clone(),
+            },
             MentionUri::Logs { title, .. } => title.clone(),
         }
     }
@@ -466,7 +482,8 @@ impl MentionUri {
         }
 
         match self {
-            MentionUri::Skill { name, source, .. } => {
+            MentionUri::Skill { source, .. } => {
+                let name = self.name();
                 if source.is_empty() {
                     // Must match `SkillSource::display_label()` in agent_skills.
                     format!("{} (global)", name)
@@ -711,6 +728,7 @@ impl MentionUri {
                 name,
                 source,
                 skill_file_path,
+                subcommand,
             } => {
                 let mut url = Url::parse("zed:///").unwrap();
                 url.set_path("/agent/skill");
@@ -718,6 +736,9 @@ impl MentionUri {
                     .append_pair("name", name)
                     .append_pair("source", source)
                     .append_pair("path", &skill_file_path.to_string_lossy());
+                if let Some(subcommand) = subcommand {
+                    url.query_pairs_mut().append_pair("subcommand", subcommand);
+                }
                 url
             }
         }
@@ -1585,12 +1606,34 @@ mod tests {
             name: "rust-best-practices".to_string(),
             source: "my-personal-project".to_string(),
             skill_file_path: PathBuf::from(path!("/path/to/skills/rust-best-practices/SKILL.md")),
+            subcommand: None,
         };
 
         let serialized = skill_uri.to_uri().to_string();
         let parsed = MentionUri::parse(&serialized, PathStyle::local()).unwrap();
 
         assert_eq!(parsed, skill_uri);
+    }
+
+    #[test]
+    fn test_parse_skill_subcommand_uri_round_trip() {
+        let skill_uri = MentionUri::Skill {
+            name: "feature".to_string(),
+            source: "".to_string(),
+            skill_file_path: PathBuf::from(path!("/path/to/skills/feature/SKILL.md")),
+            subcommand: Some("implement".to_string()),
+        };
+
+        let serialized = skill_uri.to_uri().to_string();
+        assert!(serialized.contains("subcommand=implement"), "{serialized}");
+        let parsed = MentionUri::parse(&serialized, PathStyle::local()).unwrap();
+        assert_eq!(parsed, skill_uri);
+        assert_eq!(parsed.name(), "feature implement");
+        assert_eq!(parsed.disambiguated_name(1), "feature implement (global)");
+
+        let json = serde_json::to_value(&skill_uri).unwrap();
+        let from_json: MentionUri = serde_json::from_value(json).unwrap();
+        assert_eq!(from_json, skill_uri);
     }
 
     #[test]
@@ -1946,11 +1989,13 @@ mod tests {
             name: "create-skill".into(),
             source: "".into(),
             skill_file_path: PathBuf::from("/global/create-skill/SKILL.md"),
+            subcommand: None,
         };
         let project_skill = MentionUri::Skill {
             name: "create-skill".into(),
             source: "my-project".into(),
             skill_file_path: PathBuf::from("/project/create-skill/SKILL.md"),
+            subcommand: None,
         };
         assert_eq!(global_skill.name(), "create-skill");
         assert_eq!(global_skill.disambiguated_name(0), "create-skill");

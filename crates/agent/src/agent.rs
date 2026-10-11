@@ -36,9 +36,12 @@ use acp_thread::{
 use agent_client_protocol::schema::v1 as acp_v1;
 use agent_skills::{
     AGENTS_DIR_NAME, MAX_SKILL_DESCRIPTIONS_SIZE, MAX_SKILL_FILE_SIZE, ProjectSkillGroup,
-    SKILL_FILE_NAME, Skill, SkillIndex, SkillLoadError, SkillLoadWarning, SkillScopeId,
-    SkillSource, SkillSummary, builtin_skills, global_skills_dir, load_skills_from_directory,
-    parse_skill_frontmatter, project_skills_relative_path, read_skill_body_from_content,
+    SKILL_FILE_NAME, SUBCOMMANDS_DIR_NAME, Skill, SkillIndex, SkillLoadError, SkillLoadWarning,
+    SkillScopeId, SkillSource, SkillSubcommand, SkillSummary, builtin_skills,
+    collect_skill_subcommands, global_skills_dir, load_skills_from_directory,
+    parse_skill_frontmatter, parse_skill_subcommand, project_skills_relative_path,
+    read_skill_body_from_content, read_skill_subcommand_body_from_content,
+    subcommand_name_for_file_name,
 };
 use anyhow::{Context as _, Result, anyhow};
 use chrono::{DateTime, Utc};
@@ -134,6 +137,7 @@ impl SkillLoadingIssueData {
             SkillLoadWarning::DescriptionTooLong { .. } => {
                 SkillLoadingIssueKind::DescriptionTooLong
             }
+            SkillLoadWarning::InvalidSubcommand { .. } => SkillLoadingIssueKind::LoadFailed,
         };
         Self {
             path: skill.skill_file_path.clone(),
@@ -168,6 +172,7 @@ pub struct NativeAvailableSkill {
     pub source: SharedString,
     pub skill_file_path: PathBuf,
     pub warning: Option<SharedString>,
+    pub subcommands: Vec<SkillSubcommand>,
 }
 
 impl From<&Skill> for NativeAvailableSkill {
@@ -181,6 +186,7 @@ impl From<&Skill> for NativeAvailableSkill {
                 .load_warnings
                 .first()
                 .map(|warning| warning.message().into()),
+            subcommands: skill.subcommands.clone(),
         }
     }
 }
@@ -516,6 +522,13 @@ struct ProjectSkillFile {
     relative_path: Arc<RelPath>,
     display_path: PathBuf,
     size: u64,
+    subcommand_files: Vec<ProjectSubcommandFile>,
+}
+
+struct ProjectSubcommandFile {
+    relative_path: Arc<RelPath>,
+    display_path: PathBuf,
+    size: u64,
 }
 
 async fn expand_worktree_directory(
@@ -557,8 +570,10 @@ async fn expand_project_skills_directories(
             .map(|entry| entry.path.clone())
             .collect::<Vec<_>>()
     });
+    let subcommands_dir_name = RelPath::from_unix_str(SUBCOMMANDS_DIR_NAME)?;
     for skill_dir in skill_dirs {
         expand_worktree_directory(worktree, &skill_dir, cx).await?;
+        expand_worktree_directory(worktree, &skill_dir.join(subcommands_dir_name), cx).await?;
     }
 
     Ok(())
@@ -569,6 +584,9 @@ fn project_skill_files_from_worktree(worktree: &Worktree) -> Vec<ProjectSkillFil
         return Vec::new();
     };
     let Ok(skill_file_name) = RelPath::from_unix_str(SKILL_FILE_NAME) else {
+        return Vec::new();
+    };
+    let Ok(subcommands_dir_name) = RelPath::from_unix_str(SUBCOMMANDS_DIR_NAME) else {
         return Vec::new();
     };
 
@@ -586,10 +604,28 @@ fn project_skill_files_from_worktree(worktree: &Worktree) -> Vec<ProjectSkillFil
             continue;
         }
 
+        let subcommand_files = worktree
+            .child_entries(&skill_dir.path.join(subcommands_dir_name))
+            .filter(|entry| {
+                entry.is_file()
+                    && entry
+                        .path
+                        .file_name()
+                        .and_then(subcommand_name_for_file_name)
+                        .is_some()
+            })
+            .map(|entry| ProjectSubcommandFile {
+                display_path: worktree.absolutize(&entry.path),
+                relative_path: entry.path.clone(),
+                size: entry.size,
+            })
+            .collect();
+
         skill_files.push(ProjectSkillFile {
             display_path: worktree.absolutize(&relative_path),
             relative_path: relative_path.into(),
             size: skill_file.size,
+            subcommand_files,
         });
     }
 
@@ -853,10 +889,15 @@ impl NativeAgent {
             // after the thread is constructed are still visible to the
             // model — without this, the catalog and tool would drift out
             // of sync until the session was reopened.
-            thread.add_tool(SkillTool::with_body_resolver(
-                skills_resolver_for_project(weak.clone(), project_id),
-                skill_body_resolver_for_project(project.clone(), self.fs.clone()),
-            ));
+            thread.add_tool(
+                SkillTool::with_body_resolver(
+                    skills_resolver_for_project(weak.clone(), project_id),
+                    skill_body_resolver_for_project(project.clone(), self.fs.clone()),
+                )
+                .with_subcommand_body_resolver(
+                    skill_subcommand_body_resolver_for_project(project.clone(), self.fs.clone()),
+                ),
+            );
         });
 
         let subscriptions = vec![
@@ -1259,17 +1300,57 @@ impl NativeAgent {
                         let content = cx
                             .update(|cx| buffer.read(cx).as_text_snapshot().as_rope().to_string());
 
-                        worktree_results.push(
-                            parse_skill_frontmatter(
-                                &skill_file.display_path,
-                                &content,
-                                source.clone(),
-                            )
-                            .map_err(|error| SkillLoadError {
-                                path: skill_file.display_path,
-                                message: error.to_string(),
-                            }),
-                        );
+                        let mut skill = match parse_skill_frontmatter(
+                            &skill_file.display_path,
+                            &content,
+                            source.clone(),
+                        ) {
+                            Ok(skill) => skill,
+                            Err(error) => {
+                                worktree_results.push(Err(SkillLoadError {
+                                    path: skill_file.display_path,
+                                    message: error.to_string(),
+                                }));
+                                continue;
+                            }
+                        };
+
+                        let mut subcommand_results = Vec::new();
+                        for subcommand_file in skill_file.subcommand_files {
+                            let result = if subcommand_file.size > MAX_SKILL_FILE_SIZE as u64 {
+                                Err(anyhow!(
+                                    "file exceeds maximum size of {}KB",
+                                    MAX_SKILL_FILE_SIZE / 1024
+                                ))
+                            } else {
+                                match project
+                                    .update(cx, |project, cx| {
+                                        project.open_buffer(
+                                            (worktree_id, subcommand_file.relative_path.clone()),
+                                            cx,
+                                        )
+                                    })
+                                    .await
+                                {
+                                    Ok(buffer) => {
+                                        let content = cx.update(|cx| {
+                                            buffer.read(cx).as_text_snapshot().as_rope().to_string()
+                                        });
+                                        parse_skill_subcommand(
+                                            &subcommand_file.display_path,
+                                            &content,
+                                        )
+                                        .map(Some)
+                                    }
+                                    Err(error) => Err(error),
+                                }
+                            };
+                            subcommand_results.push((subcommand_file.display_path, result));
+                        }
+                        let (subcommands, warnings) = collect_skill_subcommands(subcommand_results);
+                        skill.subcommands = subcommands;
+                        skill.load_warnings.extend(warnings);
+                        worktree_results.push(Ok(skill));
                     }
                     project_skills_results.push(worktree_results);
                 }
@@ -2175,6 +2256,8 @@ impl NativeAgent {
         let path_style = state.project.read(cx).path_style(cx);
         let read_skill_body =
             skill_body_resolver_for_project(state.project.clone(), self.fs.clone());
+        let read_subcommand_body =
+            skill_subcommand_body_resolver_for_project(state.project.clone(), self.fs.clone());
 
         cx.spawn(async move |this, cx| {
             let (acp_thread, thread) = this.update(cx, |this, _cx| {
@@ -2209,18 +2292,45 @@ impl NativeAgent {
                     )
                 })?
             };
-            let envelope = crate::tools::render_skill_envelope(&skill, &body);
-            let envelope_block = acp_v1::ContentBlock::Text(acp_v1::TextContent::new(envelope));
-
+            // `/<skill> <subcommand> rest` also loads the subcommand's file
+            // and strips its name, so the model only sees `rest` as the
+            // request. Anything else after the skill name stays a plain
+            // argument.
             let mut user_blocks = original_content;
+            let mut subcommand = None;
             if let Some(acp_v1::ContentBlock::Text(text_content)) = user_blocks.first_mut() {
-                let stripped = strip_slash_command_prefix(&text_content.text);
+                let mut stripped = strip_slash_command_prefix(&text_content.text);
+                if let Some((matched, rest)) = skill.split_subcommand(&stripped) {
+                    subcommand = Some(matched.clone());
+                    stripped = rest.to_string();
+                }
                 if stripped.trim().is_empty() {
                     user_blocks.remove(0);
                 } else {
                     text_content.text = stripped;
                 }
             }
+
+            let envelope = match subcommand {
+                Some(subcommand) => {
+                    let subcommand_body =
+                        read_subcommand_body(skill.clone(), subcommand.clone(), cx)
+                            .await
+                            .with_context(|| {
+                                format!(
+                                    "Failed to read subcommand from {}",
+                                    subcommand.file_path.display()
+                                )
+                            })?;
+                    crate::tools::render_skill_envelope_with_subcommand(
+                        &skill,
+                        &body,
+                        Some((&subcommand, &subcommand_body)),
+                    )
+                }
+                None => crate::tools::render_skill_envelope(&skill, &body),
+            };
+            let envelope_block = acp_v1::ContentBlock::Text(acp_v1::TextContent::new(envelope));
 
             // UI: show the rendered envelope as a sibling user message so
             // the user can see what context was loaded for the skill. The
@@ -3808,6 +3918,16 @@ impl TerminalHandle for AcpTerminalHandle {
 /// Returns `SkillSummary` values rather than full `Skill`s so that the
 /// (potentially ~100KB) skill bodies aren't cloned just to be discarded by
 /// `ProjectContext::new`, which only needs the summary fields.
+fn catalog_entry_size(skill: &Skill) -> usize {
+    skill.name.len()
+        + skill.description.len()
+        + skill
+            .subcommands
+            .iter()
+            .map(|subcommand| subcommand.name.len() + 2)
+            .sum::<usize>()
+}
+
 fn select_catalog_skills(skills: &[Skill]) -> (Vec<SkillSummary>, Vec<SkillLoadingIssueData>) {
     let mut kept = Vec::new();
     let mut issues = Vec::new();
@@ -3820,7 +3940,7 @@ fn select_catalog_skills(skills: &[Skill]) -> (Vec<SkillSummary>, Vec<SkillLoadi
             continue;
         }
 
-        let entry_size = skill.name.len() + skill.description.len();
+        let entry_size = catalog_entry_size(skill);
         if !budget_exceeded && total_size.saturating_add(entry_size) <= MAX_SKILL_DESCRIPTIONS_SIZE
         {
             total_size += entry_size;
@@ -3839,7 +3959,7 @@ fn select_catalog_skills(skills: &[Skill]) -> (Vec<SkillSummary>, Vec<SkillLoadi
         let budget_kb = MAX_SKILL_DESCRIPTIONS_SIZE / 1024;
         let first = dropped[0];
         let message = if dropped.len() == 1 {
-            let entry_size = first.name.len() + first.description.len();
+            let entry_size = catalog_entry_size(first);
             format!(
                 "Skill '{}' ({:.1}KB description) was dropped from the catalog because the previous skills already used the entire {}KB description budget.",
                 first.name,
@@ -3853,7 +3973,7 @@ fn select_catalog_skills(skills: &[Skill]) -> (Vec<SkillSummary>, Vec<SkillLoadi
                 budget_kb,
             );
             for skill in &dropped {
-                let entry_size = skill.name.len() + skill.description.len();
+                let entry_size = catalog_entry_size(skill);
                 message.push('\n');
                 message.push_str(&format!(
                     "- {} ({:.1}KB description)",
@@ -3902,30 +4022,14 @@ pub fn skill_body_resolver_for_project(
 ) -> impl Fn(Skill, &mut AsyncApp) -> Task<Result<String>> + Send + Sync + 'static {
     move |skill, cx| match skill.source.clone() {
         SkillSource::ProjectLocal { worktree_id, .. } => {
-            let project = project.clone();
-            cx.spawn(async move |cx| {
-                let worktree_id = WorktreeId::from_usize(worktree_id.0);
-                let worktree = project
-                    .update(cx, |project, cx| project.worktree_for_id(worktree_id, cx))
-                    .context("no such worktree")?;
-                expand_project_skills_directories(&worktree, cx).await?;
-                let relative_path = worktree.update(cx, |worktree, _cx| {
-                    let worktree_root = worktree.abs_path();
-                    worktree
-                        .path_style()
-                        .strip_prefix(&skill.skill_file_path, &worktree_root)
-                        .map(|relative_path| relative_path.into_arc())
-                        .context("skill file is not inside its worktree")
-                })?;
-
-                let buffer = project
-                    .update(cx, |project, cx| {
-                        project.open_buffer((worktree_id, relative_path), cx)
-                    })
-                    .await?;
-                let content =
-                    cx.update(|cx| buffer.read(cx).as_text_snapshot().as_rope().to_string());
-
+            let read = read_project_skill_file(
+                project.clone(),
+                worktree_id,
+                skill.skill_file_path.clone(),
+                cx,
+            );
+            cx.background_spawn(async move {
+                let content = read.await?;
                 read_skill_body_from_content(&skill.skill_file_path, &content).map_err(Into::into)
             })
         }
@@ -3938,6 +4042,70 @@ pub fn skill_body_resolver_for_project(
             })
         }
     }
+}
+
+/// Reads the body of one of a skill's subcommand files, going through the
+/// project for project-local skills just like [`skill_body_resolver_for_project`].
+pub fn skill_subcommand_body_resolver_for_project(
+    project: Entity<Project>,
+    fs: Arc<dyn Fs>,
+) -> impl Fn(Skill, SkillSubcommand, &mut AsyncApp) -> Task<Result<String>> + Send + Sync + 'static
+{
+    move |skill, subcommand, cx| match skill.source {
+        SkillSource::ProjectLocal { worktree_id, .. } => {
+            let read = read_project_skill_file(
+                project.clone(),
+                worktree_id,
+                subcommand.file_path.clone(),
+                cx,
+            );
+            cx.background_spawn(async move {
+                let content = read.await?;
+                read_skill_subcommand_body_from_content(&subcommand.file_path, &content)
+                    .map_err(Into::into)
+            })
+        }
+        SkillSource::BuiltIn | SkillSource::Global => {
+            let fs = fs.clone();
+            cx.background_spawn(async move {
+                agent_skills::read_skill_subcommand_body(fs.as_ref(), &subcommand.file_path)
+                    .await
+                    .map_err(Into::into)
+            })
+        }
+    }
+}
+
+/// Project-local skill files are read through project buffers so they also
+/// work in remote projects and reflect unsaved edits.
+fn read_project_skill_file(
+    project: Entity<Project>,
+    worktree_id: SkillScopeId,
+    abs_path: PathBuf,
+    cx: &mut AsyncApp,
+) -> Task<Result<String>> {
+    cx.spawn(async move |cx| {
+        let worktree_id = WorktreeId::from_usize(worktree_id.0);
+        let worktree = project
+            .update(cx, |project, cx| project.worktree_for_id(worktree_id, cx))
+            .context("no such worktree")?;
+        expand_project_skills_directories(&worktree, cx).await?;
+        let relative_path = worktree.update(cx, |worktree, _cx| {
+            let worktree_root = worktree.abs_path();
+            worktree
+                .path_style()
+                .strip_prefix(&abs_path, &worktree_root)
+                .map(|relative_path| relative_path.into_arc())
+                .context("skill file is not inside its worktree")
+        })?;
+
+        let buffer = project
+            .update(cx, |project, cx| {
+                project.open_buffer((worktree_id, relative_path), cx)
+            })
+            .await?;
+        Ok(cx.update(|cx| buffer.read(cx).as_text_snapshot().as_rope().to_string()))
+    })
 }
 
 /// Collect successfully-loaded global and project-local skills into a
@@ -4255,6 +4423,8 @@ mod internal_tests {
             load_warnings: Vec::new(),
             disable_model_invocation: false,
             embedded_body: None,
+            argument_hint: None,
+            subcommands: Vec::new(),
         }
     }
 
@@ -5190,6 +5360,8 @@ mod internal_tests {
             load_warnings: Vec::new(),
             disable_model_invocation: false,
             embedded_body: None,
+            argument_hint: None,
+            subcommands: Vec::new(),
         }
     }
 
@@ -5203,6 +5375,8 @@ mod internal_tests {
             load_warnings: Vec::new(),
             disable_model_invocation: false,
             embedded_body: Some("built-in body"),
+            argument_hint: None,
+            subcommands: Vec::new(),
         }
     }
 
@@ -5382,6 +5556,8 @@ mod internal_tests {
                 load_warnings: Vec::new(),
                 disable_model_invocation: false,
                 embedded_body: None,
+                argument_hint: None,
+                subcommands: Vec::new(),
             });
         }
 
@@ -5459,6 +5635,8 @@ mod internal_tests {
             load_warnings: Vec::new(),
             disable_model_invocation: false,
             embedded_body: None,
+            argument_hint: None,
+            subcommands: Vec::new(),
         };
         let second = Skill {
             name: "skill-02-overflows".to_string(),
@@ -5469,6 +5647,8 @@ mod internal_tests {
             load_warnings: Vec::new(),
             disable_model_invocation: false,
             embedded_body: None,
+            argument_hint: None,
+            subcommands: Vec::new(),
         };
         let third = Skill {
             name: "skill-03-would-fit".to_string(),
@@ -5479,6 +5659,8 @@ mod internal_tests {
             load_warnings: Vec::new(),
             disable_model_invocation: false,
             embedded_body: None,
+            argument_hint: None,
+            subcommands: Vec::new(),
         };
 
         // Sanity-check the test setup: the third skill is small enough
@@ -5537,6 +5719,8 @@ mod internal_tests {
             load_warnings: Vec::new(),
             disable_model_invocation: true,
             embedded_body: None,
+            argument_hint: None,
+            subcommands: Vec::new(),
         };
         let visible = Skill {
             name: "visible".to_string(),
@@ -5547,6 +5731,8 @@ mod internal_tests {
             load_warnings: Vec::new(),
             disable_model_invocation: false,
             embedded_body: None,
+            argument_hint: None,
+            subcommands: Vec::new(),
         };
 
         let (kept, issues) = select_catalog_skills(&[hidden, visible]);
@@ -6569,6 +6755,88 @@ mod internal_tests {
         assert_eq!(
             body, "edited body",
             "resolver must read the in-memory buffer, not the on-disk file"
+        );
+    }
+
+    #[gpui::test]
+    async fn test_project_skill_subcommand_slash_invocation(cx: &mut TestAppContext) {
+        let fake = init_test(cx);
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree(
+            "/project",
+            json!({
+                ".agents": {
+                    "skills": {
+                        "feature": {
+                            "SKILL.md": "---\nname: feature\ndescription: Feature flow\n---\n\nShared rules.",
+                            "commands": {
+                                "implement.md": "---\ndescription: Implement the story\n---\n\nWrite the code."
+                            }
+                        }
+                    }
+                }
+            }),
+        )
+        .await;
+
+        let (agent, project, _worktree_id, acp_thread) =
+            open_trusted_project_skills(cx, fs.clone(), "/project").await;
+        let project_id = project.entity_id();
+
+        let skill = agent.read_with(cx, |agent, _cx| {
+            let state = agent.projects.get(&project_id).unwrap();
+            user_skills(&state.skills)
+                .into_iter()
+                .find(|skill| skill.name == "feature")
+                .cloned()
+                .expect("project skill should be loaded")
+        });
+        let subcommand_names = skill
+            .subcommands
+            .iter()
+            .map(|subcommand| subcommand.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(subcommand_names, ["implement"]);
+        assert_eq!(skill.subcommands[0].description, "Implement the story");
+
+        let session_id = cx.update(|cx| acp_thread.read(cx).session_id().clone());
+        let thread = cx.update(|cx| native_thread_for_session(&agent, &session_id, cx));
+        let model = fake.model("fake");
+        thread.update(cx, |thread, cx| thread.set_model(model.clone(), cx));
+
+        let connection = NativeAgentConnection(agent);
+        let _prompt = cx.update(|cx| {
+            acp_thread::AgentSessionClientUserMessageIds::prompt(
+                &connection,
+                ClientUserMessageId::new(),
+                acp_v1::PromptRequest::new(
+                    session_id.clone(),
+                    vec!["/feature implement US-12".into()],
+                ),
+                cx,
+            )
+        });
+        cx.run_until_parked();
+
+        let request = fake
+            .pending_completions()
+            .pop()
+            .expect("a completion request");
+        let user_message = request
+            .messages
+            .last()
+            .expect("the skill invocation message")
+            .string_contents();
+        assert!(user_message.contains("Shared rules."), "{user_message}");
+        assert!(
+            user_message.contains("<subcommand name=\"implement\">"),
+            "{user_message}"
+        );
+        assert!(user_message.contains("Write the code."), "{user_message}");
+        assert!(user_message.contains("US-12"), "{user_message}");
+        assert!(
+            !user_message.contains("implement US-12"),
+            "the subcommand name should be consumed, not echoed: {user_message}"
         );
     }
 

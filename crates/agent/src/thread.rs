@@ -497,8 +497,8 @@ impl UserMessage {
                         MentionUri::Logs { .. } => {
                             write!(&mut logs_context, "\n{}\n", content).ok();
                         }
-                        MentionUri::Skill { name, source, .. } => {
-                            let label = format!("{} ({})", name, source);
+                        MentionUri::Skill { source, .. } => {
+                            let label = format!("{} ({})", uri.name(), source);
                             write!(&mut skills_context, "\nSkill: {}\n{}\n", label, content).ok();
                         }
                     }

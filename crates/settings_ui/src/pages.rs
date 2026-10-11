@@ -26,10 +26,10 @@ pub(crate) use mcp_servers_page::{
     McpServerForm, render_add_server_popover, render_mcp_servers_page,
 };
 pub(crate) use sandbox_settings::render_sandbox_settings_page;
-pub use skill_creator::SkillCreatorOpenMode;
 pub(crate) use skill_creator::{
     SkillCreatorEvent, SkillCreatorPage, render_skill_creator_page, skill_url_from_clipboard,
 };
+pub use skill_creator::{SkillCreatorOpenMode, SubcommandTarget};
 #[cfg(test)]
 pub(crate) use skills_setup::displayed_skills;
 pub(crate) use skills_setup::render_skills_setup_page;

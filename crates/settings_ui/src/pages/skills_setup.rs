@@ -6,7 +6,7 @@ use ui::{Divider, Tooltip, prelude::*};
 use util::ResultExt as _;
 use util::paths::PathExt as _;
 
-use crate::pages::SkillCreatorOpenMode;
+use crate::pages::{SkillCreatorOpenMode, SubcommandTarget};
 use crate::{SettingsUiFile, SettingsWindow};
 
 /// Skills shown on the Skills page for the currently selected settings file:
@@ -117,6 +117,10 @@ fn render_skill_row(
     let skill_file_path = skill.skill_file_path.clone();
     let directory_path = skill.directory_path.clone();
     let skill_name = skill.name.clone();
+    let subcommand_target = SubcommandTarget {
+        skill_name: skill.name.clone(),
+        skill_directory: skill.directory_path.clone(),
+    };
 
     let (skill_scope, shared_scope) = match &skill.source {
         SkillSource::ProjectLocal { .. } => ("project", "used in this project"),
@@ -202,16 +206,73 @@ fn render_skill_row(
         .px_8()
         .gap_4()
         .child(
-            v_flex().gap_0p5().min_w_0().flex_1().child(title).child(
-                Label::new(skill.description.clone())
-                    .size(LabelSize::Small)
-                    .color(Color::Muted)
-                    .line_clamp(5),
-            ),
+            v_flex()
+                .gap_0p5()
+                .min_w_0()
+                .flex_1()
+                .child(title)
+                .child(
+                    Label::new(skill.description.clone())
+                        .size(LabelSize::Small)
+                        .color(Color::Muted)
+                        .line_clamp(5),
+                )
+                .when(!skill.subcommands.is_empty(), |this| {
+                    this.child(h_flex().pt_1().gap_1().flex_wrap().children(
+                        skill.subcommands.iter().map(|subcommand| {
+                            let file_path = subcommand.file_path.clone();
+                            let tooltip = if subcommand.description.is_empty() {
+                                format!("Open {}", file_path.compact().display())
+                            } else {
+                                subcommand.description.clone()
+                            };
+                            Button::new(
+                                SharedString::from(format!(
+                                    "subcommand-{}-{}",
+                                    skill.name, subcommand.name
+                                )),
+                                format!("{} {}", skill.name, subcommand.name),
+                            )
+                            .tab_index(0_isize)
+                            .style(ButtonStyle::Outlined)
+                            .size(ButtonSize::Compact)
+                            .label_size(LabelSize::Small)
+                            .tooltip(Tooltip::text(tooltip))
+                            .on_click(cx.listener(
+                                move |settings_window, _event, window, cx| {
+                                    open_in_original_workspace(
+                                        settings_window,
+                                        file_path.clone(),
+                                        window,
+                                        cx,
+                                    );
+                                },
+                            ))
+                        }),
+                    ))
+                }),
         )
         .child(
             h_flex()
                 .gap_2()
+                .child(
+                    IconButton::new(
+                        SharedString::from(format!("add-subcommand-{}", skill.name)),
+                        IconName::Plus,
+                    )
+                    .tab_index(0_isize)
+                    .icon_size(IconSize::Small)
+                    .tooltip(Tooltip::text("Add Subcommand"))
+                    .on_click(cx.listener(
+                        move |settings_window, _event, window, cx| {
+                            settings_window.open_skill_creator_sub_page(
+                                SkillCreatorOpenMode::Subcommand(subcommand_target.clone()),
+                                window,
+                                cx,
+                            );
+                        },
+                    )),
+                )
                 .child(
                     IconButton::new(
                         SharedString::from(format!("delete-{}", skill.name)),
@@ -307,28 +368,38 @@ fn render_skill_row(
                                 .color(Color::Muted),
                         )
                         .on_click(cx.listener(move |settings_window, _event, window, cx| {
-                            let skill_file_path = skill_file_path.clone();
-                            let Some(original_window) = settings_window.original_window else {
-                                return;
-                            };
-                            original_window
-                                .update(cx, |multi_workspace, original_window, cx| {
-                                    let workspace = multi_workspace.workspace().clone();
-                                    workspace.update(cx, |workspace, cx| {
-                                        workspace
-                                            .open_abs_path(
-                                                skill_file_path,
-                                                Default::default(),
-                                                original_window,
-                                                cx,
-                                            )
-                                            .detach_and_log_err(cx);
-                                    });
-                                })
-                                .log_err();
-                            window.remove_window();
+                            open_in_original_workspace(
+                                settings_window,
+                                skill_file_path.clone(),
+                                window,
+                                cx,
+                            );
                         })),
                 ),
         )
         .into_any_element()
+}
+
+/// Opens `path` in the workspace the settings window was opened from and
+/// closes the settings window.
+fn open_in_original_workspace(
+    settings_window: &SettingsWindow,
+    path: std::path::PathBuf,
+    window: &mut Window,
+    cx: &mut Context<SettingsWindow>,
+) {
+    let Some(original_window) = settings_window.original_window else {
+        return;
+    };
+    original_window
+        .update(cx, |multi_workspace, original_window, cx| {
+            let workspace = multi_workspace.workspace().clone();
+            workspace.update(cx, |workspace, cx| {
+                workspace
+                    .open_abs_path(path, Default::default(), original_window, cx)
+                    .detach_and_log_err(cx);
+            });
+        })
+        .log_err();
+    window.remove_window();
 }

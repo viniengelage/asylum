@@ -1558,6 +1558,7 @@ impl MessageEditor {
             name: skill.name.to_string(),
             source: skill.source.to_string(),
             skill_file_path: skill.skill_file_path.clone(),
+            subcommand: None,
         };
 
         let link_text = mention_uri.as_link().to_string();
@@ -2435,6 +2436,7 @@ mod tests {
             source: "".into(),
             skill_file_path: skill_file_path.clone(),
             warning: None,
+            subcommands: Vec::new().into(),
         };
         let session_capabilities = SessionCapabilities::new(
             acp_v1::PromptCapabilities::default(),
@@ -2492,6 +2494,7 @@ mod tests {
             source: source.into(),
             skill_file_path: PathBuf::from(format!("/tmp/{source}-{name}/SKILL.md")),
             warning: None,
+            subcommands: Vec::new().into(),
         };
 
         // Global skills carry an empty scope (so the popup inserts
@@ -3205,6 +3208,118 @@ mod tests {
     /// (see `NativeAgent::ensure_skills_scan_started`); without the
     /// event the trigger never runs and lazily-discovered skills never
     /// appear in autocomplete.
+    #[gpui::test]
+    async fn test_completion_provider_skill_subcommands(cx: &mut TestAppContext) {
+        init_test(cx);
+
+        let app_state = cx.update(AppState::test);
+
+        cx.update(|cx| {
+            editor::init(cx);
+            workspace::init(app_state.clone(), cx);
+        });
+
+        let project = Project::test(app_state.fs.clone(), [path!("/dir").as_ref()], cx).await;
+        let window =
+            cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+        let workspace = window
+            .read_with(cx, |mw, _| mw.workspace().clone())
+            .unwrap();
+
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+        let subcommand = |name: &str, description: &str| agent_skills::SkillSubcommand {
+            name: name.into(),
+            description: description.into(),
+            argument_hint: None,
+            file_path: PathBuf::from(format!("/tmp/feature/commands/{name}.md")),
+        };
+        let skill = AvailableSkill {
+            name: "feature".into(),
+            description: "Feature flow".into(),
+            source: "".into(),
+            skill_file_path: PathBuf::from("/tmp/feature/SKILL.md"),
+            warning: None,
+            subcommands: vec![
+                subcommand("implement", "Implement the story"),
+                subcommand("plan", "Plan the story"),
+            ]
+            .into(),
+        };
+        let session_capabilities = Arc::new(RwLock::new(SessionCapabilities::new(
+            acp_v1::PromptCapabilities::default(),
+            Vec::new(),
+            vec![skill],
+        )));
+
+        let editor = workspace.update_in(&mut cx, |workspace, window, cx| {
+            let workspace_handle = cx.weak_entity();
+            let message_editor = cx.new(|cx| {
+                MessageEditor::new(
+                    workspace_handle,
+                    project.downgrade(),
+                    None,
+                    session_capabilities.clone(),
+                    "Test Agent".into(),
+                    "Test",
+                    EditorMode::AutoHeight {
+                        max_lines: None,
+                        min_lines: 1,
+                    },
+                    window,
+                    cx,
+                )
+            });
+            workspace.active_pane().update(cx, |pane, cx| {
+                pane.add_item(
+                    Box::new(cx.new(|_| MessageEditorItem(message_editor.clone()))),
+                    true,
+                    true,
+                    None,
+                    window,
+                    cx,
+                );
+            });
+            message_editor.read(cx).focus_handle(cx).focus(window, cx);
+            message_editor.read(cx).editor().clone()
+        });
+
+        cx.simulate_input("/fea");
+        editor.update_in(&mut cx, |editor, window, cx| {
+            assert!(editor.has_visible_completions_menu());
+            assert_eq!(current_completion_labels(editor), &["feature"]);
+            editor.set_text("", window, cx);
+        });
+
+        cx.simulate_input("/feature");
+        editor.update_in(&mut cx, |editor, window, cx| {
+            assert!(editor.has_visible_completions_menu());
+            let mut labels = current_completion_labels(editor);
+            assert_eq!(labels.first().map(String::as_str), Some("feature"));
+            labels.sort();
+            assert_eq!(labels, &["feature", "feature implement", "feature plan"]);
+            editor.set_text("", window, cx);
+        });
+
+        cx.simulate_input("/feature im");
+        editor.update_in(&mut cx, |editor, window, cx| {
+            assert!(editor.has_visible_completions_menu());
+            assert_eq!(
+                current_completion_labels_with_documentation(editor),
+                &[("feature implement".into(), "Implement the story".into())]
+            );
+            editor.set_text("", window, cx);
+        });
+
+        cx.simulate_input("/feature implement US-12");
+        editor.update_in(&mut cx, |editor, _window, _cx| {
+            assert!(
+                !editor.has_visible_completions_menu(),
+                "free text after the subcommand shouldn't keep the menu open"
+            );
+        });
+    }
+
     #[gpui::test]
     async fn test_slash_autocomplete_emits_opened_event(cx: &mut TestAppContext) {
         init_test(cx);

@@ -1,7 +1,8 @@
 use agent_skills::{
     AGENTS_DIR_NAME, MAX_SKILL_DESCRIPTION_LEN, MAX_SKILL_FILE_SIZE, SKILL_FILE_NAME,
-    SKILLS_DIR_NAME, SkillMetadata, SkillsUpdatedHook, global_skills_dir, parse_skill_file_content,
-    slugify_skill_name, validate_description, validate_name,
+    SKILLS_DIR_NAME, SUBCOMMAND_FILE_EXTENSION, SUBCOMMANDS_DIR_NAME, SkillMetadata,
+    SkillsUpdatedHook, global_skills_dir, parse_skill_file_content, render_skill_subcommand_file,
+    slugify_skill_name, validate_description, validate_name, validate_subcommand_name,
 };
 use anyhow::{Context as _, Result, anyhow};
 use editor::{CurrentLineHighlight, Editor, EditorElement, EditorEvent, EditorStyle};
@@ -34,6 +35,7 @@ const URL_FIELD_TAB_INDEX: isize = 1;
 const NAME_FIELD_TAB_INDEX: isize = 2;
 const DESCRIPTION_FIELD_TAB_INDEX: isize = 3;
 const DISABLE_MODEL_INVOCATION_TAB_INDEX: isize = 4;
+const ARGUMENT_HINT_FIELD_TAB_INDEX: isize = 4;
 const BODY_FIELD_TAB_INDEX: isize = 5;
 const SAVE_BUTTON_TAB_INDEX: isize = 6;
 const URL_IMPORT_DEBOUNCE: Duration = Duration::from_millis(300);
@@ -49,6 +51,14 @@ pub enum SkillCreatorOpenMode {
     Install {
         content: String,
     },
+    /// Add a `commands/<name>.md` file to an existing skill.
+    Subcommand(SubcommandTarget),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SubcommandTarget {
+    pub skill_name: String,
+    pub skill_directory: PathBuf,
 }
 
 pub(crate) enum SkillCreatorEvent {
@@ -138,8 +148,13 @@ pub struct SkillCreatorPage {
     http_client: Arc<dyn HttpClient>,
     url_editor: Entity<InputField>,
     name_editor: Entity<InputField>,
+    subcommand_name_editor: Entity<InputField>,
     description_editor: Entity<InputField>,
+    argument_hint_editor: Entity<InputField>,
     body_editor: Entity<Editor>,
+    /// Set when the page adds a subcommand to an existing skill rather than
+    /// creating a new skill.
+    subcommand_target: Option<SubcommandTarget>,
     description_length: usize,
     settings_window: WeakEntity<SettingsWindow>,
     disable_model_invocation: bool,
@@ -190,6 +205,13 @@ impl SkillCreatorPage {
         // Focus the name field on open.
         window.focus(&name_editor.focus_handle(cx), cx);
 
+        let subcommand_name_editor = cx.new(|cx| {
+            InputField::new(window, cx, "implement")
+                .label("Name")
+                .tab_index(NAME_FIELD_TAB_INDEX)
+                .tab_stop(true)
+        });
+
         let description_editor = cx.new(|cx| {
             InputField::new(
                 window,
@@ -199,6 +221,13 @@ impl SkillCreatorPage {
             .label("Description")
             .tab_index(DESCRIPTION_FIELD_TAB_INDEX)
             .tab_stop(true)
+        });
+
+        let argument_hint_editor = cx.new(|cx| {
+            InputField::new(window, cx, "e.g., <story id>")
+                .label("Argument hint")
+                .tab_index(ARGUMENT_HINT_FIELD_TAB_INDEX)
+                .tab_stop(true)
         });
 
         let body_editor = cx.new(|cx| {
@@ -242,6 +271,7 @@ impl SkillCreatorPage {
 
         let url_input_editor = url_editor.read(cx).editor().clone();
         let name_input_editor = name_editor.read(cx).editor().clone();
+        let subcommand_name_input_editor = subcommand_name_editor.read(cx).editor().clone();
         let description_input_editor = description_editor.read(cx).editor().clone();
         let weak = cx.weak_entity();
         let url_subscription = url_input_editor.subscribe(
@@ -266,6 +296,17 @@ impl SkillCreatorPage {
             cx,
         );
         let weak = cx.weak_entity();
+        let subcommand_name_subscription = subcommand_name_input_editor.subscribe(
+            Box::new(move |event, window, cx| {
+                weak.update(cx, |this, cx| {
+                    this.handle_name_input_event(&event, window, cx);
+                })
+                .ok();
+            }),
+            window,
+            cx,
+        );
+        let weak = cx.weak_entity();
         let description_subscription = description_input_editor.subscribe(
             Box::new(move |event, window, cx| {
                 weak.update(cx, |this, cx| {
@@ -280,6 +321,7 @@ impl SkillCreatorPage {
         let subscriptions = vec![
             url_subscription,
             name_subscription,
+            subcommand_name_subscription,
             description_subscription,
             cx.subscribe_in(&body_editor, window, Self::handle_body_editor_event),
         ];
@@ -290,8 +332,11 @@ impl SkillCreatorPage {
             http_client,
             url_editor,
             name_editor,
+            subcommand_name_editor,
             description_editor,
+            argument_hint_editor,
             body_editor,
+            subcommand_target: None,
             description_length: 0,
             settings_window,
             disable_model_invocation: false,
@@ -310,7 +355,15 @@ impl SkillCreatorPage {
     }
 
     pub(crate) fn name_editor_focus_handle(&self, cx: &App) -> FocusHandle {
-        self.name_editor.focus_handle(cx)
+        self.active_name_editor().focus_handle(cx)
+    }
+
+    fn active_name_editor(&self) -> &Entity<InputField> {
+        if self.subcommand_target.is_some() {
+            &self.subcommand_name_editor
+        } else {
+            &self.name_editor
+        }
     }
 
     fn handle_url_input_event(
@@ -377,7 +430,30 @@ impl SkillCreatorPage {
     }
 
     fn current_name(&self, cx: &App) -> String {
-        self.name_editor.read(cx).text(cx)
+        self.active_name_editor().read(cx).text(cx)
+    }
+
+    fn current_argument_hint(&self, cx: &App) -> String {
+        self.argument_hint_editor.read(cx).text(cx)
+    }
+
+    fn validate_current_name(&self, cx: &App) -> Result<(), &'static str> {
+        let name = self.current_name(cx);
+        if self.subcommand_target.is_some() {
+            validate_subcommand_name(&name)
+        } else {
+            validate_name(&name)
+        }
+    }
+
+    /// A subcommand's description is optional; a skill's is required.
+    fn validate_current_description(&self, cx: &App) -> Result<(), &'static str> {
+        let description = self.current_description(cx);
+        if self.subcommand_target.is_some() && description.trim().is_empty() {
+            Ok(())
+        } else {
+            validate_description(&description)
+        }
     }
 
     fn current_description(&self, cx: &App) -> String {
@@ -393,17 +469,17 @@ impl SkillCreatorPage {
     }
 
     fn recompute_name_error(&mut self, cx: &mut Context<Self>) {
-        let name = self.current_name(cx);
-        let error = validate_name(&name).err();
+        let error = self.validate_current_name(cx).err();
         self.name_error = error;
-        self.name_editor
+        self.active_name_editor()
+            .clone()
             .update(cx, |field, cx| field.set_error(error, cx));
     }
 
     fn recompute_description_error(&mut self, cx: &mut Context<Self>) {
         let description = self.current_description(cx);
         self.description_length = description.chars().count();
-        let error = validate_description(&description).err();
+        let error = self.validate_current_description(cx).err();
         self.description_error = error;
         self.description_editor
             .update(cx, |field, cx| field.set_error(error, cx));
@@ -419,8 +495,8 @@ impl SkillCreatorPage {
     }
 
     fn is_valid(&self, cx: &App) -> bool {
-        validate_name(&self.current_name(cx)).is_ok()
-            && validate_description(&self.current_description(cx)).is_ok()
+        self.validate_current_name(cx).is_ok()
+            && self.validate_current_description(cx).is_ok()
             && !self.current_body(cx).trim().is_empty()
     }
 
@@ -430,6 +506,7 @@ impl SkillCreatorPage {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.subcommand_target = None;
         match open_mode {
             SkillCreatorOpenMode::Form => {}
             SkillCreatorOpenMode::Url { initial_url } => {
@@ -438,7 +515,15 @@ impl SkillCreatorPage {
             SkillCreatorOpenMode::Install { content } => {
                 self.open_install_review(content, window, cx);
             }
+            SkillCreatorOpenMode::Subcommand(target) => {
+                self.subcommand_target = Some(target);
+                self.name_error = None;
+                self.description_error = None;
+                self.body_error = None;
+                self.save_error = None;
+            }
         }
+        cx.notify();
     }
 
     /// Pre-fill the form with a skill supplied inline (from a share link) so
@@ -640,8 +725,10 @@ impl SkillCreatorPage {
             .unwrap_or(ScopeChoice::Global);
         let name = self.current_name(cx);
         let description = self.current_description(cx);
+        let argument_hint = self.current_argument_hint(cx);
         let body = self.current_body(cx);
         let disable_model_invocation = self.disable_model_invocation;
+        let subcommand_target = self.subcommand_target.clone();
         let fs = self.fs.clone();
 
         self.saving = true;
@@ -649,15 +736,30 @@ impl SkillCreatorPage {
         cx.notify();
 
         let task = cx.spawn_in(window, async move |this, cx| {
-            let result = write_skill_to_disk(
-                fs.as_ref(),
-                &scope.skills_dir(),
-                &name,
-                &description,
-                &body,
-                disable_model_invocation,
-            )
-            .await;
+            let result = match subcommand_target {
+                Some(target) => {
+                    write_subcommand_to_disk(
+                        fs.as_ref(),
+                        &target.skill_directory,
+                        &name,
+                        &description,
+                        &argument_hint,
+                        &body,
+                    )
+                    .await
+                }
+                None => {
+                    write_skill_to_disk(
+                        fs.as_ref(),
+                        &scope.skills_dir(),
+                        &name,
+                        &description,
+                        &body,
+                        disable_model_invocation,
+                    )
+                    .await
+                }
+            };
 
             this.update_in(cx, |this, _window, cx| {
                 this.saving = false;
@@ -735,6 +837,7 @@ impl SkillCreatorPage {
     }
 
     fn render_form_fields(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let is_subcommand = self.subcommand_target.is_some();
         v_flex()
             .id("skill-creator-form-fields")
             .flex_grow_1()
@@ -744,17 +847,26 @@ impl SkillCreatorPage {
                 v_flex()
                     .gap_2()
                     .child(Label::new("Front-matter"))
-                    .child(self.name_editor.clone())
-                    .child(self.description_editor.clone()),
+                    .child(self.active_name_editor().clone())
+                    .child(self.description_editor.clone())
+                    .when(is_subcommand, |this| {
+                        this.child(self.argument_hint_editor.clone())
+                    }),
             )
-            .child(self.render_optional_params(cx))
+            .when(!is_subcommand, |this| {
+                this.child(self.render_optional_params(cx))
+            })
             .child(Divider::horizontal())
             .child(
                 v_flex()
                     .flex_grow_1()
                     .flex_shrink_0()
                     .gap_2()
-                    .child(Label::new("Skill Content"))
+                    .child(Label::new(if is_subcommand {
+                        "Subcommand Content"
+                    } else {
+                        "Skill Content"
+                    }))
                     .child(self.render_body_field(window, cx))
                     .when_some(self.body_error, |this, error| {
                         this.child(Label::new(error).size(LabelSize::Small).color(Color::Error))
@@ -835,7 +947,11 @@ impl SkillCreatorPage {
 
     fn render_footer(&self, _window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
         let saving = self.saving;
-        let main_action = if saving { "Saving…" } else { "Save Skill" };
+        let main_action = match (saving, self.subcommand_target.is_some()) {
+            (true, _) => "Saving…",
+            (false, true) => "Save Subcommand",
+            (false, false) => "Save Skill",
+        };
 
         v_flex()
             .w_full()
@@ -946,8 +1062,19 @@ impl Render for SkillCreatorPage {
                             .gap_4()
                             .px_8()
                             .py_4()
-                            .child(self.render_url_import())
-                            .child(Divider::horizontal().flex_shrink_0().flex_grow_1())
+                            .map(|this| match &self.subcommand_target {
+                                Some(target) => this.child(
+                                    Label::new(format!(
+                                        "Invoked as /{} <name> from the agent panel.",
+                                        target.skill_name
+                                    ))
+                                    .size(LabelSize::Small)
+                                    .color(Color::Muted),
+                                ),
+                                None => this
+                                    .child(self.render_url_import())
+                                    .child(Divider::horizontal().flex_shrink_0().flex_grow_1()),
+                            })
                             .child(self.render_form_fields(window, cx)),
                     ),
             )
@@ -1240,6 +1367,44 @@ async fn write_skill_to_disk(
     Ok(skill_file_path)
 }
 
+async fn write_subcommand_to_disk(
+    fs: &dyn Fs,
+    skill_directory: &std::path::Path,
+    name: &str,
+    description: &str,
+    argument_hint: &str,
+    body: &str,
+) -> Result<PathBuf> {
+    let commands_directory = skill_directory.join(SUBCOMMANDS_DIR_NAME);
+    let file_path = commands_directory.join(format!("{name}.{SUBCOMMAND_FILE_EXTENSION}"));
+    let existing = fs.metadata(&file_path).await.with_context(|| {
+        format!(
+            "failed to check whether {} already exists",
+            file_path.display()
+        )
+    })?;
+    if existing.is_some() {
+        anyhow::bail!(
+            "A subcommand named \"{name}\" already exists at {}. Pick a different name.",
+            file_path.display()
+        );
+    }
+
+    let content = render_skill_subcommand_file(description, Some(argument_hint), body)
+        .context("failed to serialize subcommand frontmatter as YAML")?;
+    fs.create_dir(&commands_directory).await.with_context(|| {
+        format!(
+            "failed to create subcommands directory {}",
+            commands_directory.display()
+        )
+    })?;
+    fs.write(&file_path, content.as_bytes())
+        .await
+        .with_context(|| format!("failed to write {}", file_path.display()))?;
+
+    Ok(file_path)
+}
+
 fn format_skill_file(
     name: &str,
     description: &str,
@@ -1250,6 +1415,7 @@ fn format_skill_file(
         name: name.to_string(),
         description: description.to_string(),
         disable_model_invocation,
+        argument_hint: None,
     };
     let frontmatter = serde_yaml_ng::to_string(&metadata)
         .context("failed to serialize skill frontmatter as YAML")?;
@@ -1699,6 +1865,58 @@ mod tests {
             .expect("written file should be parseable");
         assert_eq!(skill.name, "draft-pr");
         assert_eq!(skill.description, "Push a draft PR");
+    }
+
+    #[gpui::test]
+    async fn write_subcommand_to_disk_adds_a_loadable_subcommand(cx: &mut gpui::TestAppContext) {
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree(
+            "/skills",
+            serde_json::json!({
+                "feature": {
+                    "SKILL.md": "---\nname: feature\ndescription: Feature flow\n---\nShared.\n"
+                }
+            }),
+        )
+        .await;
+
+        let path = write_subcommand_to_disk(
+            fs.as_ref(),
+            Path::new("/skills/feature"),
+            "implement",
+            "Implement the story",
+            "<story id>",
+            "Write the code.",
+        )
+        .await
+        .expect("write should succeed");
+        assert_eq!(path, Path::new("/skills/feature/commands/implement.md"));
+
+        let fs: Arc<dyn Fs> = fs;
+        let skill = agent_skills::load_skill_frontmatter(
+            fs.clone(),
+            PathBuf::from("/skills/feature/SKILL.md"),
+            SkillSource::Global,
+        )
+        .await
+        .expect("skill should load");
+        let subcommand = skill
+            .subcommand("implement")
+            .expect("subcommand should load");
+        assert_eq!(subcommand.description, "Implement the story");
+        assert_eq!(subcommand.argument_hint.as_deref(), Some("<story id>"));
+
+        let err = write_subcommand_to_disk(
+            fs.as_ref(),
+            Path::new("/skills/feature"),
+            "implement",
+            "",
+            "",
+            "Other body.",
+        )
+        .await
+        .expect_err("writing over an existing subcommand must fail");
+        assert!(err.to_string().contains("already exists"), "{err}");
     }
 
     #[gpui::test]

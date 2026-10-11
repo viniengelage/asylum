@@ -52,9 +52,18 @@ pub const MAX_SKILL_DESCRIPTIONS_SIZE: usize = 50 * 1024;
 /// The name of the skill definition file
 pub const SKILL_FILE_NAME: &str = "SKILL.md";
 
+/// Directory inside a skill that holds its subcommands, one
+/// `<subcommand>.md` file each, e.g. `feature/commands/implement.md` is
+/// invoked as `/feature implement`.
+pub const SUBCOMMANDS_DIR_NAME: &str = "commands";
+
+/// Extension of a subcommand file inside [`SUBCOMMANDS_DIR_NAME`].
+pub const SUBCOMMAND_FILE_EXTENSION: &str = "md";
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SkillLoadWarning {
     DescriptionTooLong { actual_len: usize, max_len: usize },
+    InvalidSubcommand { file_name: String, message: String },
 }
 
 impl SkillLoadWarning {
@@ -66,6 +75,9 @@ impl SkillLoadWarning {
             } => format!(
                 "Skill description is {actual_len} characters, exceeding the {max_len}-character limit. The skill was loaded, but long descriptions may consume more model-context tokens."
             ),
+            Self::InvalidSubcommand { file_name, message } => {
+                format!("Subcommand `{SUBCOMMANDS_DIR_NAME}/{file_name}` was skipped: {message}")
+            }
         }
     }
 }
@@ -90,6 +102,57 @@ pub struct Skill {
     /// this holds the full SKILL.md body so the skill tool can serve it
     /// without a filesystem read.
     pub embedded_body: Option<&'static str>,
+    /// Hint for what to type after the slash command, from the
+    /// `argument-hint` frontmatter field.
+    pub argument_hint: Option<String>,
+    /// Subcommands found in the skill's `commands/` directory, sorted by name.
+    pub subcommands: Vec<SkillSubcommand>,
+}
+
+impl Skill {
+    pub fn subcommand(&self, name: &str) -> Option<&SkillSubcommand> {
+        self.subcommands
+            .iter()
+            .find(|subcommand| subcommand.name == name)
+    }
+
+    /// Splits the text typed after `/<skill>` into one of this skill's
+    /// subcommands and the text that follows it. Returns `None` when the
+    /// first word isn't a subcommand, so skills keep receiving free-form
+    /// arguments as before.
+    pub fn split_subcommand<'a>(&self, arguments: &'a str) -> Option<(&SkillSubcommand, &'a str)> {
+        let arguments = arguments.trim_start();
+        let (first_word, rest) = arguments
+            .split_once(char::is_whitespace)
+            .unwrap_or((arguments, ""));
+        let subcommand = self.subcommand(first_word)?;
+        Some((subcommand, rest))
+    }
+}
+
+/// A `commands/<name>.md` file inside a skill. Invoking `/<skill> <name>`
+/// loads the skill's SKILL.md together with this file's body.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillSubcommand {
+    pub name: String,
+    pub description: String,
+    pub argument_hint: Option<String>,
+    /// Absolute path to the subcommand's `.md` file
+    pub file_path: PathBuf,
+}
+
+/// Frontmatter of a subcommand file. Unlike SKILL.md, the frontmatter is
+/// optional, and so is every field in it.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct SubcommandMetadata {
+    #[serde(default)]
+    description: String,
+    #[serde(
+        default,
+        rename = "argument-hint",
+        skip_serializing_if = "Option::is_none"
+    )]
+    argument_hint: Option<String>,
 }
 
 /// Indicates where a skill was loaded from.
@@ -208,6 +271,12 @@ pub struct SkillMetadata {
     pub description: String,
     #[serde(default, rename = "disable-model-invocation")]
     pub disable_model_invocation: bool,
+    #[serde(
+        default,
+        rename = "argument-hint",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub argument_hint: Option<String>,
 }
 
 /// Minimal skill info for system prompt.
@@ -226,6 +295,8 @@ pub struct SkillSummary {
     /// references relative to the skill's directory when reading bundled
     /// resources.
     pub location: String,
+    /// Comma-separated subcommand names, empty when the skill has none.
+    pub subcommands: String,
 }
 
 impl From<&Skill> for SkillSummary {
@@ -234,6 +305,12 @@ impl From<&Skill> for SkillSummary {
             name: skill.name.clone(),
             description: skill.description.clone(),
             location: skill.skill_file_path.to_string_lossy().into_owned(),
+            subcommands: skill
+                .subcommands
+                .iter()
+                .map(|subcommand| subcommand.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
         }
     }
 }
@@ -284,6 +361,8 @@ pub fn parse_skill_frontmatter(
         load_warnings,
         disable_model_invocation: metadata.disable_model_invocation,
         embedded_body: None,
+        argument_hint: metadata.argument_hint,
+        subcommands: Vec::new(),
     })
 }
 
@@ -342,6 +421,10 @@ fn validate_description_for_loading(
 }
 
 fn extract_frontmatter(content: &str) -> Result<(SkillMetadata, &str)> {
+    extract_frontmatter_as(content)
+}
+
+fn extract_frontmatter_as<T: for<'de> Deserialize<'de>>(content: &str) -> Result<(T, &str)> {
     let content = content.trim_start();
 
     if !content.starts_with("---") {
@@ -402,7 +485,7 @@ fn extract_frontmatter(content: &str) -> Result<(SkillMetadata, &str)> {
         let Some(first_doc) = docs.next() else {
             continue;
         };
-        match SkillMetadata::deserialize(first_doc) {
+        match T::deserialize(first_doc) {
             Ok(metadata) => return Ok((metadata, &content[end..])),
             Err(e) => last_error = Some(anyhow::Error::new(e)),
         }
@@ -656,10 +739,16 @@ pub async fn load_skill_frontmatter(
             message: format!("Failed to read file: {}", e),
         })?;
 
-    parse_skill_frontmatter(&skill_file_path, &content, source).map_err(|e| SkillLoadError {
-        path: skill_file_path.clone(),
-        message: e.to_string(),
-    })
+    let mut skill = parse_skill_frontmatter(&skill_file_path, &content, source).map_err(|e| {
+        SkillLoadError {
+            path: skill_file_path.clone(),
+            message: e.to_string(),
+        }
+    })?;
+    let (subcommands, warnings) = load_skill_subcommands(&fs, &skill.directory_path).await;
+    skill.subcommands = subcommands;
+    skill.load_warnings.extend(warnings);
+    Ok(skill)
 }
 
 /// Read the body of a SKILL.md from disk — everything after the closing
@@ -689,6 +778,192 @@ pub fn read_skill_body_from_content(
         })?;
 
     Ok(body.trim().to_string())
+}
+
+/// Where a skill's subcommand file lives, given the skill's SKILL.md path.
+pub fn subcommand_file_path(skill_file_path: &Path, subcommand: &str) -> PathBuf {
+    let skill_directory = skill_file_path.parent().unwrap_or(skill_file_path);
+    skill_directory
+        .join(SUBCOMMANDS_DIR_NAME)
+        .join(format!("{subcommand}.{SUBCOMMAND_FILE_EXTENSION}"))
+}
+
+/// The subcommand name a `commands/` entry would register, or `None` when
+/// the file isn't a subcommand file (wrong extension, hidden file, …).
+pub fn subcommand_name_for_file_name(file_name: &str) -> Option<&str> {
+    let name = file_name.strip_suffix(concatcp!(".", SUBCOMMAND_FILE_EXTENSION))?;
+    (!name.is_empty() && !name.starts_with('.')).then_some(name)
+}
+
+/// Splits a subcommand file into its frontmatter and body. A file without
+/// a leading `---` is all body.
+fn split_subcommand_content(content: &str) -> Result<(SubcommandMetadata, &str)> {
+    if content.len() > MAX_SKILL_FILE_SIZE {
+        anyhow::bail!(
+            "subcommand file exceeds maximum size of {}KB",
+            MAX_SKILL_FILE_SIZE / 1024
+        );
+    }
+    if content.trim_start().starts_with("---") {
+        extract_frontmatter_as(content)
+    } else {
+        Ok((SubcommandMetadata::default(), content))
+    }
+}
+
+/// Parse a `commands/<name>.md` file. The name comes from the file name, so
+/// it follows the same rules as a skill name.
+pub fn parse_skill_subcommand(file_path: &Path, content: &str) -> Result<SkillSubcommand> {
+    let file_name = file_path
+        .file_name()
+        .and_then(|file_name| file_name.to_str())
+        .context("subcommand file has no name")?;
+    let name = subcommand_name_for_file_name(file_name)
+        .with_context(|| format!("not a .{SUBCOMMAND_FILE_EXTENSION} file"))?;
+    validate_subcommand_name(name).map_err(anyhow::Error::msg)?;
+    let (metadata, _body) = split_subcommand_content(content)?;
+    Ok(SkillSubcommand {
+        name: name.to_string(),
+        description: metadata.description.trim().to_string(),
+        argument_hint: metadata
+            .argument_hint
+            .map(|hint| hint.trim().to_string())
+            .filter(|hint| !hint.is_empty()),
+        file_path: file_path.to_path_buf(),
+    })
+}
+
+/// Same rules as [`validate_name`], with messages that name the subcommand.
+pub fn validate_subcommand_name(name: &str) -> Result<(), &'static str> {
+    validate_name(name).map_err(|_| {
+        formatcp!(
+            "Subcommand name must be 1-{MAX_SKILL_NAME_LEN} lowercase letters, numbers, and hyphens, not starting or ending with a hyphen"
+        )
+    })
+}
+
+/// The body of a subcommand file: everything after its optional frontmatter.
+pub fn read_skill_subcommand_body_from_content(
+    file_path: &Path,
+    content: &str,
+) -> Result<String, SkillLoadError> {
+    let (_metadata, body) = split_subcommand_content(content).map_err(|e| SkillLoadError {
+        path: file_path.to_path_buf(),
+        message: e.to_string(),
+    })?;
+    Ok(body.trim().to_string())
+}
+
+pub async fn read_skill_subcommand_body(
+    fs: &dyn Fs,
+    file_path: &Path,
+) -> Result<String, SkillLoadError> {
+    let content = fs.load(file_path).await.map_err(|e| SkillLoadError {
+        path: file_path.to_path_buf(),
+        message: format!("Failed to read file: {}", e),
+    })?;
+    read_skill_subcommand_body_from_content(file_path, &content)
+}
+
+/// Builds the contents of a new subcommand file.
+pub fn render_skill_subcommand_file(
+    description: &str,
+    argument_hint: Option<&str>,
+    body: &str,
+) -> Result<String> {
+    let metadata = SubcommandMetadata {
+        description: description.trim().to_string(),
+        argument_hint: argument_hint
+            .map(str::trim)
+            .filter(|hint| !hint.is_empty())
+            .map(ToString::to_string),
+    };
+    let frontmatter = serde_yaml_ng::to_string(&metadata)?;
+    Ok(format!("---\n{frontmatter}---\n\n{}\n", body.trim()))
+}
+
+/// Load every subcommand in `<skill_directory>/commands/`. Files that fail
+/// to parse are reported as warnings so one broken subcommand doesn't hide
+/// the whole skill.
+pub async fn load_skill_subcommands(
+    fs: &Arc<dyn Fs>,
+    skill_directory: &Path,
+) -> (Vec<SkillSubcommand>, Vec<SkillLoadWarning>) {
+    let commands_directory = skill_directory.join(SUBCOMMANDS_DIR_NAME);
+    let Ok(mut entries) = fs.read_dir(&commands_directory).await else {
+        return (Vec::new(), Vec::new());
+    };
+
+    let mut file_paths = Vec::new();
+    while let Some(entry) = entries.next().await {
+        if let Ok(entry_path) = entry
+            && entry_path
+                .file_name()
+                .and_then(|file_name| file_name.to_str())
+                .and_then(subcommand_name_for_file_name)
+                .is_some()
+        {
+            file_paths.push(entry_path);
+        }
+    }
+
+    let results: Vec<(PathBuf, Result<Option<SkillSubcommand>>)> =
+        futures::stream::iter(file_paths)
+            .map(|file_path| {
+                let fs = fs.clone();
+                async move {
+                    let result = load_skill_subcommand(fs.as_ref(), &file_path).await;
+                    (file_path, result)
+                }
+            })
+            .buffer_unordered(SKILL_IO_CONCURRENCY)
+            .collect()
+            .await;
+
+    collect_skill_subcommands(results)
+}
+
+async fn load_skill_subcommand(fs: &dyn Fs, file_path: &Path) -> Result<Option<SkillSubcommand>> {
+    let Some(metadata) = fs.metadata(file_path).await? else {
+        return Ok(None);
+    };
+    if metadata.is_dir {
+        return Ok(None);
+    }
+    anyhow::ensure!(
+        metadata.len <= MAX_SKILL_FILE_SIZE as u64,
+        "file exceeds maximum size of {}KB",
+        MAX_SKILL_FILE_SIZE / 1024
+    );
+    let content = fs.load(file_path).await?;
+    parse_skill_subcommand(file_path, &content).map(Some)
+}
+
+/// Turns per-file subcommand load results into the sorted subcommand list
+/// and the warnings for the files that failed. Shared with callers that
+/// read subcommand files through something other than [`Fs`], such as
+/// project buffers.
+pub fn collect_skill_subcommands(
+    results: impl IntoIterator<Item = (PathBuf, Result<Option<SkillSubcommand>>)>,
+) -> (Vec<SkillSubcommand>, Vec<SkillLoadWarning>) {
+    let mut subcommands = Vec::new();
+    let mut warnings = Vec::new();
+    for (file_path, result) in results {
+        match result {
+            Ok(Some(subcommand)) => subcommands.push(subcommand),
+            Ok(None) => {}
+            Err(error) => warnings.push(SkillLoadWarning::InvalidSubcommand {
+                file_name: file_path
+                    .file_name()
+                    .map(|file_name| file_name.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                message: format!("{error:#}"),
+            }),
+        }
+    }
+    subcommands.sort_by(|a, b| a.name.cmp(&b.name));
+    warnings.sort_by_key(|warning| warning.message());
+    (subcommands, warnings)
 }
 
 /// Content of the built-in `create-skill` SKILL.md, embedded at compile time.
@@ -722,6 +997,8 @@ fn parse_builtin_skill(name: &str, content: &'static str) -> Result<Skill> {
         load_warnings: Vec::new(),
         disable_model_invocation: metadata.disable_model_invocation,
         embedded_body: Some(body.trim()),
+        argument_hint: metadata.argument_hint,
+        subcommands: Vec::new(),
     })
 }
 
@@ -1644,6 +1921,113 @@ description: A skill with no body content
     }
 
     #[gpui::test]
+    async fn test_load_skill_subcommands(cx: &mut TestAppContext) {
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree(
+            "/skills",
+            serde_json::json!({
+                "feature": {
+                    "SKILL.md": "---\nname: feature\ndescription: Feature flow\nargument-hint: <subcomando>\n---\nShared.",
+                    "commands": {
+                        "implement.md": "---\ndescription: Implement it\nargument-hint: <story id>\n---\nWrite the code.",
+                        "plan.md": "Plan without frontmatter.",
+                        "Bad_Name.md": "Nope.",
+                        "notes.txt": "Not a subcommand.",
+                        "broken.md": "---\ndescription: [unclosed\n---\nBody."
+                    }
+                }
+            }),
+        )
+        .await;
+
+        let results = load_skills_from_directory(
+            &(fs as Arc<dyn Fs>),
+            Path::new("/skills"),
+            SkillSource::Global,
+        )
+        .await;
+
+        let skill = results[0].as_ref().expect("Should load successfully");
+        assert_eq!(skill.argument_hint.as_deref(), Some("<subcomando>"));
+        let names = skill
+            .subcommands
+            .iter()
+            .map(|subcommand| subcommand.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(names, ["implement", "plan"]);
+
+        let implement = skill.subcommand("implement").expect("implement subcommand");
+        assert_eq!(implement.description, "Implement it");
+        assert_eq!(implement.argument_hint.as_deref(), Some("<story id>"));
+        assert_eq!(
+            implement.file_path,
+            Path::new("/skills/feature/commands/implement.md")
+        );
+        let plan = skill.subcommand("plan").expect("plan subcommand");
+        assert_eq!(plan.description, "");
+        assert_eq!(plan.argument_hint, None);
+
+        let skipped = skill
+            .load_warnings
+            .iter()
+            .filter_map(|warning| match warning {
+                SkillLoadWarning::InvalidSubcommand { file_name, .. } => Some(file_name.as_str()),
+                SkillLoadWarning::DescriptionTooLong { .. } => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(skipped.len(), 2, "{skipped:?}");
+        assert!(skipped.contains(&"Bad_Name.md"));
+        assert!(skipped.contains(&"broken.md"));
+    }
+
+    #[test]
+    fn test_split_subcommand() {
+        let mut skill = parse_skill_frontmatter(
+            Path::new("/skills/feature/SKILL.md"),
+            "---\nname: feature\ndescription: Feature flow\n---\nBody.",
+            SkillSource::Global,
+        )
+        .expect("valid skill");
+        skill.subcommands.push(SkillSubcommand {
+            name: "implement".into(),
+            description: String::new(),
+            argument_hint: None,
+            file_path: PathBuf::from("/skills/feature/commands/implement.md"),
+        });
+
+        let (subcommand, rest) = skill
+            .split_subcommand("implement US-12 now")
+            .expect("matches the subcommand");
+        assert_eq!(subcommand.name, "implement");
+        assert_eq!(rest, "US-12 now");
+
+        let (_, rest) = skill
+            .split_subcommand(" implement")
+            .expect("bare subcommand");
+        assert_eq!(rest, "");
+
+        assert!(skill.split_subcommand("implementation details").is_none());
+        assert!(skill.split_subcommand("").is_none());
+    }
+
+    #[test]
+    fn test_subcommand_file_round_trip() {
+        let content =
+            render_skill_subcommand_file("Implement: the story", Some("<id>"), "Write the code.\n")
+                .expect("renders");
+        let path = Path::new("/skills/feature/commands/implement.md");
+        let subcommand = parse_skill_subcommand(path, &content).expect("valid subcommand");
+        assert_eq!(subcommand.description, "Implement: the story");
+        assert_eq!(subcommand.argument_hint.as_deref(), Some("<id>"));
+        assert_eq!(
+            read_skill_subcommand_body_from_content(path, &content).expect("body"),
+            "Write the code."
+        );
+        assert_eq!(subcommand_name_for_file_name(".md"), None);
+        assert_eq!(subcommand_name_for_file_name("plan.md"), Some("plan"));
+    }
+
+    #[gpui::test]
     async fn test_load_symlinked_skill_directory(cx: &mut TestAppContext) {
         let fs = FakeFs::new(cx.executor());
         fs.insert_tree(
@@ -1849,6 +2233,8 @@ description: A skill with no body content
             load_warnings: Vec::new(),
             disable_model_invocation: false,
             embedded_body: None,
+            argument_hint: None,
+            subcommands: Vec::new(),
         };
 
         let summary = SkillSummary::from(&skill);
