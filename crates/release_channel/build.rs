@@ -1,6 +1,8 @@
 fn main() {
     println!("cargo::rustc-check-cfg=cfg(__do_not_set_zed_release_channel)");
     println!("cargo::rerun-if-env-changed=ZED_RELEASE_CHANNEL");
+    println!("cargo::rerun-if-env-changed=ASYLUM_VERSION");
+    println!("cargo::rerun-if-changed=../../ASYLUM_VERSION");
 
     // Enabling this `cfg` will cause a runtime panic if the
     // `ZED_RELEASE_CHANNEL` env var is not also set. TLDR: don't set the `cfg`

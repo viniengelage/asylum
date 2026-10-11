@@ -124,11 +124,11 @@ fn asylum_releases_repo() -> &'static str {
 
 /// What the latest GitHub Release contains, as described by its [`ASYLUM_RELEASE_MANIFEST`].
 ///
-/// Releases are told apart by commit rather than by version: the version is Zed's own, which
-/// extensions check compatibility against, so every Asylum build of an upstream release shares
-/// it.
+/// Releases are still told apart by commit rather than by version: releases published before
+/// Asylum had its own version all carry Zed's.
 #[derive(Deserialize, Debug, Clone)]
 struct AsylumRelease {
+    /// Asylum's version (see `release_channel::ASYLUM_VERSION`).
     version: String,
     tag: String,
     commit: String,

@@ -108,6 +108,16 @@ impl AppCommitTimestamp {
     }
 }
 
+/// Asylum's own version, shown to users. It is separate from [`AppVersion`], which stays Zed's
+/// because extensions check compatibility against it. The release workflow assigns each release
+/// an `X.Y.Z` through the `ASYLUM_VERSION` environment variable; any other build shows the `X.Y`
+/// series from the repository's `ASYLUM_VERSION` file with a `-dev` suffix.
+pub static ASYLUM_VERSION: LazyLock<String> =
+    LazyLock::new(|| match option_env!("ASYLUM_VERSION") {
+        Some(version) => version.trim().to_string(),
+        None => format!("{}-dev", include_str!("../../../ASYLUM_VERSION").trim()),
+    });
+
 struct GlobalAppVersion(Version);
 
 impl Global for GlobalAppVersion {}

@@ -1708,7 +1708,7 @@ fn open_about_window(cx: &mut App) {
             let release_channel = ReleaseChannel::global(cx);
             let release_channel_name = release_channel.display_name();
             let full_version: SharedString = AppVersion::global(cx).to_string().into();
-            let version = env!("CARGO_PKG_VERSION");
+            let version = release_channel::ASYLUM_VERSION.as_str();
 
             let debug = if cfg!(debug_assertions) {
                 "(debug)"
@@ -1736,11 +1736,11 @@ fn open_about_window(cx: &mut App) {
             let content = match self.commit.as_ref() {
                 Some(commit) => {
                     format!(
-                        "{}\nCommit: {}\nVersion: {}",
+                        "{}\nCommit: {}\nZed version: {}",
                         self.message, commit, self.full_version
                     )
                 }
-                None => format!("{}\nVersion: {}", self.message, self.full_version),
+                None => format!("{}\nZed version: {}", self.message, self.full_version),
             };
             cx.write_to_clipboard(ClipboardItem::new_string(content));
             window.remove_window();
@@ -1784,7 +1784,7 @@ fn open_about_window(cx: &mut App) {
                                 .child(Label::new(commit).size(LabelSize::Small))
                             })
                             .child(
-                                Label::new("Version")
+                                Label::new("Zed Version")
                                     .color(Color::Muted)
                                     .size(LabelSize::XSmall),
                             )

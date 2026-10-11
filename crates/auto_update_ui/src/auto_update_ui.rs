@@ -331,7 +331,10 @@ fn show_update_notification(cx: &mut App) {
             move |cx| {
                 let workspace_handle = cx.entity().downgrade();
                 cx.new(|cx| {
-                    MessageNotification::new(format!("Updated to {app_name} {}", version), cx)
+                    MessageNotification::new(
+                        format!("Updated to {app_name} {}", *release_channel::ASYLUM_VERSION),
+                        cx,
+                    )
                         .primary_message("View Release Notes")
                         .primary_on_click(move |window, cx| {
                             if let Some(workspace) = workspace_handle.upgrade() {

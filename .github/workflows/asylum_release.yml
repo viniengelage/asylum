@@ -1,7 +1,11 @@
 # Builds Asylum for macOS (Apple Silicon) and Windows (x64) on GitHub-hosted runners.
 #
-# - Every push to `main` builds both and publishes a GitHub Release tagged
-#   `asylum-v<zed version>-<run number>`; pushing a tag `asylum-v*` does the same under that tag.
+# - Every push to `main` builds both and publishes a GitHub Release tagged `asylum-v<version>`;
+#   pushing a tag `asylum-v<version>` does the same under that tag.
+# - The version is Asylum's own, separate from Zed's (which stays in `crates/zed/Cargo.toml`
+#   because extensions check compatibility against it). `ASYLUM_VERSION` at the repository root
+#   holds the `MAJOR.MINOR` series; each release takes the next patch after the series' latest
+#   tag, so bumping the series is the only manual step.
 # - Run it by hand (Actions → asylum_release → Run workflow) to only build and keep the
 #   installers as workflow artifacts.
 #
@@ -44,11 +48,55 @@ env:
   ASYLUM_RELEASES_REPO: ${{ github.repository }}
 
 jobs:
+  version:
+    name: Assign the release version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pick the next version in the series
+        id: version
+        run: |
+          series=$(tr -d '[:space:]' < ASYLUM_VERSION)
+          if [[ ! "$series" =~ ^[0-9]+\.[0-9]+$ ]]; then
+            echo "ASYLUM_VERSION must hold MAJOR.MINOR, found '$series'" >&2
+            exit 1
+          fi
+
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            version="${GITHUB_REF_NAME#asylum-v}"
+          else
+            # Only `asylum-v<series>.<patch>` tags count; the tags from before Asylum had its
+            # own version (`asylum-v<zed version>-<run>`) don't match.
+            escaped_series="${series//./\\.}"
+            last_patch=$(
+              git ls-remote --tags --refs origin "refs/tags/asylum-v${series}.*" \
+                | sed -nE "s#.*refs/tags/asylum-v${escaped_series}\.([0-9]+)\$#\1#p" \
+                | sort -n \
+                | tail -n 1
+            )
+            if [[ -z "$last_patch" ]]; then
+              version="${series}.0"
+            else
+              version="${series}.$((last_patch + 1))"
+            fi
+          fi
+
+          echo "Asylum $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=asylum-v$version" >> "$GITHUB_OUTPUT"
+
   bundle_mac:
     name: macOS (aarch64)
+    needs: version
     runs-on: macos-15
     timeout-minutes: 360
     env:
+      # Compiled into the app as the version it shows (see `release_channel::ASYLUM_VERSION`).
+      ASYLUM_VERSION: ${{ needs.version.outputs.version }}
       # No debug info: the standard macOS runner has little disk and 7 GB of RAM, and nothing
       # uploads the symbols anyway.
       CARGO_PROFILE_RELEASE_DEBUG: 0
@@ -106,9 +154,12 @@ jobs:
 
   bundle_windows:
     name: Windows (x86_64)
+    needs: version
     # windows-2025 does not ship Inno Setup; 2022 does.
     runs-on: windows-2022
     timeout-minutes: 360
+    env:
+      ASYLUM_VERSION: ${{ needs.version.outputs.version }}
     steps:
       - name: Allow long paths
         run: git config --global core.longpaths true
@@ -150,7 +201,7 @@ jobs:
     # The macOS build is the one the auto-updater depends on; a failed Windows build only
     # leaves its installer out of the release.
     if: github.event_name == 'push' && !cancelled() && needs.bundle_mac.result == 'success'
-    needs: [bundle_mac, bundle_windows]
+    needs: [version, bundle_mac, bundle_windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -164,13 +215,11 @@ jobs:
 
       - name: Write the release manifest
         id: manifest
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          TAG: ${{ needs.version.outputs.tag }}
         run: |
-          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' crates/zed/Cargo.toml | head -n 1)
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            tag="$GITHUB_REF_NAME"
-          else
-            tag="asylum-v${version}-${GITHUB_RUN_NUMBER}"
-          fi
+          zed_version=$(sed -n 's/^version = "\(.*\)"$/\1/p' crates/zed/Cargo.toml | head -n 1)
 
           assets='{"macos-aarch64": "Asylum-aarch64.dmg"}'
           if [[ -f artifacts/Asylum-x86_64.exe ]]; then
@@ -178,21 +227,22 @@ jobs:
           fi
 
           jq -n \
-            --arg version "$version" \
-            --arg tag "$tag" \
+            --arg version "$VERSION" \
+            --arg zed_version "$zed_version" \
+            --arg tag "$TAG" \
             --arg commit "$GITHUB_SHA" \
             --argjson commit_timestamp "$(git show -s --format=%ct HEAD)" \
             --argjson assets "$assets" \
-            '{version: $version, tag: $tag, commit: $commit, commit_timestamp: $commit_timestamp, assets: $assets}' \
+            '{version: $version, zed_version: $zed_version, tag: $tag, commit: $commit, commit_timestamp: $commit_timestamp, assets: $assets}' \
             > artifacts/asylum-release.json
           cat artifacts/asylum-release.json
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "zed_version=$zed_version" >> "$GITHUB_OUTPUT"
 
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.manifest.outputs.tag }}
+          tag_name: ${{ needs.version.outputs.tag }}
           target_commitish: ${{ github.sha }}
-          name: Asylum ${{ steps.manifest.outputs.tag }}
+          name: Asylum ${{ needs.version.outputs.version }}
           make_latest: true
           fail_on_unmatched_files: false
           files: |
@@ -200,8 +250,8 @@ jobs:
             artifacts/Asylum-aarch64.dmg
             artifacts/Asylum-x86_64.exe
           body: |
-            Built from ${{ github.sha }}. Installed copies of Asylum update to this release by
-            themselves.
+            Built from ${{ github.sha }}, based on Zed ${{ steps.manifest.outputs.zed_version }}.
+            Installed copies of Asylum update to this release by themselves.
 
             Builds are not signed or notarized.
 
