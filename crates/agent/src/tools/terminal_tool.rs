@@ -1,4 +1,4 @@
-use agent_client_protocol::schema::v1 as acp;
+use acp_thread::ProcessOutput;
 use agent_client_protocol::schema::v2 as acp_v2;
 use anyhow::Result;
 use futures::FutureExt as _;
@@ -1016,7 +1016,10 @@ async fn run_terminal_tool(
 
     loop {
         let mut idle_poll = match idle_timeout {
-            Some(_) => cx.background_executor().timer(IDLE_POLL_INTERVAL).boxed_local(),
+            Some(_) => cx
+                .background_executor()
+                .timer(IDLE_POLL_INTERVAL)
+                .boxed_local(),
             None => futures::future::pending().boxed_local(),
         }
         .fuse();
@@ -1091,7 +1094,7 @@ async fn run_terminal_tool(
 /// A process that survives the kill (or a pty kept open by a child that escaped its process
 /// group) must not keep the tool, and with it the whole turn, waiting.
 async fn wait_for_exit_after_kill(
-    wait_for_exit: futures::future::Shared<Task<acp::TerminalExitStatus>>,
+    wait_for_exit: futures::future::Shared<Task<acp_v2::TerminalExitStatus>>,
     cx: &AsyncApp,
 ) {
     let grace_period = cx.background_executor().timer(KILL_GRACE_PERIOD);
@@ -1305,7 +1308,7 @@ fn wsl_interop_blocked(content: &str) -> bool {
 }
 
 fn process_content(
-    output: acp::TerminalOutputResponse,
+    output: ProcessOutput,
     command: &str,
     timed_out: bool,
     user_stopped: bool,
@@ -1453,7 +1456,7 @@ fn resolve_cd_in_worktrees(
 ) -> Option<PathBuf> {
     let cd = path_style.normalize(cd);
     let cd_path = Path::new(&cd);
-    let is_absolute = path_style.is_absolute(&cd);
+    let is_absolute = path_style.is_absolute(cd_path);
 
     worktree_roots.iter().find_map(|(root_name, abs_path)| {
         let prefix = if is_absolute {
@@ -1461,13 +1464,11 @@ fn resolve_cd_in_worktrees(
         } else {
             (*root_name).to_string()
         };
-        let subpath = path_style.strip_prefix(cd_path, Path::new(&prefix))?;
+        let subpath = path_style.strip_prefix(cd_path, Path::new(&prefix)).ok()?;
         if subpath.is_empty() {
             Some(abs_path.clone())
         } else {
-            path_style
-                .join_path(abs_path, &*subpath.display(path_style))
-                .ok()
+            path_style.join_path(abs_path, subpath).ok()
         }
     })
 }
@@ -1628,7 +1629,7 @@ mod tests {
 
     #[test]
     fn test_process_content_user_stopped() {
-        let output = acp::TerminalOutputResponse::new("partial output".to_string(), false);
+        let output = ProcessOutput::new("partial output".to_string(), false);
 
         let result = process_content(
             output,
@@ -1864,8 +1865,8 @@ mod tests {
 
     #[test]
     fn test_process_content_filters_success_output_for_model() {
-        let output = acp::TerminalOutputResponse::new("one\ntwo\nthree\nfour".to_string(), false)
-            .exit_status(acp::TerminalExitStatus::new().exit_code(0));
+        let output = ProcessOutput::new("one\ntwo\nthree\nfour".to_string(), false)
+            .exit_status(acp_v2::TerminalExitStatus::new().exit_code(0));
 
         let result = process_content(
             output,
@@ -1883,8 +1884,8 @@ mod tests {
 
     #[test]
     fn test_process_content_filters_failure_output_for_model() {
-        let output = acp::TerminalOutputResponse::new("one\ntwo\nthree".to_string(), false)
-            .exit_status(acp::TerminalExitStatus::new().exit_code(1));
+        let output = ProcessOutput::new("one\ntwo\nthree".to_string(), false)
+            .exit_status(acp_v2::TerminalExitStatus::new().exit_code(1));
 
         let result = process_content(
             output,
@@ -1905,7 +1906,7 @@ mod tests {
 
     #[test]
     fn test_process_content_filters_timeout_output_for_model() {
-        let output = acp::TerminalOutputResponse::new("one\ntwo\nthree".to_string(), false);
+        let output = ProcessOutput::new("one\ntwo\nthree".to_string(), false);
 
         let result = process_content(
             output,
@@ -1926,7 +1927,7 @@ mod tests {
 
     #[test]
     fn test_process_content_filters_user_stopped_output_for_model() {
-        let output = acp::TerminalOutputResponse::new("one\ntwo\nthree".to_string(), false);
+        let output = ProcessOutput::new("one\ntwo\nthree".to_string(), false);
 
         let result = process_content(
             output,
@@ -1948,8 +1949,8 @@ mod tests {
 
     #[test]
     fn test_process_content_selected_output_has_no_explanatory_note() {
-        let output = acp::TerminalOutputResponse::new("one\ntwo\nthree".to_string(), false)
-            .exit_status(acp::TerminalExitStatus::new().exit_code(0));
+        let output = ProcessOutput::new("one\ntwo\nthree".to_string(), false)
+            .exit_status(acp_v2::TerminalExitStatus::new().exit_code(0));
 
         let result = process_content(
             output,
@@ -1969,7 +1970,7 @@ mod tests {
 
     #[test]
     fn test_process_content_user_stopped_empty_output() {
-        let output = acp::TerminalOutputResponse::new("".to_string(), false);
+        let output = ProcessOutput::new("".to_string(), false);
 
         let result = process_content(
             output,
@@ -1993,7 +1994,7 @@ mod tests {
 
     #[test]
     fn test_process_content_timed_out() {
-        let output = acp::TerminalOutputResponse::new("build output here".to_string(), false);
+        let output = ProcessOutput::new("build output here".to_string(), false);
 
         let result = process_content(
             output,
@@ -2017,7 +2018,7 @@ mod tests {
 
     #[test]
     fn test_process_content_timed_out_with_empty_output() {
-        let output = acp::TerminalOutputResponse::new("".to_string(), false);
+        let output = ProcessOutput::new("".to_string(), false);
 
         let result = process_content(
             output,
@@ -2041,8 +2042,8 @@ mod tests {
 
     #[test]
     fn test_process_content_with_success() {
-        let output = acp::TerminalOutputResponse::new("success output".to_string(), false)
-            .exit_status(acp::TerminalExitStatus::new().exit_code(0));
+        let output = ProcessOutput::new("success output".to_string(), false)
+            .exit_status(acp_v2::TerminalExitStatus::new().exit_code(0));
 
         let result = process_content(
             output,
@@ -2066,8 +2067,8 @@ mod tests {
 
     #[test]
     fn test_process_content_with_success_empty_output() {
-        let output = acp::TerminalOutputResponse::new("".to_string(), false)
-            .exit_status(acp::TerminalExitStatus::new().exit_code(0));
+        let output = ProcessOutput::new("".to_string(), false)
+            .exit_status(acp_v2::TerminalExitStatus::new().exit_code(0));
 
         let result = process_content(
             output,
@@ -2086,8 +2087,8 @@ mod tests {
 
     #[test]
     fn test_process_content_with_error_exit() {
-        let output = acp::TerminalOutputResponse::new("error output".to_string(), false)
-            .exit_status(acp::TerminalExitStatus::new().exit_code(1));
+        let output = ProcessOutput::new("error output".to_string(), false)
+            .exit_status(acp_v2::TerminalExitStatus::new().exit_code(1));
 
         let result = process_content(
             output,
@@ -2111,8 +2112,8 @@ mod tests {
 
     #[test]
     fn test_process_content_with_error_exit_empty_output() {
-        let output = acp::TerminalOutputResponse::new("".to_string(), false)
-            .exit_status(acp::TerminalExitStatus::new().exit_code(1));
+        let output = ProcessOutput::new("".to_string(), false)
+            .exit_status(acp_v2::TerminalExitStatus::new().exit_code(1));
 
         let result = process_content(
             output,
@@ -2131,7 +2132,7 @@ mod tests {
 
     #[test]
     fn test_process_content_unexpected_termination() {
-        let output = acp::TerminalOutputResponse::new("some output".to_string(), false);
+        let output = ProcessOutput::new("some output".to_string(), false);
 
         let result = process_content(
             output,
@@ -2155,7 +2156,7 @@ mod tests {
 
     #[test]
     fn test_process_content_unexpected_termination_empty_output() {
-        let output = acp::TerminalOutputResponse::new("".to_string(), false);
+        let output = ProcessOutput::new("".to_string(), false);
 
         let result = process_content(
             output,
@@ -2461,9 +2462,8 @@ mod tests {
         fs.insert_tree("/root", serde_json::json!({})).await;
         let project = project::Project::test(fs, ["/root".as_ref()], cx).await;
 
-        let output =
-            acp::TerminalOutputResponse::new("one\ntwo\nthree\nfour\nfive".to_string(), false)
-                .exit_status(acp::TerminalExitStatus::new().exit_code(0));
+        let output = ProcessOutput::new("one\ntwo\nthree\nfour\nfive".to_string(), false)
+            .exit_status(acp_v2::TerminalExitStatus::new().exit_code(0));
         let environment = std::rc::Rc::new(cx.update(|cx| {
             crate::tests::FakeThreadEnvironment::default().with_terminal(
                 crate::tests::FakeTerminalHandle::new_with_immediate_exit(cx, 0)
@@ -2521,8 +2521,8 @@ mod tests {
         fs.insert_tree("/root", serde_json::json!({})).await;
         let project = project::Project::test(fs, ["/root".as_ref()], cx).await;
 
-        let output = acp::TerminalOutputResponse::new("command output".to_string(), false)
-            .exit_status(acp::TerminalExitStatus::new().exit_code(0));
+        let output = ProcessOutput::new("command output".to_string(), false)
+            .exit_status(acp_v2::TerminalExitStatus::new().exit_code(0));
         let environment = std::rc::Rc::new(cx.update(|cx| {
             crate::tests::FakeThreadEnvironment::default().with_terminal(
                 crate::tests::FakeTerminalHandle::new_with_immediate_exit(cx, 0)

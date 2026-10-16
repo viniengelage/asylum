@@ -4847,6 +4847,7 @@ async fn test_adding_remote_skill(cx: &mut TestAppContext, server_cx: &mut TestA
 
     let input = SkillToolInput {
         name: "test-skill".into(),
+        subcommand: None,
     };
     let task = cx.update(|cx| {
         skill_tool
@@ -4899,6 +4900,7 @@ async fn test_adding_remote_skill(cx: &mut TestAppContext, server_cx: &mut TestA
 
     let input2 = SkillToolInput {
         name: "test-2".into(),
+        subcommand: None,
     };
     let task = cx.update(|cx| {
         skill_tool

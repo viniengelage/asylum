@@ -58,11 +58,12 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+use svg_preview::svg_preview_view::SvgPreviewView;
 use theme_settings::ThemeSettings;
 use ui::{
     ContextMenu, DecoratedIcon, IconDecoration, IconDecorationKind, IndentGuideColors,
-    IndentGuideLayout, KeyBinding, ListItem, ListItemSpacing, ProjectEmptyState,
-    ScrollAxes, ScrollableHandle, Scrollbars, StickyCandidate, Tooltip, WithScrollbar, prelude::*,
+    IndentGuideLayout, KeyBinding, ListItem, ListItemSpacing, ProjectEmptyState, ScrollAxes,
+    ScrollableHandle, Scrollbars, StickyCandidate, Tooltip, WithScrollbar, prelude::*,
 };
 use util::{
     ResultExt, TryFutureExt,
@@ -451,6 +452,8 @@ actions!(
         OpenInBrowser,
         /// Opens the context menu for the selected entry.
         OpenContextMenu,
+        /// Opens an SVG preview for the selected file.
+        OpenSvgPreview,
     ]
 );
 
@@ -1171,11 +1174,10 @@ impl ProjectPanel {
             let is_remote = project.is_remote();
             let is_collab = project.is_via_collab();
             let is_local = project.is_local() || project.is_via_wsl_with_host_interop(cx);
-            let is_markdown = !is_dir
-                && MarkdownPreviewView::is_markdown_path(
-                    entry.path.as_std_path(),
-                    project.languages(),
-                );
+            let file_name = Path::new(entry_file_name(entry, worktree.root_name()));
+            let is_markdown =
+                !is_dir && MarkdownPreviewView::is_markdown_path(file_name, project.languages());
+            let is_svg = !is_dir && SvgPreviewView::is_svg_path(file_name);
             let is_browser_previewable = !is_dir && is_browser_previewable_path(&entry.path);
 
             let settings = ProjectPanelSettings::get_global(cx);
@@ -1211,6 +1213,9 @@ impl ProjectPanel {
                         .when(is_browser_previewable, |menu| {
                             menu.action("Open in Browser", Box::new(OpenInBrowser))
                         })
+                        .when(is_svg, |menu| {
+                            menu.action("Open SVG Preview", Box::new(OpenSvgPreview))
+                        })
                         .when(is_dir, |menu| {
                             menu.action("Search Inside", Box::new(NewSearchInDirectory))
                         })
@@ -1233,6 +1238,9 @@ impl ProjectPanel {
                             })
                             .when(is_browser_previewable, |menu| {
                                 menu.action("Open in Browser", Box::new(OpenInBrowser))
+                            })
+                            .when(is_svg, |menu| {
+                                menu.action("Open SVG Preview", Box::new(OpenSvgPreview))
                             })
                             .when(is_dir, |menu| {
                                 menu.separator()
@@ -2026,21 +2034,15 @@ impl ProjectPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some((worktree, entry)) = self.selected_entry(cx) else {
+        let Some((project_path, file_name)) = self.selected_file(cx) else {
             return;
         };
-        if !entry.is_file()
-            || !MarkdownPreviewView::is_markdown_path(
-                entry.path.as_std_path(),
-                self.project.read(cx).languages(),
-            )
-        {
+        if !MarkdownPreviewView::is_markdown_path(
+            Path::new(file_name),
+            self.project.read(cx).languages(),
+        ) {
             return;
         }
-        let project_path = ProjectPath {
-            worktree_id: worktree.id(),
-            path: entry.path.clone(),
-        };
         self.workspace
             .update(cx, |workspace, cx| {
                 MarkdownPreviewView::open_for_project_path(project_path, workspace, window, cx);
@@ -2068,6 +2070,25 @@ impl ProjectPanel {
             }),
             cx,
         );
+    }
+
+    fn open_svg_preview(
+        &mut self,
+        _: &OpenSvgPreview,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((project_path, file_name)) = self.selected_file(cx) else {
+            return;
+        };
+        if !SvgPreviewView::is_svg_path(Path::new(file_name)) {
+            return;
+        }
+        self.workspace
+            .update(cx, |workspace, cx| {
+                SvgPreviewView::open_for_project_path(project_path, workspace, window, cx)
+            })
+            .ok();
     }
 
     fn open_internal(
@@ -4107,14 +4128,20 @@ impl ProjectPanel {
     }
 
     fn selected_file_project_path(&self, cx: &App) -> Option<ProjectPath> {
+        self.selected_file(cx).map(|(project_path, _)| project_path)
+    }
+
+    fn selected_file<'a>(&self, cx: &'a App) -> Option<(ProjectPath, &'a str)> {
         let (worktree, entry) = self.selected_sub_entry(cx)?;
         if entry.is_dir() {
             return None;
         }
-        Some(ProjectPath {
-            worktree_id: worktree.read(cx).id(),
+        let worktree = worktree.read(cx);
+        let project_path = ProjectPath {
+            worktree_id: worktree.id(),
             path: entry.path.clone(),
-        })
+        };
+        Some((project_path, entry_file_name(entry, worktree.root_name())))
     }
 
     fn reveal_in_finder(
@@ -7194,11 +7221,7 @@ impl ProjectPanel {
                     suffix.display(path_style).to_string()
                 })
         } else {
-            entry
-                .path
-                .file_name()
-                .map(|name| name.to_string())
-                .unwrap_or_else(|| root_name.as_unix_str().to_string())
+            entry_file_name(entry, root_name).to_string()
         };
 
         let selection = SelectedEntry {
@@ -7559,6 +7582,14 @@ impl StickyCandidate for StickyProjectPanelCandidate {
     }
 }
 
+/// A single-file worktree's root entry has an empty path, so its name is the worktree's root name.
+fn entry_file_name<'a>(entry: &'a Entry, root_name: &'a RelPath) -> &'a str {
+    entry
+        .path
+        .file_name()
+        .unwrap_or_else(|| root_name.as_unix_str())
+}
+
 fn item_width_estimate(depth: usize, item_text_chars: usize, is_symlink: bool) -> usize {
     const ICON_SIZE_FACTOR: usize = 2;
     let mut item_width = depth * ICON_SIZE_FACTOR + item_text_chars;
@@ -7726,6 +7757,7 @@ impl Render for ProjectPanel {
                 .on_action(cx.listener(Self::open_split_horizontal))
                 .on_action(cx.listener(Self::open_markdown_preview))
                 .on_action(cx.listener(Self::open_in_browser))
+                .on_action(cx.listener(Self::open_svg_preview))
                 .on_action(cx.listener(Self::confirm))
                 .on_action(cx.listener(Self::cancel))
                 .on_action(cx.listener(Self::copy_path))
