@@ -166,6 +166,11 @@ async fn sync_launchers_in(
         let changed = write_launcher(&launcher, app, &app_info, app_name, profile)
             .with_context(|| format!("failed to write {}", launcher.display()))?;
         if changed {
+            // The Finder and the Dock cache a bundle's icon until the bundle itself is
+            // modified; a new icon file inside `Contents/Resources` alone doesn't count.
+            touch(&launcher)
+                .with_context(|| format!("failed to touch {}", launcher.display()))
+                .log_err();
             register(&launcher).await;
         }
         launchers.insert(profile.id.clone(), launcher);
@@ -288,6 +293,10 @@ fn write_if_changed(path: &Path, bytes: &[u8]) -> Result<bool> {
     std::fs::rename(&temporary, path)
         .with_context(|| format!("failed to write {}", path.display()))?;
     Ok(true)
+}
+
+fn touch(path: &Path) -> std::io::Result<()> {
+    std::fs::File::open(path)?.set_modified(std::time::SystemTime::now())
 }
 
 /// Tells Launch Services about a new or changed launcher, which is what makes the Dock and

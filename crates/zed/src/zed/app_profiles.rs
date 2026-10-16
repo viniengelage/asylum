@@ -35,6 +35,8 @@ use workspace::{
 use crate::zed::{mac_only_instance, profile_launchers};
 
 const DEFAULT_PROFILE_NAME: &str = "Padrão";
+/// The color of the icon in the app's own bundle.
+const BUNDLE_ICON_COLOR: Option<ProfileColor> = Some(ProfileColor::Purple);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -124,7 +126,8 @@ fn default_profile() -> AppProfile {
     AppProfile {
         id: paths::DEFAULT_PROFILE_ID.to_string(),
         name: DEFAULT_PROFILE_NAME.to_string(),
-        color: ProfileColor::Amber,
+        // Matches the app's own icon, so the default profile doesn't recolor it.
+        color: ProfileColor::Purple,
         folders: Vec::new(),
     }
 }
@@ -540,8 +543,9 @@ pub struct ProfileStore {
     launchers_task: Option<Task<()>>,
     /// Where each profile's launcher is, once they were synced.
     launchers: HashMap<String, PathBuf>,
-    /// The color the Dock icon was last set to.
-    dock_icon: Option<ProfileColor>,
+    /// The color the Dock icon shows, once it was first worked out: `None` inside is the
+    /// app's own icon in a profile whose color isn't the app's.
+    dock_icon: Option<Option<ProfileColor>>,
     _subscriptions: Vec<gpui::Subscription>,
 }
 
@@ -854,20 +858,25 @@ impl ProfileStore {
         }));
     }
 
-    /// Colors the Dock icon of a profile that runs from the app itself, such as one started
-    /// with `--profile` from the command line, or before its launcher existed. From a launcher
-    /// the icon already is the profile's.
+    /// Keeps the Dock icon in the profile's color, also after the color changes while the
+    /// profile runs: the icon the process started with is never reloaded from its bundle.
     fn update_dock_icon(&mut self) {
-        if active_profile_id() == paths::DEFAULT_PROFILE_ID
-            || profile_launchers::runs_from_launcher()
-        {
-            return;
-        }
         let color = self.active_profile().color;
-        if self.dock_icon == Some(color) {
+        let shown = *self.dock_icon.get_or_insert_with(|| {
+            if profile_launchers::runs_from_launcher() {
+                // The launcher was written with the profile's color.
+                Some(color)
+            } else if active_profile_id() == paths::DEFAULT_PROFILE_ID {
+                BUNDLE_ICON_COLOR
+            } else {
+                // Shows the app's icon until it gets the profile's color below.
+                None
+            }
+        });
+        if shown == Some(color) {
             return;
         }
-        self.dock_icon = Some(color);
+        self.dock_icon = Some(Some(color));
         set_dock_icon(color.launcher_icon());
     }
 
