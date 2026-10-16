@@ -5299,11 +5299,17 @@ impl Workspace {
             }
         }
 
+        // A bottom dock zoomed in place leaves the side docks visible, so revealing one of
+        // them doesn't have to hide it.
+        let keep_bottom_zoom = self.bottom_dock_zoomed_inline(cx)
+            && dock_to_reveal.is_some_and(|position| position != DockPosition::Bottom);
+
         // If another dock is zoomed, hide it.
         let mut focus_center = false;
         for dock in self.all_docks() {
             dock.update(cx, |dock, cx| {
                 if Some(dock.position()) != dock_to_reveal
+                    && !(keep_bottom_zoom && dock.position() == DockPosition::Bottom)
                     && let Some(panel) = dock.active_panel()
                     && panel.is_zoomed(window, cx)
                 {
@@ -5318,7 +5324,7 @@ impl Workspace {
                 .update(cx, |pane, cx| window.focus(&pane.focus_handle(cx), cx))
         }
 
-        if self.zoomed_position != dock_to_reveal {
+        if self.zoomed_position != dock_to_reveal && !keep_bottom_zoom {
             self.zoomed = None;
             self.zoomed_position = None;
             cx.emit(Event::ZoomChanged);
@@ -9561,6 +9567,12 @@ impl Workspace {
             )
     }
 
+    /// A zoomed bottom dock only grows vertically: it takes the center column's whole height,
+    /// hiding the editor, while the side docks and the status bar stay in place.
+    pub(crate) fn bottom_dock_zoomed_inline(&self, cx: &App) -> bool {
+        self.zoomed_position == Some(DockPosition::Bottom) && !Self::unified_panes(cx)
+    }
+
     fn render_dock(
         &self,
         position: DockPosition,
@@ -9568,7 +9580,8 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<Stateful<Div>> {
-        if self.zoomed_position == Some(position) {
+        let zoomed_inline = position == DockPosition::Bottom && self.bottom_dock_zoomed_inline(cx);
+        if self.zoomed_position == Some(position) && !zoomed_inline {
             return None;
         }
 
@@ -9724,6 +9737,11 @@ impl Workspace {
                 if let Some(min) = min_size {
                     container = container.min_w(min);
                 }
+            } else if zoomed_inline {
+                // Covers the editor rather than replacing it: the center panes stay rendered,
+                // so they still get the focus events that dismiss the zoom when one of them
+                // is focused, like a file opened from the project panel.
+                container = container.absolute().inset_0().occlude();
             } else {
                 let size = size_state
                     .and_then(|state| state.size)
@@ -10640,6 +10658,7 @@ impl Render for Workspace {
             && self.active_item(cx).is_some();
         let pad_zoomed_pane =
             self.centered_layout && self.zoomed.is_some() && self.zoomed_position.is_none();
+        let bottom_dock_zoomed_inline = self.bottom_dock_zoomed_inline(cx);
         self.sync_traffic_light_pane(pad_center_pane, window, cx);
         let render_padding = |size| {
             (size > 0.0).then(|| {
@@ -10861,6 +10880,7 @@ impl Render for Workspace {
                                             ))
                                             .child(
                                                 div()
+                                                    .relative()
                                                     .flex()
                                                     .flex_col()
                                                     .flex_1()
@@ -10916,6 +10936,9 @@ impl Render for Workspace {
                                     })
                             })
                             .children(self.zoomed.as_ref().and_then(|view| {
+                                if bottom_dock_zoomed_inline {
+                                    return None;
+                                }
                                 let zoomed_view = view.upgrade()?;
                                 let zoomed_element = match zoomed_paddings {
                                     (None, None) => zoomed_view.into_any_element(),
@@ -18399,6 +18422,57 @@ mod tests {
             assert!(workspace.right_dock().read(cx).is_open());
             assert_eq!(workspace.zoomed_position, Some(DockPosition::Right));
             assert!(panel.read(cx).focus_handle(cx).contains_focused(window, cx));
+        });
+    }
+
+    #[gpui::test]
+    async fn test_zoomed_bottom_dock_stays_beside_focused_side_dock(cx: &mut gpui::TestAppContext) {
+        init_test(cx);
+        let fs = FakeFs::new(cx.executor());
+
+        let project = Project::test(fs, [], cx).await;
+        let (multi_workspace, cx) =
+            cx.add_window_view(|window, cx| MultiWorkspace::test_new(project, window, cx));
+        let workspace = multi_workspace.read_with(cx, |mw, _| mw.workspace().clone());
+
+        let (bottom_panel, left_panel) = workspace.update_in(cx, |workspace, window, cx| {
+            let bottom_panel = cx.new(|cx| TestPanel::new(DockPosition::Bottom, 100, cx));
+            let left_panel = cx.new(|cx| TestPanel::new(DockPosition::Left, 101, cx));
+            workspace.add_panel(bottom_panel.clone(), window, cx);
+            workspace.add_panel(left_panel.clone(), window, cx);
+            workspace.toggle_dock(DockPosition::Left, window, cx);
+            workspace.toggle_dock(DockPosition::Bottom, window, cx);
+            (bottom_panel, left_panel)
+        });
+        cx.executor().run_until_parked();
+
+        bottom_panel.update(cx, |_, cx| cx.emit(PanelEvent::ZoomIn));
+        cx.executor().run_until_parked();
+        workspace.update_in(cx, |workspace, _, cx| {
+            assert_eq!(workspace.zoomed_position, Some(DockPosition::Bottom));
+            assert!(workspace.bottom_dock_zoomed_inline(cx));
+        });
+
+        cx.update(|window, cx| window.focus(&left_panel.read(cx).focus_handle(cx), cx));
+        cx.executor().run_until_parked();
+
+        workspace.update_in(cx, |workspace, window, cx| {
+            assert!(workspace.left_dock().read(cx).is_open());
+            assert!(workspace.bottom_dock().read(cx).is_open());
+            assert!(bottom_panel.is_zoomed(window, cx));
+            assert_eq!(workspace.zoomed_position, Some(DockPosition::Bottom));
+        });
+
+        // The editor is hidden behind the zoomed dock, so focusing it takes the dock away.
+        workspace.update_in(cx, |workspace, window, cx| {
+            let pane = workspace.active_pane().clone();
+            window.focus(&pane.focus_handle(cx), cx);
+        });
+        cx.executor().run_until_parked();
+
+        workspace.update_in(cx, |workspace, _, cx| {
+            assert!(!workspace.bottom_dock().read(cx).is_open());
+            assert_eq!(workspace.zoomed_position, None);
         });
     }
 

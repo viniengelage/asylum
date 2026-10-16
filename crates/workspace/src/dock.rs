@@ -549,6 +549,10 @@ impl Dock {
                 if panel.is_zoomed(window, cx) {
                     workspace.zoomed = Some(panel.to_any().downgrade());
                     workspace.zoomed_position = Some(position);
+                } else if position != DockPosition::Bottom
+                    && workspace.bottom_dock_zoomed_inline(cx)
+                {
+                    // The zoomed bottom dock stays beside the side dock that took focus.
                 } else {
                     workspace.zoomed = None;
                     workspace.zoomed_position = None;
