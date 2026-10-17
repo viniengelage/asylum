@@ -111,6 +111,9 @@ pub enum CommandCategory {
     /// Task agents from the Agentes tab. Unlike native commands, the text after the command is
     /// the request itself and goes out in the same message.
     TaskAgent,
+    /// Flows (esteiras). The app runs them instead of sending the message; the text after the
+    /// command is the run's input.
+    Flow,
 }
 
 impl CommandCategory {
@@ -119,6 +122,7 @@ impl CommandCategory {
             Self::Native => "native",
             Self::Mcp => "mcp",
             Self::TaskAgent => "task-agent",
+            Self::Flow => "flow",
         }
     }
 
@@ -127,6 +131,7 @@ impl CommandCategory {
             "native" => Some(Self::Native),
             "mcp" => Some(Self::Mcp),
             "task-agent" => Some(Self::TaskAgent),
+            "flow" => Some(Self::Flow),
             _ => None,
         }
     }
@@ -8046,10 +8051,14 @@ mod tests {
             CommandCategory::Native,
             CommandCategory::Mcp,
             CommandCategory::TaskAgent,
+            CommandCategory::Flow,
         ];
         for category in all {
             match category {
-                CommandCategory::Native | CommandCategory::Mcp | CommandCategory::TaskAgent => {}
+                CommandCategory::Native
+                | CommandCategory::Mcp
+                | CommandCategory::TaskAgent
+                | CommandCategory::Flow => {}
             }
             let meta = meta_with_command_category(category);
             assert_eq!(command_category_from_meta(&Some(meta)), Some(category));

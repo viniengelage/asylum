@@ -34,6 +34,7 @@ async-channel.workspace = true
 agent_servers.workspace = true
 agent_settings.workspace = true
 task_agents.workspace = true
+flows.workspace = true
 agent_skills.workspace = true
 ai_onboarding.workspace = true
 anyhow.workspace = true

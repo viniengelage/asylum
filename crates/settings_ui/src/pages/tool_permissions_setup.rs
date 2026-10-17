@@ -1422,6 +1422,8 @@ mod tests {
             "rename_symbol",
             // Only presents a plan in the conversation; executing it is a user click.
             "submit_plan",
+            // Only records a flow step's delivery; the flow decides what runs next.
+            "submit_step",
             "thinking",
             // Only reports progress on an approved plan back to the plan card.
             "update_plan",

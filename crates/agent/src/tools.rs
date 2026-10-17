@@ -25,6 +25,7 @@ mod rename_tool;
 mod skill_tool;
 mod spawn_agent_tool;
 mod submit_plan_tool;
+mod submit_step_tool;
 mod symbol_locator;
 mod terminal_tool;
 mod toolkit_tool;
@@ -98,6 +99,7 @@ pub use rename_tool::*;
 pub use skill_tool::*;
 pub use spawn_agent_tool::*;
 pub use submit_plan_tool::*;
+pub use submit_step_tool::*;
 pub use symbol_locator::*;
 
 pub use terminal_tool::*;
@@ -228,6 +230,7 @@ tools! {
     SkillTool,
     SpawnAgentTool,
     SubmitPlanTool,
+    SubmitStepTool,
     TerminalTool,
     UpdatePlanTool,
     WebSearchTool,

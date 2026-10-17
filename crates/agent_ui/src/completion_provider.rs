@@ -423,9 +423,10 @@ impl AvailableCommand {
     fn category_order(&self) -> u8 {
         match self.category {
             Some(acp_thread::CommandCategory::Native) => 0,
-            Some(acp_thread::CommandCategory::TaskAgent) => 1,
-            Some(acp_thread::CommandCategory::Mcp) => 2,
-            None => 3,
+            Some(acp_thread::CommandCategory::Flow) => 1,
+            Some(acp_thread::CommandCategory::TaskAgent) => 2,
+            Some(acp_thread::CommandCategory::Mcp) => 3,
+            None => 4,
         }
     }
 
@@ -435,6 +436,7 @@ impl AvailableCommand {
             Some(acp_thread::CommandCategory::Native) => ("commands", "Commands"),
             Some(acp_thread::CommandCategory::Mcp) => ("mcp-commands", "MCP Server Commands"),
             Some(acp_thread::CommandCategory::TaskAgent) => ("task-agents", "Agentes"),
+            Some(acp_thread::CommandCategory::Flow) => ("flows", "Esteiras"),
             None => ("acp-commands", "Commands"),
         };
         CompletionGroup {
@@ -487,7 +489,7 @@ fn slash_completion_group_key(candidate: &SlashCompletionCandidate) -> u32 {
     match candidate {
         SlashCompletionCandidate::Skill(_) | SlashCompletionCandidate::SkillSubcommand { .. } => 0,
         SlashCompletionCandidate::Command(command) => 1 + command.category_order() as u32,
-        SlashCompletionCandidate::LocalCommand(_) => 4,
+        SlashCompletionCandidate::LocalCommand(_) => 6,
     }
 }
 

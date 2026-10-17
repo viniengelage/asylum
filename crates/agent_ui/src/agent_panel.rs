@@ -2993,7 +2993,7 @@ impl AgentPanel {
         self.project.read(cx).visible_worktrees(cx).next().is_some()
     }
 
-    fn ensure_native_agent_connection(&self, cx: &mut Context<Self>) {
+    pub(crate) fn ensure_native_agent_connection(&self, cx: &mut Context<Self>) {
         if !self.has_open_project(cx) {
             return;
         }

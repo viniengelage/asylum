@@ -2118,6 +2118,19 @@ impl ThreadView {
             return;
         }
 
+        // A flow isn't a message to this thread: it runs in its own tab, one thread per step.
+        let flow_command = leading_command_of_category(
+            text,
+            self.session_capabilities.read().available_commands(),
+            acp_thread::CommandCategory::Flow,
+        );
+        if let Some(flow) = flow_command {
+            let input = strip_leading_command(text, &flow);
+            message_editor.update(cx, |editor, cx| editor.clear(window, cx));
+            window.dispatch_action(Box::new(crate::flows_view::RunFlow { flow, input }), cx);
+            return;
+        }
+
         cx.emit(AcpThreadViewEvent::Interacted);
         self.send_impl(message_editor, window, cx)
     }
@@ -15109,15 +15122,22 @@ fn leading_native_command(
     text: &str,
     available_commands: &[acp_v2::AvailableCommand],
 ) -> Option<String> {
+    leading_command_of_category(text, available_commands, acp_thread::CommandCategory::Native)
+}
+
+fn leading_command_of_category(
+    text: &str,
+    available_commands: &[acp_v2::AvailableCommand],
+    category: acp_thread::CommandCategory,
+) -> Option<String> {
     let rest = text.trim_start().strip_prefix('/')?;
     let name_end = rest.find(char::is_whitespace).unwrap_or(rest.len());
     let name = &rest[..name_end];
-    let is_native = available_commands.iter().any(|command| {
+    let matches = available_commands.iter().any(|command| {
         command.name == name
-            && acp_thread::command_category_from_meta(&command.meta)
-                == Some(acp_thread::CommandCategory::Native)
+            && acp_thread::command_category_from_meta(&command.meta) == Some(category)
     });
-    is_native.then(|| name.to_string())
+    matches.then(|| name.to_string())
 }
 
 /// Removes a leading `/command_name` token from `text`, returning the trimmed

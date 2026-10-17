@@ -2,6 +2,8 @@
 //! another. A flow lives in a `.flow.md` file: the steps in the YAML frontmatter and free notes
 //! for people in the body.
 
+pub mod run;
+
 use anyhow::{Context as _, Result};
 use fs::Fs;
 use futures::StreamExt as _;

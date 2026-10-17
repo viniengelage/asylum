@@ -35,6 +35,7 @@ collections.workspace = true
 context_server.workspace = true
 db.workspace = true
 feature_flags.workspace = true
+flows.workspace = true
 fs.workspace = true
 futures.workspace = true
 git.workspace = true

@@ -218,6 +218,7 @@ struct ProjectState {
     skills: Arc<Vec<Skill>>,
     skill_loading_issues: Vec<SkillLoadingIssue>,
     task_agents: Arc<Vec<TaskAgent>>,
+    flows: Arc<Vec<flows::Flow>>,
     project_context_needs_refresh: watch::Sender<()>,
     _maintain_project_context: Task<Result<()>>,
     context_server_registry: Entity<ContextServerRegistry>,
@@ -1242,6 +1243,7 @@ impl NativeAgent {
                 skills: Arc::new(Vec::new()),
                 skill_loading_issues: Vec::new(),
                 task_agents: Arc::default(),
+                flows: Arc::default(),
                 project_context_needs_refresh: project_context_needs_refresh_tx,
                 _maintain_project_context: cx.spawn(async move |this, cx| {
                     Self::maintain_project_context(
@@ -1277,14 +1279,25 @@ impl NativeAgent {
                     .get(&project_id)
                     .context("project state not found")?;
                 let task_agents = Self::load_task_agents(&state.project, this.fs.clone(), cx);
+                let flows = Self::load_flows(&state.project, this.fs.clone(), cx);
                 anyhow::Ok((
                     Self::build_project_context(&state.project, this.fs.clone(), cx),
                     task_agents,
+                    flows,
                 ))
             })??;
-            let (task, task_agents_task) = task;
+            let (task, task_agents_task, flows_task) = task;
             let (project_context, skills, skill_issue_data) = task.await;
             let (task_agents, task_agent_errors) = task_agents_task.await;
+            let (flows, flow_errors) = flows_task.await;
+            for error in flow_errors {
+                log::warn!(
+                    "failed to load flow {}: {}",
+                    error.path.display(),
+                    error.message
+                );
+            }
+            let flows = Arc::new(flows);
             for error in task_agent_errors {
                 log::warn!(
                     "failed to load task agent {}: {}",
@@ -1321,6 +1334,7 @@ impl NativeAgent {
                 if let Some(state) = this.projects.get_mut(&project_id) {
                     state.skills = skills;
                     state.task_agents = task_agents;
+                    state.flows = flows;
                     state.skill_loading_issues = skill_loading_issues.clone();
                     // Only push the new `ProjectContext` through if it
                     // differs from the current one. The system prompt is
@@ -1389,6 +1403,37 @@ impl NativeAgent {
             })
             .collect::<Vec<_>>();
         cx.background_spawn(task_agents::load_task_agents(fs, roots))
+    }
+
+    /// Flows come from the same trusted local worktrees as task agents, plus the personal ones.
+    fn load_flows(
+        project: &Entity<Project>,
+        fs: Arc<dyn Fs>,
+        cx: &mut App,
+    ) -> Task<(Vec<flows::Flow>, Vec<flows::FlowLoadError>)> {
+        let trusted_worktrees = TrustedWorktrees::try_get_global(cx);
+        let worktree_store = project.read(cx).worktree_store();
+        let worktrees = project.read(cx).visible_worktrees(cx).collect::<Vec<_>>();
+        let roots = worktrees
+            .into_iter()
+            .filter_map(|worktree| {
+                let worktree_id = worktree.read(cx).id();
+                let is_trusted = trusted_worktrees.as_ref().is_none_or(|trusted_worktrees| {
+                    trusted_worktrees.update(cx, |trusted_worktrees, cx| {
+                        trusted_worktrees.can_trust(&worktree_store, worktree_id, cx)
+                    })
+                });
+                let worktree = worktree.read(cx);
+                let local = worktree.as_local()?;
+                is_trusted.then(|| {
+                    (
+                        Arc::<str>::from(worktree.root_name_str()),
+                        local.abs_path().to_path_buf(),
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        cx.background_spawn(flows::load_flows(fs, roots))
     }
 
     fn build_project_context(
@@ -1994,7 +2039,26 @@ impl NativeAgent {
                 ))
         });
 
+        let flow_commands = state.flows.iter().map(|flow| {
+            let steps = flow.steps.len();
+            acp_v2::AvailableCommand::new(
+                flow.id.clone(),
+                format!(
+                    "{} · {steps} passo{} · o texto depois vira “O que construir”",
+                    flow.name,
+                    if steps == 1 { "" } else { "s" }
+                ),
+            )
+            .meta(acp_thread::meta_with_command_category(
+                acp_thread::CommandCategory::Flow,
+            ))
+            .input(acp_v2::AvailableCommandInput::Text(
+                acp_v2::TextCommandInput::new("<o que construir>"),
+            ))
+        });
+
         std::iter::once(compact_command)
+            .chain(flow_commands)
             .chain(task_agent_commands)
             .chain(mcp_commands)
             .collect()
@@ -2647,6 +2711,16 @@ impl NativeAgentConnection {
     pub fn ensure_skills_scan_started(&self, cx: &mut App) {
         self.0
             .update(cx, |agent, cx| agent.ensure_skills_scan_started(cx));
+    }
+
+    /// The flows loaded for a project, in the order they appear in the slash menu.
+    pub fn flows(&self, project: &Entity<Project>, cx: &App) -> Arc<Vec<flows::Flow>> {
+        self.0
+            .read(cx)
+            .projects
+            .get(&project.entity_id())
+            .map(|state| state.flows.clone())
+            .unwrap_or_default()
     }
 
     /// The task agents loaded for a project, in the order they appear in the slash menu.

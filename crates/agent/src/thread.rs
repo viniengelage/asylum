@@ -4,7 +4,7 @@ use crate::{
     DeletePathTool, DiagnosticsTool, EditFileTool, FetchTool, FindPathTool, FindReferencesTool,
     GetCodeActionsTool, GoToDefinitionTool, GrepTool, ListAgentsAndModelsTool, ListDirectoryTool,
     MovePathTool, ProjectSnapshot, ReadFileTool, RenameTool, SandboxedTerminalTool, SpawnAgentTool,
-    SubmitPlanTool, SystemPromptTemplate, Template, Templates, TerminalTool,
+    SubmitPlanTool, SubmitStepTool, SystemPromptTemplate, Template, Templates, TerminalTool,
     ToolPermissionDecision, UpdatePlanTool, WebSearchTool, WriteFileTool,
     decide_permission_from_settings,
 };
@@ -2343,6 +2343,8 @@ impl Thread {
         if self.parent_thread_id().is_none() {
             self.add_tool(SubmitPlanTool);
             self.add_tool(UpdatePlanTool);
+            // Off in every profile; a flow step turns it on through its task agent.
+            self.add_tool(SubmitStepTool);
         }
 
         self.add_tool(DiagnosticsTool::new(self.project.clone()));
