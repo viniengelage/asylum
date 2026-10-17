@@ -1107,6 +1107,18 @@
     },
   },
   {
+    "context": "NewFlow",
+    "bindings": {
+      "ctrl-enter": "menu::Confirm",
+    },
+  },
+  {
+    "context": "NewFlow > Editor && mode == auto_height",
+    "bindings": {
+      "enter": "editor::Newline",
+    },
+  },
+  {
     "context": "GitCommit > Editor && mode == auto_height",
     "bindings": {
       "escape": "menu::Cancel",

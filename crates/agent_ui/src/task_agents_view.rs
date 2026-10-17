@@ -1784,14 +1784,17 @@ impl TaskAgentsView {
             .map(|this| {
                 if editable {
                     this.child(
-                        Button::new("save-agent", "Salvar")
-                            .style(ButtonStyle::Filled)
-                            .key_binding(KeyBinding::for_action_in(
+                        primary_button(
+                            "save-agent",
+                            "Salvar",
+                            Some(KeyBinding::for_action_in(
                                 &workspace::Save { save_intent: None },
                                 &self.focus_handle,
                                 cx,
-                            ))
-                            .on_click(cx.listener(|this, _, _window, cx| this.save(cx))),
+                            )),
+                            cx,
+                        )
+                        .on_click(cx.listener(|this, _, _window, cx| this.save(cx))),
                     )
                 } else {
                     this.child(
@@ -2902,4 +2905,92 @@ impl StatusItemView for TaskAgentsToolkitButton {
     fn hide_setting(&self, _cx: &App) -> Option<HideStatusItem> {
         None
     }
+}
+
+/// A form's main action, filled with the theme's strong accent as in the boards. The `Filled`
+/// button style is a neutral gray in the Polar theme, so it can't say "this is the next step".
+pub(crate) fn primary_button(
+    id: impl Into<gpui::ElementId>,
+    label: impl Into<SharedString>,
+    key_binding: Option<KeyBinding>,
+    cx: &App,
+) -> Stateful<Div> {
+    let fill = cx.theme().colors().border_focused;
+    h_flex()
+        .id(id)
+        .h(px(30.))
+        .px_3()
+        .gap_2()
+        .flex_none()
+        .rounded_md()
+        .cursor_pointer()
+        .bg(fill)
+        .hover(move |this| this.bg(fill.opacity(0.85)))
+        .child(
+            Label::new(label)
+                .size(LabelSize::Small)
+                .weight(FontWeight::SEMIBOLD)
+                .color(Color::Custom(gpui::white())),
+        )
+        .children(key_binding.map(|binding| binding.size(rems_from_px(12_f32))))
+}
+
+/// The bordered companion of [`primary_button`], e.g. Cancelar.
+pub(crate) fn secondary_button(
+    id: impl Into<gpui::ElementId>,
+    label: impl Into<SharedString>,
+    cx: &App,
+) -> Stateful<Div> {
+    let colors = cx.theme().colors();
+    h_flex()
+        .id(id)
+        .h(px(30.))
+        .px_3()
+        .flex_none()
+        .rounded_md()
+        .cursor_pointer()
+        .border_1()
+        .border_color(colors.border)
+        .hover(|this| this.bg(colors.element_hover))
+        .child(Label::new(label).size(LabelSize::Small))
+}
+
+/// Two or more choices side by side; the chosen one is filled, as in the boards.
+pub(crate) fn segment_option(
+    id: impl Into<gpui::ElementId>,
+    label: impl Into<SharedString>,
+    selected: bool,
+    enabled: bool,
+    cx: &App,
+) -> Stateful<Div> {
+    let colors = cx.theme().colors();
+    h_flex()
+        .id(id)
+        .flex_1()
+        .min_w_0()
+        .h(px(28.))
+        .justify_center()
+        .rounded(px(5.))
+        .when(selected, |this| this.bg(colors.element_selected))
+        .when(enabled && !selected, |this| {
+            this.cursor_pointer()
+                .hover(|this| this.bg(colors.element_hover))
+        })
+        .child(
+            Label::new(label)
+                .size(LabelSize::Small)
+                .weight(if selected {
+                    FontWeight::MEDIUM
+                } else {
+                    FontWeight::NORMAL
+                })
+                .color(if !enabled {
+                    Color::Disabled
+                } else if selected {
+                    Color::Default
+                } else {
+                    Color::Muted
+                })
+                .truncate(),
+        )
 }

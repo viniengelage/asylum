@@ -2,6 +2,7 @@
 //! request), the request, its name and where it is saved.
 
 use super::FlowView;
+use crate::task_agents_view::{primary_button, secondary_button, segment_option};
 use editor::Editor;
 use flows::{
     AgentStep, Criterion, Flow, FlowSource, FlowStep, GateStep, OnFail, RunStep, StepKind, Verifier,
@@ -288,7 +289,7 @@ impl NewFlowModal {
             .border_color(if selected {
                 colors.text_accent
             } else {
-                colors.border_variant
+                colors.border
             })
             .bg(if selected {
                 colors.text_accent.opacity(0.12)
@@ -299,7 +300,7 @@ impl NewFlowModal {
             .child(
                 div()
                     .pb_2()
-                    .child(Icon::new(icon).size(IconSize::Small).color(if selected {
+                    .child(Icon::new(icon).size(IconSize::Medium).color(if selected {
                         Color::Accent
                     } else {
                         Color::Muted
@@ -379,19 +380,14 @@ impl Render for NewFlowModal {
                             current: bool,
                             enabled: bool,
                             cx: &mut Context<Self>| {
-            div().flex_1().min_w_0().child(
-                Button::new(id, label)
-                    .label_size(LabelSize::Small)
-                    .full_width()
-                    .toggle_state(personal == current)
-                    .disabled(!enabled)
-                    .style(ButtonStyle::Subtle)
-                    .on_click(cx.listener(move |this, _, _window, cx| {
-                        this.personal = personal;
-                        cx.notify();
-                    })),
-            )
+            segment_option(id, label, personal == current, enabled, cx).when(enabled, |this| {
+                this.on_click(cx.listener(move |this, _, _window, cx| {
+                    this.personal = personal;
+                    cx.notify();
+                }))
+            })
         };
+        let create_binding = KeyBinding::for_action_in(&menu::Confirm, &self.focus_handle, cx);
         let personal_agents = self
             .agents
             .iter()
@@ -418,7 +414,7 @@ impl Render for NewFlowModal {
                         .border_color(if index == selected {
                             colors.text_accent
                         } else {
-                            colors.border_variant
+                            colors.border
                         })
                         .child(
                             Icon::new(IconName::ListTree)
@@ -540,7 +536,7 @@ impl Render for NewFlowModal {
                                     .border_color(if request_focused || suggest {
                                         colors.text_accent
                                     } else {
-                                        colors.border_variant
+                                        colors.border
                                     })
                                     .bg(colors.editor_background)
                                     .child(self.request.clone())
@@ -558,9 +554,18 @@ impl Render for NewFlowModal {
                                             .child(div().flex_1())
                                             .when(suggest, |this| {
                                                 this.child(
-                                                    Label::new("↵ sugerir")
-                                                        .size(LabelSize::XSmall)
-                                                        .color(Color::Accent),
+                                                    h_flex()
+                                                        .gap_1()
+                                                        .child(
+                                                            create_binding
+                                                                .clone()
+                                                                .size(rems_from_px(11_f32)),
+                                                        )
+                                                        .child(
+                                                            Label::new("sugerir")
+                                                                .size(LabelSize::XSmall)
+                                                                .color(Color::Accent),
+                                                        ),
                                                 )
                                             }),
                                     ),
@@ -582,7 +587,7 @@ impl Render for NewFlowModal {
                                             .py_1p5()
                                             .rounded_md()
                                             .border_1()
-                                            .border_color(colors.border_variant)
+                                            .border_color(colors.border)
                                             .bg(colors.editor_background)
                                             .child(self.name.clone()),
                                     ),
@@ -599,7 +604,7 @@ impl Render for NewFlowModal {
                                             .gap_0p5()
                                             .rounded_md()
                                             .border_1()
-                                            .border_color(colors.border_variant)
+                                            .border_color(colors.border)
                                             .bg(colors.editor_background)
                                             .child(where_button(
                                                 "new-flow-project",
@@ -634,7 +639,7 @@ impl Render for NewFlowModal {
                     .py_3()
                     .gap_2()
                     .border_t_1()
-                    .border_color(colors.border_variant)
+                    .border_color(colors.border)
                     .child(
                         Label::new(if suggest {
                             "A sugestão abre no editor da esteira; nada roda até você clicar em Rodar."
@@ -646,21 +651,16 @@ impl Render for NewFlowModal {
                     )
                     .child(div().flex_1())
                     .child(
-                        Button::new("new-flow-cancel", "Cancelar")
-                            .style(ButtonStyle::Outlined)
+                        secondary_button("new-flow-cancel", "Cancelar", cx)
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(DismissEvent))),
                     )
                     .child(
-                        Button::new(
+                        primary_button(
                             "new-flow-create",
                             if suggest { "Sugerir e abrir" } else { "Criar e abrir" },
-                        )
-                        .style(ButtonStyle::Filled)
-                        .key_binding(KeyBinding::for_action_in(
-                            &menu::Confirm,
-                            &self.focus_handle,
+                            Some(create_binding),
                             cx,
-                        ))
+                        )
                         .on_click(cx.listener(|this, _, window, cx| this.create(window, cx))),
                     ),
             )

@@ -1210,6 +1210,20 @@
     },
   },
   {
+    "context": "NewFlow",
+    "use_key_equivalents": true,
+    "bindings": {
+      "cmd-enter": "menu::Confirm",
+    },
+  },
+  {
+    "context": "NewFlow > Editor && mode == auto_height",
+    "use_key_equivalents": true,
+    "bindings": {
+      "enter": "editor::Newline",
+    },
+  },
+  {
     "context": "GitCommit > Editor && mode == auto_height",
     "use_key_equivalents": true,
     "bindings": {
