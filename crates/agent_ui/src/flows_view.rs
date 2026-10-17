@@ -23,13 +23,14 @@ use task_agents::TaskAgent;
 use ui::{Divider, ListItem, ListItemSpacing, prelude::*};
 use util::ResultExt as _;
 use workspace::{
-    Workspace,
+    HideStatusItem, ItemHandle, StatusItemView, Workspace,
+    dock::StatusBarButton,
     item::{Item, ItemEvent, TabContentParams},
 };
 
 /// Runs a flow (esteira) in its own tab, each agent step in a thread of the Agent panel. The
 /// composer sends `/<esteira> <pedido>` here.
-#[derive(Clone, PartialEq, serde::Deserialize, schemars::JsonSchema, gpui::Action)]
+#[derive(Clone, Default, PartialEq, serde::Deserialize, schemars::JsonSchema, gpui::Action)]
 #[action(namespace = esteiras, name = "Rodar")]
 #[serde(deny_unknown_fields)]
 pub struct RunFlow {
@@ -402,6 +403,7 @@ impl FlowView {
         if let (Some(reason), Some(run)) = (reason, &mut self.run) {
             run.cancel(reason);
         }
+        notify_runs_changed(cx);
         cx.notify();
     }
 
@@ -1247,5 +1249,165 @@ impl Item for FlowView {
 
     fn to_item_events(event: &Self::Event, f: &mut dyn FnMut(ItemEvent)) {
         f(*event)
+    }
+}
+
+/// Bumped whenever a run changes, so the status bar chip re-renders.
+#[derive(Default)]
+struct FlowRunsRevision(usize);
+
+impl gpui::Global for FlowRunsRevision {}
+
+fn notify_runs_changed(cx: &mut App) {
+    cx.default_global::<FlowRunsRevision>().0 += 1;
+}
+
+/// The status bar chip of the run in progress: what it waits on, and a click to its tab.
+pub struct FlowRunChip {
+    workspace: WeakEntity<Workspace>,
+    _observe_runs: gpui::Subscription,
+}
+
+impl FlowRunChip {
+    pub fn new(workspace: &Workspace, cx: &mut Context<Self>) -> Self {
+        Self {
+            workspace: workspace.weak_handle(),
+            _observe_runs: cx.observe_global::<FlowRunsRevision>(|_, cx| cx.notify()),
+        }
+    }
+
+    fn active_view(&self, cx: &App) -> Option<Entity<FlowView>> {
+        let workspace = self.workspace.upgrade()?;
+        let views: Vec<Entity<FlowView>> =
+            workspace.read(cx).items_of_type::<FlowView>(cx).collect();
+        views
+            .iter()
+            .find(|view| {
+                matches!(
+                    view.read(cx).run.as_ref().map(|run| &run.state),
+                    Some(RunState::WaitingForYou(_))
+                )
+            })
+            .or_else(|| views.iter().find(|view| view.read(cx).is_running()))
+            .cloned()
+    }
+}
+
+impl Render for FlowRunChip {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let Some(view) = self.active_view(cx) else {
+            return div().into_any_element();
+        };
+        let flow_view = view.read(cx);
+        let Some(run) = &flow_view.run else {
+            return div().into_any_element();
+        };
+        let total = run.steps.len();
+        let waiting = matches!(run.state, RunState::WaitingForYou(_));
+        let text = if waiting {
+            format!(
+                "{} · passo {} de {total} · esperando você",
+                flow_view.flow.name,
+                run.cursor + 1
+            )
+        } else {
+            format!(
+                "{} · passo {} de {total} · {}",
+                flow_view.flow.name,
+                run.cursor + 1,
+                flow_view.step_label(run.cursor)
+            )
+        };
+        let color = if waiting {
+            Color::Warning
+        } else {
+            Color::Accent
+        };
+        let workspace = self.workspace.clone();
+        h_flex()
+            .id("flow-run-chip")
+            .h(px(20.))
+            .px_1p5()
+            .gap_1()
+            .rounded_md()
+            .cursor_pointer()
+            .hover(|this| this.bg(cx.theme().colors().element_hover))
+            .child(div().size(px(6.)).rounded_full().bg(color.color(cx)))
+            .child(Label::new(text).size(LabelSize::Small).color(color))
+            .tooltip(ui::Tooltip::text("Abrir a execução"))
+            .on_click(move |_, window, cx| {
+                workspace
+                    .update(cx, |workspace, cx| {
+                        workspace.activate_item(&view, true, true, window, cx);
+                    })
+                    .log_err();
+            })
+            .into_any_element()
+    }
+}
+
+impl StatusItemView for FlowRunChip {
+    fn set_active_pane_item(
+        &mut self,
+        _active_pane_item: Option<&dyn ItemHandle>,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        cx.notify();
+    }
+
+    fn hide_setting(&self, _cx: &App) -> Option<HideStatusItem> {
+        None
+    }
+}
+
+/// The status bar's toolkit button for esteiras: lists them to run one.
+pub struct FlowsToolkitButton {
+    workspace: WeakEntity<Workspace>,
+}
+
+impl FlowsToolkitButton {
+    pub fn new(workspace: &Workspace, _cx: &mut Context<Self>) -> Self {
+        Self {
+            workspace: workspace.weak_handle(),
+        }
+    }
+}
+
+impl Render for FlowsToolkitButton {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let is_open = self.workspace.upgrade().is_some_and(|workspace| {
+            workspace
+                .read(cx)
+                .active_item(cx)
+                .is_some_and(|item| item.downcast::<FlowView>().is_some())
+        });
+        let workspace = self.workspace.clone();
+        StatusBarButton::new("toolkit-flows", IconName::ListTree, is_open)
+            .tab_index(0isize)
+            .aria_label("Esteiras")
+            .tooltip(|_window, cx| ui::Tooltip::for_action("Esteiras", &RunFlow::default(), cx))
+            .on_click(move |_, window, cx| {
+                workspace
+                    .update(cx, |workspace, cx| {
+                        run_flow(workspace, RunFlow::default(), window, cx)
+                    })
+                    .log_err();
+            })
+    }
+}
+
+impl StatusItemView for FlowsToolkitButton {
+    fn set_active_pane_item(
+        &mut self,
+        _active_pane_item: Option<&dyn ItemHandle>,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        cx.notify();
+    }
+
+    fn hide_setting(&self, _cx: &App) -> Option<HideStatusItem> {
+        None
     }
 }

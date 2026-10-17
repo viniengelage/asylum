@@ -646,6 +646,9 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
         let elastic_button = cx.new(|cx| elastic::ElasticToolkitButton::new(workspace, cx));
         let task_agents_button =
             cx.new(|cx| agent_ui::task_agents_view::TaskAgentsToolkitButton::new(workspace, cx));
+        let flows_button =
+            cx.new(|cx| agent_ui::flows_view::FlowsToolkitButton::new(workspace, cx));
+        let flow_run_chip = cx.new(|cx| agent_ui::flows_view::FlowRunChip::new(workspace, cx));
         let dock_toggle_buttons =
             cx.new(|cx| workspace::dock::DockToggleButtons::new(workspace, cx));
         let git_blame_status = cx.new(|_| git_ui::GitBlameStatus::default());
@@ -664,6 +667,7 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
             status_bar.add_left_item(activity_indicator, window, cx);
             status_bar.add_left_item(search_button, window, cx);
             status_bar.add_left_item(active_file_name, window, cx);
+            status_bar.add_left_item(flow_run_chip, window, cx);
             status_bar.add_toolkit_item(toolbox_button, window, cx);
             status_bar.add_toolkit_item(clickup_button, window, cx);
             status_bar.add_toolkit_item(repo_button, window, cx);
@@ -671,6 +675,7 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
             status_bar.add_toolkit_item(database_button, window, cx);
             status_bar.add_toolkit_item(elastic_button, window, cx);
             status_bar.add_toolkit_item(task_agents_button, window, cx);
+            status_bar.add_toolkit_item(flows_button, window, cx);
             // Editor info renders right items in reverse, so this sits at its right end,
             // next to the toolkit.
             status_bar.add_right_item(edit_prediction_ui, window, cx);
