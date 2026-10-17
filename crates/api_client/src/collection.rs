@@ -74,6 +74,14 @@ pub struct Capture {
     pub value: Option<String>,
 }
 
+/// What sending the login request itself put in the session.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LoginCapture {
+    pub token_path: String,
+    pub refresh_token_path: Option<String>,
+    pub expires_in: Option<i64>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum LoginStatus {
     Idle,
@@ -103,6 +111,8 @@ pub struct Exchange {
     /// Cookies the responses set along the way, the request's own and any login's.
     pub cookies_set: Vec<Cookie>,
     pub captures: Vec<Capture>,
+    /// Set when this was the collection's login request and its token went into the session.
+    pub login_capture: Option<LoginCapture>,
 }
 
 pub struct Collection {
@@ -902,6 +912,15 @@ impl Collection {
                     .ok()
                 })
                 .unwrap_or_default();
+            let login_capture = response
+                .as_ref()
+                .and_then(|response| {
+                    this.update(cx, |this, cx| {
+                        this.take_login_response(&operation_key, response, cx)
+                    })
+                    .ok()
+                })
+                .flatten();
             Exchange {
                 request: request.map(|request| request.masked()),
                 response,
@@ -912,7 +931,39 @@ impl Collection {
                 sent_at,
                 cookies_set,
                 captures,
+                login_capture,
             }
+        })
+    }
+
+    /// Sending the login request by hand logs in too, so the token isn't left only in the body.
+    fn take_login_response(
+        &mut self,
+        operation_key: &str,
+        response: &ReceivedResponse,
+        cx: &mut Context<Self>,
+    ) -> Option<LoginCapture> {
+        let login = self
+            .file
+            .auth
+            .login
+            .clone()
+            .filter(|login| login.operation == operation_key)?;
+        if !(200..300).contains(&response.status) {
+            return None;
+        }
+        let session = session_from_response(&login, response)
+            .map_err(|error| log::info!("API: a resposta do login não deu sessão: {error:#}"))
+            .ok()?;
+        let expires_in = session
+            .expires_at
+            .map(|expires_at| expires_at - Utc::now().timestamp());
+        self.set_session(session, cx);
+        self.login_status = LoginStatus::Idle;
+        Some(LoginCapture {
+            token_path: login.token_path,
+            refresh_token_path: login.refresh_token_path,
+            expires_in,
         })
     }
 

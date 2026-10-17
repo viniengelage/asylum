@@ -2,6 +2,7 @@
 
 use crate::{
     SendRequest,
+    panel::{tinted_chip, variable_chip},
     collection::{Collection, Exchange},
     config::{self, BodyKind, CaptureRule, FormField, HeaderEntry, ParamEntry, RequestDraft},
     example,
@@ -12,12 +13,12 @@ use crate::{
 };
 use editor::{Editor, EditorEvent, HighlightKey, MultiBufferOffset};
 use gpui::{
-    AnyElement, ClipboardItem, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
+    AnyElement, ClipboardItem, Div, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
     HighlightStyle, Hsla, Subscription, Task, WeakEntity,
 };
 use language::LanguageRegistry;
 use std::{sync::Arc, time::Duration};
-use ui::{Checkbox, Tooltip, prelude::*};
+use ui::{Checkbox, Indicator, Tooltip, prelude::*};
 use ui_input::{ErasedEditorEvent, InputField};
 use util::ResultExt as _;
 use workspace::{
@@ -94,9 +95,9 @@ pub struct ApiRequestView {
 pub fn method_color(method: &str) -> Color {
     match method {
         "GET" => Color::Success,
-        "POST" => Color::Accent,
+        "POST" => Color::Warning,
         "PUT" => Color::Info,
-        "PATCH" => Color::Warning,
+        "PATCH" => Color::Accent,
         "DELETE" => Color::Error,
         _ => Color::Muted,
     }
@@ -114,7 +115,6 @@ pub fn status_color(status: u16) -> Color {
     match status {
         200..=299 => Color::Success,
         300..=399 => Color::Info,
-        400..=499 => Color::Warning,
         _ => Color::Error,
     }
 }
@@ -665,6 +665,11 @@ impl ApiRequestView {
         }
     }
 
+    pub(crate) fn show_headers_tab(&mut self, cx: &mut Context<Self>) {
+        self.request_tab = RequestTab::Headers;
+        cx.notify();
+    }
+
     pub fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.send_task.is_some() {
             return;
@@ -736,49 +741,6 @@ impl ApiRequestView {
         })
     }
 
-    /// Every placeholder the request uses, in the order they appear, once each.
-    fn used_placeholders(&self, cx: &App) -> Vec<String> {
-        let draft = self.draft(cx);
-        let mut texts: Vec<String> = vec![draft.url.clone()];
-        texts.extend(draft.path_params.iter().map(|entry| entry.value.clone()));
-        texts.extend(
-            draft
-                .query
-                .iter()
-                .filter(|entry| entry.enabled)
-                .map(|entry| entry.value.clone()),
-        );
-        texts.extend(
-            self.inherited_headers(cx)
-                .into_iter()
-                .filter(|header| {
-                    header.enabled
-                        && !draft
-                            .disabled_inherited
-                            .iter()
-                            .any(|name| name.eq_ignore_ascii_case(&header.name))
-                })
-                .map(|header| header.value),
-        );
-        texts.extend(
-            draft
-                .headers
-                .iter()
-                .filter(|entry| entry.enabled)
-                .map(|entry| entry.value.clone()),
-        );
-        texts.extend(draft.body.clone());
-        let mut names: Vec<String> = Vec::new();
-        for text in texts {
-            for name in vars::placeholder_names(&text) {
-                if !names.contains(&name) {
-                    names.push(name);
-                }
-            }
-        }
-        names
-    }
-
     /// Opens the spec at this operation.
     fn open_in_spec(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(operation) = self.operation(cx).cloned() else {
@@ -812,18 +774,38 @@ impl ApiRequestView {
             .unwrap_or_else(|| "?".to_string());
         let sending = self.send_task.is_some();
         let focus_handle = self.focus_handle.clone();
+        let colors = cx.theme().colors();
+        let send_button = ui::primary_button(
+            "api-send",
+            Some(IconName::Send),
+            if sending { "Enviando…" } else { "Enviar" },
+            Some(ui::KeyBinding::for_action_in(&SendRequest, &focus_handle, cx)),
+            cx,
+        )
+        .h(px(32.))
+        .px_4()
+        .map(|this| {
+            if sending {
+                this.opacity(0.6).cursor_default().into_any_element()
+            } else {
+                this.on_click(cx.listener(|this, _, window, cx| this.send(window, cx)))
+                    .into_any_element()
+            }
+        });
         h_flex()
             .gap_2()
             .px_3()
             .pt_3()
             .child(
                 h_flex()
-                    .h_8()
-                    .px_2p5()
+                    .flex_none()
+                    .h(px(32.))
+                    .w(px(84.))
+                    .px_3()
                     .rounded_md()
                     .border_1()
-                    .border_color(cx.theme().colors().border)
-                    .bg(cx.theme().colors().editor_background)
+                    .border_color(colors.border_selected)
+                    .bg(colors.editor_background)
                     .child(
                         Label::new(SharedString::from(method.clone()))
                             .size(LabelSize::Small)
@@ -862,33 +844,7 @@ impl ApiRequestView {
                         )
                     }),
             )
-            .child(
-                Button::new("api-send", if sending { "Enviando…" } else { "Enviar" })
-                    .style(ButtonStyle::Tinted(ui::TintColor::Accent))
-                    .start_icon(Icon::new(IconName::Send).size(IconSize::Small))
-                    .disabled(sending)
-                    .key_binding(ui::KeyBinding::for_action_in(
-                        &SendRequest,
-                        &focus_handle,
-                        cx,
-                    ))
-                    .on_click(cx.listener(|this, _, window, cx| this.send(window, cx))),
-            )
-            .child(
-                IconButton::new("api-save", IconName::Bookmark)
-                    .icon_size(IconSize::Small)
-                    .icon_color(if self.saved_id.is_some() {
-                        Color::Accent
-                    } else {
-                        Color::Muted
-                    })
-                    .tooltip(Tooltip::text(if self.saved_id.is_some() {
-                        "Atualizar em Salvas por mim"
-                    } else {
-                        "Salvar em Salvas por mim"
-                    }))
-                    .on_click(cx.listener(|this, _, _, cx| this.save(cx))),
-            )
+            .child(send_button)
     }
 
     fn render_meta(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -924,23 +880,15 @@ impl ApiRequestView {
             .as_ref()
             .map(|prepared| prepared.missing.clone())
             .unwrap_or_default();
-        let variables: Vec<(String, Option<String>)> = self
-            .used_placeholders(cx)
-            .into_iter()
-            .map(|name| {
-                let value = resolved_variable(collection, &name);
-                (name, value)
-            })
-            .collect();
         v_flex()
             .px_3()
-            .pt_1p5()
-            .gap_0p5()
+            .pt_2()
+            .gap_1()
             .child(
                 h_flex()
                     .gap_1p5()
                     .child(
-                        Icon::new(IconName::Book)
+                        Icon::new(IconName::FileCode)
                             .size(IconSize::XSmall)
                             .color(Color::Muted),
                     )
@@ -952,15 +900,19 @@ impl ApiRequestView {
                     )
                     .when_some(
                         operation.filter(|operation| operation.deprecated),
-                        |this, _| this.child(chip("deprecated", Color::Warning, cx)),
+                        |this, _| this.child(tinted_chip("deprecated", Color::Warning, cx)),
                     )
                     .child(div().flex_1())
                     .when(operation.is_some(), |this| {
                         this.child(
-                            Button::new("api-open-in-spec", "Ver na spec")
-                                .style(ButtonStyle::Subtle)
-                                .label_size(LabelSize::XSmall)
-                                .color(Color::Accent)
+                            div()
+                                .id("api-open-in-spec")
+                                .cursor_pointer()
+                                .child(
+                                    Label::new("Ver na spec")
+                                        .size(LabelSize::XSmall)
+                                        .color(Color::Accent),
+                                )
                                 .on_click(
                                     cx.listener(|this, _, window, cx| {
                                         this.open_in_spec(window, cx)
@@ -969,46 +921,6 @@ impl ApiRequestView {
                         )
                     }),
             )
-            .when(!variables.is_empty(), |this| {
-                this.child(
-                    h_flex()
-                        .flex_wrap()
-                        .gap_1()
-                        .children(variables.into_iter().map(|(name, value)| {
-                            let color = if value.is_some() {
-                                Color::Accent
-                            } else {
-                                Color::Warning
-                            };
-                            h_flex()
-                                .gap_1()
-                                .px_1()
-                                .rounded_sm()
-                                .bg(color.color(cx).opacity(0.1))
-                                .child(
-                                    Label::new(format!("{{{{{name}}}}}"))
-                                        .size(LabelSize::XSmall)
-                                        .buffer_font(cx)
-                                        .color(color),
-                                )
-                                .child(
-                                    Label::new(value.unwrap_or_else(|| "sem valor".to_string()))
-                                        .size(LabelSize::XSmall)
-                                        .buffer_font(cx)
-                                        .color(Color::Muted),
-                                )
-                        })),
-                )
-            })
-            .when_some(prepared, |this, prepared| {
-                this.child(
-                    Label::new(prepared.url)
-                        .size(LabelSize::XSmall)
-                        .buffer_font(cx)
-                        .color(Color::Muted)
-                        .truncate(),
-                )
-            })
             .when(!missing.is_empty(), |this| {
                 this.child(
                     h_flex()
@@ -1053,14 +965,10 @@ impl ApiRequestView {
         on_click: impl Fn(&mut Self, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        Button::new(id, label)
-            .style(if active {
-                ButtonStyle::Filled
-            } else {
-                ButtonStyle::Subtle
-            })
-            .label_size(LabelSize::Small)
-            .toggle_state(active)
+        ui::segment_option(id, label, active, true, cx)
+            .flex_initial()
+            .px_2p5()
+            .h(px(26.))
             .on_click(cx.listener(move |this, _, _, cx| {
                 on_click(this, cx);
                 cx.notify();
@@ -1069,9 +977,9 @@ impl ApiRequestView {
 
     fn render_request_tabs(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let operation = self.operation(cx).cloned();
-        let has_body_schema = operation
+        let request_body = operation
             .as_ref()
-            .is_some_and(|operation| operation.request_body.is_some());
+            .and_then(|operation| operation.request_body.clone());
         let params_count = self.path_params.len() + self.query_rows.len();
         let headers_count = self.header_rows.len() + self.inherited_headers(cx).len();
         let auth_label = match operation.as_ref() {
@@ -1091,64 +999,102 @@ impl ApiRequestView {
             None => "Auth".to_string(),
         };
         let tab = self.request_tab;
+        let with_count = |label: &str, count: usize| {
+            if count > 0 {
+                format!("{label} · {count}")
+            } else {
+                label.to_string()
+            }
+        };
+        let body_tools = request_body
+            .filter(|_| tab == RequestTab::Body && !self.body_kind(cx).is_form())
+            .map(|body| body.content_type);
+        let colors = cx.theme().colors().clone();
         h_flex()
             .px_3()
             .pt_2()
-            .gap_1()
-            .child(self.render_tab_button(
-                "api-tab-params",
-                if params_count > 0 {
-                    format!("Params {params_count}")
-                } else {
-                    "Params".to_string()
-                },
-                tab == RequestTab::Params,
-                |this, _| this.request_tab = RequestTab::Params,
-                cx,
-            ))
-            .child(self.render_tab_button(
-                "api-tab-headers",
-                format!("Headers {headers_count}"),
-                tab == RequestTab::Headers,
-                |this, _| this.request_tab = RequestTab::Headers,
-                cx,
-            ))
-            .child(self.render_tab_button(
-                "api-tab-body",
-                if has_body_schema {
-                    "Body".to_string()
-                } else {
-                    "Body · nenhum".to_string()
-                },
-                tab == RequestTab::Body,
-                |this, _| this.request_tab = RequestTab::Body,
-                cx,
-            ))
-            .child(self.render_tab_button(
-                "api-tab-auth",
-                auth_label,
-                tab == RequestTab::Auth,
-                |this, _| this.request_tab = RequestTab::Auth,
-                cx,
-            ))
-            .child(self.render_tab_button(
-                "api-tab-captures",
-                if self.capture_rows.is_empty() {
-                    "Capturas".to_string()
-                } else {
-                    format!("Capturas {}", self.capture_rows.len())
-                },
-                tab == RequestTab::Captures,
-                |this, _| this.request_tab = RequestTab::Captures,
-                cx,
-            ))
-            .child(self.render_tab_button(
-                "api-tab-docs",
-                "Docs".to_string(),
-                tab == RequestTab::Docs,
-                |this, _| this.request_tab = RequestTab::Docs,
-                cx,
-            ))
+            .gap_2()
+            .child(
+                ui::segmented_control(cx)
+                    .child(self.render_tab_button(
+                        "api-tab-params",
+                        with_count("Params", params_count),
+                        tab == RequestTab::Params,
+                        |this, _| this.request_tab = RequestTab::Params,
+                        cx,
+                    ))
+                    .child(self.render_tab_button(
+                        "api-tab-headers",
+                        with_count("Headers", headers_count),
+                        tab == RequestTab::Headers,
+                        |this, _| this.request_tab = RequestTab::Headers,
+                        cx,
+                    ))
+                    .child(self.render_tab_button(
+                        "api-tab-body",
+                        if operation
+                            .as_ref()
+                            .is_some_and(|operation| operation.request_body.is_some())
+                        {
+                            "Body".to_string()
+                        } else {
+                            "Body · nenhum".to_string()
+                        },
+                        tab == RequestTab::Body,
+                        |this, _| this.request_tab = RequestTab::Body,
+                        cx,
+                    ))
+                    .child(self.render_tab_button(
+                        "api-tab-auth",
+                        auth_label,
+                        tab == RequestTab::Auth,
+                        |this, _| this.request_tab = RequestTab::Auth,
+                        cx,
+                    ))
+                    .child(self.render_tab_button(
+                        "api-tab-captures",
+                        with_count("Capturas", self.capture_rows.len()),
+                        tab == RequestTab::Captures,
+                        |this, _| this.request_tab = RequestTab::Captures,
+                        cx,
+                    ))
+                    .child(self.render_tab_button(
+                        "api-tab-docs",
+                        "Docs".to_string(),
+                        tab == RequestTab::Docs,
+                        |this, _| this.request_tab = RequestTab::Docs,
+                        cx,
+                    )),
+            )
+            .child(div().flex_1())
+            .when_some(body_tools, |this, content_type| {
+                this.child(
+                    h_flex()
+                        .flex_none()
+                        .h(px(30.))
+                        .px_2p5()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(colors.border_selected)
+                        .bg(colors.editor_background)
+                        .child(
+                            Label::new(content_type)
+                                .size(LabelSize::XSmall)
+                                .buffer_font(cx)
+                                .color(Color::Muted),
+                        ),
+                )
+                .child(
+                    ui::secondary_button(
+                        "api-fill-example",
+                        Some((IconName::FileTextOutlined, Color::Muted)),
+                        "Preencher com o exemplo do spec",
+                        true,
+                        cx,
+                    )
+                    .on_click(cx.listener(|this, _, window, cx| this.fill_example(window, cx))),
+                )
+            })
     }
 
     fn inherited_headers(&self, cx: &App) -> Vec<send::PlannedHeader> {
@@ -1304,32 +1250,89 @@ impl ApiRequestView {
             .into_any_element()
     }
 
+    /// Shows where an inherited header comes from: the spec at this operation, or the dock's
+    /// collection settings.
+    fn open_header_origin(&mut self, origin: &HeaderOrigin, window: &mut Window, cx: &mut Context<Self>) {
+        if *origin == HeaderOrigin::Spec {
+            self.open_in_spec(window, cx);
+            return;
+        }
+        self.workspace
+            .update(cx, |workspace, cx| {
+                crate::open(workspace, window, cx);
+                if let Some(panel) = workspace.panel::<crate::ApiPanel>(cx) {
+                    panel.update(cx, |panel, cx| panel.open_settings(window, cx));
+                }
+            })
+            .log_err();
+    }
+
     fn render_headers(&self, cx: &mut Context<Self>) -> AnyElement {
         let inherited = self.inherited_headers(cx);
+        let colors = cx.theme().colors();
+        let border = colors.border;
+        let row = || {
+            h_flex()
+                .w_full()
+                .min_h(px(34.))
+                .px_3()
+                .gap_2()
+                .border_b_1()
+                .border_color(border)
+        };
+        let name_column = |content: AnyElement| div().flex_none().w(px(220.)).child(content);
+        let origin_column = |content: AnyElement| h_flex().flex_none().w(px(190.)).child(content);
+        let origin_chip = |label: String, origin: Option<&HeaderOrigin>, cx: &App| {
+            let (color, icon) = match origin {
+                Some(HeaderOrigin::Scheme(_)) => (Color::Success, Some(IconName::Lock)),
+                Some(HeaderOrigin::Spec) => (Color::Accent, Some(IconName::FileCode)),
+                Some(HeaderOrigin::Collection) => (Color::Muted, Some(IconName::Folder)),
+                None => (Color::Default, None),
+            };
+            let hsla = color.color(cx);
+            h_flex()
+                .flex_none()
+                .h(px(22.))
+                .px_2()
+                .gap_1()
+                .rounded_md()
+                .border_1()
+                .map(|this| match origin {
+                    Some(HeaderOrigin::Collection) | None => this
+                        .bg(cx.theme().colors().element_background)
+                        .border_color(cx.theme().colors().border_selected),
+                    _ => this.bg(hsla.opacity(0.1)).border_color(hsla.opacity(0.3)),
+                })
+                .children(icon.map(|icon| Icon::new(icon).size(IconSize::XSmall).color(color)))
+                .child(Label::new(label).size(LabelSize::XSmall).color(color))
+                .into_any_element()
+        };
         v_flex()
-            .gap_2()
-            .child(Self::section_label("HERDADOS"))
-            .when(inherited.is_empty(), |this| {
-                this.child(
-                    Label::new("Nenhum header vem do spec, da coleção ou do login.")
-                        .size(LabelSize::XSmall)
-                        .color(Color::Muted),
-                )
-            })
+            .w_full()
+            .rounded_lg()
+            .border_1()
+            .border_color(border)
+            .bg(colors.editor_background)
+            .overflow_hidden()
+            .child(
+                row()
+                    .h(px(32.))
+                    .min_h(px(32.))
+                    .child(div().flex_none().w(px(20.)))
+                    .child(name_column(Self::section_label("HEADER").into_any_element()))
+                    .child(div().flex_1().child(Self::section_label("VALOR")))
+                    .child(origin_column(Self::section_label("ORIGEM").into_any_element()))
+                    .child(div().flex_none().w(px(24.))),
+            )
             .children(inherited.into_iter().enumerate().map(|(index, header)| {
                 let disabled = self
                     .disabled_inherited
                     .iter()
                     .any(|name| name.eq_ignore_ascii_case(&header.name));
                 let enabled = header.enabled && !disabled;
-                let origin_color = match &header.origin {
-                    HeaderOrigin::Scheme(_) => Color::Success,
-                    HeaderOrigin::Spec => Color::Info,
-                    HeaderOrigin::Collection => Color::Muted,
-                };
                 let name = header.name.clone();
-                h_flex()
-                    .gap_2()
+                let origin = header.origin.clone();
+                row()
                     .child(
                         Checkbox::new(
                             SharedString::from(format!("api-inherited-{index}")),
@@ -1349,33 +1352,87 @@ impl ApiRequestView {
                             this.store_draft(cx);
                         })),
                     )
-                    .child(
-                        div().w(px(200.)).child(
-                            Label::new(header.name.clone())
-                                .size(LabelSize::Small)
-                                .buffer_font(cx)
-                                .color(if enabled {
-                                    Color::Default
-                                } else {
-                                    Color::Muted
-                                }),
-                        ),
-                    )
+                    .child(name_column(
+                        Label::new(header.name.clone())
+                            .size(LabelSize::Small)
+                            .buffer_font(cx)
+                            .color(if enabled {
+                                Color::Default
+                            } else {
+                                Color::Muted
+                            })
+                            .truncate()
+                            .into_any_element(),
+                    ))
                     .child(div().flex_1().min_w_0().child(render_template(
                         &header.value,
                         self.collection.read(cx),
                         !enabled,
                         cx,
                     )))
-                    .child(chip(header.origin.label(), origin_color, cx))
+                    .child(origin_column(origin_chip(
+                        header.origin.label(),
+                        Some(&header.origin),
+                        cx,
+                    )))
+                    .child(
+                        IconButton::new(("api-inherited-origin", index), IconName::ArrowUpRight)
+                            .icon_size(IconSize::XSmall)
+                            .icon_color(Color::Muted)
+                            .tooltip(Tooltip::text(if header.origin == HeaderOrigin::Spec {
+                                "Ver na spec"
+                            } else {
+                                "Abrir os headers da coleção"
+                            }))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.open_header_origin(&origin, window, cx)
+                            })),
+                    )
             }))
-            .child(Self::section_label("DESTA REQUEST"))
-            .child(self.render_rows("header", &self.header_rows, cx))
-            .child(self.add_row_button("header", "Adicionar header", cx))
+            .children(self.header_rows.iter().enumerate().map(|(index, header)| {
+                row()
+                    .py_1()
+                    .child(
+                        Checkbox::new(
+                            SharedString::from(format!("api-header-enabled-{index}")),
+                            header.enabled.into(),
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if let Some(row) = this.header_rows.get_mut(index) {
+                                row.enabled = !row.enabled;
+                            }
+                            this.store_draft(cx);
+                        })),
+                    )
+                    .child(name_column(header.name.clone().into_any_element()))
+                    .child(div().flex_1().min_w_0().child(header.value.clone()))
+                    .child(origin_column(origin_chip("esta request".to_string(), None, cx)))
+                    .child(
+                        IconButton::new(("api-header-remove", index), IconName::Trash)
+                            .icon_size(IconSize::XSmall)
+                            .icon_color(Color::Muted)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if index < this.header_rows.len() {
+                                    this.header_rows.remove(index);
+                                }
+                                this.store_draft(cx);
+                            })),
+                    )
+            }))
             .child(
-                Label::new("Desmarcar um header herdado vale só para esta request.")
-                    .size(LabelSize::XSmall)
-                    .color(Color::Muted),
+                h_flex()
+                    .h(px(40.))
+                    .px_3()
+                    .gap_4()
+                    .child(self.add_row_button("header", "Adicionar header", cx))
+                    .child(
+                        Label::new(
+                            "Herdados vêm da coleção e do spec — desmarcar aqui vale só para esta request.",
+                        )
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted)
+                        .truncate(),
+                    ),
             )
             .into_any_element()
     }
@@ -1614,56 +1671,31 @@ impl ApiRequestView {
         let content_type = operation
             .and_then(|operation| operation.request_body.as_ref())
             .map(|body| body.content_type.clone());
-        let schema_name = operation
+        let schema_reference = operation
             .and_then(|operation| operation.request_body.as_ref())
             .and_then(|body| body.schema.as_ref())
             .and_then(|schema| schema.get("$ref"))
             .and_then(|reference| reference.as_str())
-            .and_then(|reference| reference.rsplit('/').next())
             .map(str::to_string);
         let is_json = content_type
             .as_deref()
             .is_none_or(crate::spec::is_json_content_type);
-        v_flex()
+        editor_card(cx)
             .size_full()
-            .gap_2()
-            .child(
-                h_flex()
-                    .gap_2()
-                    .when_some(content_type.clone(), |this, content_type| {
-                        this.child(chip(content_type, Color::Muted, cx))
-                    })
-                    .child(div().flex_1())
-                    .when(content_type.is_some(), |this| {
-                        this.child(
-                            Button::new("api-fill-example", "Preencher com o exemplo do spec")
-                                .style(ButtonStyle::Outlined)
-                                .label_size(LabelSize::Small)
-                                .start_icon(Icon::new(IconName::FileCode).size(IconSize::XSmall))
-                                .on_click(
-                                    cx.listener(|this, _, window, cx| {
-                                        this.fill_example(window, cx)
-                                    }),
-                                ),
-                        )
-                    }),
-            )
             .when(!is_json, |this| {
                 this.child(
-                    Label::new("Este body não é JSON: o texto vai como está.")
-                        .size(LabelSize::XSmall)
-                        .color(Color::Warning),
+                    div().px_3().pt_2().child(
+                        Label::new("Este body não é JSON: o texto vai como está.")
+                            .size(LabelSize::XSmall)
+                            .color(Color::Warning),
+                    ),
                 )
             })
             .child(
                 div()
                     .flex_1()
-                    .min_h(px(120.))
-                    .p_2()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(cx.theme().colors().border)
-                    .bg(cx.theme().colors().editor_background)
+                    .min_h(px(80.))
+                    .py_2()
                     .capture_action(cx.listener(
                         |this, _: &editor::actions::NewlineBelow, window, cx| {
                             this.send(window, cx);
@@ -1673,7 +1705,7 @@ impl ApiRequestView {
             )
             .child(render_validation(
                 self.body_validation.as_ref(),
-                schema_name.as_deref(),
+                schema_reference.as_deref(),
                 "Válido contra",
                 cx,
             ))
@@ -1822,8 +1854,10 @@ impl ApiRequestView {
                 return div()
                     .flex_1()
                     .min_h_0()
+                    .max_h(px(320.))
                     .px_3()
-                    .py_2()
+                    .pt_2p5()
+                    .pb_2()
                     .child(self.render_body(cx))
                     .into_any_element();
             }
@@ -1835,15 +1869,148 @@ impl ApiRequestView {
             .id("api-request-content")
             .flex_1()
             .min_h_0()
+            .max_h(px(320.))
             .overflow_y_scroll()
             .px_3()
-            .py_2()
+            .pt_2p5()
+            .pb_2()
             .child(content)
             .into_any_element()
     }
 
+    fn render_capture_banner(&self, exchange: &Exchange, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let pairs: Vec<(String, String)> = match &exchange.login_capture {
+            Some(login) => std::iter::once((login.token_path.clone(), TOKEN_VARIABLE.to_string()))
+                .chain(
+                    login
+                        .refresh_token_path
+                        .clone()
+                        .map(|path| (path, REFRESH_TOKEN_VARIABLE.to_string())),
+                )
+                .chain(exchange.captures.iter().filter(|capture| capture.value.is_some()).map(
+                    |capture| (capture.path.clone(), capture.variable.clone()),
+                ))
+                .collect(),
+            None => exchange
+                .captures
+                .iter()
+                .filter(|capture| capture.value.is_some())
+                .map(|capture| (capture.path.clone(), capture.variable.clone()))
+                .collect(),
+        };
+        let missing: Vec<String> = exchange
+            .captures
+            .iter()
+            .filter(|capture| capture.value.is_none())
+            .map(|capture| capture.path.clone())
+            .collect();
+        if pairs.is_empty() && missing.is_empty() {
+            return None;
+        }
+        let success = Color::Success.color(cx);
+        let warning = Color::Warning.color(cx);
+        let tint = if pairs.is_empty() { warning } else { success };
+        Some(
+            h_flex()
+                .w_full()
+                .min_h(px(40.))
+                .px_3p5()
+                .py_1p5()
+                .gap_2p5()
+                .rounded_lg()
+                .bg(tint.opacity(0.06))
+                .border_1()
+                .border_color(tint.opacity(0.33))
+                .child(
+                    Icon::new(if pairs.is_empty() {
+                        IconName::Warning
+                    } else {
+                        IconName::Check
+                    })
+                    .size(IconSize::Small)
+                    .color(if pairs.is_empty() {
+                        Color::Warning
+                    } else {
+                        Color::Success
+                    }),
+                )
+                .when(!pairs.is_empty(), |this| {
+                    this.child(
+                        Label::new(if exchange.login_capture.is_some() {
+                            "Login capturado:"
+                        } else {
+                            "Capturado:"
+                        })
+                        .size(LabelSize::Small)
+                        .weight(FontWeight::SEMIBOLD),
+                    )
+                })
+                .children(pairs.into_iter().map(|(path, variable)| {
+                    h_flex()
+                        .flex_none()
+                        .gap_1p5()
+                        .child(
+                            Label::new(path)
+                                .size(LabelSize::XSmall)
+                                .buffer_font(cx),
+                        )
+                        .child(Label::new("→").size(LabelSize::XSmall).color(Color::Muted))
+                        .child(variable_chip(format!("{{{{{variable}}}}}"), cx))
+                }))
+                .when_some(
+                    exchange
+                        .login_capture
+                        .as_ref()
+                        .and_then(|login| login.expires_in),
+                    |this, seconds| {
+                        this.child(
+                            Label::new(format!("expira em {seconds} s"))
+                                .size(LabelSize::XSmall)
+                                .buffer_font(cx)
+                                .color(Color::Muted)
+                                .single_line(),
+                        )
+                    },
+                )
+                .when(!missing.is_empty(), |this| {
+                    this.child(
+                        Label::new(format!("sem valor nesta resposta: {}", missing.join(", ")))
+                            .size(LabelSize::XSmall)
+                            .buffer_font(cx)
+                            .color(Color::Warning)
+                            .truncate(),
+                    )
+                })
+                .child(div().flex_1())
+                .when(exchange.login_capture.is_some(), |this| {
+                    this.child(
+                        div().min_w_0().child(
+                            Label::new("Authorization aplicado na coleção")
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted)
+                                .truncate(),
+                        ),
+                    )
+                })
+                .into_any_element(),
+        )
+    }
+
     fn render_response(&self, cx: &mut Context<Self>) -> AnyElement {
-        let header = h_flex().px_3().py_2().gap_2().child(
+        let save_button = IconButton::new("api-save", IconName::Bookmark)
+            .icon_size(IconSize::Small)
+            .icon_color(if self.saved_id.is_some() {
+                Color::Accent
+            } else {
+                Color::Muted
+            })
+            .tooltip(Tooltip::text(if self.saved_id.is_some() {
+                "Atualizar em Salvas por mim"
+            } else {
+                "Salvar em Salvas por mim"
+            }))
+            .on_click(cx.listener(|this, _, _, cx| this.save(cx)));
+        let header = h_flex().h(px(44.)).px_3().gap_2p5().child(
             Label::new("Resposta")
                 .size(LabelSize::Small)
                 .weight(FontWeight::SEMIBOLD),
@@ -1857,7 +2024,7 @@ impl ApiRequestView {
             return v_flex()
                 .flex_1()
                 .min_h_0()
-                .child(header)
+                .child(header.child(div().flex_1()).child(save_button))
                 .child(
                     div()
                         .flex_1()
@@ -1870,75 +2037,74 @@ impl ApiRequestView {
         };
 
         let tab = self.response_tab;
+        let mut facts = Vec::new();
+        if let Some(response) = exchange.response.as_ref() {
+            facts.push(format!("{} ms", response.elapsed.as_millis()));
+            facts.push(format!(
+                "{}{}",
+                human_size(response.body.len()),
+                if response.truncated { " (cortado)" } else { "" }
+            ));
+        }
+        facts.push(format!("às {}", exchange.sent_at.format("%H:%M:%S")));
         let header = header
             .when_some(exchange.response.as_ref(), |this, response| {
                 let status_text = match &response.reason {
                     Some(reason) => format!("{} {reason}", response.status),
                     None => response.status.to_string(),
                 };
-                this.child(chip(status_text, status_color(response.status), cx))
-                    .child(
-                        Label::new(format!("{} ms", response.elapsed.as_millis()))
-                            .size(LabelSize::XSmall)
-                            .color(Color::Muted),
-                    )
-                    .child(
-                        Label::new(format!(
-                            "· {}{}",
-                            human_size(response.body.len()),
-                            if response.truncated { " (cortado)" } else { "" }
-                        ))
-                        .size(LabelSize::XSmall)
-                        .color(Color::Muted),
-                    )
+                this.child(status_chip(status_text, status_color(response.status), cx))
             })
             .when(exchange.error.is_some(), |this| {
-                this.child(chip("falhou", Color::Error, cx))
+                this.child(status_chip("falhou".to_string(), Color::Error, cx))
             })
             .child(
-                Label::new(format!("· {}", exchange.sent_at.format("%H:%M:%S")))
+                Label::new(facts.join(" · "))
                     .size(LabelSize::XSmall)
                     .color(Color::Muted),
             )
             .child(div().flex_1())
-            .child(self.render_tab_button(
-                "api-response-body",
-                "Body".to_string(),
-                tab == ResponseTab::Body,
-                |this, _| this.response_tab = ResponseTab::Body,
-                cx,
-            ))
-            .child(self.render_tab_button(
-                "api-response-headers",
-                format!(
-                    "Headers {}",
-                    exchange
-                        .response
-                        .as_ref()
-                        .map_or(0, |response| response.headers.len())
-                ),
-                tab == ResponseTab::Headers,
-                |this, _| this.response_tab = ResponseTab::Headers,
-                cx,
-            ))
-            .child(self.render_tab_button(
-                "api-response-cookies",
-                if exchange.cookies_set.is_empty() {
-                    "Cookies".to_string()
-                } else {
-                    format!("Cookies {}", exchange.cookies_set.len())
-                },
-                tab == ResponseTab::Cookies,
-                |this, _| this.response_tab = ResponseTab::Cookies,
-                cx,
-            ))
-            .child(self.render_tab_button(
-                "api-response-timeline",
-                "Timeline".to_string(),
-                tab == ResponseTab::Timeline,
-                |this, _| this.response_tab = ResponseTab::Timeline,
-                cx,
-            ))
+            .child(
+                ui::segmented_control(cx)
+                    .child(self.render_tab_button(
+                        "api-response-body",
+                        "Body".to_string(),
+                        tab == ResponseTab::Body,
+                        |this, _| this.response_tab = ResponseTab::Body,
+                        cx,
+                    ))
+                    .child(self.render_tab_button(
+                        "api-response-headers",
+                        format!(
+                            "Headers · {}",
+                            exchange
+                                .response
+                                .as_ref()
+                                .map_or(0, |response| response.headers.len())
+                        ),
+                        tab == ResponseTab::Headers,
+                        |this, _| this.response_tab = ResponseTab::Headers,
+                        cx,
+                    ))
+                    .child(self.render_tab_button(
+                        "api-response-cookies",
+                        if exchange.cookies_set.is_empty() {
+                            "Cookies".to_string()
+                        } else {
+                            format!("Cookies · {}", exchange.cookies_set.len())
+                        },
+                        tab == ResponseTab::Cookies,
+                        |this, _| this.response_tab = ResponseTab::Cookies,
+                        cx,
+                    ))
+                    .child(self.render_tab_button(
+                        "api-response-timeline",
+                        "Timeline".to_string(),
+                        tab == ResponseTab::Timeline,
+                        |this, _| this.response_tab = ResponseTab::Timeline,
+                        cx,
+                    )),
+            )
             .when(
                 exchange
                     .response
@@ -1965,103 +2131,76 @@ impl ApiRequestView {
                         let text = this.response_editor.read(cx).text(cx);
                         cx.write_to_clipboard(ClipboardItem::new_string(text));
                     })),
-            );
+            )
+            .child(save_button);
 
-        let content: AnyElement =
-            match tab {
-                ResponseTab::Body => v_flex()
-                    .flex_1()
-                    .min_h_0()
-                    .gap_1()
-                    .children(exchange.captures.iter().map(|capture| {
-                        let found = capture.value.is_some();
+        let content: AnyElement = match tab {
+            ResponseTab::Body => v_flex()
+                .flex_1()
+                .min_h_0()
+                .gap_2p5()
+                .children(self.render_capture_banner(exchange, cx))
+                .when_some(self.example_status.clone(), |this, (message, ok)| {
+                    this.child(Label::new(message).size(LabelSize::XSmall).color(if ok {
+                        Color::Success
+                    } else {
+                        Color::Warning
+                    }))
+                })
+                .when_some(exchange.error.clone(), |this, error| {
+                    this.child(Label::new(error).size(LabelSize::Small).color(Color::Error))
+                })
+                .child(
+                    editor_card(cx)
+                        .flex_1()
+                        .min_h_0()
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_h_0()
+                                .py_2()
+                                .child(self.response_editor.clone()),
+                        )
+                        .child(render_validation(
+                            exchange.validation.as_ref(),
+                            exchange.response_schema_name.as_deref(),
+                            "Resposta confere com",
+                            cx,
+                        )),
+                )
+                .into_any_element(),
+            ResponseTab::Headers => editor_card(cx)
+                .id("api-response-headers-list")
+                .flex_1()
+                .min_h_0()
+                .overflow_y_scroll()
+                .children(exchange.response.iter().flat_map(|response| {
+                    response.headers.iter().map(|(name, value)| {
                         h_flex()
-                        .gap_1p5()
-                        .child(
-                            Icon::new(if found { IconName::Check } else { IconName::Warning })
-                                .size(IconSize::XSmall)
-                                .color(if found { Color::Success } else { Color::Warning }),
-                        )
-                        .child(
-                            Label::new(match &capture.value {
-                                Some(value) => format!(
-                                    "Capturado: {} → {{{{{}}}}} = {}",
-                                    capture.path,
-                                    capture.variable,
-                                    if is_sensitive_variable(&capture.variable) {
-                                        send::mask(value)
-                                    } else {
-                                        value.clone()
-                                    }
-                                ),
-                                None => format!(
-                                    "{} não existe nesta resposta; {{{{{}}}}} ficou como estava",
-                                    capture.path, capture.variable
-                                ),
-                            })
-                            .size(LabelSize::XSmall)
-                            .buffer_font(cx)
-                            .color(if found { Color::Muted } else { Color::Warning })
-                            .truncate(),
-                        )
-                    }))
-                    .when_some(self.example_status.clone(), |this, (message, ok)| {
-                        this.child(Label::new(message).size(LabelSize::XSmall).color(if ok {
-                            Color::Success
-                        } else {
-                            Color::Warning
-                        }))
-                    })
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_h_0()
-                            .p_2()
-                            .rounded_md()
-                            .border_1()
+                            .min_h(px(30.))
+                            .px_3()
+                            .gap_3()
+                            .border_b_1()
                             .border_color(cx.theme().colors().border)
-                            .bg(cx.theme().colors().editor_background)
-                            .child(self.response_editor.clone()),
-                    )
-                    .child(render_validation(
-                        exchange.validation.as_ref(),
-                        exchange.response_schema_name.as_deref(),
-                        "Resposta confere com",
-                        cx,
-                    ))
-                    .when_some(exchange.error.clone(), |this, error| {
-                        this.child(Label::new(error).size(LabelSize::Small).color(Color::Error))
-                    })
-                    .into_any_element(),
-                ResponseTab::Headers => v_flex()
-                    .id("api-response-headers-list")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .gap_1()
-                    .children(exchange.response.iter().flat_map(|response| {
-                        response.headers.iter().map(|(name, value)| {
-                            h_flex()
-                                .gap_3()
-                                .child(
-                                    div().w(px(220.)).child(
-                                        Label::new(name.clone())
-                                            .size(LabelSize::Small)
-                                            .buffer_font(cx)
-                                            .color(Color::Accent),
-                                    ),
-                                )
-                                .child(
-                                    Label::new(value.clone())
+                            .child(
+                                div().flex_none().w(px(220.)).child(
+                                    Label::new(name.clone())
                                         .size(LabelSize::Small)
-                                        .buffer_font(cx),
-                                )
-                        })
-                    }))
-                    .into_any_element(),
-                ResponseTab::Cookies => self.render_cookies(exchange, cx),
-                ResponseTab::Timeline => self.render_timeline(exchange, cx),
-            };
+                                        .buffer_font(cx)
+                                        .color(Color::Accent),
+                                ),
+                            )
+                            .child(
+                                Label::new(value.clone())
+                                    .size(LabelSize::Small)
+                                    .buffer_font(cx),
+                            )
+                    })
+                }))
+                .into_any_element(),
+            ResponseTab::Cookies => self.render_cookies(exchange, cx),
+            ResponseTab::Timeline => self.render_timeline(exchange, cx),
+        };
 
         v_flex()
             .flex_1()
@@ -2281,153 +2420,324 @@ impl ApiRequestView {
     fn render_timeline(&self, exchange: &Exchange, cx: &mut Context<Self>) -> AnyElement {
         let steps = exchange.timeline.clone();
         let request = exchange.request.clone();
-        v_flex()
+        let border = cx.theme().colors().border;
+        editor_card(cx)
             .id("api-timeline")
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
-            .gap_2()
-            .when(steps.len() > 1, |this| {
-                this.child(
-                    Label::new("O token não servia: o Asylum renovou o login e repetiu a request.")
-                        .size(LabelSize::Small)
-                        .color(Color::Muted),
-                )
-            })
-            .children(steps.into_iter().enumerate().map(|(index, step)| {
-                h_flex()
-                    .gap_2()
-                    .child(
-                        Label::new(format!("{}", index + 1))
-                            .size(LabelSize::XSmall)
-                            .color(Color::Muted),
-                    )
-                    .child(method_label(&step.method, cx))
-                    .child(
-                        div().w(px(260.)).child(
-                            Label::new(step.path)
-                                .size(LabelSize::Small)
-                                .buffer_font(cx)
-                                .truncate(),
-                        ),
-                    )
-                    .child(match step.status {
-                        Some(status) => {
-                            chip(status.to_string(), status_color(status), cx).into_any_element()
-                        }
-                        None => chip("erro", Color::Error, cx).into_any_element(),
+            .child(
+                v_flex()
+                    .p_4()
+                    .gap_1()
+                    .border_b_1()
+                    .border_color(border)
+                    .when(steps.len() > 1, |this| {
+                        this.child(
+                            div().pb_2().child(
+                                Label::new(
+                                    "O token não servia: o Asylum renovou o login e repetiu a request.",
+                                )
+                                .size(LabelSize::Small),
+                            ),
+                        )
                     })
-                    .child(
-                        div().flex_1().min_w_0().child(
-                            Label::new(step.note)
-                                .size(LabelSize::XSmall)
-                                .color(Color::Muted)
-                                .truncate(),
-                        ),
-                    )
-                    .child(
-                        Label::new(format!("{} ms", step.elapsed.as_millis()))
-                            .size(LabelSize::XSmall)
-                            .color(Color::Muted),
-                    )
-            }))
-            .when_some(exchange.error.clone(), |this, error| {
-                this.child(Label::new(error).size(LabelSize::Small).color(Color::Error))
-            })
+                    .children(steps.into_iter().enumerate().map(|(index, step)| {
+                        let failed = step.status.is_none_or(|status| status >= 400);
+                        let color = match step.status {
+                            Some(status) => status_color(status),
+                            None => Color::Error,
+                        };
+                        let status_text = match step.status {
+                            Some(status) => match reason_phrase(status) {
+                                Some(reason) => format!("{status} {reason}"),
+                                None => status.to_string(),
+                            },
+                            None => "erro".to_string(),
+                        };
+                        h_flex()
+                            .min_h(px(40.))
+                            .gap_3()
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_none()
+                                    .size(px(20.))
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded_full()
+                                    .border_1()
+                                    .map(|this| {
+                                        if failed {
+                                            let error = Color::Error.color(cx);
+                                            this.bg(error.opacity(0.12))
+                                                .border_color(error.opacity(0.33))
+                                        } else {
+                                            this.bg(cx.theme().colors().element_background)
+                                                .border_color(cx.theme().colors().border_selected)
+                                        }
+                                    })
+                                    .child(
+                                        Label::new(format!("{}", index + 1))
+                                            .size(LabelSize::XSmall)
+                                            .buffer_font(cx)
+                                            .weight(FontWeight::SEMIBOLD)
+                                            .color(if failed { Color::Error } else { Color::Default }),
+                                    ),
+                            )
+                            .child(
+                                h_flex()
+                                    .flex_none()
+                                    .w(px(260.))
+                                    .gap_2p5()
+                                    .child(method_label(&step.method, cx))
+                                    .child(
+                                        Label::new(step.path)
+                                            .size(LabelSize::Small)
+                                            .buffer_font(cx)
+                                            .truncate(),
+                                    ),
+                            )
+                            .child(
+                                h_flex()
+                                    .flex_none()
+                                    .w(px(140.))
+                                    .child(status_chip(status_text, color, cx)),
+                            )
+                            .child(
+                                div().flex_1().min_w_0().child(
+                                    Label::new(step.note)
+                                        .size(LabelSize::XSmall)
+                                        .color(Color::Muted)
+                                        .truncate(),
+                                ),
+                            )
+                            .child(
+                                Label::new(format!("{} ms", step.elapsed.as_millis()))
+                                    .size(LabelSize::XSmall)
+                                    .buffer_font(cx)
+                                    .color(Color::Muted),
+                            )
+                    }))
+                    .when_some(exchange.error.clone(), |this, error| {
+                        this.child(Label::new(error).size(LabelSize::Small).color(Color::Error))
+                    }),
+            )
             .when_some(request, |this, request| {
                 let curl = request.curl();
                 this.child(
-                    h_flex()
-                        .pt_2()
-                        .child(Self::section_label("REQUEST ENVIADA"))
-                        .child(div().flex_1())
+                    v_flex()
+                        .p_4()
+                        .gap_1()
                         .child(
-                            Button::new("api-copy-curl", "Copiar como cURL")
-                                .style(ButtonStyle::Outlined)
-                                .label_size(LabelSize::Small)
-                                .start_icon(Icon::new(IconName::Terminal).size(IconSize::XSmall))
-                                .tooltip(Tooltip::text("As credenciais saem mascaradas"))
-                                .on_click(move |_, _, cx| {
-                                    cx.write_to_clipboard(ClipboardItem::new_string(curl.clone()));
-                                }),
-                        ),
+                            h_flex()
+                                .pb_2()
+                                .child(Self::section_label("REQUEST ENVIADA"))
+                                .child(div().flex_1())
+                                .child(
+                                    ui::secondary_button(
+                                        "api-copy-curl",
+                                        Some((IconName::Terminal, Color::Muted)),
+                                        "Copiar como cURL",
+                                        true,
+                                        cx,
+                                    )
+                                    .tooltip(Tooltip::text("As credenciais saem mascaradas"))
+                                    .on_click(move |_, _, cx| {
+                                        cx.write_to_clipboard(ClipboardItem::new_string(
+                                            curl.clone(),
+                                        ));
+                                    }),
+                                ),
+                        )
+                        .child(
+                            h_flex()
+                                .gap_2()
+                                .child(
+                                    Label::new(request.method.clone())
+                                        .size(LabelSize::Small)
+                                        .buffer_font(cx)
+                                        .weight(FontWeight::SEMIBOLD)
+                                        .color(method_color(&request.method)),
+                                )
+                                .child(
+                                    Label::new(request.url.clone())
+                                        .size(LabelSize::Small)
+                                        .buffer_font(cx),
+                                ),
+                        )
+                        .children(request.headers.iter().map(|(name, value)| {
+                            h_flex()
+                                .child(
+                                    Label::new(format!("{name}: "))
+                                        .size(LabelSize::Small)
+                                        .buffer_font(cx)
+                                        .color(Color::Muted),
+                                )
+                                .child(
+                                    Label::new(value.clone())
+                                        .size(LabelSize::Small)
+                                        .buffer_font(cx),
+                                )
+                        })),
                 )
-                .child(
-                    Label::new(format!("{} {}", request.method, request.url))
-                        .size(LabelSize::Small)
-                        .buffer_font(cx),
-                )
-                .children(request.headers.iter().map(|(name, value)| {
-                    Label::new(format!("{name}: {value}"))
-                        .size(LabelSize::Small)
-                        .buffer_font(cx)
-                        .color(Color::Muted)
-                }))
             })
             .into_any_element()
     }
 }
 
+/// The bordered box the boards put editors and response lists in.
+fn editor_card(cx: &App) -> Div {
+    v_flex()
+        .rounded_lg()
+        .border_1()
+        .border_color(cx.theme().colors().border)
+        .bg(cx.theme().colors().editor_background)
+        .overflow_hidden()
+}
+
+/// `200 OK` with a dot, on a wash of the status color.
+fn status_chip(label: String, color: Color, cx: &App) -> impl IntoElement {
+    let hsla = color.color(cx);
+    h_flex()
+        .flex_none()
+        .h(px(22.))
+        .px_2()
+        .gap_1p5()
+        .rounded_md()
+        .bg(hsla.opacity(0.08))
+        .border_1()
+        .border_color(hsla.opacity(0.2))
+        .child(Indicator::dot().color(color))
+        .child(
+            Label::new(label)
+                .size(LabelSize::XSmall)
+                .buffer_font(cx)
+                .weight(FontWeight::SEMIBOLD)
+                .color(color),
+        )
+}
+
+/// The reason phrase servers usually send, for timeline steps that only kept the code.
+fn reason_phrase(status: u16) -> Option<&'static str> {
+    Some(match status {
+        200 => "OK",
+        201 => "Created",
+        202 => "Accepted",
+        204 => "No Content",
+        301 => "Moved Permanently",
+        302 => "Found",
+        304 => "Not Modified",
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        403 => "Forbidden",
+        404 => "Not Found",
+        409 => "Conflict",
+        422 => "Unprocessable Entity",
+        429 => "Too Many Requests",
+        500 => "Internal Server Error",
+        502 => "Bad Gateway",
+        503 => "Service Unavailable",
+        504 => "Gateway Timeout",
+        _ => return None,
+    })
+}
+
+/// The editor card's footer: whether the JSON follows its schema, and which one.
 fn render_validation(
     validation: Option<&Validation>,
-    schema_name: Option<&str>,
+    schema_reference: Option<&str>,
     valid_prefix: &str,
-    _cx: &App,
+    cx: &App,
 ) -> AnyElement {
     let Some(validation) = validation else {
         return div().into_any_element();
     };
-    let schema = schema_name.unwrap_or("o schema do spec");
+    // The response side only knows the schema's name, the request side its whole `$ref`.
+    let (schema, location) = match schema_reference {
+        Some(reference) if reference.starts_with('#') => (
+            reference.rsplit('/').next().unwrap_or(reference).to_string(),
+            Some(reference.trim_start_matches("#/").to_string()),
+        ),
+        Some(name) => (name.to_string(), None),
+        None => ("o schema do spec".to_string(), None),
+    };
+    let footer = h_flex()
+        .flex_none()
+        .min_h(px(34.))
+        .px_3()
+        .py_1()
+        .gap_1p5()
+        .border_t_1()
+        .border_color(cx.theme().colors().border);
     match validation {
-        Validation::Valid => h_flex()
-            .gap_1()
+        Validation::Valid => footer
             .child(
                 Icon::new(IconName::Check)
                     .size(IconSize::XSmall)
                     .color(Color::Success),
             )
             .child(
-                Label::new(format!("{valid_prefix} {schema}"))
+                Label::new(valid_prefix.to_string())
                     .size(LabelSize::XSmall)
                     .color(Color::Muted),
             )
-            .into_any_element(),
-        Validation::Invalid { issues, more } => v_flex()
-            .gap_0p5()
-            .children(issues.iter().take(4).map(|issue| {
-                h_flex()
-                    .gap_1()
-                    .child(
-                        Icon::new(IconName::Warning)
-                            .size(IconSize::XSmall)
-                            .color(Color::Warning),
-                    )
-                    .child(
-                        Label::new(if issue.location.is_empty() {
-                            issue.message.clone()
-                        } else {
-                            format!("{}: {}", issue.location, issue.message)
-                        })
-                        .size(LabelSize::XSmall)
-                        .color(Color::Warning)
-                        .truncate(),
-                    )
-            }))
-            .when(issues.len() > 4 || *more > 0, |this| {
-                this.child(
-                    Label::new(format!(
-                        "e mais {} fora de {schema}",
-                        issues.len().saturating_sub(4) + more
-                    ))
+            .child(
+                Label::new(schema)
                     .size(LabelSize::XSmall)
-                    .color(Color::Muted),
+                    .buffer_font(cx),
+            )
+            .when_some(location, |this, location| {
+                this.child(
+                    Label::new(format!("· {location}"))
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted)
+                        .truncate(),
                 )
             })
             .into_any_element(),
-        Validation::Unchecked { reason } => Label::new(format!("Sem validação: {reason}"))
-            .size(LabelSize::XSmall)
-            .color(Color::Muted)
-            .truncate()
+        Validation::Invalid { issues, more } => footer
+            .child(
+                v_flex()
+                    .gap_0p5()
+                    .children(issues.iter().take(4).map(|issue| {
+                        h_flex()
+                            .gap_1()
+                            .child(
+                                Icon::new(IconName::Warning)
+                                    .size(IconSize::XSmall)
+                                    .color(Color::Warning),
+                            )
+                            .child(
+                                Label::new(if issue.location.is_empty() {
+                                    issue.message.clone()
+                                } else {
+                                    format!("{}: {}", issue.location, issue.message)
+                                })
+                                .size(LabelSize::XSmall)
+                                .color(Color::Warning)
+                                .truncate(),
+                            )
+                    }))
+                    .when(issues.len() > 4 || *more > 0, |this| {
+                        this.child(
+                            Label::new(format!(
+                                "e mais {} fora de {schema}",
+                                issues.len().saturating_sub(4) + more
+                            ))
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
+                        )
+                    }),
+            )
+            .into_any_element(),
+        Validation::Unchecked { reason } => footer
+            .child(
+                Label::new(format!("Sem validação: {reason}"))
+                    .size(LabelSize::XSmall)
+                    .color(Color::Muted)
+                    .truncate(),
+            )
             .into_any_element(),
     }
 }
@@ -2505,12 +2815,7 @@ impl Render for ApiRequestView {
             .child(self.render_request_bar(cx))
             .child(self.render_meta(cx))
             .child(self.render_request_tabs(cx))
-            .child(
-                v_flex()
-                    .flex_1()
-                    .min_h_0()
-                    .child(self.render_request_content(cx)),
-            )
+            .child(self.render_request_content(cx))
             .child(div().h_px().w_full().bg(cx.theme().colors().border))
             .child(self.render_response(cx))
     }
@@ -2553,8 +2858,9 @@ impl Item for ApiRequestView {
             .into()
     }
 
+    /// The method in the tab already says what this is, as in the boards.
     fn tab_icon(&self, _window: &Window, _cx: &App) -> Option<Icon> {
-        Some(Icon::new(IconName::ArrowRightLeft).color(Color::Muted))
+        None
     }
 
     fn telemetry_event_text(&self) -> Option<&'static str> {

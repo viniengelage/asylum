@@ -39,10 +39,68 @@ actions!(
 pub fn init(cx: &mut App) {
     workspace::register_panel_item::<ApiPanel>(cx);
     lens::init(cx);
-    cx.observe_new(|workspace: &mut Workspace, _window, _cx| {
+    cx.observe_new(|workspace: &mut Workspace, window, cx| {
         workspace.register_action(|workspace, _: &ToggleFocus, window, cx| {
             toggle_focus(workspace, window, cx);
         });
+        // `panel`, `settings` and `link` open the dock on that screen; `op:<METHOD path>[:send]`
+        // also opens that operation's tab and sends it, `tab:headers` shows its headers and
+        // `wait:<ms>` waits. Steps can be chained with `|`.
+        if let (Ok(step), Some(window)) = (std::env::var("API_CLIENT_DEBUG_OPEN"), window) {
+            cx.spawn_in(window, async move |workspace, cx| {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_secs(3))
+                    .await;
+                let panel = workspace.update_in(cx, |workspace, window, cx| {
+                    open(workspace, window, cx);
+                    workspace.panel::<ApiPanel>(cx)
+                })?;
+                let Some(panel) = panel else {
+                    return anyhow::Ok(());
+                };
+                for _ in 0..40 {
+                    if panel.read_with(cx, |panel, cx| panel.is_loaded(cx)) {
+                        break;
+                    }
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_millis(250))
+                        .await;
+                }
+                for step in step.split('|') {
+                    if let Some(milliseconds) =
+                        step.strip_prefix("wait:").and_then(|value| value.parse().ok())
+                    {
+                        cx.background_executor()
+                            .timer(std::time::Duration::from_millis(milliseconds))
+                            .await;
+                        continue;
+                    }
+                    if step == "tab:headers" {
+                        workspace.update(cx, |workspace, cx| {
+                            if let Some(view) = workspace.active_item_as::<ApiRequestView>(cx) {
+                                view.update(cx, |view, cx| view.show_headers_tab(cx));
+                            }
+                        })?;
+                        continue;
+                    }
+                    panel.update_in(cx, |panel, window, cx| match step {
+                        "settings" => panel.open_settings(window, cx),
+                        "link" => panel.show_link(cx),
+                        _ => {
+                            if let Some(target) = step.strip_prefix("op:") {
+                                let (key, send) = match target.strip_suffix(":send") {
+                                    Some(key) => (key, true),
+                                    None => (target, false),
+                                };
+                                panel.debug_open_operation(key.to_string(), send, window, cx);
+                            }
+                        }
+                    })?;
+                }
+                anyhow::Ok(())
+            })
+            .detach_and_log_err(cx);
+        }
     })
     .detach();
 }
