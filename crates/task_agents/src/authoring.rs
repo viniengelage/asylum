@@ -312,6 +312,7 @@ pub fn example_markdown(
             .collect(),
         takes: Vec::new(),
         gives: Vec::new(),
+        context_servers: Vec::new(),
         instructions: instructions.to_string(),
         source: crate::TaskAgentSource::Personal,
         file_path: Default::default(),

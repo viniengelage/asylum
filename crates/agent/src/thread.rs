@@ -4679,9 +4679,19 @@ impl Thread {
         let mut context_server_tools = Vec::new();
         let mut seen_tools = tools.keys().cloned().collect::<HashSet<_>>();
         let mut duplicate_tool_names = HashSet::default();
+        // A task agent can turn on whole MCP servers, e.g. a flow step that happens in Pencil.
+        let task_agent_servers = self
+            .effective_task_agent()
+            .map(|agent| agent.context_servers.clone())
+            .unwrap_or_default();
         for (server_id, server_tools) in self.context_server_registry.read(cx).servers() {
+            let server_enabled_by_agent = task_agent_servers
+                .iter()
+                .any(|id| id.as_str() == server_id.0.as_ref());
             for (tool_name, tool) in server_tools {
-                if profile.is_context_server_tool_enabled(&server_id.0, &tool_name) {
+                if server_enabled_by_agent
+                    || profile.is_context_server_tool_enabled(&server_id.0, &tool_name)
+                {
                     let tool_name: SharedString =
                         provider_compatible_tool_name(tool_name.as_ref()).into();
                     if !seen_tools.insert(tool_name.clone()) {

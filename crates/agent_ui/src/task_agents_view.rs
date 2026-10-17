@@ -305,6 +305,7 @@ fn template_agent(template: Option<&Template>) -> TaskAgent {
             .unwrap_or_default(),
         takes: Vec::new(),
         gives: Vec::new(),
+        context_servers: Vec::new(),
         instructions: template
             .map(|template| template.instructions.to_string())
             .unwrap_or_else(|| "Descreva aqui o que o agente faz, passo a passo.".to_string()),

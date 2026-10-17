@@ -67,7 +67,16 @@ impl FlowView {
             return;
         };
         let label = run.flow.steps[step].label(&self.agents);
-        let agent = match step_agent(run, step, &self.agents) {
+        let servers: Vec<String> = self
+            .project
+            .read(cx)
+            .context_server_store()
+            .read(cx)
+            .configured_server_ids()
+            .into_iter()
+            .map(|id| id.0.to_string())
+            .collect();
+        let agent = match step_agent(run, step, &self.agents, &servers) {
             Ok(agent) => agent,
             Err(error) => {
                 run.step_started(step);
@@ -382,9 +391,27 @@ fn outcome(passed: bool) -> CriterionOutcome {
     }
 }
 
+/// The MCP server of a design tool, among the configured ones, by its name.
+fn design_server(tool: flows::DesignTool, servers: &[String]) -> Option<&String> {
+    let keyword = match tool {
+        flows::DesignTool::Pencil => "pencil",
+        flows::DesignTool::Penpot => "penpot",
+        flows::DesignTool::Figma => "figma",
+        flows::DesignTool::Code => return None,
+    };
+    servers
+        .iter()
+        .find(|server| server.to_lowercase().contains(keyword))
+}
+
 /// The step's task agent as the flow configures it: its model and instructions for this flow,
-/// with `submit_step` turned on so it can hand off.
-fn step_agent(run: &FlowRun, step: usize, agents: &[TaskAgent]) -> Result<TaskAgent> {
+/// the MCP server of where it happens, and `submit_step` turned on so it can hand off.
+fn step_agent(
+    run: &FlowRun,
+    step: usize,
+    agents: &[TaskAgent],
+    servers: &[String],
+) -> Result<TaskAgent> {
     let StepKind::Agent(agent_step) = &run.flow.steps[step].kind else {
         return Err(anyhow!("o passo não é de agente"));
     };
@@ -400,6 +427,20 @@ fn step_agent(run: &FlowRun, step: usize, agents: &[TaskAgent]) -> Result<TaskAg
         })?;
     if let Some(model) = &agent_step.model {
         agent.model = Some(model.clone());
+    }
+    if let Some(target) = &agent_step.where_
+        && target.tool != flows::DesignTool::Code
+    {
+        let server = design_server(target.tool, servers).with_context(|| {
+            format!(
+                "o passo acontece no {}, mas nenhum MCP do {} está configurado (Configurações → MCP)",
+                target.tool.label(),
+                target.tool.label()
+            )
+        })?;
+        if !agent.context_servers.contains(server) {
+            agent.context_servers.push(server.clone());
+        }
     }
     if !agent_step.instructions.trim().is_empty() {
         agent.instructions = format!(
@@ -825,6 +866,7 @@ mod tests {
             permissions: BTreeMap::new(),
             takes: Vec::new(),
             gives: gives.iter().map(|name| name.to_string()).collect(),
+            context_servers: Vec::new(),
             instructions: "Instruções do agente.".to_string(),
             source: task_agents::TaskAgentSource::Personal,
             file_path: PathBuf::new(),
@@ -835,6 +877,10 @@ mod tests {
         let mut ux = AgentStep::new("ux");
         ux.instructions = "Use o design system.".to_string();
         ux.model = Some("anthropic/claude-opus-5-5".to_string());
+        ux.where_ = Some(flows::DesignTarget {
+            tool: flows::DesignTool::Pencil,
+            file: Some("design/app.pen".to_string()),
+        });
         ux.criteria = vec![Criterion {
             text: "Cobre a spec".to_string(),
             required: true,
@@ -899,7 +945,8 @@ mod tests {
         assert!(prompt.contains("1. Cobre a spec (obrigatório"));
         assert!(prompt.contains("## Refaça considerando\nCobre a spec"));
 
-        let agent = step_agent(&run, 1, &agents).expect("the step's agent exists");
+        let agent = step_agent(&run, 1, &agents, &["pencil-mcp".to_string()])
+            .expect("the step's agent exists");
         assert_eq!(agent.model.as_deref(), Some("anthropic/claude-opus-5-5"));
         assert!(
             agent
@@ -907,11 +954,15 @@ mod tests {
                 .ends_with("## Nesta esteira\nUse o design system.")
         );
         assert_eq!(agent.tools.get(SubmitStepTool::NAME), Some(&true));
+        assert_eq!(agent.context_servers, ["pencil-mcp"]);
+        let error =
+            step_agent(&run, 1, &agents, &["penpot".to_string()]).expect_err("no Pencil server");
+        assert!(error.to_string().contains("nenhum MCP do Pencil"));
     }
 
     #[test]
     fn test_unknown_agent_is_reported() {
-        let error = step_agent(&run(), 0, &[]).expect_err("no agents loaded");
+        let error = step_agent(&run(), 0, &[], &[]).expect_err("no agents loaded");
         assert!(error.to_string().contains("/produto"));
     }
 }

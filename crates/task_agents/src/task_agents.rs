@@ -140,6 +140,7 @@ struct Frontmatter {
     permissions: BTreeMap<String, PermissionEntry>,
     takes: Option<ToolkitsEntry>,
     gives: Option<ToolkitsEntry>,
+    context_servers: Option<ToolkitsEntry>,
 }
 
 #[derive(Serialize)]
@@ -164,6 +165,8 @@ struct FrontmatterOut<'a> {
     takes: &'a Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     gives: &'a Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    context_servers: &'a Vec<String>,
 }
 
 /// A `provider/model` pair, e.g. `anthropic/claude-opus-5-5`. Claude Code's aliases (`opus`,
@@ -220,6 +223,9 @@ pub struct TaskAgent {
     pub takes: Vec<String>,
     /// What the agent hands to later steps of a flow, e.g. `PR`.
     pub gives: Vec<String>,
+    /// MCP servers whose tools are all turned on, by server id, over the profile's.
+    #[serde(default)]
+    pub context_servers: Vec<String>,
     pub instructions: String,
     pub source: TaskAgentSource,
     pub file_path: PathBuf,
@@ -277,6 +283,7 @@ impl TaskAgent {
                 .map(|(name, rules)| (name.as_str(), PermissionEntry::from(rules.clone())))
                 .collect(),
             takes: &self.takes,
+            context_servers: &self.context_servers,
             gives: &self.gives,
         };
         let yaml = serde_yaml_ng::to_string(&frontmatter)?;
@@ -350,6 +357,7 @@ pub fn parse_task_agent(path: &Path, content: &str, source: TaskAgentSource) -> 
     let toolkits = names(frontmatter.toolkits);
     let takes = names(frontmatter.takes);
     let gives = names(frontmatter.gives);
+    let context_servers = names(frontmatter.context_servers);
     let model = frontmatter
         .model
         .filter(|model| ModelReference::parse(model).is_some());
@@ -374,6 +382,7 @@ pub fn parse_task_agent(path: &Path, content: &str, source: TaskAgentSource) -> 
             .collect(),
         takes,
         gives,
+        context_servers,
         instructions: body.trim().to_string(),
         source,
         file_path: path.to_path_buf(),

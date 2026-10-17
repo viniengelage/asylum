@@ -55,6 +55,7 @@ fn agent(command: &str, takes: &[&str], gives: &[&str]) -> TaskAgent {
         permissions: BTreeMap::new(),
         takes: takes.iter().map(|name| name.to_string()).collect(),
         gives: gives.iter().map(|name| name.to_string()).collect(),
+        context_servers: Vec::new(),
         instructions: String::new(),
         source: TaskAgentSource::Personal,
         file_path: PathBuf::new(),
