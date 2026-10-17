@@ -1,7 +1,7 @@
-//! Nova esteira: a name, where it lives (just for me or in the project) and how it starts —
-//! blank, from a template, or with the steps suggested for a request.
+//! Nova esteira: how it starts (blank, from a template, or with the steps suggested for a
+//! request), the request, its name and where it is saved.
 
-use super::{FlowView, flow_source_label};
+use super::FlowView;
 use editor::Editor;
 use flows::{
     AgentStep, Criterion, Flow, FlowSource, FlowStep, GateStep, OnFail, RunStep, StepKind, Verifier,
@@ -11,7 +11,7 @@ use project::Project;
 use std::path::PathBuf;
 use std::sync::Arc;
 use task_agents::TaskAgent;
-use ui::{Tooltip, prelude::*};
+use ui::{KeyBinding, Tooltip, prelude::*};
 use util::ResultExt as _;
 use workspace::{ModalView, Workspace};
 
@@ -144,6 +144,7 @@ pub(super) struct NewFlowModal {
     start: Start,
     name: Entity<Editor>,
     request: Entity<Editor>,
+    _subscriptions: Vec<gpui::Subscription>,
 }
 
 impl NewFlowModal {
@@ -177,7 +178,7 @@ impl NewFlowModal {
             );
             editor
         });
-        name.focus_handle(cx).focus(window, cx);
+        request.focus_handle(cx).focus(window, cx);
         Self {
             focus_handle: cx.focus_handle(),
             workspace,
@@ -186,6 +187,13 @@ impl NewFlowModal {
             personal: project_root.is_none(),
             project_root,
             start: Start::Blank,
+            _subscriptions: vec![
+                cx.subscribe(&name, |_, _, event: &editor::EditorEvent, cx| {
+                    if matches!(event, editor::EditorEvent::BufferEdited) {
+                        cx.notify();
+                    }
+                }),
+            ],
             name,
             request,
         }
@@ -258,11 +266,15 @@ impl NewFlowModal {
         &self,
         id: &'static str,
         start: Start,
+        icon: IconName,
         title: &'static str,
-        detail: &'static str,
+        detail: String,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let selected = self.start == start;
+        let selected = match (self.start, start) {
+            (Start::Template(_), Start::Template(_)) => true,
+            (current, start) => current == start,
+        };
         let colors = cx.theme().colors();
         v_flex()
             .id(id)
@@ -276,23 +288,63 @@ impl NewFlowModal {
             .border_color(if selected {
                 colors.text_accent
             } else {
-                colors.border
+                colors.border_variant
             })
             .bg(if selected {
-                colors.element_selected
+                colors.text_accent.opacity(0.12)
             } else {
                 colors.editor_background
             })
+            .hover(|this| this.border_color(colors.border_focused))
+            .child(
+                div()
+                    .pb_2()
+                    .child(Icon::new(icon).size(IconSize::Small).color(if selected {
+                        Color::Accent
+                    } else {
+                        Color::Muted
+                    })),
+            )
             .child(Label::new(title).weight(gpui::FontWeight::SEMIBOLD))
             .child(
                 Label::new(detail)
-                    .size(LabelSize::XSmall)
+                    .size(LabelSize::Small)
                     .color(Color::Muted),
             )
             .on_click(cx.listener(move |this, _, _window, cx| {
                 this.start = start;
                 cx.notify();
             }))
+    }
+
+    /// Where the file will be written, as the "Salvar em" hint shows it.
+    fn file_label(&self, cx: &App) -> String {
+        let typed = self.name.read(cx).text(cx).trim().to_string();
+        let name = if typed.is_empty() {
+            match self.start {
+                Start::Template(index) => TEMPLATES
+                    .get(index)
+                    .map(|template| template.name.to_string())
+                    .unwrap_or_default(),
+                _ => "Nova esteira".to_string(),
+            }
+        } else {
+            typed
+        };
+        let file = format!(
+            "{}{}",
+            task_agents::command_slug(&name),
+            flows::FLOW_FILE_SUFFIX
+        );
+        if self.personal || self.project_root.is_none() {
+            let directory = flows::personal_flows_dir();
+            match directory.strip_prefix(util::paths::home_dir()) {
+                Ok(relative) => format!("~/{}/{file}", relative.display()),
+                Err(_) => directory.join(file).display().to_string(),
+            }
+        } else {
+            format!("{}/{file}", flows::PROJECT_FLOWS_DIR)
+        }
     }
 }
 
@@ -314,20 +366,15 @@ impl Render for NewFlowModal {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let viewport = window.viewport_size();
         let colors = cx.theme().colors().clone();
-        let field = |editor: &Entity<Editor>, cx: &App| {
-            div()
-                .px_2p5()
-                .py_1p5()
-                .rounded_md()
-                .border_1()
-                .border_color(cx.theme().colors().border_variant)
-                .bg(cx.theme().colors().editor_background)
-                .child(editor.clone())
+        let suggest = self.start == Start::Suggest;
+        let section = |text: &'static str| {
+            Label::new(text)
+                .size(LabelSize::XSmall)
+                .weight(gpui::FontWeight::SEMIBOLD)
+                .color(Color::Muted)
         };
-        let section =
-            |text: &'static str| Label::new(text).size(LabelSize::XSmall).color(Color::Muted);
         let where_button = |id: &'static str,
-                            label: String,
+                            label: &'static str,
                             personal: bool,
                             current: bool,
                             enabled: bool,
@@ -345,11 +392,17 @@ impl Render for NewFlowModal {
                     })),
             )
         };
-        let project_label = self
-            .project_root
-            .as_ref()
-            .map(|(name, _)| format!("No projeto · {name}"))
-            .unwrap_or_else(|| "No projeto".to_string());
+        let personal_agents = self
+            .agents
+            .iter()
+            .filter(|agent| matches!(agent.source, task_agents::TaskAgentSource::Personal))
+            .count();
+        let project_agents = self.agents.len() - personal_agents;
+        let template_names = TEMPLATES
+            .iter()
+            .map(|template| template.name)
+            .collect::<Vec<_>>()
+            .join(", ");
         let mut templates = v_flex().gap_1();
         if let Start::Template(selected) = self.start {
             for (index, template) in TEMPLATES.iter().enumerate() {
@@ -365,7 +418,7 @@ impl Render for NewFlowModal {
                         .border_color(if index == selected {
                             colors.text_accent
                         } else {
-                            colors.border
+                            colors.border_variant
                         })
                         .child(
                             Icon::new(IconName::ListTree)
@@ -375,6 +428,7 @@ impl Render for NewFlowModal {
                         .child(
                             v_flex()
                                 .flex_1()
+                                .min_w_0()
                                 .child(Label::new(template.name).size(LabelSize::Small))
                                 .child(
                                     Label::new(template.description)
@@ -389,19 +443,20 @@ impl Render for NewFlowModal {
                 );
             }
         }
+        let request_focused = self.request.focus_handle(cx).contains_focused(window, cx);
         v_flex()
             .key_context("NewFlow")
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(|this, _: &menu::Confirm, window, cx| this.create(window, cx)))
             .on_action(cx.listener(|_, _: &menu::Cancel, _, cx| cx.emit(DismissEvent)))
-            .w(px(640.).min(viewport.width - px(64.)))
+            .w(px(720.).min(viewport.width - px(64.)))
             .max_h(viewport.height - px(140.))
             .elevation_3(cx)
             .overflow_hidden()
             .child(
                 h_flex()
                     .items_start()
-                    .px_6()
+                    .px_5()
                     .pt_5()
                     .pb_4()
                     .child(
@@ -410,9 +465,10 @@ impl Render for NewFlowModal {
                             .gap_1()
                             .child(Headline::new("Nova esteira").size(HeadlineSize::Small))
                             .child(
-                                Label::new("Cada passo é um dos seus agentes, um portão seu ou um comando. Tudo editável depois.")
-                                    .size(LabelSize::Small)
-                                    .color(Color::Muted),
+                                Label::new(
+                                    "Uma lista de passos com seus agentes. Tudo é editável depois, passo a passo.",
+                                )
+                                .color(Color::Muted),
                             ),
                     )
                     .child(
@@ -428,51 +484,44 @@ impl Render for NewFlowModal {
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
-                    .px_6()
+                    .px_5()
                     .pb_5()
                     .gap_5()
-                    .child(v_flex().gap_2().child(section("NOME")).child(field(&self.name, cx)))
-                    .child(
-                        v_flex()
-                            .gap_2()
-                            .child(section("ONDE FICA"))
-                            .child(
-                                h_flex()
-                                    .p_0p5()
-                                    .gap_0p5()
-                                    .rounded_md()
-                                    .border_1()
-                                    .border_color(colors.border)
-                                    .bg(colors.editor_background)
-                                    .child(where_button("new-flow-personal", "Só para mim".to_string(), true, self.personal, true, cx))
-                                    .child(where_button("new-flow-project", project_label, false, self.personal, self.project_root.is_some(), cx)),
-                            )
-                            .child(
-                                Label::new(if self.personal {
-                                    format!("{} · {}", flow_source_label(&FlowSource::Personal), flows::personal_flows_dir().display())
-                                } else {
-                                    format!("{} no repo; vai no git e o time inteiro usa.", flows::PROJECT_FLOWS_DIR)
-                                })
-                                .size(LabelSize::XSmall)
-                                .color(Color::Muted),
-                            ),
-                    )
                     .child(
                         v_flex()
                             .gap_2()
                             .child(section("COMEÇAR DE"))
                             .child(
                                 h_flex()
+                                    .items_start()
                                     .gap_2()
-                                    .child(self.render_start("new-flow-blank", Start::Blank, "Em branco", "Você monta os passos com os seus agentes.", cx))
                                     .child(self.render_start(
-                                        "new-flow-template",
-                                        if let Start::Template(index) = self.start { Start::Template(index) } else { Start::Template(0) },
-                                        "De um modelo",
-                                        "Uma esteira pronta para ajustar.",
+                                        "new-flow-blank",
+                                        Start::Blank,
+                                        IconName::Plus,
+                                        "Em branco",
+                                        "só o pedido e um +".to_string(),
                                         cx,
                                     ))
-                                    .child(self.render_start("new-flow-suggest", Start::Suggest, "Sugerir pelo pedido", "A IA monta os passos com os seus agentes.", cx)),
+                                    .child(self.render_start(
+                                        "new-flow-template",
+                                        match self.start {
+                                            Start::Template(index) => Start::Template(index),
+                                            _ => Start::Template(0),
+                                        },
+                                        IconName::Blocks,
+                                        "De um modelo",
+                                        template_names,
+                                        cx,
+                                    ))
+                                    .child(self.render_start(
+                                        "new-flow-suggest",
+                                        Start::Suggest,
+                                        IconName::Sparkle,
+                                        "Sugerir pelo pedido",
+                                        "a IA propõe os passos com seus agentes".to_string(),
+                                        cx,
+                                    )),
                             )
                             .child(templates),
                     )
@@ -480,35 +529,139 @@ impl Render for NewFlowModal {
                         v_flex()
                             .gap_2()
                             .child(section("O QUE CONSTRUIR"))
-                            .child(field(&self.request, cx))
                             .child(
-                                Label::new(if self.start == Start::Suggest {
-                                    "Obrigatório para sugerir. Vira o exemplo da esteira."
-                                } else {
-                                    "Opcional. Vira o exemplo da esteira; muda a cada execução."
-                                })
-                                .size(LabelSize::XSmall)
-                                .color(Color::Muted),
+                                v_flex()
+                                    .px_3()
+                                    .pt_3()
+                                    .pb_2()
+                                    .gap_3()
+                                    .rounded_lg()
+                                    .border_1()
+                                    .border_color(if request_focused || suggest {
+                                        colors.text_accent
+                                    } else {
+                                        colors.border_variant
+                                    })
+                                    .bg(colors.editor_background)
+                                    .child(self.request.clone())
+                                    .child(
+                                        h_flex()
+                                            .gap_2()
+                                            .child(
+                                                Label::new(format!(
+                                                    "Usa só agentes da sua lista: {personal_agents} pessoa{}, {project_agents} do projeto",
+                                                    if personal_agents == 1 { "l" } else { "is" }
+                                                ))
+                                                .size(LabelSize::XSmall)
+                                                .color(Color::Muted),
+                                            )
+                                            .child(div().flex_1())
+                                            .when(suggest, |this| {
+                                                this.child(
+                                                    Label::new("↵ sugerir")
+                                                        .size(LabelSize::XSmall)
+                                                        .color(Color::Accent),
+                                                )
+                                            }),
+                                    ),
+                            ),
+                    )
+                    .child(
+                        h_flex()
+                            .items_start()
+                            .gap_4()
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .gap_2()
+                                    .child(section("NOME"))
+                                    .child(
+                                        div()
+                                            .px_2p5()
+                                            .py_1p5()
+                                            .rounded_md()
+                                            .border_1()
+                                            .border_color(colors.border_variant)
+                                            .bg(colors.editor_background)
+                                            .child(self.name.clone()),
+                                    ),
+                            )
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .gap_2()
+                                    .child(section("SALVAR EM"))
+                                    .child(
+                                        h_flex()
+                                            .p_0p5()
+                                            .gap_0p5()
+                                            .rounded_md()
+                                            .border_1()
+                                            .border_color(colors.border_variant)
+                                            .bg(colors.editor_background)
+                                            .child(where_button(
+                                                "new-flow-project",
+                                                "Projeto",
+                                                false,
+                                                self.personal,
+                                                self.project_root.is_some(),
+                                                cx,
+                                            ))
+                                            .child(where_button(
+                                                "new-flow-personal",
+                                                "Só para mim",
+                                                true,
+                                                self.personal,
+                                                true,
+                                                cx,
+                                            )),
+                                    )
+                                    .child(
+                                        Label::new(self.file_label(cx))
+                                            .size(LabelSize::XSmall)
+                                            .color(Color::Muted)
+                                            .buffer_font(cx)
+                                            .truncate(),
+                                    ),
                             ),
                     ),
             )
             .child(
                 h_flex()
-                    .px_6()
+                    .px_5()
                     .py_3()
                     .gap_2()
-                    .justify_end()
                     .border_t_1()
-                    .border_color(colors.border)
+                    .border_color(colors.border_variant)
+                    .child(
+                        Label::new(if suggest {
+                            "A sugestão abre no editor da esteira; nada roda até você clicar em Rodar."
+                        } else {
+                            "A esteira abre no editor; nada roda até você clicar em Rodar."
+                        })
+                        .size(LabelSize::Small)
+                        .color(Color::Muted),
+                    )
+                    .child(div().flex_1())
                     .child(
                         Button::new("new-flow-cancel", "Cancelar")
                             .style(ButtonStyle::Outlined)
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(DismissEvent))),
                     )
                     .child(
-                        Button::new("new-flow-create", "Criar esteira")
-                            .style(ButtonStyle::Filled)
-                            .on_click(cx.listener(|this, _, window, cx| this.create(window, cx))),
+                        Button::new(
+                            "new-flow-create",
+                            if suggest { "Sugerir e abrir" } else { "Criar e abrir" },
+                        )
+                        .style(ButtonStyle::Filled)
+                        .key_binding(KeyBinding::for_action_in(
+                            &menu::Confirm,
+                            &self.focus_handle,
+                            cx,
+                        ))
+                        .on_click(cx.listener(|this, _, window, cx| this.create(window, cx))),
                     ),
             )
     }
