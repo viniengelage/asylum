@@ -88,6 +88,7 @@ pub fn register_agent_toolkit(cx: &mut App) {
 }
 
 pub fn init(cx: &mut App) {
+    workspace::register_project_item::<WebPreviewView>(cx);
     cx.observe_new(|workspace: &mut Workspace, window, _cx| {
         workspace.register_action(WebPreviewView::open_action);
         workspace.register_action(WebPreviewView::open_url_action);
@@ -1948,4 +1949,67 @@ fn gpui_pixel_buffer(
     // SAFETY: the pointer is a live CVPixelBuffer owned by `pixel_buffer`, and retaining it
     // gives the returned handle its own reference.
     Some(unsafe { objc2_core_foundation::CFRetained::retain(pointer) })
+}
+
+/// A PDF opened from the project. Zed has no PDF viewer of its own, so it opens in a Browser tab,
+/// where Chromium's viewer shows it.
+pub struct PdfFile {
+    url: String,
+    project_path: project::ProjectPath,
+    entry_id: Option<project::ProjectEntryId>,
+}
+
+impl project::ProjectItem for PdfFile {
+    fn try_open(
+        project: &Entity<project::Project>,
+        path: &project::ProjectPath,
+        cx: &mut App,
+    ) -> Option<Task<anyhow::Result<Entity<Self>>>> {
+        let is_pdf = path
+            .path
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"));
+        if !is_pdf {
+            return None;
+        }
+        let abs_path = project.read(cx).absolute_path(path, cx)?;
+        let url = url::Url::from_file_path(&abs_path).ok()?.to_string();
+        let entry_id = project
+            .read(cx)
+            .entry_for_path(path, cx)
+            .map(|entry| entry.id);
+        let project_path = path.clone();
+        Some(Task::ready(Ok(cx.new(|_| PdfFile {
+            url,
+            project_path,
+            entry_id,
+        }))))
+    }
+
+    fn entry_id(&self, _cx: &App) -> Option<project::ProjectEntryId> {
+        self.entry_id
+    }
+
+    fn project_path(&self, _cx: &App) -> Option<project::ProjectPath> {
+        Some(self.project_path.clone())
+    }
+
+    fn is_dirty(&self) -> bool {
+        false
+    }
+}
+
+impl workspace::item::ProjectItem for WebPreviewView {
+    type Item = PdfFile;
+
+    fn for_project_item(
+        _project: Entity<project::Project>,
+        _pane: Option<&workspace::Pane>,
+        item: Entity<PdfFile>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let url = item.read(cx).url.clone();
+        Self::new_with_url(url, window, cx)
+    }
 }

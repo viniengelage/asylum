@@ -21179,6 +21179,7 @@ dependencies = [
  "smol",
  "task_agents",
  "ui",
+ "url",
  "util",
  "workspace",
  "zed_actions",
