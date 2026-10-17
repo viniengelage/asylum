@@ -1,6 +1,6 @@
 use super::{ThreadView, ToolCallLayout};
 use acp_thread::{ToolCall, ToolCallStatus};
-use gpui::{AnyElement, ClipboardItem, Empty, relative};
+use gpui::{AnyElement, ClipboardItem, Empty, px, relative};
 use task_agents::{
     DATABASE_QUERY_TOOL, DATABASE_WRITE_QUERY_TOOL, DatabaseConnectionInfo, DatabaseQueryResult,
     DatabaseWriteResult,
@@ -243,7 +243,7 @@ impl ThreadView {
                 self.render_write_card(entry_ix, result, sql, cx)
             }
             DatabaseCard::NotConnected { message } => {
-                self.render_not_connected_card(entry_ix, message)
+                self.render_not_connected_card(entry_ix, message, cx)
             }
         };
         v_flex()
@@ -252,10 +252,10 @@ impl ThreadView {
             })
             .mt_1()
             .mb_2()
-            .rounded_md()
+            .rounded_lg()
             .border_1()
             .border_color(self.tool_card_border_color(cx))
-            .bg(cx.theme().colors().editor_background)
+            .bg(cx.theme().colors().element_background)
             .overflow_hidden()
             .children(content)
             .into_any_element()
@@ -681,45 +681,73 @@ impl ThreadView {
         vec![header, self.render_sql_block(&sql, cx), footer]
     }
 
-    fn render_not_connected_card(&self, entry_ix: usize, message: String) -> Vec<AnyElement> {
+    fn render_not_connected_card(
+        &self,
+        entry_ix: usize,
+        message: String,
+        cx: &Context<Self>,
+    ) -> Vec<AnyElement> {
+        let accent = cx.theme().colors().border_focused;
         vec![
             h_flex()
                 .w_full()
-                .gap_2()
-                .px_2()
-                .py_1p5()
+                .gap_2p5()
+                .px_3p5()
+                .py_3p5()
+                .items_start()
                 .child(
-                    Icon::new(IconName::Power)
-                        .size(IconSize::Small)
-                        .color(Color::Muted),
+                    div().pt_0p5().child(
+                        Icon::new(IconName::Power)
+                            .size(IconSize::Small)
+                            .color(Color::Muted),
+                    ),
                 )
                 .child(
                     v_flex()
                         .flex_1()
                         .min_w_0()
-                        .child(Label::new("Sem banco para consultar").size(LabelSize::Small))
+                        .gap_1()
+                        .child(
+                            Label::new("Nenhum banco conectado")
+                                .size(LabelSize::Small)
+                                .weight(gpui::FontWeight::SEMIBOLD),
+                        )
                         .child(
                             Label::new(message)
                                 .size(LabelSize::XSmall)
                                 .color(Color::Muted),
-                        ),
-                )
-                .child(
-                    Button::new(("database-card-panel", entry_ix), "Abrir painel Banco")
-                        .label_size(LabelSize::Small)
-                        .start_icon(
-                            Icon::new(IconName::Database)
-                                .size(IconSize::XSmall)
-                                .color(Color::Accent),
                         )
-                        .on_click(|_, window, cx| {
-                            if let Some(action) = cx
-                                .build_action("database_client::ToggleFocus", None)
-                                .log_err()
-                            {
-                                window.dispatch_action(action, cx);
-                            }
-                        }),
+                        .child(
+                            div().pt_1p5().child(
+                                h_flex()
+                                    .id(("database-card-panel", entry_ix))
+                                    .h(px(22.))
+                                    .px_2()
+                                    .gap_1p5()
+                                    .rounded_sm()
+                                    .cursor_pointer()
+                                    .bg(accent.opacity(0.22))
+                                    .child(
+                                        Icon::new(IconName::Database)
+                                            .size(IconSize::XSmall)
+                                            .color(Color::Accent),
+                                    )
+                                    .child(
+                                        Label::new("Conectar no painel Banco")
+                                            .size(LabelSize::XSmall)
+                                            .weight(gpui::FontWeight::MEDIUM)
+                                            .color(Color::Accent),
+                                    )
+                                    .on_click(|_, window, cx| {
+                                        if let Some(action) = cx
+                                            .build_action("database_client::ToggleFocus", None)
+                                            .log_err()
+                                        {
+                                            window.dispatch_action(action, cx);
+                                        }
+                                    }),
+                            ),
+                        ),
                 )
                 .into_any_element(),
         ]
