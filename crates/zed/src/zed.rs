@@ -640,6 +640,8 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
         let toolbox_button = cx.new(|cx| toolbox::ToolboxButton::new(workspace, cx));
         let clickup_button = cx.new(|cx| clickup::ClickUpToolkitButton::new(workspace, cx));
         let repo_button = cx.new(|cx| repo_hosting::RepoToolkitButton::new(workspace, cx));
+        let projects_button =
+            cx.new(|cx| github_projects::ProjectsToolkitButton::new(workspace, cx));
         let api_button = cx.new(|cx| api_client::ApiToolkitButton::new(workspace, cx));
         let database_button =
             cx.new(|cx| database_client::DatabaseToolkitButton::new(workspace, cx));
@@ -671,6 +673,7 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
             status_bar.add_toolkit_item(toolbox_button, window, cx);
             status_bar.add_toolkit_item(clickup_button, window, cx);
             status_bar.add_toolkit_item(repo_button, window, cx);
+            status_bar.add_toolkit_item(projects_button, window, cx);
             status_bar.add_toolkit_item(api_button, window, cx);
             status_bar.add_toolkit_item(database_button, window, cx);
             status_bar.add_toolkit_item(elastic_button, window, cx);
@@ -6063,8 +6066,8 @@ mod tests {
                 "assistant",
                 "assistant2",
                 "auto_update",
-                "branch_picker",
                 "bedrock",
+                "branch_picker",
                 "branches",
                 "buffer_search",
                 "call_hierarchy",
@@ -6089,6 +6092,7 @@ mod tests {
                 "editor",
                 "elastic",
                 "encoding_selector",
+                "esteiras",
                 "feedback",
                 "file_finder",
                 "git",
@@ -6096,6 +6100,7 @@ mod tests {
                 "git_onboarding",
                 "git_panel",
                 "git_picker",
+                "github_projects",
                 "go_to_line",
                 "highlights_tree_view",
                 "icon_theme_selector",
@@ -6106,11 +6111,6 @@ mod tests {
                 "keymap_editor",
                 "keystroke_input",
                 "language_selector",
-                "profiles",
-                "repo_hosting",
-                "toolbox",
-                "web_preview",
-                "welcome",
                 "line_ending_selector",
                 "lsp_command_selector",
                 "lsp_tool",
@@ -6124,6 +6124,7 @@ mod tests {
                 "outline_panel",
                 "pane",
                 "picker",
+                "profiles",
                 "project_panel",
                 "project_search",
                 "project_symbols",
@@ -6131,6 +6132,7 @@ mod tests {
                 "recent_projects",
                 "remote_debug",
                 "repl",
+                "repo_hosting",
                 "search",
                 "settings_editor",
                 "settings_profile_selector",
@@ -6142,15 +6144,19 @@ mod tests {
                 "tab_switcher",
                 "tabular_data",
                 "task",
+                "task_agents",
                 "terminal",
                 "terminal_panel",
                 "text_finder",
                 "theme",
                 "theme_selector",
                 "toast",
+                "toolbox",
                 "toolchain",
                 "variable_list",
                 "vim",
+                "web_preview",
+                "welcome",
                 "which_key",
                 "window",
                 "workspace",

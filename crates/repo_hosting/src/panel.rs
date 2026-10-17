@@ -2413,28 +2413,11 @@ impl RepoPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AskPassDelegate {
-        let workspace = self.workspace.clone();
-        let window = window.window_handle();
-        AskPassDelegate::new_with_cancellation(
+        askpass_delegate(
+            self.workspace.clone(),
+            operation,
+            window,
             &mut cx.to_async(),
-            move |prompt, tx, cancellation, cx| {
-                window
-                    .update(cx, |_, window, cx| {
-                        workspace.update(cx, |workspace, cx| {
-                            workspace.toggle_modal(window, cx, |window, cx| {
-                                AskPassModal::new(
-                                    operation.into(),
-                                    prompt.into(),
-                                    tx,
-                                    cancellation,
-                                    window,
-                                    cx,
-                                )
-                            });
-                        })
-                    })
-                    .log_err();
-            },
         )
     }
 
@@ -6093,7 +6076,35 @@ impl RepoPanel {
     }
 }
 
-async fn fetch_remote(
+/// Asks for git credentials in a modal of `workspace` when fetching or pushing needs them.
+pub(crate) fn askpass_delegate(
+    workspace: WeakEntity<Workspace>,
+    operation: &'static str,
+    window: &Window,
+    cx: &mut AsyncApp,
+) -> AskPassDelegate {
+    let window = window.window_handle();
+    AskPassDelegate::new_with_cancellation(cx, move |prompt, tx, cancellation, cx| {
+        window
+            .update(cx, |_, window, cx| {
+                workspace.update(cx, |workspace, cx| {
+                    workspace.toggle_modal(window, cx, |window, cx| {
+                        AskPassModal::new(
+                            operation.into(),
+                            prompt.into(),
+                            tx,
+                            cancellation,
+                            window,
+                            cx,
+                        )
+                    });
+                })
+            })
+            .log_err();
+    })
+}
+
+pub(crate) async fn fetch_remote(
     repository: &Entity<Repository>,
     remote_name: &str,
     askpass: AskPassDelegate,

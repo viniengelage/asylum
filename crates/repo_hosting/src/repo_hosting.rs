@@ -18,6 +18,7 @@ use anyhow::Result;
 use credentials_provider::CredentialsProvider;
 use gpui::{Entity, Global, Subscription, Task, WeakEntity, actions};
 use http_client::HttpClient;
+use project::Project;
 use std::{any::TypeId, collections::HashMap, sync::Arc};
 use ui::{Tooltip, prelude::*};
 use util::ResultExt as _;
@@ -256,7 +257,7 @@ impl RepoStore {
     }
 
     /// Called when a request made with the saved token came back unauthorized.
-    pub(crate) fn mark_rejected(&mut self, hosting: api::Hosting, cx: &mut Context<Self>) {
+    pub fn mark_rejected(&mut self, hosting: api::Hosting, cx: &mut Context<Self>) {
         let connection = self.connection_mut(hosting);
         if matches!(connection, Connection::Connected(_)) {
             *connection = Connection::Rejected;
@@ -445,6 +446,48 @@ pub fn is_unauthorized(error: &anyhow::Error) -> bool {
         error.downcast_ref::<api::ApiError>(),
         Some(api::ApiError::Unauthorized { .. })
     )
+}
+
+/// The hosted repository the project's `origin` (or `upstream`) points at, the name of that
+/// remote and the checked-out branch as the remote names it.
+pub fn hosted_repository(
+    project: &Entity<Project>,
+    cx: &App,
+) -> Option<(api::RemoteRepository, String, Option<String>)> {
+    match panel::detect_target(project, cx) {
+        (
+            panel::Target::Hosted {
+                repository,
+                remote_name,
+            },
+            branch,
+        ) => Some((repository, remote_name, branch)),
+        _ => None,
+    }
+}
+
+/// Fetches `remote_name` and checks out `branch` from it, asking for credentials in
+/// `workspace` when git needs them.
+pub fn checkout_remote_branch(
+    workspace: WeakEntity<Workspace>,
+    project: &Entity<Project>,
+    remote_name: String,
+    branch: String,
+    window: &mut Window,
+    cx: &mut App,
+) -> Task<Result<()>> {
+    let Some(repository) = project.read(cx).active_repository(cx) else {
+        return Task::ready(Err(anyhow::anyhow!("o projeto não tem repositório git")));
+    };
+    let askpass = panel::askpass_delegate(workspace, "git fetch", window, &mut cx.to_async());
+    cx.spawn(async move |cx| {
+        panel::fetch_remote(&repository, &remote_name, askpass, cx).await?;
+        let switch = repository.update(cx, |repository, _| {
+            repository.change_branch(format!("{remote_name}/{branch}"))
+        });
+        switch.await??;
+        Ok(())
+    })
 }
 
 /// Whether a dock is currently showing the Repo panel.

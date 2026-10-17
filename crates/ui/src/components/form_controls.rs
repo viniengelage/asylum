@@ -120,3 +120,53 @@ pub fn segmented_control(cx: &App) -> Div {
         .border_color(colors.border)
         .bg(colors.editor_background)
 }
+
+/// Lets any of the controls above open a [`crate::PopoverMenu`], which only takes clickable,
+/// toggleable triggers.
+#[derive(IntoElement)]
+pub struct PopoverTriggerArea {
+    base: Stateful<Div>,
+    on_click: Option<Box<dyn Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static>>,
+    cursor_style: gpui::CursorStyle,
+}
+
+impl PopoverTriggerArea {
+    pub fn new(base: Stateful<Div>) -> Self {
+        Self {
+            base,
+            on_click: None,
+            cursor_style: gpui::CursorStyle::PointingHand,
+        }
+    }
+}
+
+impl Clickable for PopoverTriggerArea {
+    fn on_click(
+        mut self,
+        handler: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_click = Some(Box::new(handler));
+        self
+    }
+
+    fn cursor_style(mut self, cursor_style: gpui::CursorStyle) -> Self {
+        self.cursor_style = cursor_style;
+        self
+    }
+}
+
+impl Toggleable for PopoverTriggerArea {
+    fn toggle_state(self, _selected: bool) -> Self {
+        self
+    }
+}
+
+impl RenderOnce for PopoverTriggerArea {
+    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+        self.base
+            .cursor(self.cursor_style)
+            .when_some(self.on_click, |this, handler| {
+                this.on_click(move |event, window, cx| handler(event, window, cx))
+            })
+    }
+}

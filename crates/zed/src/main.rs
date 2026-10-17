@@ -824,6 +824,7 @@ fn main() {
         toolbox::init(cx);
         clickup::init(cx);
         repo_hosting::init(cx);
+        github_projects::init(cx);
         api_client::init(cx);
         database_client::init(cx);
         elastic::init(cx);
@@ -836,6 +837,7 @@ fn main() {
         database_client::register_agent_toolkit(cx);
         elastic::register_agent_toolkit(cx);
         repo_hosting::register_agent_toolkit(cx);
+        github_projects::register_agent_toolkit(cx);
         clickup::register_agent_toolkit(cx);
         onboarding::init(cx);
         settings_ui::init(cx);

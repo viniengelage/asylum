@@ -1210,6 +1210,14 @@
     },
   },
   {
+    "context": "ProjectBoard",
+    "use_key_equivalents": true,
+    "bindings": {
+      "cmd-n": "github_projects::NewItem",
+      "cmd-enter": "github_projects::StartItem"
+    }
+  },
+  {
     "context": "FlowView",
     "use_key_equivalents": true,
     "bindings": {
