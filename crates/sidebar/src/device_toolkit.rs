@@ -1,5 +1,5 @@
-use crate::{DevicePlatform, Sidebar};
-use android_sdk::{AndroidSdkManager, EmulatorKey, KEYCODE_HOME};
+use crate::{DeviceInstanceKind, DevicePlatform, Sidebar};
+use android_sdk::{AndroidSdkManager, AndroidSdkState, EmulatorKey, KEYCODE_HOME};
 use anyhow::{Context as _, Result, anyhow};
 use gpui::{
     AnyWindowHandle, App, AppContext as _, AsyncApp, Entity, Global, SimulatorInput,
@@ -8,12 +8,22 @@ use gpui::{
 use project::Project;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use std::fmt::Write as _;
 use std::time::Duration;
 use task_agents::{ToolAccess, Toolkit, ToolkitOutput, ToolkitTool, scale_screenshot};
+use util::ResultExt as _;
+use workspace::dock::DockPosition;
 
 const ANDROID_KEYCODE_BACK: u32 = 4;
 const SWIPE_STEPS: u32 = 12;
 const LOG_LINES_LIMIT: usize = 400;
+/// A cold boot of a simulator that was never started can take a while on first launch.
+const IOS_OPEN_TIMEOUT: Duration = Duration::from_secs(120);
+/// An emulator cold boot is slow, more so the first time an AVD starts.
+const ANDROID_OPEN_TIMEOUT: Duration = Duration::from_secs(300);
+/// Reading the Android installation from disk is quick; this only bounds a stuck scan.
+const ANDROID_DETECT_TIMEOUT: Duration = Duration::from_secs(20);
+const OPEN_POLL_INTERVAL: Duration = Duration::from_millis(500);
 
 /// Every devices sidebar (the panel and the instances opened with +), with the window it
 /// lives in, so agent tools can reach the simulator view and the emulator manager.
@@ -115,9 +125,219 @@ fn resolve_device(device: Option<&str>, cx: &App) -> Result<DeviceTarget> {
     } else {
         ios.or(android)
     };
-    target.context(
-        "Nenhum device aberto. Abra o simulador iOS ou o emulador Android no dock de Devices e tente de novo.",
-    )
+    target
+        .context("Nenhum device aberto. Veja as opções com device_list e abra um com device_open.")
+}
+
+/// A device an agent asked to see, resolved against what can be booted.
+pub(crate) enum AgentDevice {
+    Ios { udid: String },
+    Android { avd: String },
+}
+
+impl AgentDevice {
+    fn kind(&self) -> DeviceInstanceKind {
+        match self {
+            AgentDevice::Ios { .. } => DeviceInstanceKind::Ios,
+            AgentDevice::Android { .. } => DeviceInstanceKind::Android,
+        }
+    }
+}
+
+/// The Devices panel of the window showing `project`, with that window. Instances opened
+/// with + register as hosts too, but only the panel lays them out.
+fn devices_panel(
+    project: &Entity<Project>,
+    cx: &App,
+) -> Result<(Entity<Sidebar>, AnyWindowHandle)> {
+    let panels = cx
+        .try_global::<DeviceHosts>()
+        .map(|hosts| hosts.0.clone())
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|(sidebar, window)| Some((sidebar.upgrade()?, window)))
+        .filter(|(sidebar, _)| sidebar.read(cx).device_instance_host.is_none())
+        .collect::<Vec<_>>();
+    let shows_project = |sidebar: &Entity<Sidebar>| {
+        sidebar
+            .read(cx)
+            .active_workspace(cx)
+            .is_some_and(|workspace| workspace.read(cx).project() == project)
+    };
+    panels
+        .iter()
+        .find(|(sidebar, _)| shows_project(sidebar))
+        .or_else(|| panels.first())
+        .cloned()
+        .context("Esta janela não tem o dock de Devices.")
+}
+
+/// The instances the panel shows, in order, starting with the panel's own one.
+fn visible_instances(panel: &Entity<Sidebar>, cx: &App) -> Vec<Entity<Sidebar>> {
+    let sidebar = panel.read(cx);
+    (!sidebar.own_device_instance_closed)
+        .then(|| panel.clone())
+        .into_iter()
+        .chain(sidebar.device_instances.iter().cloned())
+        .collect()
+}
+
+/// The instance that shows `kind`, or the first one, which is switched to it.
+fn instance_for(
+    panel: &Entity<Sidebar>,
+    kind: DeviceInstanceKind,
+    cx: &App,
+) -> Result<Entity<Sidebar>> {
+    let instances = visible_instances(panel, cx);
+    instances
+        .iter()
+        .find(|instance| instance.read(cx).device_instance_kind() == kind)
+        .or_else(|| instances.first())
+        .cloned()
+        .context("O dock de Devices não tem nenhuma instância aberta.")
+}
+
+/// The emulator manager of the instance Android runs in, once it knows what is installed.
+async fn android_manager(
+    panel: &Entity<Sidebar>,
+    window: AnyWindowHandle,
+    cx: &mut AsyncApp,
+) -> Result<Entity<AndroidSdkManager>> {
+    let instance = cx.update(|cx| instance_for(panel, DeviceInstanceKind::Android, cx))?;
+    let manager = window.update(cx, |_, _window, cx| {
+        instance.update(cx, |instance, cx| {
+            instance.ensure_android_sdk_manager(cx);
+            instance.android_sdk_manager.clone()
+        })
+    })?;
+    let manager = manager.context("o gerenciador do emulador não foi criado")?;
+    wait_for(ANDROID_DETECT_TIMEOUT, cx, |cx| {
+        Ok((!matches!(manager.read(cx).state(), AndroidSdkState::Unknown)).then_some(()))
+    })
+    .await
+    .context("a instalação do Android não foi lida a tempo")?;
+    Ok(manager)
+}
+
+/// Polls `check` until it returns a value, fails, or `timeout` runs out.
+async fn wait_for<T>(
+    timeout: Duration,
+    cx: &mut AsyncApp,
+    mut check: impl FnMut(&App) -> Result<Option<T>>,
+) -> Result<T> {
+    let started = std::time::Instant::now();
+    loop {
+        if let Some(value) = cx.update(|cx| check(cx))? {
+            return Ok(value);
+        }
+        anyhow::ensure!(
+            started.elapsed() < timeout,
+            "tempo esgotado depois de {}s",
+            timeout.as_secs()
+        );
+        cx.background_executor().timer(OPEN_POLL_INTERVAL).await;
+    }
+}
+
+/// What the Android side can offer, or why it can't.
+fn android_unavailable_reason(state: &AndroidSdkState) -> Option<String> {
+    match state {
+        AndroidSdkState::NotInstalled | AndroidSdkState::Unknown => Some(
+            "o SDK Android não está instalado; o usuário instala pelo botão da aba Android no dock de Devices"
+                .to_string(),
+        ),
+        AndroidSdkState::Installing(_) => Some("o SDK Android ainda está sendo instalado".to_string()),
+        AndroidSdkState::Installed => Some(
+            "nenhum dispositivo virtual criado; o usuário cria um na aba Android do dock de Devices"
+                .to_string(),
+        ),
+        AndroidSdkState::Failed(_)
+        | AndroidSdkState::AvdReady
+        | AndroidSdkState::EmulatorBooting
+        | AndroidSdkState::EmulatorRunning { .. } => None,
+    }
+}
+
+/// Matches what the agent typed against the simulators and AVDs: an id first, then a name,
+/// then part of a name. "ios" and "android" stand for the device already chosen there.
+fn choose_device(
+    query: &str,
+    ios: &[crate::IosSimulatorDevice],
+    selected_udid: Option<&str>,
+    avds: &[android_sdk::AndroidAvd],
+    selected_avd: Option<&str>,
+) -> Result<AgentDevice> {
+    let query = query.trim();
+    let lowercase = query.to_lowercase();
+    let ios_device = |device: &crate::IosSimulatorDevice| AgentDevice::Ios {
+        udid: device.udid.clone(),
+    };
+    let android_device = |avd: &android_sdk::AndroidAvd| AgentDevice::Android {
+        avd: avd.name.clone(),
+    };
+
+    if matches!(
+        lowercase.as_str(),
+        "ios" | "iphone" | "simulador" | "simulator"
+    ) {
+        let device = selected_udid
+            .and_then(|udid| ios.iter().find(|device| device.udid == udid))
+            .or_else(|| crate::default_ios_device(ios))
+            .context("Nenhum simulador iOS disponível.")?;
+        return Ok(ios_device(device));
+    }
+    if matches!(lowercase.as_str(), "android" | "emulador" | "emulator") {
+        let avd = selected_avd
+            .and_then(|name| avds.iter().find(|avd| avd.name == name))
+            .or_else(|| avds.first())
+            .context("Nenhum dispositivo virtual Android disponível.")?;
+        return Ok(android_device(avd));
+    }
+
+    if let Some(device) = ios
+        .iter()
+        .find(|device| device.udid.eq_ignore_ascii_case(query))
+    {
+        return Ok(ios_device(device));
+    }
+    if let Some(avd) = avds.iter().find(|avd| avd.name == query) {
+        return Ok(android_device(avd));
+    }
+
+    let mut matches = ios
+        .iter()
+        .filter(|device| device.name.to_lowercase() == lowercase)
+        .map(ios_device)
+        .chain(
+            avds.iter()
+                .filter(|avd| avd.label().to_lowercase() == lowercase)
+                .map(android_device),
+        )
+        .collect::<Vec<_>>();
+    if matches.is_empty() {
+        matches = ios
+            .iter()
+            .filter(|device| device.name.to_lowercase().contains(&lowercase))
+            .map(ios_device)
+            .chain(
+                avds.iter()
+                    .filter(|avd| {
+                        avd.label().to_lowercase().contains(&lowercase)
+                            || avd.name.to_lowercase().contains(&lowercase)
+                    })
+                    .map(android_device),
+            )
+            .collect();
+    }
+    match matches.len() {
+        0 => anyhow::bail!(
+            "Nenhum device corresponde a \"{query}\". Veja as opções com device_list."
+        ),
+        1 => Ok(matches.remove(0)),
+        count => anyhow::bail!(
+            "{count} devices correspondem a \"{query}\". Use o id que device_list mostra."
+        ),
+    }
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -126,6 +346,16 @@ struct DeviceInput {
     /// (iOS first when both are open).
     #[serde(default)]
     device: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct ListInput {}
+
+#[derive(Deserialize, JsonSchema)]
+struct OpenInput {
+    /// The device to show: an id or name from device_list (e.g. "iPhone 16e", "Pixel 7"), or
+    /// "ios" / "android" for the one already chosen on that platform.
+    device: String,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -236,7 +466,11 @@ async fn capture(target: &DeviceTarget, cx: &mut AsyncApp) -> Result<Screenshot>
 }
 
 /// Maps a point in screenshot pixels to the fractions of the screen the simulator input wants.
-async fn ios_fractions(target: &DeviceTarget, points: &[(f64, f64)], cx: &mut AsyncApp) -> Result<Vec<(f64, f64)>> {
+async fn ios_fractions(
+    target: &DeviceTarget,
+    points: &[(f64, f64)],
+    cx: &mut AsyncApp,
+) -> Result<Vec<(f64, f64)>> {
     let screenshot = capture(target, cx).await?;
     Ok(points
         .iter()
@@ -249,14 +483,21 @@ async fn ios_fractions(target: &DeviceTarget, points: &[(f64, f64)], cx: &mut As
         .collect())
 }
 
-async fn android_native_scale(manager: &Entity<AndroidSdkManager>, cx: &mut AsyncApp) -> Result<f64> {
-    let (width, height) = cx.update(|cx| manager.read(cx).native_screen_size(cx)).await?;
+async fn android_native_scale(
+    manager: &Entity<AndroidSdkManager>,
+    cx: &mut AsyncApp,
+) -> Result<f64> {
+    let (width, height) = cx
+        .update(|cx| manager.read(cx).native_screen_size(cx))
+        .await?;
     Ok(1.0 / task_agents::screenshot_scale(width, height))
 }
 
 fn ios_view(target: &DeviceTarget) -> Result<(u64, AnyWindowHandle)> {
     match target {
-        DeviceTarget::Ios { view: Some(view), .. } => Ok(*view),
+        DeviceTarget::Ios {
+            view: Some(view), ..
+        } => Ok(*view),
         DeviceTarget::Ios { .. } => Err(anyhow!(
             "O simulador iOS precisa estar visível no dock de Devices para receber toques e teclas."
         )),
@@ -268,7 +509,9 @@ fn ios_view(target: &DeviceTarget) -> Result<(u64, AnyWindowHandle)> {
 fn send_ios_input(target: &DeviceTarget, input: SimulatorInput, cx: &mut AsyncApp) -> Result<()> {
     let (subview_id, window) = ios_view(target)?;
     window
-        .update(cx, |_, window, _cx| window.send_simulator_input(subview_id, input))
+        .update(cx, |_, window, _cx| {
+            window.send_simulator_input(subview_id, input)
+        })
         .context("a janela do simulador foi fechada")?
 }
 
@@ -305,17 +548,77 @@ async fn ios_pointer_path(
 /// macOS virtual key codes on the ANSI layout, with whether Shift is needed.
 fn mac_key_for_character(character: char) -> Option<(u16, bool)> {
     const BASE: &[(char, u16)] = &[
-        ('a', 0), ('s', 1), ('d', 2), ('f', 3), ('h', 4), ('g', 5), ('z', 6), ('x', 7),
-        ('c', 8), ('v', 9), ('b', 11), ('q', 12), ('w', 13), ('e', 14), ('r', 15), ('y', 16),
-        ('t', 17), ('1', 18), ('2', 19), ('3', 20), ('4', 21), ('6', 22), ('5', 23), ('=', 24),
-        ('9', 25), ('7', 26), ('-', 27), ('8', 28), ('0', 29), (']', 30), ('o', 31), ('u', 32),
-        ('[', 33), ('i', 34), ('p', 35), ('l', 37), ('j', 38), ('\'', 39), ('k', 40), (';', 41),
-        ('\\', 42), (',', 43), ('/', 44), ('n', 45), ('m', 46), ('.', 47), (' ', 49), ('`', 50),
+        ('a', 0),
+        ('s', 1),
+        ('d', 2),
+        ('f', 3),
+        ('h', 4),
+        ('g', 5),
+        ('z', 6),
+        ('x', 7),
+        ('c', 8),
+        ('v', 9),
+        ('b', 11),
+        ('q', 12),
+        ('w', 13),
+        ('e', 14),
+        ('r', 15),
+        ('y', 16),
+        ('t', 17),
+        ('1', 18),
+        ('2', 19),
+        ('3', 20),
+        ('4', 21),
+        ('6', 22),
+        ('5', 23),
+        ('=', 24),
+        ('9', 25),
+        ('7', 26),
+        ('-', 27),
+        ('8', 28),
+        ('0', 29),
+        (']', 30),
+        ('o', 31),
+        ('u', 32),
+        ('[', 33),
+        ('i', 34),
+        ('p', 35),
+        ('l', 37),
+        ('j', 38),
+        ('\'', 39),
+        ('k', 40),
+        (';', 41),
+        ('\\', 42),
+        (',', 43),
+        ('/', 44),
+        ('n', 45),
+        ('m', 46),
+        ('.', 47),
+        (' ', 49),
+        ('`', 50),
     ];
     const SHIFTED: &[(char, char)] = &[
-        ('!', '1'), ('@', '2'), ('#', '3'), ('$', '4'), ('%', '5'), ('^', '6'), ('&', '7'),
-        ('*', '8'), ('(', '9'), (')', '0'), ('_', '-'), ('+', '='), ('{', '['), ('}', ']'),
-        ('|', '\\'), (':', ';'), ('"', '\''), ('<', ','), ('>', '.'), ('?', '/'), ('~', '`'),
+        ('!', '1'),
+        ('@', '2'),
+        ('#', '3'),
+        ('$', '4'),
+        ('%', '5'),
+        ('^', '6'),
+        ('&', '7'),
+        ('*', '8'),
+        ('(', '9'),
+        (')', '0'),
+        ('_', '-'),
+        ('+', '='),
+        ('{', '['),
+        ('}', ']'),
+        ('|', '\\'),
+        (':', ';'),
+        ('"', '\''),
+        ('<', ','),
+        ('>', '.'),
+        ('?', '/'),
+        ('~', '`'),
     ];
     let lookup = |character: char| {
         BASE.iter()
@@ -360,7 +663,10 @@ async fn ios_key(
 
 async fn ios_type(target: &DeviceTarget, udid: &str, text: &str, cx: &mut AsyncApp) -> Result<()> {
     ios_view(target)?;
-    if text.chars().all(|character| mac_key_for_character(character).is_some()) {
+    if text
+        .chars()
+        .all(|character| mac_key_for_character(character).is_some())
+    {
         for character in text.chars() {
             if let Some((key_code, shift)) = mac_key_for_character(character) {
                 ios_key(target, key_code, &character.to_string(), shift, false, cx).await?;
@@ -390,7 +696,11 @@ fn device_input_tool<I>(
     title: &'static str,
     description: &'static str,
     access: ToolAccess,
-    run: impl AsyncFn(DeviceTarget, I, &mut AsyncApp) -> Result<ToolkitOutput> + Clone + Send + Sync + 'static,
+    run: impl AsyncFn(DeviceTarget, I, &mut AsyncApp) -> Result<ToolkitOutput>
+    + Clone
+    + Send
+    + Sync
+    + 'static,
 ) -> ToolkitTool
 where
     I: JsonSchema + serde::de::DeserializeOwned + DeviceSelector + 'static,
@@ -422,10 +732,381 @@ macro_rules! device_selector {
     };
 }
 
-device_selector!(DeviceInput, TapInput, SwipeInput, TypeInput, KeyInput, LogsInput, OpenUrlInput);
+device_selector!(
+    DeviceInput,
+    TapInput,
+    SwipeInput,
+    TypeInput,
+    KeyInput,
+    LogsInput,
+    OpenUrlInput
+);
+
+/// What the Devices dock can show: the simulators and AVDs, marked with the one on screen.
+async fn list_devices(project: Entity<Project>, cx: &mut AsyncApp) -> Result<ToolkitOutput> {
+    let (panel, window) = cx.update(|cx| devices_panel(&project, cx))?;
+    let mut text = String::new();
+
+    let shown_udids = cx.update(|cx| {
+        visible_instances(&panel, cx)
+            .into_iter()
+            .filter_map(|instance| {
+                let instance = instance.read(cx);
+                instance
+                    .ios_native_subview_udid
+                    .clone()
+                    .filter(|_| !instance.ios_native_subview_hidden)
+            })
+            .collect::<Vec<_>>()
+    });
+    writeln!(text, "## iOS (simuladores)")?;
+    match crate::list_ios_simulators().await {
+        Ok(devices) if devices.is_empty() => writeln!(text, "Nenhum simulador disponível.")?,
+        Ok(devices) => {
+            for device in devices {
+                let os_version = device
+                    .os_version
+                    .as_deref()
+                    .map(|version| format!(" ({version})"))
+                    .unwrap_or_default();
+                let on_screen = if shown_udids.contains(&device.udid) {
+                    ", na tela"
+                } else {
+                    ""
+                };
+                writeln!(
+                    text,
+                    "- {}{os_version}: {}{on_screen}. id: {}",
+                    device.name, device.state, device.udid
+                )?;
+            }
+        }
+        Err(error) => writeln!(text, "Indisponível: {error:#}")?,
+    }
+
+    writeln!(text, "\n## Android (emuladores)")?;
+    match android_manager(&panel, window, cx).await {
+        Ok(manager) => cx.update(|cx| -> Result<()> {
+            let manager = manager.read(cx);
+            if let Some(reason) = android_unavailable_reason(manager.state()) {
+                writeln!(text, "Indisponível: {reason}.")?;
+                return Ok(());
+            }
+            let running = match manager.state() {
+                AndroidSdkState::EmulatorRunning { .. } => Some("rodando, na tela"),
+                AndroidSdkState::EmulatorBooting => Some("inicializando"),
+                _ => None,
+            };
+            for avd in manager.avds() {
+                let state = running
+                    .filter(|_| manager.selected_avd() == Some(avd.name.as_str()))
+                    .unwrap_or("desligado");
+                writeln!(text, "- {}: {state}. id: {}", avd.label(), avd.name)?;
+            }
+            if let AndroidSdkState::Failed(message) = manager.state() {
+                writeln!(text, "Último erro: {message}")?;
+            }
+            Ok(())
+        })?,
+        Err(error) => writeln!(text, "Indisponível: {error:#}")?,
+    }
+    writeln!(
+        text,
+        "\nAbra um com device_open; só um emulador Android roda por vez."
+    )?;
+    Ok(ToolkitOutput::text(text))
+}
+
+/// Shows the device the agent named in the Devices dock and waits until its screen is up.
+async fn open_device(
+    project: Entity<Project>,
+    query: String,
+    cx: &mut AsyncApp,
+) -> Result<ToolkitOutput> {
+    let (panel, window) = cx.update(|cx| devices_panel(&project, cx))?;
+    let wants_android = !matches!(
+        query.trim().to_lowercase().as_str(),
+        "ios" | "iphone" | "simulador" | "simulator"
+    );
+    let wants_ios = !matches!(
+        query.trim().to_lowercase().as_str(),
+        "android" | "emulador" | "emulator"
+    );
+
+    let ios = if wants_ios {
+        crate::list_ios_simulators().await.unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let android = if wants_android {
+        android_manager(&panel, window, cx).await.ok()
+    } else {
+        None
+    };
+    let device = cx.update(|cx| {
+        let selected_udid = visible_instances(&panel, cx)
+            .iter()
+            .find_map(|instance| instance.read(cx).selected_ios_device_udid.clone());
+        let (avds, selected_avd) = match &android {
+            Some(manager) => {
+                let manager = manager.read(cx);
+                (
+                    manager.avds().to_vec(),
+                    manager.selected_avd().map(str::to_string),
+                )
+            }
+            None => (Vec::new(), None),
+        };
+        let device = choose_device(
+            &query,
+            &ios,
+            selected_udid.as_deref(),
+            &avds,
+            selected_avd.as_deref(),
+        );
+        if device.is_err()
+            && wants_android
+            && let Some(reason) = android
+                .as_ref()
+                .and_then(|manager| android_unavailable_reason(manager.read(cx).state()))
+        {
+            return device.with_context(|| format!("Android: {reason}"));
+        }
+        device
+    })?;
+
+    let instance = cx.update(|cx| instance_for(&panel, device.kind(), cx))?;
+    let workspace = cx
+        .update(|cx| panel.read(cx).active_workspace(cx))
+        .context("o dock de Devices não está em nenhum workspace")?;
+    let label = match &device {
+        AgentDevice::Ios { udid } => ios
+            .iter()
+            .find(|candidate| &candidate.udid == udid)
+            .map(|candidate| format!("iOS · {}", candidate.name))
+            .unwrap_or_else(|| format!("iOS · {udid}")),
+        AgentDevice::Android { avd } => cx.update(|cx| {
+            android
+                .as_ref()
+                .and_then(|manager| {
+                    manager
+                        .read(cx)
+                        .avds()
+                        .iter()
+                        .find(|candidate| &candidate.name == avd)
+                        .map(|candidate| format!("Android · {}", candidate.label()))
+                })
+                .unwrap_or_else(|| format!("Android · {avd}"))
+        }),
+    };
+
+    window.update(cx, |_, window, cx| {
+        workspace.update(cx, |workspace, cx| {
+            if !workspace
+                .dock_at_position(DockPosition::Devices)
+                .read(cx)
+                .is_open()
+            {
+                workspace.toggle_dock(DockPosition::Devices, window, cx);
+            }
+        });
+    })?;
+    // Opening the dock reads every instance, so the device is picked once that settled.
+    let udid = match &device {
+        AgentDevice::Ios { udid } => Some(udid.clone()),
+        AgentDevice::Android { .. } => None,
+    };
+    window.update(cx, |_, window, cx| {
+        instance.update(cx, |instance, cx| {
+            instance.open_device_for_agent(device, window, cx)
+        })
+    })?;
+
+    match udid {
+        Some(udid) => {
+            wait_for(IOS_OPEN_TIMEOUT, cx, |cx| {
+                let instance = instance.read(cx);
+                if instance.ios_failed_device_udid.as_deref() == Some(udid.as_str()) {
+                    anyhow::bail!("o simulador não conectou à tela");
+                }
+                if let Some(error) = &instance.ios_simulator_error {
+                    anyhow::bail!("{error}");
+                }
+                Ok(
+                    (instance.ios_native_subview_udid.as_deref() == Some(udid.as_str())
+                        && !instance.ios_native_subview_hidden)
+                        .then_some(()),
+                )
+            })
+            .await
+            .with_context(|| format!("{label} não abriu"))?;
+        }
+        None => {
+            let manager = cx
+                .update(|cx| instance.read(cx).android_sdk_manager.clone())
+                .context("o gerenciador do emulador sumiu")?;
+            wait_for(ANDROID_OPEN_TIMEOUT, cx, |cx| {
+                let manager = manager.read(cx);
+                match manager.state() {
+                    AndroidSdkState::Failed(message) => anyhow::bail!("{message}"),
+                    AndroidSdkState::EmulatorRunning { .. } => {
+                        Ok(manager.screen_frame().is_some().then_some(()))
+                    }
+                    _ => Ok(None),
+                }
+            })
+            .await
+            .with_context(|| format!("{label} não abriu"))?;
+        }
+    }
+
+    let mut output = ToolkitOutput::text(format!(
+        "{label} está aberto no dock de Devices. Use device_screenshot para ver a tela."
+    ));
+    // The screen comes along so the agent doesn't need another call to see it.
+    let platform = if label.starts_with("iOS") {
+        "ios"
+    } else {
+        "android"
+    };
+    let target = cx.update(|cx| resolve_device(Some(platform), cx));
+    if let Ok(target) = target
+        && let Some(screenshot) = capture(&target, cx).await.log_err()
+    {
+        output = ToolkitOutput::text(format!(
+            "{label} está aberto no dock de Devices. Tela: {}x{} px (1 px aqui = {:.2} px nativos).",
+            screenshot.width, screenshot.height, screenshot.to_native
+        ));
+        output.push_png(&screenshot.png);
+    }
+    Ok(output)
+}
+
+/// Shuts the device down and takes it off the Devices dock.
+async fn close_device(
+    project: Entity<Project>,
+    query: String,
+    cx: &mut AsyncApp,
+) -> Result<ToolkitOutput> {
+    let (panel, window) = cx.update(|cx| devices_panel(&project, cx))?;
+    let ios = crate::list_ios_simulators().await.unwrap_or_default();
+    let android = android_manager(&panel, window, cx).await.ok();
+    let (instances, device) = cx.update(|cx| {
+        let instances = visible_instances(&panel, cx);
+        let selected_udid = instances
+            .iter()
+            .find_map(|instance| instance.read(cx).selected_ios_device_udid.clone());
+        let (avds, selected_avd) = match &android {
+            Some(manager) => {
+                let manager = manager.read(cx);
+                (
+                    manager.avds().to_vec(),
+                    manager.selected_avd().map(str::to_string),
+                )
+            }
+            None => (Vec::new(), None),
+        };
+        let device = choose_device(
+            &query,
+            &ios,
+            selected_udid.as_deref(),
+            &avds,
+            selected_avd.as_deref(),
+        );
+        (instances, device)
+    });
+    match device? {
+        AgentDevice::Ios { udid } => {
+            let output = smol::process::Command::new("xcrun")
+                .args(["simctl", "shutdown", &udid])
+                .output()
+                .await
+                .context("não foi possível executar xcrun simctl shutdown")?;
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            // Shutting down a device that is already off is what was asked for.
+            anyhow::ensure!(
+                output.status.success() || stderr.contains("current state: Shutdown"),
+                "simctl shutdown falhou: {}",
+                stderr.trim()
+            );
+            window.update(cx, |_, window, cx| {
+                for instance in &instances {
+                    instance.update(cx, |instance, cx| {
+                        if instance.selected_ios_device_udid.as_deref() == Some(udid.as_str()) {
+                            // Back to the start screen, rather than reconnecting to a device
+                            // that is going down.
+                            instance.remove_ios_simulator_view(window);
+                            instance.ios_simulator_started = false;
+                            cx.notify();
+                        }
+                    });
+                }
+            })?;
+            let name = ios
+                .iter()
+                .find(|device| device.udid == udid)
+                .map_or(udid.as_str(), |device| device.name.as_str());
+            Ok(ToolkitOutput::text(format!("Desligou o simulador {name}.")))
+        }
+        AgentDevice::Android { avd } => {
+            let manager = android.context("o emulador Android não está disponível")?;
+            let stopped = cx.update(|cx| {
+                manager.update(cx, |manager, cx| {
+                    let runs_this_avd = manager.selected_avd() == Some(avd.as_str())
+                        && matches!(
+                            manager.state(),
+                            AndroidSdkState::EmulatorRunning { .. }
+                                | AndroidSdkState::EmulatorBooting
+                        );
+                    if runs_this_avd {
+                        manager.stop_emulator(cx);
+                    }
+                    runs_this_avd
+                })
+            });
+            Ok(ToolkitOutput::text(if stopped {
+                format!("Desligou o emulador {avd}.")
+            } else {
+                format!("O emulador {avd} já estava desligado.")
+            }))
+        }
+    }
+}
 
 pub fn register_toolkit(cx: &mut App) {
     let tools = vec![
+        ToolkitTool::new(
+            "device_list",
+            "Listou os devices",
+            "Lists the iOS simulators and Android emulators the Devices dock can show, with their \
+             ids and which one is on screen. Use this instead of running simctl or emulator in a \
+             terminal: devices started there don't appear in the app.",
+            ToolAccess::Read,
+            |project: Entity<Project>, _input: ListInput, cx: &mut App| {
+                cx.spawn(async move |cx| list_devices(project, cx).await)
+            },
+        ),
+        ToolkitTool::new(
+            "device_open",
+            "Abriu um device",
+            "Opens an iOS simulator or Android emulator in the Devices dock, boots it, waits until \
+             its screen is up and returns a screenshot. Name it by an id or name from device_list, \
+             or \"ios\" / \"android\". Only one Android emulator runs at a time: opening another \
+             AVD replaces it.",
+            ToolAccess::Act,
+            |project: Entity<Project>, input: OpenInput, cx: &mut App| {
+                cx.spawn(async move |cx| open_device(project, input.device, cx).await)
+            },
+        ),
+        ToolkitTool::new(
+            "device_close",
+            "Desligou um device",
+            "Shuts down an iOS simulator or the Android emulator, named like in device_open.",
+            ToolAccess::Act,
+            |project: Entity<Project>, input: OpenInput, cx: &mut App| {
+                cx.spawn(async move |cx| close_device(project, input.device, cx).await)
+            },
+        ),
         device_input_tool(
             "device_screenshot",
             "Viu a tela do device",
@@ -480,7 +1161,8 @@ pub fn register_toolkit(cx: &mut App) {
              Points are in the pixels of the latest device_screenshot.",
             ToolAccess::Act,
             async |target, input: SwipeInput, cx| {
-                let duration = Duration::from_millis(input.duration_ms.unwrap_or(300).clamp(50, 5000));
+                let duration =
+                    Duration::from_millis(input.duration_ms.unwrap_or(300).clamp(50, 5000));
                 match &target {
                     DeviceTarget::Ios { .. } => {
                         let points = (0..=SWIPE_STEPS)
@@ -499,7 +1181,8 @@ pub fn register_toolkit(cx: &mut App) {
                         let native = |value: f64| (value * to_native).round().max(0.0) as u32;
                         let from = (native(input.from_x), native(input.from_y));
                         let to = (native(input.to_x), native(input.to_y));
-                        manager.update(cx, |manager, cx| manager.send_swipe(from, to, duration, cx));
+                        manager
+                            .update(cx, |manager, cx| manager.send_swipe(from, to, duration, cx));
                         cx.background_executor().timer(duration).await;
                     }
                 }
@@ -561,14 +1244,14 @@ pub fn register_toolkit(cx: &mut App) {
                         ios_key(&target, key_code, "", false, false, cx).await?;
                     }
                     DeviceTarget::Android { manager, .. } => {
-                        let named = |w3c: &'static str, keycode: u32| EmulatorKey::Named { w3c, keycode };
+                        let named =
+                            |w3c: &'static str, keycode: u32| EmulatorKey::Named { w3c, keycode };
                         match key.as_str() {
                             "back" => manager.update(cx, |manager, cx| {
                                 manager.send_keyevent(ANDROID_KEYCODE_BACK, cx)
                             }),
-                            "home" => manager.update(cx, |manager, cx| {
-                                manager.send_keyevent(KEYCODE_HOME, cx)
-                            }),
+                            "home" => manager
+                                .update(cx, |manager, cx| manager.send_keyevent(KEYCODE_HOME, cx)),
                             other => {
                                 let key = match other {
                                     "enter" | "return" => named("Enter", 66),
@@ -586,7 +1269,10 @@ pub fn register_toolkit(cx: &mut App) {
                         }
                     }
                 }
-                Ok(ToolkitOutput::text(format!("Apertou {key} no {}.", target.label())))
+                Ok(ToolkitOutput::text(format!(
+                    "Apertou {key} no {}.",
+                    target.label()
+                )))
             },
         ),
         device_input_tool(
@@ -613,7 +1299,11 @@ pub fn register_toolkit(cx: &mut App) {
                             .await?
                     }
                 }
-                Ok(ToolkitOutput::text(format!("Abriu {} no {}.", input.url, target.label())))
+                Ok(ToolkitOutput::text(format!(
+                    "Abriu {} no {}.",
+                    input.url,
+                    target.label()
+                )))
             },
         ),
         device_input_tool(
@@ -676,7 +1366,8 @@ pub fn register_toolkit(cx: &mut App) {
         Toolkit {
             id: "devices".into(),
             name: "Dispositivos".into(),
-            description: "Simulador iOS e emulador Android do dock de Devices".into(),
+            description: "Abre e controla o simulador iOS e o emulador Android do dock de Devices"
+                .into(),
             icon: "smartphone".into(),
             tools,
         },
@@ -703,5 +1394,70 @@ mod tests {
         assert!(wants(Some("iPhone 16e"), DevicePlatform::Ios));
         assert!(!wants(Some("android"), DevicePlatform::Ios));
         assert!(wants(Some("Pixel 9"), DevicePlatform::Android));
+    }
+
+    fn simulator(name: &str, udid: &str, state: &str) -> crate::IosSimulatorDevice {
+        crate::IosSimulatorDevice {
+            name: name.to_string(),
+            udid: udid.to_string(),
+            state: state.to_string(),
+            os_version: None,
+        }
+    }
+
+    fn avd(name: &str, device_profile: &str) -> android_sdk::AndroidAvd {
+        android_sdk::AndroidAvd {
+            name: name.to_string(),
+            device_profile: Some(device_profile.to_string()),
+        }
+    }
+
+    fn chosen(device: Result<AgentDevice>) -> String {
+        match device {
+            Ok(AgentDevice::Ios { udid }) => format!("ios:{udid}"),
+            Ok(AgentDevice::Android { avd }) => format!("android:{avd}"),
+            Err(error) => format!("error:{error}"),
+        }
+    }
+
+    #[test]
+    fn test_choose_device() {
+        let ios = [
+            simulator("iPhone 16e", "AAA", "Shutdown"),
+            simulator("iPhone 16 Pro", "BBB", "Booted"),
+            simulator("iPad Air", "CCC", "Shutdown"),
+        ];
+        let avds = [avd("zed-pixel_7", "pixel_7"), avd("zed-pixel_9", "pixel_9")];
+        let choose = |query: &str| chosen(choose_device(query, &ios, None, &avds, None));
+
+        // A platform alone stands for the device the dock would pick.
+        assert_eq!(choose("ios"), "ios:BBB");
+        assert_eq!(choose("Android"), "android:zed-pixel_7");
+        assert_eq!(
+            chosen(choose_device(
+                "android",
+                &ios,
+                None,
+                &avds,
+                Some("zed-pixel_9")
+            )),
+            "android:zed-pixel_9"
+        );
+        assert_eq!(
+            chosen(choose_device("ios", &ios, Some("CCC"), &avds, None)),
+            "ios:CCC"
+        );
+
+        // Ids, then exact names, then parts of names.
+        assert_eq!(choose("aaa"), "ios:AAA");
+        assert_eq!(choose("zed-pixel_9"), "android:zed-pixel_9");
+        assert_eq!(choose("iphone 16e"), "ios:AAA");
+        assert_eq!(choose("iPad"), "ios:CCC");
+        assert_eq!(choose("pixel_7"), "android:zed-pixel_7");
+
+        assert_eq!(choose("iPhone"), "ios:BBB");
+        assert!(choose("iPhone 16").starts_with("error:2 devices"));
+        assert!(choose("Galaxy").starts_with("error:Nenhum device"));
+        assert!(chosen(choose_device("android", &ios, None, &[], None)).starts_with("error:"));
     }
 }

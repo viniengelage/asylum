@@ -93,35 +93,87 @@ pub fn init(cx: &mut App) {
         workspace.register_action(WebPreviewView::open_url_action);
 
         if let Some(window) = window {
-            let button = _cx.new(|_cx| WebPreviewButton);
+            let button = _cx.new(|cx| WebPreviewToolkitButton::new(workspace, cx));
             workspace.status_bar().update(_cx, |status_bar, cx| {
-                status_bar.add_right_item(button, window, cx);
+                status_bar.add_toolkit_item(button, window, cx);
             });
         }
     })
     .detach();
 }
 
-struct WebPreviewButton;
+/// The Browser button in the status bar's toolkit group, lit while a page is the active tab.
+struct WebPreviewToolkitButton {
+    workspace: gpui::WeakEntity<Workspace>,
+    browser_is_active: bool,
+}
 
-impl Render for WebPreviewButton {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        IconButton::new("web-preview-button", IconName::ToolWeb)
-            .icon_size(IconSize::Small)
-            .tooltip(Tooltip::text("Open Web Preview"))
-            .on_click(|_, window, cx| {
-                window.dispatch_action(Box::new(OpenWebPreview), cx);
-            })
+impl WebPreviewToolkitButton {
+    fn new(workspace: &Workspace, _cx: &mut Context<Self>) -> Self {
+        Self {
+            workspace: workspace.weak_handle(),
+            browser_is_active: false,
+        }
+    }
+
+    /// Brings the most recent page forward, or opens one when there is none. With a page
+    /// already in front, another tab is what the click can still be asking for.
+    fn activate_or_open(
+        workspace: &mut Workspace,
+        browser_is_active: bool,
+        window: &mut Window,
+        cx: &mut Context<Workspace>,
+    ) {
+        if !browser_is_active
+            && let Some(view) = workspace.items_of_type::<WebPreviewView>(cx).last()
+        {
+            workspace.activate_item(&view, true, true, window, cx);
+            return;
+        }
+        WebPreviewView::open_action(workspace, &OpenWebPreview, window, cx);
     }
 }
 
-impl StatusItemView for WebPreviewButton {
+impl Render for WebPreviewToolkitButton {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        let workspace = self.workspace.clone();
+        let browser_is_active = self.browser_is_active;
+        let tooltip = if browser_is_active {
+            "Nova aba do Browser"
+        } else {
+            "Browser"
+        };
+        workspace::dock::StatusBarButton::new(
+            "toolkit-browser",
+            IconName::ToolWeb,
+            browser_is_active,
+        )
+        .tab_index(0isize)
+        .aria_label("Browser")
+        .tooltip(move |_window, cx| Tooltip::simple(tooltip, cx))
+        .on_click(move |_, window, cx| {
+            workspace
+                .update(cx, |workspace, cx| {
+                    Self::activate_or_open(workspace, browser_is_active, window, cx)
+                })
+                .ok();
+        })
+    }
+}
+
+impl StatusItemView for WebPreviewToolkitButton {
     fn set_active_pane_item(
         &mut self,
-        _active_pane_item: Option<&dyn ItemHandle>,
+        active_pane_item: Option<&dyn ItemHandle>,
         _window: &mut Window,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) {
+        let browser_is_active =
+            active_pane_item.is_some_and(|item| item.downcast::<WebPreviewView>().is_some());
+        if browser_is_active != self.browser_is_active {
+            self.browser_is_active = browser_is_active;
+            cx.notify();
+        }
     }
 
     fn hide_setting(&self, _cx: &App) -> Option<workspace::HideStatusItem> {

@@ -255,6 +255,22 @@
     "context": "AgentPanel",
     "use_key_equivalents": true,
     "bindings": {
+      "cmd-t": "agent::NewAgentThreadTab",
+    },
+  },
+  {
+    "context": "AgentPanel && agent_tabs",
+    "use_key_equivalents": true,
+    "bindings": {
+      "cmd-w": "agent::CloseAgentThreadTab",
+      "cmd-shift-]": "agent::ActivateNextAgentThreadTab",
+      "cmd-shift-[": "agent::ActivatePreviousAgentThreadTab",
+    },
+  },
+  {
+    "context": "AgentPanel",
+    "use_key_equivalents": true,
+    "bindings": {
       "cmd-n": "agent::NewThread",
       "cmd-alt-c": "agent::OpenSettings",
       "cmd-alt-m": "agent::ToggleOptionsMenu",
@@ -1801,6 +1817,21 @@
     "bindings": {
       "tab": "git_graph::FocusNextTabStop",
       "shift-tab": "git_graph::FocusPreviousTabStop",
+    },
+  },
+  {
+    "context": "NewTaskAgent",
+    "use_key_equivalents": true,
+    "bindings": {
+      "cmd-enter": "task_agents::CreateSuggestedAgent",
+    },
+  },
+  {
+    "context": "NewTaskAgent > Editor",
+    "use_key_equivalents": true,
+    "bindings": {
+      "cmd-enter": "task_agents::SuggestAgent",
+      "cmd-shift-enter": "task_agents::CreateSuggestedAgent",
     },
   },
   {

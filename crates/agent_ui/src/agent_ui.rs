@@ -488,6 +488,12 @@ pub struct NewExternalAgentThread {
     agent: AgentId,
 }
 
+impl NewExternalAgentThread {
+    pub fn new(agent: AgentId) -> Self {
+        Self { agent }
+    }
+}
+
 fn deserialize_external_agent_id<'de, D>(deserializer: D) -> Result<AgentId, D::Error>
 where
     D: serde::Deserializer<'de>,

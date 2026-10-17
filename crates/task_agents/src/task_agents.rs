@@ -221,7 +221,9 @@ impl TaskAgent {
     }
 
     pub fn subagent_model_reference(&self) -> Option<ModelReference> {
-        self.subagent_model.as_deref().and_then(ModelReference::parse)
+        self.subagent_model
+            .as_deref()
+            .and_then(ModelReference::parse)
     }
 
     /// Whether the agent turns a tool on or off, given which toolkit the tool belongs to.
@@ -492,6 +494,17 @@ pub async fn load_task_agents(
         }
     }
     (agents, errors)
+}
+
+/// Bumped whenever an agent file is created, saved or deleted from the app, so views that list
+/// agents (the Agentes tab, the threads sidebar) reload without watching the folders.
+#[derive(Default)]
+pub struct TaskAgentsRevision(pub usize);
+
+impl gpui::Global for TaskAgentsRevision {}
+
+pub fn notify_task_agents_changed(cx: &mut gpui::App) {
+    cx.default_global::<TaskAgentsRevision>().0 += 1;
 }
 
 #[cfg(test)]

@@ -1,6 +1,8 @@
 //! The Agentes tab: the task agents of the project and of the user, each an `.md` file, with a
 //! form for its command, profile, model, toolkits and per-tool permissions, and its instructions.
 
+mod new_agent_modal;
+
 use crate::{AgentInitialContent, AgentPanel, AgentThreadSource};
 use agent::AgentTool as _;
 use agent_client_protocol::schema::v2 as acp;
@@ -8,21 +10,18 @@ use agent_settings::{AgentProfile, AgentSettings};
 use anyhow::Result;
 use editor::Editor;
 use fs::Fs;
-use futures::StreamExt as _;
 use gpui::{
     App, Context, Entity, EventEmitter, FocusHandle, Focusable, Subscription, Task, WeakEntity,
     Window, actions,
 };
-use language_model::{
-    CompletionIntent, LanguageModelRegistry, LanguageModelRequest, LanguageModelRequestMessage,
-    Role,
-};
+use language_model::LanguageModelRegistry;
+use new_agent_modal::NewAgentModal;
 use project::Project;
 use settings::{
     LanguageModelProviderSetting, LanguageModelSelection, Settings as _, SettingsStore,
     update_settings_file,
 };
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 use task_agents::{
@@ -253,7 +252,7 @@ const TEMPLATES: &[Template] = &[
             ("browser", PermissionMode::Allow),
             ("api_send", PermissionMode::Confirm),
         ],
-        instructions: "Você testa o app como uma pessoa usaria.\n\n1. Tire `device_screenshot` para ver onde o app está.\n2. Percorra o fluxo pedido com `device_tap`, `device_type` e `device_swipe`, tirando uma captura depois de cada passo.\n3. Quando uma tela depender do backend, confira com `api_send` ou `database_query` se os dados batem.\n4. Leia `device_logs` quando algo der errado.\n\nNo fim, faça um relatório: os passos, o que funcionou, e cada bug com como reproduzir, o esperado e o que aconteceu.",
+        instructions: "Você testa o app como uma pessoa usaria.\n\n1. Se nenhum device estiver aberto, veja as opções com `device_list` e abra o do teste com `device_open`, que já devolve a tela; senão tire `device_screenshot` para ver onde o app está.\n2. Percorra o fluxo pedido com `device_tap`, `device_type` e `device_swipe`, tirando uma captura depois de cada passo.\n3. Quando uma tela depender do backend, confira com `api_send` ou `database_query` se os dados batem.\n4. Leia `device_logs` quando algo der errado.\n\nNo fim, faça um relatório: os passos, o que funcionou, e cada bug com como reproduzir, o esperado e o que aconteceu.",
     },
     Template {
         name: "Escrever testes",
@@ -266,6 +265,51 @@ const TEMPLATES: &[Template] = &[
         instructions: "Você escreve testes automatizados.\n\n1. Descubra o framework de testes do projeto e o padrão dos testes existentes.\n2. Cubra o caminho feliz, os casos de borda e os erros do código pedido.\n3. Rode os testes e corrija até passarem, sem mudar o comportamento do código testado sem avisar.",
     },
 ];
+
+/// The agent a template starts, or a blank one. Where it is saved is decided on creation.
+fn template_agent(template: Option<&Template>) -> TaskAgent {
+    let (name, command) = match template {
+        Some(template) => (template.name.to_string(), template.command.to_string()),
+        None => ("Novo agente".to_string(), "novo-agente".to_string()),
+    };
+    TaskAgent {
+        id: command.clone(),
+        name,
+        command,
+        description: template
+            .map(|template| template.description.to_string())
+            .unwrap_or_default(),
+        profile: template.map(|template| template.profile.to_string()),
+        model: None,
+        subagent_model: None,
+        toolkits: template
+            .map(|template| template.toolkits.iter().map(|id| id.to_string()).collect())
+            .unwrap_or_default(),
+        tools: Default::default(),
+        permissions: template
+            .map(|template| {
+                template
+                    .permissions
+                    .iter()
+                    .map(|(name, mode)| {
+                        (
+                            name.to_string(),
+                            ToolPermissionRules {
+                                default: Some(*mode),
+                                ..Default::default()
+                            },
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        instructions: template
+            .map(|template| template.instructions.to_string())
+            .unwrap_or_else(|| "Descreva aqui o que o agente faz, passo a passo.".to_string()),
+        source: TaskAgentSource::Personal,
+        file_path: PathBuf::new(),
+    }
+}
 
 /// How many times the model may fix its own file before what it wrote is saved as is.
 const MAX_AUTHORING_REPAIRS: usize = 2;
@@ -322,20 +366,6 @@ struct Draft {
     instructions: Entity<Editor>,
 }
 
-/// The "Criar com IA" form: what the agent should do and whatever context helps, turned into
-/// an agent file by the default model.
-struct AgentGenerator {
-    description: Entity<Editor>,
-    context: Entity<Editor>,
-    personal: bool,
-    running: bool,
-    /// The model's latest answer, streamed as it arrives.
-    output: String,
-    progress: Option<SharedString>,
-    error: Option<SharedString>,
-    _task: Task<()>,
-}
-
 pub struct TaskAgentsView {
     project: Entity<Project>,
     workspace: WeakEntity<Workspace>,
@@ -348,7 +378,7 @@ pub struct TaskAgentsView {
     /// build the editors.
     pending_selection: Option<usize>,
     draft: Option<Draft>,
-    generator: Option<AgentGenerator>,
+    search: Entity<Editor>,
     status: Option<SharedString>,
     _load_task: Task<()>,
     _subscriptions: Vec<Subscription>,
@@ -358,10 +388,15 @@ impl TaskAgentsView {
     fn new(
         project: Entity<Project>,
         workspace: WeakEntity<Workspace>,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let fs = project.read(cx).fs().clone();
+        let search = cx.new(|cx| {
+            let mut editor = Editor::single_line(window, cx);
+            editor.set_placeholder_text("Buscar agentes…", window, cx);
+            editor
+        });
         let mut this = Self {
             project,
             workspace,
@@ -372,7 +407,7 @@ impl TaskAgentsView {
             selected: None,
             pending_selection: None,
             draft: None,
-            generator: None,
+            search: search.clone(),
             status: None,
             _load_task: Task::ready(()),
             _subscriptions: vec![
@@ -381,6 +416,11 @@ impl TaskAgentsView {
                     |_, _, _: &language_model::Event, cx| cx.notify(),
                 ),
                 cx.observe_global::<SettingsStore>(|_, cx| cx.notify()),
+                cx.subscribe(&search, |_, _, event: &editor::EditorEvent, cx| {
+                    if matches!(event, editor::EditorEvent::BufferEdited) {
+                        cx.notify();
+                    }
+                }),
             ],
         };
         this.reload(None, cx);
@@ -469,7 +509,6 @@ impl TaskAgentsView {
             })
         };
         self.selected = Some(index);
-        self.generator = None;
         self.draft = Some(Draft {
             agent,
             name,
@@ -550,6 +589,7 @@ impl TaskAgentsView {
     /// The composer's slash menu comes from the native agent, which rereads the files when its
     /// project context refreshes; personal agents live outside the project, so ask for it.
     fn refresh_agent_commands(&self, cx: &mut App) {
+        task_agents::notify_task_agents_changed(cx);
         let Some(workspace) = self.workspace.upgrade() else {
             return;
         };
@@ -576,18 +616,23 @@ impl TaskAgentsView {
         path
     }
 
-    fn create_from_template(
+    /// Writes a new agent file for `agent`, in the project or with the user's agents, and
+    /// selects it. With `run_after`, a thread with its /command opens once the file is written.
+    fn create_agent(
         &mut self,
-        template: Option<&Template>,
+        mut agent: TaskAgent,
         personal: bool,
+        generated: bool,
+        run_after: bool,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (name, command) = match template {
-            Some(template) => (template.name.to_string(), template.command.to_string()),
-            None => ("Novo agente".to_string(), "novo-agente".to_string()),
-        };
-        let path = self.new_agent_path(&command, personal, cx);
-        let source = if path.starts_with(personal_agents_dir()) {
+        let path = self.new_agent_path(&agent.command, personal, cx);
+        agent.id = path
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+            .unwrap_or_else(|| agent.command.clone());
+        agent.source = if path.starts_with(personal_agents_dir()) {
             TaskAgentSource::Personal
         } else {
             TaskAgentSource::Project {
@@ -598,45 +643,7 @@ impl TaskAgentsView {
                     .unwrap_or_else(|| "projeto".into()),
             }
         };
-        let agent = TaskAgent {
-            id: path
-                .file_stem()
-                .map(|stem| stem.to_string_lossy().into_owned())
-                .unwrap_or_else(|| command.clone()),
-            name,
-            command,
-            description: template
-                .map(|t| t.description.to_string())
-                .unwrap_or_default(),
-            profile: template.map(|t| t.profile.to_string()),
-            model: None,
-            subagent_model: None,
-            toolkits: template
-                .map(|t| t.toolkits.iter().map(|id| id.to_string()).collect())
-                .unwrap_or_default(),
-            tools: Default::default(),
-            permissions: template
-                .map(|t| {
-                    t.permissions
-                        .iter()
-                        .map(|(name, mode)| {
-                            (
-                                name.to_string(),
-                                ToolPermissionRules {
-                                    default: Some(*mode),
-                                    ..Default::default()
-                                },
-                            )
-                        })
-                        .collect()
-                })
-                .unwrap_or_default(),
-            instructions: template
-                .map(|t| t.instructions.to_string())
-                .unwrap_or_else(|| "Descreva aqui o que o agente faz, passo a passo.".to_string()),
-            source,
-            file_path: path.clone(),
-        };
+        agent.file_path = path.clone();
         let markdown = match agent.to_markdown() {
             Ok(markdown) => markdown,
             Err(error) => {
@@ -646,7 +653,8 @@ impl TaskAgentsView {
             }
         };
         let fs = self.fs.clone();
-        cx.spawn(async move |this, cx| {
+        let command = agent.command;
+        cx.spawn_in(window, async move |this, cx| {
             let result: Result<()> = async {
                 if let Some(parent) = path.parent() {
                     fs.create_dir(parent).await?;
@@ -654,57 +662,44 @@ impl TaskAgentsView {
                 fs.atomic_write(path.clone(), markdown).await
             }
             .await;
-            this.update(cx, |this, cx| {
-                match result {
-                    Ok(()) => {
-                        this.status = Some(format!("Criado em {}", path.display()).into());
-                        this.refresh_agent_commands(cx);
-                        this.reload(Some(path), cx);
+            this.update_in(cx, |this, window, cx| {
+                let created = result.is_ok();
+                this.status = Some(match result {
+                    Ok(()) if generated => {
+                        format!("Criado com IA em {}. Revise antes de usar.", path.display()).into()
                     }
-                    Err(error) => {
-                        this.status = Some(format!("Não foi possível criar: {error}").into());
-                    }
+                    Ok(()) => format!("Criado em {}", path.display()).into(),
+                    Err(error) => format!("Não foi possível criar: {error}").into(),
+                });
+                this.refresh_agent_commands(cx);
+                this.reload(Some(path), cx);
+                if created && run_after {
+                    this.run_command(command, window, cx);
                 }
-                cx.notify();
             })
             .log_err();
         })
         .detach();
     }
 
-    fn open_generator(&mut self, personal: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let description = cx.new(|cx| {
-            let mut editor = Editor::auto_height(2, 6, window, cx);
-            editor.set_placeholder_text(
-                "Ex.: revisa o PR do branch contra a tarefa do ClickUp e aponta o que falta",
-                window,
-                cx,
-            );
-            editor.set_soft_wrap();
-            editor
+    fn open_new_agent_modal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(workspace) = self.workspace.upgrade() else {
+            return;
+        };
+        let view = cx.entity().downgrade();
+        let catalog = Arc::new(self.authoring_catalog(cx));
+        let imported = self
+            .agents
+            .iter()
+            .filter(|agent| matches!(agent.source, TaskAgentSource::Imported { .. }))
+            .cloned()
+            .collect::<Vec<_>>();
+        let personal = self.worktree_roots(cx).is_empty();
+        workspace.update(cx, |workspace, cx| {
+            workspace.toggle_modal(window, cx, |window, cx| {
+                NewAgentModal::new(view, catalog, imported, personal, window, cx)
+            });
         });
-        let context = cx.new(|cx| {
-            let mut editor = Editor::auto_height(8, 24, window, cx);
-            editor.set_placeholder_text(
-                "Caminhos, convenções do time, como validar, o que nunca fazer, links… Tudo o que você diria a alguém novo fazendo essa tarefa.",
-                window,
-                cx,
-            );
-            editor.set_soft_wrap();
-            editor
-        });
-        window.focus(&description.focus_handle(cx), cx);
-        self.generator = Some(AgentGenerator {
-            description,
-            context,
-            personal,
-            running: false,
-            output: String::new(),
-            progress: None,
-            error: None,
-            _task: Task::ready(()),
-        });
-        cx.notify();
     }
 
     fn authoring_catalog(&self, cx: &App) -> AuthoringCatalog {
@@ -757,213 +752,6 @@ impl TaskAgentsView {
         }
     }
 
-    fn generate(&mut self, cx: &mut Context<Self>) {
-        let Some(generator) = self.generator.as_ref() else {
-            return;
-        };
-        if generator.running {
-            return;
-        }
-        let description = generator.description.read(cx).text(cx);
-        let context = generator.context.read(cx).text(cx);
-        let personal = generator.personal;
-        let error = if description.trim().is_empty() {
-            Some("Diga o que o agente deve fazer.")
-        } else {
-            None
-        };
-        let registry = LanguageModelRegistry::read_global(cx);
-        let model = registry.default_model().and_then(|model| {
-            registry
-                .provider_for_model(&model)
-                .log_err()
-                .map(|provider| (model, provider))
-        });
-        let error = error.or(model
-            .is_none()
-            .then_some("Escolha um modelo no painel do Agent para gerar o agente."));
-        if let Some(error) = error {
-            if let Some(generator) = self.generator.as_mut() {
-                generator.error = Some(error.into());
-            }
-            cx.notify();
-            return;
-        }
-        let Some((model, provider)) = model else {
-            return;
-        };
-
-        let catalog = self.authoring_catalog(cx);
-        let mut messages = vec![
-            LanguageModelRequestMessage {
-                role: Role::System,
-                content: vec![task_agents::authoring_system_prompt(&catalog).into()],
-                cache: false,
-                reasoning_details: None,
-            },
-            LanguageModelRequestMessage {
-                role: Role::User,
-                content: vec![task_agents::authoring_user_prompt(&description, &context).into()],
-                cache: false,
-                reasoning_details: None,
-            },
-        ];
-        let task = cx.spawn(async move |this, cx| {
-            let mut attempt = 0;
-            let result: Result<TaskAgent> = async {
-                loop {
-                    let request = LanguageModelRequest {
-                        intent: Some(CompletionIntent::CreateFile),
-                        messages: messages.clone(),
-                        ..Default::default()
-                    };
-                    let mut response = provider.stream_completion_text(&model, request, cx).await?;
-                    let mut text = String::new();
-                    while let Some(chunk) = response.stream.next().await {
-                        text.push_str(&chunk?);
-                        this.update(cx, |this, cx| {
-                            if let Some(generator) = this.generator.as_mut() {
-                                generator.output = text.clone();
-                            }
-                            cx.notify();
-                        })?;
-                    }
-
-                    let markdown = task_agents::extract_agent_markdown(&text);
-                    let problems = match task_agents::parse_task_agent(
-                        Path::new("gerado.md"),
-                        &markdown,
-                        TaskAgentSource::Personal,
-                    ) {
-                        Ok(mut agent) => {
-                            let problems = task_agents::review_generated_agent(&agent, &catalog);
-                            if problems.is_empty() || attempt >= MAX_AUTHORING_REPAIRS {
-                                task_agents::drop_unknown_references(&mut agent, &catalog);
-                                return Ok(agent);
-                            }
-                            problems
-                        }
-                        Err(error) if attempt < MAX_AUTHORING_REPAIRS => {
-                            vec![format!("o arquivo não abre: {error:#}")]
-                        }
-                        Err(error) => return Err(error),
-                    };
-                    attempt += 1;
-                    this.update(cx, |this, cx| {
-                        if let Some(generator) = this.generator.as_mut() {
-                            generator.progress =
-                                Some(format!("Corrigindo: {}", problems.join("; ")).into());
-                        }
-                        cx.notify();
-                    })?;
-                    messages.push(LanguageModelRequestMessage {
-                        role: Role::Assistant,
-                        content: vec![text.into()],
-                        cache: false,
-                        reasoning_details: None,
-                    });
-                    messages.push(LanguageModelRequestMessage {
-                        role: Role::User,
-                        content: vec![task_agents::authoring_repair_prompt(&problems).into()],
-                        cache: false,
-                        reasoning_details: None,
-                    });
-                }
-            }
-            .await;
-            this.update(cx, |this, cx| match result {
-                Ok(agent) => this.save_generated(agent, personal, cx),
-                Err(error) => {
-                    if let Some(generator) = this.generator.as_mut() {
-                        generator.running = false;
-                        generator.progress = None;
-                        generator.error =
-                            Some(format!("Não foi possível gerar o agente: {error:#}").into());
-                    }
-                    cx.notify();
-                }
-            })
-            .log_err();
-        });
-        if let Some(generator) = self.generator.as_mut() {
-            generator.running = true;
-            generator.output.clear();
-            generator.progress = Some("Escrevendo o agente…".into());
-            generator.error = None;
-            generator._task = task;
-        }
-        cx.notify();
-    }
-
-    fn save_generated(&mut self, mut agent: TaskAgent, personal: bool, cx: &mut Context<Self>) {
-        let path = self.new_agent_path(&agent.command, personal, cx);
-        agent.id = path
-            .file_stem()
-            .map(|stem| stem.to_string_lossy().into_owned())
-            .unwrap_or_else(|| agent.command.clone());
-        agent.source = if path.starts_with(personal_agents_dir()) {
-            TaskAgentSource::Personal
-        } else {
-            TaskAgentSource::Project {
-                worktree_root_name: self
-                    .worktree_roots(cx)
-                    .first()
-                    .map(|(name, _)| name.clone())
-                    .unwrap_or_else(|| "projeto".into()),
-            }
-        };
-        agent.file_path = path.clone();
-        let markdown = match agent.to_markdown() {
-            Ok(markdown) => markdown,
-            Err(error) => {
-                if let Some(generator) = self.generator.as_mut() {
-                    generator.running = false;
-                    generator.error = Some(format!("Não foi possível salvar: {error}").into());
-                }
-                cx.notify();
-                return;
-            }
-        };
-        let fs = self.fs.clone();
-        cx.spawn(async move |this, cx| {
-            let result: Result<()> = async {
-                if let Some(parent) = path.parent() {
-                    fs.create_dir(parent).await?;
-                }
-                fs.atomic_write(path.clone(), markdown).await
-            }
-            .await;
-            this.update(cx, |this, cx| {
-                match result {
-                    Ok(()) => {
-                        this.generator = None;
-                        this.status = Some(
-                            format!("Criado com IA em {}. Revise antes de usar.", path.display())
-                                .into(),
-                        );
-                        this.refresh_agent_commands(cx);
-                        this.reload(Some(path), cx);
-                    }
-                    Err(error) => {
-                        if let Some(generator) = this.generator.as_mut() {
-                            generator.running = false;
-                            generator.error =
-                                Some(format!("Não foi possível salvar: {error}").into());
-                        }
-                    }
-                }
-                cx.notify();
-            })
-            .log_err();
-        })
-        .detach();
-    }
-
-    fn close_generator(&mut self, cx: &mut Context<Self>) {
-        self.generator = None;
-        cx.notify();
-    }
-
     fn delete_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(agent) = self.draft.as_ref().map(|draft| draft.agent.clone()) else {
             return;
@@ -1006,6 +794,10 @@ impl TaskAgentsView {
         let Some(command) = self.draft.as_ref().map(|draft| draft.agent.command.clone()) else {
             return;
         };
+        self.run_command(command, window, cx);
+    }
+
+    fn run_command(&self, command: String, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(workspace) = self.workspace.upgrade() {
             workspace.update(cx, |workspace, cx| {
                 run_task_agent(
@@ -1129,8 +921,16 @@ impl TaskAgentsView {
                 matches!(source, TaskAgentSource::Imported { .. })
             }),
         ];
+        let query = self.search.read(cx).text(cx).trim().to_lowercase();
+        let matches = |agent: &TaskAgent| {
+            query.is_empty()
+                || agent.name.to_lowercase().contains(&query)
+                || agent.command.to_lowercase().contains(&query)
+                || agent.description.to_lowercase().contains(&query)
+        };
         let mut list = v_flex()
             .id("task-agents-list")
+            .size_full()
             .gap_1()
             .p_2()
             .overflow_y_scroll();
@@ -1139,7 +939,7 @@ impl TaskAgentsView {
                 .agents
                 .iter()
                 .enumerate()
-                .filter(|(_, agent)| belongs(&agent.source))
+                .filter(|(_, agent)| belongs(&agent.source) && matches(agent))
                 .collect::<Vec<_>>();
             if entries.is_empty() {
                 continue;
@@ -1216,74 +1016,6 @@ impl TaskAgentsView {
             );
         }
         list
-    }
-
-    fn render_new_agent_menu(
-        &self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let view = cx.entity().downgrade();
-        let menu = ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
-            menu = menu.header("No projeto");
-            for index in 0..TEMPLATES.len() {
-                let view = view.clone();
-                menu = menu.custom_entry(
-                    move |_window, _cx| {
-                        let template = &TEMPLATES[index];
-                        h_flex()
-                            .gap_2()
-                            .child(
-                                Icon::new(template.icon)
-                                    .size(IconSize::Small)
-                                    .color(Color::Muted),
-                            )
-                            .child(Label::new(template.name))
-                            .child(
-                                Label::new(format!("/{}", template.command))
-                                    .size(LabelSize::Small)
-                                    .color(Color::Muted),
-                            )
-                            .into_any_element()
-                    },
-                    move |_window, cx| {
-                        view.update(cx, |view, cx| {
-                            view.create_from_template(TEMPLATES.get(index), false, cx)
-                        })
-                        .log_err();
-                    },
-                );
-            }
-            let blank_view = view.clone();
-            menu = menu.entry("Em branco", None, move |_window, cx| {
-                blank_view
-                    .update(cx, |view, cx| view.create_from_template(None, false, cx))
-                    .log_err();
-            });
-            menu = menu.separator().header("Só para mim");
-            let personal_view = view.clone();
-            menu = menu.entry("Em branco (só para mim)", None, move |_window, cx| {
-                personal_view
-                    .update(cx, |view, cx| view.create_from_template(None, true, cx))
-                    .log_err();
-            });
-            let ai_view = view.clone();
-            let personal_ai_view = view;
-            menu.separator()
-                .entry("Criar com IA…", None, move |window, cx| {
-                    ai_view
-                        .update(cx, |view, cx| view.open_generator(false, window, cx))
-                        .log_err();
-                })
-                .entry("Criar com IA (só para mim)…", None, move |window, cx| {
-                    personal_ai_view
-                        .update(cx, |view, cx| view.open_generator(true, window, cx))
-                        .log_err();
-                })
-        });
-        DropdownMenu::new("new-task-agent", "Novo agente", menu)
-            .style(ui::DropdownStyle::Outlined)
-            .full_width(true)
     }
 
     fn render_field(
@@ -1363,7 +1095,7 @@ impl TaskAgentsView {
             }
             menu
         });
-        DropdownMenu::new("task-agent-profile", label, menu).style(ui::DropdownStyle::Outlined)
+        selector("task-agent-profile", IconName::ToolHammer, label, menu)
     }
 
     fn render_model_dropdown(
@@ -1667,99 +1399,7 @@ impl TaskAgentsView {
         column
     }
 
-    fn render_generator(generator: &AgentGenerator, cx: &mut Context<Self>) -> AnyElement {
-        let running = generator.running;
-        let field = |label: &'static str, hint: &'static str, editor: &Entity<Editor>| {
-            v_flex()
-                .gap_1()
-                .child(Label::new(label).size(LabelSize::Small).color(Color::Muted))
-                .child(
-                    div()
-                        .p_2()
-                        .rounded_md()
-                        .border_1()
-                        .border_color(cx.theme().colors().border)
-                        .bg(cx.theme().colors().editor_background)
-                        .child(editor.clone()),
-                )
-                .child(Label::new(hint).size(LabelSize::XSmall).color(Color::Muted))
-        };
-        v_flex()
-            .id("task-agent-generator")
-            .size_full()
-            .overflow_y_scroll()
-            .p_4()
-            .gap_4()
-            .child(
-                h_flex()
-                    .gap_3()
-                    .child(Icon::new(IconName::Sparkle).size(IconSize::Medium).color(Color::Accent))
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .child(Label::new("Criar agente com IA").size(LabelSize::Large))
-                            .child(
-                                Label::new(if generator.personal {
-                                    "Vai para os seus agentes, fora do repositório."
-                                } else {
-                                    "Vai para .asylum/agents do projeto."
-                                })
-                                .size(LabelSize::XSmall)
-                                .color(Color::Muted),
-                            ),
-                    )
-                    .child(
-                        Button::new("cancel-generator", "Cancelar")
-                            .style(ButtonStyle::Subtle)
-                            .on_click(cx.listener(|this, _, _, cx| this.close_generator(cx))),
-                    )
-                    .child(
-                        Button::new("run-generator", if running { "Gerando…" } else { "Gerar" })
-                            .style(ButtonStyle::Filled)
-                            .disabled(running)
-                            .start_icon(Icon::new(IconName::Sparkle).size(IconSize::XSmall))
-                            .on_click(cx.listener(|this, _, _, cx| this.generate(cx))),
-                    ),
-            )
-            .child(field(
-                "O que ele faz",
-                "O trabalho que o agente entrega quando for chamado.",
-                &generator.description,
-            ))
-            .child(field(
-                "Contexto",
-                "A IA escolhe perfil, toolkits e permissões a partir disso e escreve as instruções. Você revisa no formulário depois.",
-                &generator.context,
-            ))
-            .when_some(generator.error.clone(), |this, error| {
-                this.child(Label::new(error).size(LabelSize::Small).color(Color::Error))
-            })
-            .when_some(generator.progress.clone(), |this, progress| {
-                this.child(Label::new(progress).size(LabelSize::Small).color(Color::Muted))
-            })
-            .when(!generator.output.is_empty(), |this| {
-                this.child(
-                    div()
-                        .p_2()
-                        .rounded_md()
-                        .border_1()
-                        .border_color(cx.theme().colors().border)
-                        .bg(cx.theme().colors().panel_background)
-                        .child(
-                            Label::new(generator.output.clone())
-                                .size(LabelSize::Small)
-                                .buffer_font(cx),
-                        ),
-                )
-            })
-            .into_any_element()
-    }
-
     fn render_detail(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        if let Some(generator) = self.generator.as_ref() {
-            return Self::render_generator(generator, cx);
-        }
         let Some(draft) = self.draft.as_ref() else {
             return v_flex()
                 .size_full()
@@ -1773,6 +1413,14 @@ impl TaskAgentsView {
                         "Cada agente é um .md com instruções, ferramentas e permissões. Chame com /comando no composer do Agent.",
                     )
                     .color(Color::Muted),
+                )
+                .child(
+                    Button::new("empty-new-agent", "Novo agente")
+                        .style(ButtonStyle::Filled)
+                        .start_icon(Icon::new(IconName::Plus).size(IconSize::XSmall))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.open_new_agent_modal(window, cx)
+                        })),
                 )
                 .into_any_element();
         };
@@ -1859,47 +1507,21 @@ impl TaskAgentsView {
             )
             .child(
                 Self::render_card("MODELO E PERFIL", cx)
-                    .child(
-                        v_flex()
-                            .gap_1()
-                            .child(Label::new("Perfil base").size(LabelSize::Small).color(Color::Muted))
-                            .child(self.render_profile_dropdown(window, cx))
-                            .child(
-                                Label::new(
-                                    "As ferramentas do perfil são o ponto de partida; os toolkits abaixo somam a elas.",
-                                )
-                                .size(LabelSize::XSmall)
-                                .color(Color::Muted),
-                            ),
-                    )
-                    .child(
-                        v_flex()
-                            .gap_1()
-                            .child(Label::new("Modelo").size(LabelSize::Small).color(Color::Muted))
-                            .child(self.render_model_dropdown(window, cx))
-                            .child(
-                                Label::new("Só aparecem modelos dos provedores conectados.")
-                                    .size(LabelSize::XSmall)
-                                    .color(Color::Muted),
-                            ),
-                    )
-                    .child(
-                        v_flex()
-                            .gap_1()
-                            .child(
-                                Label::new("Modelo dos subagents")
-                                    .size(LabelSize::Small)
-                                    .color(Color::Muted),
-                            )
-                            .child(self.render_agent_subagent_model_dropdown(window, cx))
-                            .child(
-                                Label::new(
-                                    "Vale para os subagents que este agente abre sem pedir um modelo.",
-                                )
-                                .size(LabelSize::XSmall)
-                                .color(Color::Muted),
-                            ),
-                    ),
+                    .child(setting_row(
+                        "Ferramentas",
+                        "perfil base; os toolkits abaixo somam a ele",
+                        self.render_profile_dropdown(window, cx),
+                    ))
+                    .child(setting_row(
+                        "Modelo",
+                        "sobrepõe o modelo da thread",
+                        self.render_model_dropdown(window, cx),
+                    ))
+                    .child(setting_row(
+                        "Subagents",
+                        "modelo dos subagents que ele abre",
+                        self.render_agent_subagent_model_dropdown(window, cx),
+                    )),
             )
             .child(
                 Self::render_card("PERMISSÕES DO ZED AGENT", cx)
@@ -1972,11 +1594,11 @@ fn model_dropdown(
         None => empty_label.into(),
         Some(reference) => groups
             .iter()
-            .find_map(|(provider, models)| {
+            .find_map(|(_, models)| {
                 models
                     .iter()
                     .find(|(id, _)| id == reference)
-                    .map(|(_, name)| format!("{name} · {provider}").into())
+                    .map(|(_, name)| name.clone())
             })
             // A model whose provider is signed out still shows, so it is not lost silently.
             .unwrap_or_else(|| format!("{reference} (indisponível)").into()),
@@ -2010,7 +1632,59 @@ fn model_dropdown(
         }
         menu
     });
-    DropdownMenu::new(id, label, menu).style(ui::DropdownStyle::Outlined)
+    selector(id, IconName::Sparkle, label, menu)
+}
+
+/// The trigger of the tab's choices: what is chosen, with an icon for what kind of choice it is,
+/// sized to its content like the Agent panel's own profile and model selectors.
+fn selector(
+    id: &'static str,
+    icon: IconName,
+    label: impl Into<SharedString>,
+    menu: Entity<ContextMenu>,
+) -> DropdownMenu {
+    DropdownMenu::new_with_element(
+        id,
+        h_flex()
+            .gap_1p5()
+            .min_w_0()
+            .child(Icon::new(icon).size(IconSize::XSmall).color(Color::Muted))
+            .child(
+                Label::new(label.into())
+                    .size(LabelSize::Small)
+                    .single_line()
+                    .truncate(),
+            )
+            .child(
+                Icon::new(IconName::ChevronDown)
+                    .size(IconSize::XSmall)
+                    .color(Color::Muted),
+            )
+            .into_any_element(),
+        menu,
+    )
+    .no_chevron()
+    .style(ui::DropdownStyle::Outlined)
+    .trigger_size(ButtonSize::Compact)
+    .attach(gpui::Anchor::BottomRight)
+}
+
+/// A labeled setting with its control on the right, as in the agent's cards.
+fn setting_row(
+    title: &'static str,
+    hint: &'static str,
+    control: impl IntoElement,
+) -> impl IntoElement {
+    h_flex()
+        .gap_3()
+        .justify_between()
+        .child(
+            v_flex()
+                .min_w_0()
+                .child(Label::new(title))
+                .child(Label::new(hint).size(LabelSize::XSmall).color(Color::Muted)),
+        )
+        .child(div().flex_none().max_w(px(280.)).child(control))
 }
 
 impl TaskAgentsView {
@@ -2037,35 +1711,83 @@ impl Render for TaskAgentsView {
                     .border_r_1()
                     .border_color(cx.theme().colors().border)
                     .bg(cx.theme().colors().panel_background)
-                    .child(div().p_2().child(self.render_new_agent_menu(window, cx)))
-                    .child(Divider::horizontal())
+                    .child(
+                        div().p_2().child(
+                            h_flex()
+                                .gap_2()
+                                .px_2()
+                                .py_1()
+                                .rounded_md()
+                                .border_1()
+                                .border_color(cx.theme().colors().border_variant)
+                                .bg(cx.theme().colors().editor_background)
+                                .child(
+                                    Icon::new(IconName::MagnifyingGlass)
+                                        .size(IconSize::Small)
+                                        .color(Color::Muted),
+                                )
+                                .child(div().flex_1().min_w_0().child(self.search.clone())),
+                        ),
+                    )
                     .child(div().flex_1().min_h_0().child(self.render_list(cx)))
+                    .child(
+                        div().p_2().child(
+                            h_flex()
+                                .id("new-task-agent")
+                                .gap_2()
+                                .px_2()
+                                .py_1p5()
+                                .rounded_md()
+                                .border_1()
+                                .border_color(cx.theme().colors().border_variant)
+                                .cursor_pointer()
+                                .hover(|this| this.bg(cx.theme().colors().element_hover))
+                                .child(
+                                    Icon::new(IconName::Plus)
+                                        .size(IconSize::Small)
+                                        .color(Color::Accent),
+                                )
+                                .child(Label::new("Novo agente").color(Color::Accent))
+                                .child(div().flex_1())
+                                .child(
+                                    Label::new("de um modelo ou com IA")
+                                        .size(LabelSize::XSmall)
+                                        .color(Color::Muted),
+                                )
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.open_new_agent_modal(window, cx)
+                                })),
+                        ),
+                    )
                     .child(Divider::horizontal())
                     .child(
                         v_flex()
                             .p_2()
-                            .gap_1()
+                            .gap_2()
+                            .child(setting_row(
+                                "Subagents",
+                                "padrão do Zed Agent",
+                                self.render_subagent_model_dropdown(window, cx),
+                            ))
                             .child(
-                                Label::new("Modelo padrão dos subagents")
-                                    .size(LabelSize::Small)
-                                    .color(Color::Muted),
-                            )
-                            .child(self.render_subagent_model_dropdown(window, cx))
-                            .child(
-                                Label::new(
-                                    "Vale para todo subagent do Zed Agent que não peça um modelo e cujo agente não defina um.",
-                                )
-                                .size(LabelSize::XSmall)
-                                .color(Color::Muted),
+                                v_flex()
+                                    .p_2()
+                                    .gap_0p5()
+                                    .rounded_md()
+                                    .bg(cx.theme().colors().editor_background)
+                                    .child(
+                                        Label::new("COMO FICA NO REPO")
+                                            .size(LabelSize::XSmall)
+                                            .color(Color::Muted),
+                                    )
+                                    .child(
+                                        Label::new(
+                                            "Cada agente é um .md com frontmatter em .asylum/agents; vai no git e o time inteiro usa.",
+                                        )
+                                        .size(LabelSize::XSmall)
+                                        .color(Color::Muted),
+                                    ),
                             ),
-                    )
-                    .child(Divider::horizontal())
-                    .child(
-                        div().p_2().child(
-                            Label::new("Agentes do projeto ficam em .asylum/agents e vão no git.")
-                                .size(LabelSize::XSmall)
-                                .color(Color::Muted),
-                        ),
                     ),
             )
             .child(

@@ -46,6 +46,7 @@ pub struct ThreadItem {
     title_generating: bool,
     highlight_positions: Vec<usize>,
     timestamp: SharedString,
+    agent_label: Option<SharedString>,
     notified: bool,
     status: AgentThreadStatus,
     selected: bool,
@@ -81,6 +82,7 @@ impl ThreadItem {
             title_generating: false,
             highlight_positions: Vec::new(),
             timestamp: "".into(),
+            agent_label: None,
             notified: false,
             status: AgentThreadStatus::default(),
             selected: false,
@@ -104,6 +106,12 @@ impl ThreadItem {
 
     pub fn timestamp(mut self, timestamp: impl Into<SharedString>) -> Self {
         self.timestamp = timestamp.into();
+        self
+    }
+
+    /// The agent that runs the thread, shown first in the metadata row.
+    pub fn agent_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.agent_label = Some(label.into());
         self
     }
 
@@ -414,7 +422,10 @@ impl RenderOnce for ThreadItem {
 
         let has_worktree = !linked_worktrees.is_empty();
 
-        let has_metadata = has_project_name
+        let agent_label = self.agent_label;
+        let has_agent_label = agent_label.is_some();
+        let has_metadata = has_agent_label
+            || has_project_name
             || has_project_paths
             || has_worktree
             || has_diff_stats
@@ -489,6 +500,22 @@ impl RenderOnce for ThreadItem {
                     h_flex()
                         .gap_1p5()
                         .child(icon_container()) // Icon Spacing
+                        .when_some(agent_label, |this, label| {
+                            this.child(
+                                Label::new(label)
+                                    .size(LabelSize::Small)
+                                    .color(Color::Accent)
+                                    .flex_shrink_0(),
+                            )
+                            .when(
+                                has_project_name
+                                    || has_project_paths
+                                    || has_worktree
+                                    || has_diff_stats
+                                    || has_timestamp,
+                                |this| this.child(dot_separator()),
+                            )
+                        })
                         .when(self.archived, |this| {
                             this.child(
                                 Icon::new(IconName::Archive).size(IconSize::XSmall).color(

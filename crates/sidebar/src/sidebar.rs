@@ -1,3 +1,4 @@
+mod agents_section;
 mod android_device_modal;
 mod device_location_modal;
 mod device_toolkit;
@@ -158,25 +159,20 @@ enum DevicePlatform {
 enum DeviceInstanceKind {
     Android,
     Ios,
-    Browser,
 }
 
 impl DeviceInstanceKind {
-    const ALL: [Self; 3] = [Self::Android, Self::Ios, Self::Browser];
+    const ALL: [Self; 2] = [Self::Android, Self::Ios];
 
     fn label(self) -> &'static str {
         match self {
             Self::Android => "Android",
             Self::Ios => "iOS",
-            Self::Browser => "Browser",
         }
     }
 
     fn icon(self) -> IconName {
-        match self {
-            Self::Android | Self::Ios => IconName::Smartphone,
-            Self::Browser => IconName::ToolWeb,
-        }
+        IconName::Smartphone
     }
 }
 
@@ -521,6 +517,10 @@ struct SerializedSidebar {
     width_set_by_user: bool,
     #[serde(default)]
     active_view: SerializedSidebarView,
+    #[serde(default)]
+    pinned_agents: Vec<agents_section::AgentFilter>,
+    #[serde(default)]
+    agents_section_collapsed: bool,
 }
 
 #[derive(Debug, Default)]
@@ -1165,6 +1165,11 @@ fn create_worktree_in_workspace(
 /// be computed from the current world state, compute it in the rebuild.
 pub struct Sidebar {
     multi_workspace: WeakEntity<MultiWorkspace>,
+    /// Shows only the threads of one agent; set from the AGENTES section.
+    agent_filter: Option<agents_section::AgentFilter>,
+    agents_section_collapsed: bool,
+    pinned_agents: Vec<agents_section::AgentFilter>,
+    task_agents: agents_section::LoadedTaskAgents,
     width: Pixels,
     /// Whether `width` came from the user rather than from
     /// `agent.threads_sidebar.default_width`. Only a user-chosen width is persisted, so
@@ -1210,11 +1215,6 @@ pub struct Sidebar {
     view: SidebarView,
     devices_only: bool,
     device_platform: DevicePlatform,
-    /// Whether the Devices panel shows the browser instead of `device_platform`'s device.
-    browser_active: bool,
-    /// Created the first time the Browser tab is opened, and kept so the page survives
-    /// switching to a device and back.
-    browser_view: Option<Entity<web_preview::WebPreviewView>>,
     /// Instances opened with the header's + button, laid out to the right of this one. Only
     /// the sidebar registered as the Devices panel holds them. Each is a devices-only sidebar
     /// with its own device state, which is what lets a simulator and an emulator run side by
@@ -1361,6 +1361,11 @@ impl Sidebar {
         })
         .detach();
 
+        cx.observe_global::<task_agents::TaskAgentsRevision>(|this, cx| {
+            this.refresh_task_agents(cx);
+        })
+        .detach();
+
         cx.observe(
             &TerminalThreadMetadataStore::global(cx),
             |this, _store, cx| {
@@ -1393,6 +1398,10 @@ impl Sidebar {
 
         Self {
             multi_workspace: multi_workspace.downgrade(),
+            agent_filter: None,
+            agents_section_collapsed: false,
+            pinned_agents: Vec::new(),
+            task_agents: agents_section::LoadedTaskAgents::default(),
             width: AgentSettings::get_global(cx).threads_sidebar.default_width,
             width_set_by_user: false,
             focus_handle,
@@ -1417,8 +1426,6 @@ impl Sidebar {
             view: SidebarView::default(),
             devices_only: false,
             device_platform: DevicePlatform::default(),
-            browser_active: false,
-            browser_view: None,
             device_instances: Vec::new(),
             device_instance_host: None,
             own_device_instance_closed: false,
@@ -2122,7 +2129,8 @@ impl Sidebar {
             let label = group_key.display_name(&path_detail_map);
 
             let is_collapsed = self.is_group_collapsed(group_key, cx);
-            let should_load_threads = !is_collapsed || !query.is_empty();
+            let should_load_threads =
+                !is_collapsed || !query.is_empty() || self.agent_filter.is_some();
 
             let is_active = active_workspace
                 .as_ref()
@@ -2375,6 +2383,14 @@ impl Sidebar {
                 }
             }
 
+            if let Some(filter) = &self.agent_filter {
+                threads.retain(|thread| thread.draft.is_none() && filter.matches(&thread.metadata));
+                terminals.clear();
+                if threads.is_empty() {
+                    continue;
+                }
+            }
+
             let has_visible_rows = !threads.is_empty() || !terminals.is_empty();
             let has_stored_thread_rows = !should_load_threads && !has_visible_rows && {
                 let store = ThreadMetadataStore::global(cx).read(cx);
@@ -2584,6 +2600,7 @@ impl Sidebar {
             self.entry_shapes(multi_workspace.read(cx)).collect();
 
         self.rebuild_contents(cx);
+        self.refresh_task_agents(cx);
         self.refresh_refilled_draft_times(cx);
         self.refresh_draft_editor_observations(cx);
 
@@ -3910,6 +3927,8 @@ impl Sidebar {
 
         if self.reset_filter_editor_text(window, cx) {
             self.update_entries(cx);
+        } else if self.agent_filter.is_some() {
+            self.set_agent_filter(None, cx);
         } else {
             self.selection = None;
             self.filter_editor.focus_handle(cx).focus(window, cx);
@@ -6871,9 +6890,17 @@ impl Sidebar {
                 .regenerating_titles
                 .contains(&thread.metadata.thread_id);
 
+        // Filtered by one agent, the label would repeat what the filter says.
+        let agent_label = self
+            .agent_filter
+            .is_none()
+            .then(|| thread.metadata.task_agent.clone())
+            .flatten()
+            .map(|command| SharedString::from(format!("/{command}")));
         let thread_item = ThreadItem::new(id, title.clone())
             .base_bg(sidebar_bg)
             .icon(icon)
+            .when_some(agent_label, |this, label| this.agent_label(label))
             .when(is_draft, |this| {
                 this.icon_color(Color::Custom(cx.theme().colors().icon_muted.opacity(0.2)))
             })
@@ -7009,10 +7036,19 @@ impl Sidebar {
             })
             .on_click({
                 let thread_workspace = thread_workspace.clone();
-                cx.listener(move |this, _, window, cx| {
+                cx.listener(move |this, event: &gpui::ClickEvent, window, cx| {
                     this.selection = None;
                     match &thread_workspace {
                         ThreadEntryWorkspace::Open(workspace) => {
+                            let already_active = workspace
+                                .read(cx)
+                                .panel::<AgentPanel>(cx)
+                                .is_some_and(|panel| {
+                                    panel.read(cx).active_thread_id(cx) == Some(metadata.thread_id)
+                                });
+                            if event.modifiers().platform && !already_active {
+                                Self::prepare_new_agent_tab(workspace, cx);
+                            }
                             this.activate_thread(metadata.clone(), workspace, false, window, cx);
                         }
                         ThreadEntryWorkspace::Closed {
@@ -8080,8 +8116,7 @@ impl Sidebar {
 
     fn render_sidebar_bottom_bar(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let is_archive = matches!(self.view, SidebarView::Archive(..));
-        // The device toolbar drives the emulator or simulator; the browser brings its own bar.
-        let is_devices = matches!(self.view, SidebarView::Devices) && !self.browser_active;
+        let is_devices = matches!(self.view, SidebarView::Devices);
         let on_right = self.side(cx) == SidebarSide::Right;
 
         v_flex()
@@ -8854,6 +8889,41 @@ impl Sidebar {
         }
     }
 
+    /// Shows `device` in this instance and starts it, as picking it in the instance's own
+    /// controls would. An agent asks for a device to see it, so it is booted right away.
+    fn open_device_for_agent(
+        &mut self,
+        device: device_toolkit::AgentDevice,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match device {
+            device_toolkit::AgentDevice::Ios { udid } => {
+                self.show_device_instance_kind(DeviceInstanceKind::Ios, window, cx);
+                self.ios_simulator_started = true;
+                if self.selected_ios_device_udid.as_deref() != Some(udid.as_str()) {
+                    self.select_ios_device(udid, window, cx);
+                } else if !self.is_ios_device_booted(&udid) {
+                    #[cfg(target_os = "macos")]
+                    self.sync_ios_devices(Some(udid), window, cx);
+                }
+            }
+            device_toolkit::AgentDevice::Android { avd } => {
+                self.show_device_instance_kind(DeviceInstanceKind::Android, window, cx);
+                self.with_android_sdk_manager(cx, |manager, cx| {
+                    manager.select_avd(avd, cx);
+                    if !matches!(
+                        manager.state(),
+                        AndroidSdkState::EmulatorRunning { .. } | AndroidSdkState::EmulatorBooting
+                    ) {
+                        manager.boot_emulator(cx);
+                    }
+                });
+            }
+        }
+        cx.notify();
+    }
+
     /// Hides the simulator's native view without destroying it. Reconnecting
     /// SimulatorKit to the same device in the same process does not reliably
     /// produce frames again, so views are kept alive and re-shown by
@@ -8907,9 +8977,6 @@ impl Sidebar {
             Some(cx.observe_in(&dock, window, |this, dock, window, cx| {
                 if !dock.read(cx).is_open() {
                     this.hide_ios_simulator_view(window);
-                    this.set_browser_visible(false, cx);
-                } else if this.browser_active {
-                    this.set_browser_visible(true, cx);
                 }
             }));
         self.observed_devices_dock = Some(dock.entity_id());
@@ -9773,22 +9840,10 @@ impl Sidebar {
         }
     }
 
-    fn set_browser_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
-        if let Some(browser_view) = &self.browser_view {
-            browser_view.update(cx, |browser_view, _cx| {
-                browser_view.set_browser_hidden(!visible);
-            });
-        }
-    }
-
     fn device_instance_kind(&self) -> DeviceInstanceKind {
-        if self.browser_active {
-            DeviceInstanceKind::Browser
-        } else {
-            match self.device_platform {
-                DevicePlatform::Android => DeviceInstanceKind::Android,
-                DevicePlatform::Ios => DeviceInstanceKind::Ios,
-            }
+        match self.device_platform {
+            DevicePlatform::Android => DeviceInstanceKind::Android,
+            DevicePlatform::Ios => DeviceInstanceKind::Ios,
         }
     }
 
@@ -9801,29 +9856,14 @@ impl Sidebar {
         match kind {
             DeviceInstanceKind::Android => {
                 self.hide_ios_simulator_view(window);
-                self.browser_active = false;
-                self.set_browser_visible(false, cx);
                 self.device_platform = DevicePlatform::Android;
                 self.ensure_android_sdk_manager(cx);
             }
             DeviceInstanceKind::Ios => {
-                self.browser_active = false;
-                self.set_browser_visible(false, cx);
                 self.device_platform = DevicePlatform::Ios;
                 if self.ios_simulator_started {
                     self.refresh_ios_devices(window, cx);
                 }
-            }
-            DeviceInstanceKind::Browser => {
-                // The simulator is a native view drawn over the panel; it has to go before
-                // the page can be seen.
-                self.hide_ios_simulator_view(window);
-                self.browser_active = true;
-                if self.browser_view.is_none() {
-                    self.browser_view =
-                        Some(cx.new(|cx| web_preview::WebPreviewView::new(window, cx)));
-                }
-                self.set_browser_visible(true, cx);
             }
         }
         cx.notify();
@@ -9979,8 +10019,8 @@ impl Sidebar {
         self.resize_devices_dock_for_instances(previous_count, window, cx);
     }
 
-    /// Releases everything a closed instance shows. The simulator's native view and the
-    /// browser would otherwise stay on screen, since neither is drawn by the element tree.
+    /// Releases everything a closed instance shows. The simulator's native view would otherwise
+    /// stay on screen, since it isn't drawn by the element tree.
     fn tear_down_device_instance(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.remove_ios_simulator_view(window);
         self.stop_ios_pasteboard_sync();
@@ -9988,9 +10028,6 @@ impl Sidebar {
         self.ios_simulator_started = false;
         self.ios_device_discovery_task = None;
         self.ios_busy_message = None;
-        self.set_browser_visible(false, cx);
-        self.browser_view = None;
-        self.browser_active = false;
         self.android_sdk_manager = None;
         self.android_screen_bounds = None;
         self.android_pointer_down = None;
@@ -10089,7 +10126,6 @@ impl Sidebar {
                             match kind {
                                 DeviceInstanceKind::Android => "Emulador Android",
                                 DeviceInstanceKind::Ios => "Simulador iOS",
-                                DeviceInstanceKind::Browser => "Web preview",
                             }
                         };
                         let this = this.clone();
@@ -10128,9 +10164,8 @@ impl Sidebar {
     }
 
     fn render_devices_view(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let browser_active = self.browser_active;
-        let is_android = !browser_active && self.device_platform == DevicePlatform::Android;
-        let is_ios = !browser_active && self.device_platform == DevicePlatform::Ios;
+        let is_android = self.device_platform == DevicePlatform::Android;
+        let is_ios = self.device_platform == DevicePlatform::Ios;
 
         let platform_tab = |id: &'static str,
                             label: &'static str,
@@ -10183,23 +10218,11 @@ impl Sidebar {
                             "device-tab-ios",
                             "iOS",
                             IconName::Smartphone,
-                            TabPosition::Middle(std::cmp::Ordering::Equal),
+                            TabPosition::Last,
                             is_ios,
                         )
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.show_device_instance_kind(DeviceInstanceKind::Ios, window, cx);
-                        })),
-                    )
-                    .child(
-                        platform_tab(
-                            "device-tab-browser",
-                            "Browser",
-                            IconName::ToolWeb,
-                            TabPosition::Last,
-                            browser_active,
-                        )
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.show_device_instance_kind(DeviceInstanceKind::Browser, window, cx);
                         })),
                     )
                     .end_child(self.render_add_device_instance_button(cx))
@@ -10214,18 +10237,13 @@ impl Sidebar {
                         )
                     }),
             )
-            .child(
-                v_flex()
-                    .flex_1()
-                    .min_h_0()
-                    .map(|this| match &self.browser_view {
-                        Some(browser_view) if browser_active => {
-                            this.child(div().flex_1().min_h_0().child(browser_view.clone()))
-                        }
-                        _ if is_android => this.child(self.render_android_devices(window, cx)),
-                        _ => this.child(self.render_ios_simulator(window, cx)),
-                    }),
-            )
+            .child(v_flex().flex_1().min_h_0().map(|this| {
+                if is_android {
+                    this.child(self.render_android_devices(window, cx))
+                } else {
+                    this.child(self.render_ios_simulator(window, cx))
+                }
+            }))
     }
 
     fn spawn_ios_terminal_task(
@@ -11334,6 +11352,8 @@ impl WorkspaceSidebar for Sidebar {
                 SidebarView::Archive(_) => SerializedSidebarView::History,
                 SidebarView::Devices => SerializedSidebarView::Devices,
             },
+            pinned_agents: self.pinned_agents.clone(),
+            agents_section_collapsed: self.agents_section_collapsed,
         };
         serde_json::to_string(&serialized).ok()
     }
@@ -11353,6 +11373,8 @@ impl WorkspaceSidebar for Sidebar {
                 self.width = px(width).clamp(THREADS_LIST_MIN_WIDTH, THREADS_LIST_MAX_WIDTH);
                 self.width_set_by_user = true;
             }
+            self.pinned_agents = serialized.pinned_agents;
+            self.agents_section_collapsed = serialized.agents_section_collapsed;
             match serialized.active_view {
                 SerializedSidebarView::History => {
                     cx.defer_in(window, |this, window, cx| {
@@ -11557,6 +11579,9 @@ impl Render for Sidebar {
             .map(|this| match &self.view {
                 SidebarView::ThreadList => this
                     .child(self.render_sidebar_header(no_open_projects, window, cx))
+                    .when(!no_open_projects, |this| {
+                        this.child(self.render_agents_section(window, cx))
+                    })
                     .map(|this| {
                         if no_open_projects {
                             this.child(self.render_empty_state(cx))

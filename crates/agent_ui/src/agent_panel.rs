@@ -1,3 +1,5 @@
+mod agent_tabs;
+
 use std::{
     cell::Cell,
     fmt,
@@ -345,6 +347,10 @@ struct SerializedAgentPanel {
     last_active_terminal_id: Option<String>,
     #[serde(default)]
     new_draft_thread_id: Option<ThreadId>,
+    #[serde(default)]
+    agent_tabs: Vec<ThreadId>,
+    #[serde(default)]
+    active_agent_tab: usize,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -1135,6 +1141,12 @@ pub struct AgentPanel {
     last_created_entry_kind: AgentPanelEntryKind,
     draft_thread: Option<Entity<ConversationView>>,
     retained_threads: HashMap<ThreadId, Entity<ConversationView>>,
+    /// Threads pinned as agent tabs; see `agent_tabs`.
+    agent_tabs: Vec<ThreadId>,
+    active_agent_tab: usize,
+    opening_agent_tab: bool,
+    tab_task_agents: Vec<task_agents::TaskAgent>,
+    _tab_task_agents_load: Task<()>,
     terminals: HashMap<TerminalId, AgentTerminal>,
     pending_terminal_spawn: Option<TerminalId>,
     #[cfg(test)]
@@ -1228,6 +1240,8 @@ impl AgentPanel {
             .as_ref()
             .map(|draft| draft.read(cx).thread_id);
 
+        let agent_tabs = self.agent_tabs.clone();
+        let active_agent_tab = self.active_agent_tab;
         let kvp = KeyValueStore::global(cx);
         self.pending_serialization = Some(cx.background_spawn(async move {
             save_serialized_panel(
@@ -1238,6 +1252,8 @@ impl AgentPanel {
                     last_active_thread,
                     last_active_terminal_id,
                     new_draft_thread_id,
+                    agent_tabs,
+                    active_agent_tab,
                 },
                 kvp,
             )
@@ -1395,6 +1411,12 @@ impl AgentPanel {
 
                     if let Some(serialized_panel) = &serialized_panel {
                         panel.last_created_entry_kind = serialized_panel.last_created_entry_kind;
+                        if serialized_panel.agent_tabs.len() > 1 {
+                            panel.agent_tabs = serialized_panel.agent_tabs.clone();
+                            panel.active_agent_tab = serialized_panel
+                                .active_agent_tab
+                                .min(serialized_panel.agent_tabs.len() - 1);
+                        }
                     } else if let Some(entry_kind) = global_last_created_entry_kind {
                         panel.last_created_entry_kind = entry_kind;
                     }
@@ -1541,7 +1563,7 @@ impl AgentPanel {
         })
         .detach();
 
-        let panel = Self {
+        let mut panel = Self {
             workspace_id,
             base_view,
             last_created_entry_kind: AgentPanelEntryKind::Thread,
@@ -1556,6 +1578,11 @@ impl AgentPanel {
             draft_thread: None,
             persist_selected_agent_task: Task::ready(()),
             retained_threads: HashMap::default(),
+            agent_tabs: Vec::new(),
+            active_agent_tab: 0,
+            opening_agent_tab: false,
+            tab_task_agents: Vec::new(),
+            _tab_task_agents_load: Task::ready(()),
             terminals: HashMap::default(),
             pending_terminal_spawn: None,
             #[cfg(test)]
@@ -1584,6 +1611,11 @@ impl AgentPanel {
         };
 
         panel.ensure_native_agent_connection(cx);
+        panel.reload_tab_task_agents(cx);
+        cx.observe_global::<task_agents::TaskAgentsRevision>(|panel, cx| {
+            panel.reload_tab_task_agents(cx);
+        })
+        .detach();
         panel
     }
 
@@ -3335,6 +3367,7 @@ impl AgentPanel {
         cx: &mut Context<Self>,
     ) {
         self.remove_retained_thread(&id);
+        self.forget_agent_tab(id);
         ThreadMetadataStore::global(cx).update(cx, |store, cx| {
             store.delete(id, cx);
         });
@@ -4307,7 +4340,10 @@ impl AgentPanel {
         let mut potential_removals = self
             .retained_threads
             .iter()
-            .filter(|(_id, view)| {
+            .filter(|(id, view)| {
+                if self.is_in_agent_tab(id) {
+                    return false;
+                }
                 let view = view.read(cx);
                 if view.has_pending_selections() {
                     return false;
@@ -4363,6 +4399,7 @@ impl AgentPanel {
         }
 
         self.refresh_base_view_subscriptions(window, cx);
+        self.sync_agent_tabs(cx);
 
         if focus {
             self.activation_focus_handle(cx).focus(window, cx);
@@ -6617,6 +6654,9 @@ impl AgentPanel {
     fn key_context(&self) -> KeyContext {
         let mut key_context = KeyContext::new_with_defaults();
         key_context.add("AgentPanel");
+        if self.has_agent_tabs() {
+            key_context.add("agent_tabs");
+        }
         key_context
     }
 }
@@ -6657,6 +6697,10 @@ impl Render for AgentPanel {
             .on_action(cx.listener(|this, _: &OpenSettings, window, cx| {
                 this.open_configuration(window, cx);
             }))
+            .on_action(cx.listener(Self::new_agent_thread_tab))
+            .on_action(cx.listener(Self::close_active_agent_thread_tab))
+            .on_action(cx.listener(Self::activate_next_agent_thread_tab))
+            .on_action(cx.listener(Self::activate_previous_agent_thread_tab))
             .on_action(cx.listener(Self::open_active_thread_as_markdown))
             .on_action(cx.listener(Self::manage_skills))
             .on_action(cx.listener(Self::toggle_options_menu))
@@ -6679,6 +6723,7 @@ impl Render for AgentPanel {
                     })
                 }
             }))
+            .children(self.render_agent_tabs(cx))
             .child(self.render_toolbar(window, cx))
             .children(self.render_new_user_onboarding(window, cx))
             .map(|parent| match self.visible_surface() {
@@ -7082,12 +7127,11 @@ fn mention_pull_request(
                 return anyhow::Ok(());
             }
         };
-        let mut blocks = vec![acp_v2::ContentBlock::Resource(acp_v2::EmbeddedResource::new(
-            acp_v2::EmbeddedResourceResource::TextResourceContents(acp_v2::TextResourceContents::new(
-                content,
-                mention_uri.to_uri().to_string(),
+        let mut blocks = vec![acp_v2::ContentBlock::Resource(
+            acp_v2::EmbeddedResource::new(acp_v2::EmbeddedResourceResource::TextResourceContents(
+                acp_v2::TextResourceContents::new(content, mention_uri.to_uri().to_string()),
             )),
-        ))];
+        )];
         blocks.push(acp_v2::ContentBlock::Text(acp_v2::TextContent::new(
             match prompt {
                 Some(prompt) => format!(" {prompt}"),
@@ -7166,12 +7210,11 @@ fn mention_logs(
                 return anyhow::Ok(());
             }
         };
-        let mut blocks = vec![acp_v2::ContentBlock::Resource(acp_v2::EmbeddedResource::new(
-            acp_v2::EmbeddedResourceResource::TextResourceContents(acp_v2::TextResourceContents::new(
-                content,
-                mention_uri.to_uri().to_string(),
+        let mut blocks = vec![acp_v2::ContentBlock::Resource(
+            acp_v2::EmbeddedResource::new(acp_v2::EmbeddedResourceResource::TextResourceContents(
+                acp_v2::TextResourceContents::new(content, mention_uri.to_uri().to_string()),
             )),
-        ))];
+        )];
         blocks.push(acp_v2::ContentBlock::Text(acp_v2::TextContent::new(
             match prompt {
                 Some(prompt) => format!(" {prompt}"),
@@ -8464,6 +8507,7 @@ mod tests {
                         worktree_paths: WorktreePaths::from_folder_paths(&PathList::default()),
                         remote_connection: None,
                         archived: false,
+                        task_agent: None,
                     },
                     cx,
                 );
@@ -14975,6 +15019,77 @@ mod tests {
                 Agent::Stub,
                 "selected_agent should be restored to the original after an agent override"
             );
+        });
+    }
+
+    #[gpui::test]
+    async fn test_agent_tabs_follow_and_keep_their_threads(cx: &mut TestAppContext) {
+        let (panel, mut cx) = setup_panel(cx).await;
+        let connection = StubAgentConnection::new()
+            .with_supports_load_session(true)
+            .with_agent_id("loadable-stub".into())
+            .with_telemetry_id("loadable-stub".into());
+
+        let (session_a, thread_a) =
+            open_generating_thread_with_loadable_connection(&panel, &connection, &mut cx);
+        panel.update(&mut cx, |panel, cx| panel.prepare_new_agent_tab(cx));
+        let (session_b, thread_b) =
+            open_generating_thread_with_loadable_connection(&panel, &connection, &mut cx);
+        panel.read_with(&cx, |panel, _cx| {
+            assert_eq!(panel.agent_tabs, vec![thread_a, thread_b]);
+            assert_eq!(panel.active_agent_tab, 1);
+        });
+
+        // Opening a thread without asking for a tab replaces the active tab's thread.
+        let (session_c, thread_c) =
+            open_generating_thread_with_loadable_connection(&panel, &connection, &mut cx);
+        panel.read_with(&cx, |panel, _cx| {
+            assert_eq!(panel.agent_tabs, vec![thread_a, thread_c]);
+            assert_eq!(panel.active_agent_tab, 1);
+        });
+
+        panel.update_in(&mut cx, |panel, window, cx| {
+            panel.activate_agent_tab(0, window, cx);
+        });
+        cx.run_until_parked();
+        panel.read_with(&cx, |panel, cx| {
+            assert_eq!(panel.active_thread_id(cx), Some(thread_a));
+            assert_eq!(panel.active_agent_tab, 0);
+        });
+
+        for session_id in [session_a, session_b, session_c] {
+            connection.end_turn(session_id, acp::StopReason::EndTurn);
+        }
+        cx.run_until_parked();
+        panel.update(&mut cx, |panel, cx| {
+            AgentSettings::override_global(
+                AgentSettings {
+                    max_idle_retained_threads: 0,
+                    ..AgentSettings::get_global(cx).clone()
+                },
+                cx,
+            );
+            panel.cleanup_retained_threads(cx);
+        });
+        panel.read_with(&cx, |panel, _cx| {
+            assert!(
+                panel.retained_threads.contains_key(&thread_c),
+                "a thread with a tab stays loaded while idle"
+            );
+            assert!(
+                !panel.retained_threads.contains_key(&thread_b),
+                "a thread that lost its tab is cleaned up like any other"
+            );
+        });
+
+        // Closing down to one tab hides the strip and leaves the remaining thread active.
+        panel.update_in(&mut cx, |panel, window, cx| {
+            panel.close_agent_tab(0, window, cx);
+        });
+        cx.run_until_parked();
+        panel.read_with(&cx, |panel, cx| {
+            assert!(panel.agent_tabs.is_empty());
+            assert_eq!(panel.active_thread_id(cx), Some(thread_c));
         });
     }
 }
