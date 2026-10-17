@@ -69,7 +69,8 @@ pub fn secondary_button(
         }))
 }
 
-/// Two or more choices side by side; the chosen one is filled, as in the boards.
+/// Two or more choices side by side; the chosen one is filled and outlined in the accent, as in
+/// the boards.
 pub fn segment_option(
     id: impl Into<gpui::ElementId>,
     label: impl Into<SharedString>,
@@ -85,7 +86,12 @@ pub fn segment_option(
         .h(px(28.))
         .justify_center()
         .rounded(px(5.))
-        .when(selected, |this| this.bg(colors.element_selected))
+        .border_1()
+        .border_color(gpui::transparent_black())
+        .when(selected, |this| {
+            this.bg(colors.element_selected)
+                .border_color(colors.border_focused)
+        })
         .when(enabled && !selected, |this| {
             this.cursor_pointer()
                 .hover(|this| this.bg(colors.element_hover))
@@ -94,7 +100,7 @@ pub fn segment_option(
             Label::new(label)
                 .size(LabelSize::Small)
                 .weight(if selected {
-                    FontWeight::MEDIUM
+                    FontWeight::SEMIBOLD
                 } else {
                     FontWeight::NORMAL
                 })

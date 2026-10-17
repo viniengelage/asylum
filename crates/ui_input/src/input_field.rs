@@ -44,6 +44,8 @@ pub struct InputField {
     /// An optional validation error. When set, the field's border turns red
     /// and the message is shown as hint subtext below the field.
     error: Option<SharedString>,
+    /// A short note at the end of the field, such as where its value came from.
+    end_hint: Option<(SharedString, Color)>,
 }
 
 impl Focusable for InputField {
@@ -71,6 +73,7 @@ impl InputField {
             tab_stop: true,
             masked: None,
             error: None,
+            end_hint: None,
         }
     }
 
@@ -113,6 +116,16 @@ impl InputField {
     /// Sets a validation error message, turning the field's border red and
     /// showing the message as hint subtext below the field. Pass `None` to
     /// clear the error.
+    pub fn end_hint(mut self, hint: impl Into<SharedString>) -> Self {
+        self.end_hint = Some((hint.into(), Color::Muted));
+        self
+    }
+
+    pub fn set_end_hint(&mut self, hint: Option<(SharedString, Color)>, cx: &mut Context<Self>) {
+        self.end_hint = hint;
+        cx.notify();
+    }
+
     pub fn set_error(&mut self, error: Option<impl Into<SharedString>>, cx: &mut Context<Self>) {
         self.error = error.map(Into::into);
         cx.notify();
@@ -203,6 +216,13 @@ impl Render for InputField {
                             .child(Icon::new(icon).size(IconSize::Small).color(Color::Muted))
                     })
                     .child(self.editor.render(window, cx))
+                    .when_some(self.end_hint.clone(), |this, (hint, color)| {
+                        this.gap_2().child(
+                            div()
+                                .flex_none()
+                                .child(Label::new(hint).size(LabelSize::XSmall).color(color)),
+                        )
+                    })
                     .when_some(self.masked, |this, is_masked| {
                         this.child(
                             IconButton::new(
