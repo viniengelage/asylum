@@ -216,6 +216,10 @@ fn is_submit_plan_tool_call(tool_call: &ToolCall) -> bool {
     tool_call.tool_name.as_deref() == Some(<agent::SubmitPlanTool as agent::AgentTool>::NAME)
 }
 
+fn is_submit_step_tool_call(tool_call: &ToolCall) -> bool {
+    tool_call.tool_name.as_deref() == Some(<agent::SubmitStepTool as agent::AgentTool>::NAME)
+}
+
 fn is_update_plan_tool_call(tool_call: &ToolCall) -> bool {
     tool_call.tool_name.as_deref() == Some(<agent::UpdatePlanTool as agent::AgentTool>::NAME)
 }
@@ -4810,6 +4814,116 @@ impl ThreadView {
             tool_call,
             self.discarded_plans.contains(&tool_call.id),
         )
+    }
+
+    /// The card of a flow step's `submit_step`: what the step delivered and its own checks. It
+    /// renders from the raw input, so it fills in while the model streams it.
+    fn render_step_delivery_tool_call(
+        &self,
+        tool_call: &ToolCall,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let delivery: agent::SubmitStepToolInput = tool_call
+            .raw_input
+            .clone()
+            .and_then(|input| serde_json::from_value(input).ok())
+            .unwrap_or_default();
+        let colors = cx.theme().colors();
+        let is_done = matches!(tool_call.status(), ToolCallStatus::Completed);
+        let header = h_flex()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .border_b_1()
+            .border_color(colors.border_variant)
+            .child(
+                Icon::new(IconName::ListTree)
+                    .size(IconSize::Small)
+                    .color(Color::Accent),
+            )
+            .child(
+                Label::new("Entrega do passo")
+                    .size(LabelSize::Small)
+                    .weight(gpui::FontWeight::SEMIBOLD),
+            )
+            .child(div().flex_1())
+            .child(
+                Label::new(if is_done {
+                    "a esteira confere os critérios"
+                } else {
+                    "escrevendo…"
+                })
+                .size(LabelSize::XSmall)
+                .color(Color::Muted),
+            );
+        let outputs = v_flex().children(delivery.outputs.iter().map(|(name, value)| {
+            h_flex()
+                .gap_2()
+                .px_3()
+                .py_1()
+                .border_b_1()
+                .border_color(colors.border_variant)
+                .child(
+                    Label::new(name.clone())
+                        .size(LabelSize::XSmall)
+                        .buffer_font(cx)
+                        .color(Color::Success),
+                )
+                .child(div().flex_1())
+                .child(
+                    Label::new(value.clone())
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted)
+                        .truncate(),
+                )
+        }));
+        let checks = v_flex()
+            .gap_1()
+            .px_3()
+            .py_2()
+            .children(delivery.criteria.iter().map(|check| {
+                h_flex()
+                    .items_start()
+                    .gap_2()
+                    .child(
+                        Icon::new(if check.passed {
+                            IconName::Check
+                        } else {
+                            IconName::Close
+                        })
+                        .size(IconSize::XSmall)
+                        .color(if check.passed {
+                            Color::Success
+                        } else {
+                            Color::Error
+                        }),
+                    )
+                    .child(
+                        Label::new(format!("Critério {} · {}", check.number, check.evidence))
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
+                    )
+            }));
+        v_flex()
+            .mx_5()
+            .my_1p5()
+            .rounded_md()
+            .border_1()
+            .border_color(self.tool_card_border_color(cx))
+            .bg(colors.editor_background)
+            .overflow_hidden()
+            .child(header)
+            .when(!delivery.summary.is_empty(), |this| {
+                this.child(
+                    div()
+                        .px_3()
+                        .py_2()
+                        .child(Label::new(delivery.summary.clone()).size(LabelSize::Small)),
+                )
+            })
+            .when(!delivery.outputs.is_empty(), |this| this.child(outputs))
+            .when(!delivery.criteria.is_empty(), |this| this.child(checks))
+            .into_any_element()
     }
 
     fn render_plan_tool_call(
@@ -10125,6 +10239,8 @@ impl ThreadView {
             );
             if is_submit_plan_tool_call(tool_call) && !failed {
                 this.child(self.render_plan_tool_call(entry_ix, tool_call, cx))
+            } else if is_submit_step_tool_call(tool_call) && !failed {
+                this.child(self.render_step_delivery_tool_call(tool_call, cx))
             } else if is_update_plan_tool_call(tool_call) && !failed {
                 // Progress shows up on the plan card itself.
                 this
@@ -15122,7 +15238,11 @@ fn leading_native_command(
     text: &str,
     available_commands: &[acp_v2::AvailableCommand],
 ) -> Option<String> {
-    leading_command_of_category(text, available_commands, acp_thread::CommandCategory::Native)
+    leading_command_of_category(
+        text,
+        available_commands,
+        acp_thread::CommandCategory::Native,
+    )
 }
 
 fn leading_command_of_category(
