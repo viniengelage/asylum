@@ -337,14 +337,16 @@ fn run_flow(
         workspace.update_in(cx, |workspace, window, cx| {
             if action.flow.is_empty() {
                 if flows.is_empty() {
-                    show_error(
-                        workspace,
-                        anyhow::anyhow!(
-                            "nenhuma esteira em {} nem nas pessoais",
-                            flows::PROJECT_FLOWS_DIR
-                        ),
-                        cx,
-                    );
+                    let weak_workspace = workspace.weak_handle();
+                    workspace.toggle_modal(window, cx, |window, cx| {
+                        new_flow_modal::NewFlowModal::new(
+                            weak_workspace,
+                            project.clone(),
+                            agents,
+                            window,
+                            cx,
+                        )
+                    });
                     return;
                 }
                 let delegate = FlowPickerDelegate::new(
@@ -507,6 +509,34 @@ impl PickerDelegate for FlowPickerDelegate {
 
     fn dismissed(&mut self, _window: &mut Window, cx: &mut Context<Picker<Self>>) {
         cx.emit(DismissEvent);
+    }
+
+    fn render_footer(
+        &self,
+        _window: &mut Window,
+        cx: &mut Context<Picker<Self>>,
+    ) -> Option<AnyElement> {
+        let workspace = self.workspace.clone();
+        Some(
+            h_flex()
+                .w_full()
+                .p_1p5()
+                .border_t_1()
+                .border_color(cx.theme().colors().border_variant)
+                .child(
+                    Button::new("flow-picker-new", "Nova esteira")
+                        .full_width()
+                        .style(ButtonStyle::Outlined)
+                        .start_icon(Icon::new(IconName::Plus).size(IconSize::Small))
+                        .on_click(cx.listener(move |_, _, window, cx| {
+                            cx.emit(DismissEvent);
+                            workspace
+                                .update(cx, |workspace, cx| new_flow(workspace, window, cx))
+                                .log_err();
+                        })),
+                )
+                .into_any_element(),
+        )
     }
 
     fn render_match(
