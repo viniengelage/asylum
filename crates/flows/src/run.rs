@@ -119,6 +119,10 @@ pub enum RunAction {
     RunCommand {
         step: usize,
     },
+    /// Does a GitHub step with the account of the Repo dock.
+    RunGitHub {
+        step: usize,
+    },
     /// Starts every agent of an "Em paralelo" step at once.
     StartParallel {
         step: usize,
@@ -402,6 +406,7 @@ impl FlowRun {
                         match &self.flow.steps[step].kind {
                             StepKind::Agent(_) => RunAction::StartAgent { step },
                             StepKind::Run(_) => RunAction::RunCommand { step },
+                            StepKind::GitHub(_) => RunAction::RunGitHub { step },
                             StepKind::Parallel(_) => RunAction::StartParallel { step },
                             StepKind::Gate(_) | StepKind::Branch(_) => RunAction::Wait,
                         }
@@ -582,6 +587,7 @@ impl FlowRun {
         let on_fail = match &self.flow.steps[step].kind {
             StepKind::Agent(agent_step) => agent_step.on_fail.clone(),
             StepKind::Run(run) => run.on_fail.clone(),
+            StepKind::GitHub(github) => github.on_fail.clone(),
             StepKind::Parallel(parallel) => parallel.on_fail.clone(),
             StepKind::Gate(_) | StepKind::Branch(_) => OnFail::AskYou,
         };
@@ -645,6 +651,7 @@ impl FlowRun {
             StepKind::Agent(agent_step) => format!("/{}", agent_step.agent),
             StepKind::Gate(_) => "Você aprova".to_string(),
             StepKind::Run(run) => run.command.clone(),
+            StepKind::GitHub(github) => github.action.label().to_string(),
             StepKind::Branch(_) => "Se / senão".to_string(),
             StepKind::Parallel(_) => "Em paralelo".to_string(),
         }
@@ -677,6 +684,25 @@ impl FlowRun {
             self.log(RunEventKind::Failed, title, evidence.clone(), Some(step));
             self.fail_step(step, &label, evidence);
         }
+    }
+
+    /// A GitHub step ended. What it delivered (`branch`, `pr`, the failed check's log) goes on
+    /// to the next steps as an agent's outputs do, even when it failed and the run goes back.
+    pub fn github_finished(
+        &mut self,
+        step: usize,
+        passed: bool,
+        evidence: String,
+        outputs: BTreeMap<String, String>,
+    ) {
+        if let Some(run) = self.steps.get_mut(step) {
+            run.submission = Some(Submission {
+                summary: evidence.clone(),
+                outputs,
+                self_checks: BTreeMap::new(),
+            });
+        }
+        self.command_finished(step, passed, evidence);
     }
 
     /// The user answered the gate the run waits on. An adjustment goes back with the note.

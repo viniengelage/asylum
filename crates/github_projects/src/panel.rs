@@ -299,14 +299,9 @@ impl TasksPanel {
                                         .log_err();
                                 }
                             })
-                            .when_some(
-                                project_url,
-                                |menu, url| {
-                                    menu.entry("Abrir no GitHub", None, move |_, cx| {
-                                        cx.open_url(&url)
-                                    })
-                                },
-                            )
+                            .when_some(project_url, |menu, url| {
+                                menu.entry("Abrir no GitHub", None, move |_, cx| cx.open_url(&url))
+                            })
                         }))
                     }),
             )

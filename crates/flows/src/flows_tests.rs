@@ -359,3 +359,73 @@ fn test_parses_branches_and_parallel_steps() {
         input: "relatório".to_string(),
     }));
 }
+
+#[test]
+fn test_parses_github_steps() {
+    let flow = parse(
+        r#"---
+name: "Do item ao merge"
+steps:
+  - github: start_item
+  - agent: produto
+  - github: open_pr
+    draft: true
+  - github: wait_checks
+    timeout: 1h
+    on_fail: { back_to: produto, max: 1, then: ask_you }
+  - gate: you
+  - github: move_item
+    status: "Em revisão"
+---
+"#,
+    );
+    let actions: Vec<GitHubAction> = flow
+        .steps
+        .iter()
+        .filter_map(|step| match &step.kind {
+            StepKind::GitHub(github) => Some(github.action.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        actions,
+        vec![
+            GitHubAction::StartItem,
+            GitHubAction::OpenPullRequest { draft: true },
+            GitHubAction::WaitChecks {
+                timeout_minutes: 60
+            },
+            GitHubAction::MoveItem {
+                status: "Em revisão".to_string()
+            },
+        ]
+    );
+    let ids: Vec<&str> = flow.steps.iter().map(|step| step.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        ["comecar", "produto", "pr", "checks", "aprovacao", "mover"]
+    );
+    assert!(validate_flow(&flow, &agents()).is_empty());
+    let inputs = flow.available_inputs(3, &agents());
+    assert!(
+        inputs
+            .iter()
+            .any(|input| input.name == "pr" && input.from_step == Some(2))
+    );
+
+    let markdown = flow.to_markdown().unwrap();
+    let reparsed = parse(&markdown);
+    assert_eq!(reparsed.steps, flow.steps);
+
+    let mut empty_move = flow.clone();
+    if let StepKind::GitHub(github) = &mut empty_move.steps[5].kind {
+        github.action = GitHubAction::MoveItem {
+            status: String::new(),
+        };
+    }
+    assert!(
+        validate_flow(&empty_move, &agents())
+            .iter()
+            .any(|problem| matches!(problem, FlowProblem::EmptyStatus { step: 5 }))
+    );
+}

@@ -643,6 +643,157 @@ pub struct PullRequestMergeCard {
     pub strategy: String,
 }
 
+pub const PROJECT_ITEMS_TOOL: &str = "project_items";
+pub const PROJECT_ITEM_TOOL: &str = "project_item";
+
+/// An item of the GitHub project, as the agent's `@` menu offers it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectItemEntry {
+    pub project_id: String,
+    pub item_id: String,
+    /// `asylum#198`, or `rascunho`.
+    pub reference: String,
+    pub title: String,
+    pub status: Option<String>,
+    /// The item of the checked-out branch.
+    pub is_current_branch: bool,
+    pub is_assigned_to_you: bool,
+}
+
+type ListProjectItems = Arc<dyn Fn(&Entity<Project>, &App) -> Vec<ProjectItemEntry>>;
+type DescribeProjectItem =
+    Arc<dyn Fn(&Entity<Project>, String, String, &mut App) -> Task<Result<String>>>;
+
+/// Installed by the Tarefas dock, so the agent can offer and read GitHub project items without
+/// depending on it.
+#[derive(Clone)]
+pub struct ProjectItemSource {
+    /// The items of the selected project as of the dock's last sync.
+    pub list: ListProjectItems,
+    /// What the agent receives when the item is mentioned, by project and item id.
+    pub describe: DescribeProjectItem,
+}
+
+impl Global for ProjectItemSource {}
+
+pub fn register_project_item_source(source: ProjectItemSource, cx: &mut App) {
+    cx.set_global(source);
+}
+
+pub fn project_items(project: &Entity<Project>, cx: &App) -> Vec<ProjectItemEntry> {
+    cx.try_global::<ProjectItemSource>()
+        .map(|source| (source.list)(project, cx))
+        .unwrap_or_default()
+}
+
+pub fn describe_project_item(
+    project: &Entity<Project>,
+    project_id: String,
+    item_id: String,
+    cx: &mut App,
+) -> Task<Result<String>> {
+    match cx.try_global::<ProjectItemSource>() {
+        Some(source) => {
+            let describe = source.describe.clone();
+            describe(project, project_id, item_id, cx)
+        }
+        None => Task::ready(Err(anyhow::anyhow!("This build has no Tarefas dock."))),
+    }
+}
+
+/// One row of a [`ProjectItemsCard`].
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ProjectItemRow {
+    pub item_id: String,
+    pub reference: String,
+    pub title: String,
+    pub status: Option<String>,
+    /// GitHub's color name of the status option, such as `YELLOW`.
+    pub status_color: Option<String>,
+    /// `P1`, `em andamento`: what the row shows next to the title.
+    pub detail: Option<String>,
+    /// Issues without a branch yet can be started from the card.
+    pub can_start: bool,
+    pub url: Option<String>,
+}
+
+/// What `project_items` keeps for the thread, so the card lists the items instead of the model
+/// retyping them.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ProjectItemsCard {
+    pub project_id: String,
+    pub project_title: String,
+    pub project_url: String,
+    /// `Sprint 42 · seus itens`.
+    pub title: String,
+    pub items: Vec<ProjectItemRow>,
+}
+
+/// What an esteira's GitHub step asks the Tarefas dock to do.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct GitHubStepRequest {
+    /// `start_item`, `open_pr`, `wait_checks`, `move_item` or `comment_item`.
+    pub action: String,
+    pub draft: bool,
+    pub timeout_minutes: u32,
+    /// The column `move_item` moves to.
+    pub status: String,
+    /// What `comment_item` posts; empty posts `summary`.
+    pub comment: String,
+    /// The run's input, where `#204` names the item when there is one; otherwise the item is
+    /// the one of the checked-out branch.
+    pub request: String,
+    /// What the run's steps delivered so far, for the pull request and comments.
+    pub summary: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct GitHubStepOutcome {
+    pub passed: bool,
+    /// What the run's log says about the step, and the reason when it failed.
+    pub evidence: String,
+    /// `branch`, `pr`, `checks`, `log do que falhou`.
+    pub outputs: std::collections::BTreeMap<String, String>,
+}
+
+type GitHubStepsRepository = Arc<dyn Fn(&Entity<Project>, &App) -> Option<String>>;
+type RunGitHubStep =
+    Arc<dyn Fn(&Entity<Project>, GitHubStepRequest, &mut App) -> Task<Result<GitHubStepOutcome>>>;
+
+/// Installed by the Tarefas dock, so esteiras can have GitHub steps without depending on it.
+#[derive(Clone)]
+pub struct GitHubStepRunner {
+    /// `owner/name` when the project is on GitHub, so the editor offers the steps.
+    pub repository: GitHubStepsRepository,
+    pub run: RunGitHubStep,
+}
+
+impl Global for GitHubStepRunner {}
+
+pub fn register_github_step_runner(runner: GitHubStepRunner, cx: &mut App) {
+    cx.set_global(runner);
+}
+
+/// The GitHub repository esteiras of `project` can have GitHub steps for.
+pub fn github_steps_repository(project: &Entity<Project>, cx: &App) -> Option<String> {
+    cx.try_global::<GitHubStepRunner>()
+        .and_then(|runner| (runner.repository)(project, cx))
+}
+
+pub fn run_github_step(
+    project: &Entity<Project>,
+    request: GitHubStepRequest,
+    cx: &mut App,
+) -> Task<Result<GitHubStepOutcome>> {
+    match cx.try_global::<GitHubStepRunner>() {
+        Some(runner) => {
+            let run = runner.run.clone();
+            run(project, request, cx)
+        }
+        None => Task::ready(Err(anyhow::anyhow!("Este build não tem o dock Tarefas."))),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

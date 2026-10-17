@@ -1001,6 +1001,29 @@ pub mod web_preview {
 
 /// Declared here so the agent's cards and mentions can drive the Repo dock without depending on
 /// it.
+pub mod github_projects {
+    use gpui::Action;
+    use schemars::JsonSchema;
+    use serde::Deserialize;
+
+    /// Opens the GitHub project's board in a tab, with an item selected.
+    #[derive(Clone, PartialEq, Deserialize, JsonSchema, Action)]
+    #[action(namespace = github_projects)]
+    #[serde(deny_unknown_fields)]
+    pub struct OpenProjectItem {
+        pub item_id: String,
+    }
+
+    /// Starts an item of the GitHub project: creates its branch linked to it, moves it to work
+    /// in progress, assigns it to you and checks the branch out.
+    #[derive(Clone, PartialEq, Deserialize, JsonSchema, Action)]
+    #[action(namespace = github_projects)]
+    #[serde(deny_unknown_fields)]
+    pub struct StartProjectItem {
+        pub item_id: String,
+    }
+}
+
 pub mod repo_hosting {
     use gpui::Action;
     use schemars::JsonSchema;

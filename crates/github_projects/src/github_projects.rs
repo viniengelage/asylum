@@ -4,6 +4,7 @@
 mod agent_toolkit;
 pub mod api;
 mod board;
+mod flow_steps;
 mod panel;
 
 pub use agent_toolkit::register_toolkit as register_agent_toolkit;
@@ -46,7 +47,19 @@ const SYNC_INTERVAL: Duration = Duration::from_secs(60);
 
 pub fn init(cx: &mut App) {
     workspace::register_panel_item::<TasksPanel>(cx);
-    cx.observe_new(|workspace: &mut Workspace, _window, _cx| {
+    flow_steps::register(cx);
+    cx.observe_new(|workspace: &mut Workspace, _window, cx| {
+        agent_toolkit::prefetch(workspace.project().clone(), cx);
+        workspace.register_action(
+            |workspace, action: &zed_actions::github_projects::OpenProjectItem, window, cx| {
+                board::open(workspace, Some(action.item_id.clone()), window, cx);
+            },
+        );
+        workspace.register_action(
+            |workspace, action: &zed_actions::github_projects::StartProjectItem, window, cx| {
+                start_from_workspace(workspace, action.item_id.clone(), window, cx);
+            },
+        );
         workspace.register_action(|workspace, _: &ToggleFocus, window, cx| {
             if workspace.panel::<TasksPanel>(cx).is_none() {
                 open(workspace, window, cx);
@@ -670,6 +683,45 @@ pub fn start_item(
         })?;
         checkout.await
     })
+}
+
+/// Starts an item from an action, such as the agent card's Começar, with the branch name the
+/// item suggests.
+fn start_from_workspace(
+    workspace: &mut Workspace,
+    item_id: String,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    let project = workspace.project().clone();
+    let Some((repository, _, _)) = github_repository(&project, cx) else {
+        return;
+    };
+    let state = repository_projects(&repository, cx);
+    let Some(branch) = state
+        .read(cx)
+        .project()
+        .and_then(|github_project| github_project.item(&item_id))
+        .map(api::branch_name)
+    else {
+        return;
+    };
+    let task = start_item(
+        workspace.weak_handle(),
+        project,
+        state,
+        item_id,
+        branch,
+        window,
+        cx,
+    );
+    cx.spawn(async move |workspace, cx| {
+        if let Err(error) = task.await {
+            workspace.update(cx, |workspace, cx| workspace.show_error(error, cx))?;
+        }
+        anyhow::Ok(())
+    })
+    .detach_and_log_err(cx);
 }
 
 /// Whether a dock is showing the Tarefas panel.

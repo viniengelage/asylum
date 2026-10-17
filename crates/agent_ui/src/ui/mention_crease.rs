@@ -245,6 +245,12 @@ fn open_mention_uri(
                 cx,
             );
         }
+        MentionUri::ProjectItem { item_id, .. } => {
+            window.dispatch_action(
+                Box::new(zed_actions::github_projects::OpenProjectItem { item_id }),
+                cx,
+            );
+        }
         MentionUri::Logs { id, .. } => {
             let project = workspace.project().clone();
             task_agents::open_log_mention(&project, &id, window, cx).log_err();

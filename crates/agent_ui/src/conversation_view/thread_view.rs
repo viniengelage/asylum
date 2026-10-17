@@ -59,6 +59,7 @@ use super::*;
 
 mod database_card;
 mod elastic_card;
+mod project_card;
 mod repo_card;
 
 /// The message the "Executar" button sends. The plan card also looks for it to
@@ -10289,6 +10290,9 @@ impl ThreadView {
                     .when_some(repo_card::repo_card(tool_call), |this, card| {
                         this.child(self.render_repo_card(entry_ix, card, layout, cx))
                     })
+                    .when_some(project_card::project_card(tool_call), |this, card| {
+                        this.child(self.render_project_card(entry_ix, card, layout, cx))
+                    })
                     .when_some(
                         elastic_card::elastic_card(tool_call),
                         |this, card| {
@@ -15113,6 +15117,12 @@ pub(crate) fn open_link(
             MentionUri::PullRequest { number, .. } => {
                 window.dispatch_action(
                     Box::new(zed_actions::repo_hosting::OpenPullRequest { number }),
+                    cx,
+                );
+            }
+            MentionUri::ProjectItem { item_id, .. } => {
+                window.dispatch_action(
+                    Box::new(zed_actions::github_projects::OpenProjectItem { item_id }),
                     cx,
                 );
             }

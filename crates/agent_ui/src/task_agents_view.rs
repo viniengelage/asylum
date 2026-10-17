@@ -26,9 +26,7 @@ use task_agents::{
     TaskAgent, TaskAgentSource, ToolAccess, ToolPermissionRules, ToolkitSummary, command_slug,
     load_task_agents, personal_agents_dir, toolkits,
 };
-use ui::{
-    ContextMenu, DropdownMenu, KeyBinding, Switch, Tooltip, prelude::*, primary_button,
-};
+use ui::{ContextMenu, DropdownMenu, KeyBinding, Switch, Tooltip, prelude::*, primary_button};
 use util::ResultExt as _;
 use workspace::{
     HideStatusItem, ItemHandle, StatusItemView, Workspace,
@@ -670,6 +668,7 @@ impl TaskAgentsView {
                 flows::StepKind::Run(_) => (IconName::Terminal, Color::Success),
                 flows::StepKind::Branch(_) => (IconName::GitBranch, Color::Accent),
                 flows::StepKind::Parallel(_) => (IconName::ListTree, Color::Accent),
+                flows::StepKind::GitHub(_) => (IconName::Blocks, Color::Accent),
             };
             steps = steps.child(
                 h_flex()
@@ -2909,4 +2908,3 @@ impl StatusItemView for TaskAgentsToolkitButton {
         None
     }
 }
-

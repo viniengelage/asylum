@@ -14,7 +14,7 @@ pub use agent_toolkit::register_toolkit as register_agent_toolkit;
 use panel::PullRequestFollowup;
 pub use panel::RepoPanel;
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use credentials_provider::CredentialsProvider;
 use gpui::{Entity, Global, Subscription, Task, WeakEntity, actions};
 use http_client::HttpClient;
@@ -487,6 +487,49 @@ pub fn checkout_remote_branch(
         });
         switch.await??;
         Ok(())
+    })
+}
+
+/// Pushes the checked-out branch to `remote_name`, setting the upstream the first time, and
+/// returns the branch's name on the remote.
+pub fn push_current_branch(
+    workspace: WeakEntity<Workspace>,
+    project: &Entity<Project>,
+    remote_name: String,
+    window: &mut Window,
+    cx: &mut App,
+) -> Task<Result<String>> {
+    let Some(repository) = project.read(cx).active_repository(cx) else {
+        return Task::ready(Err(anyhow::anyhow!("o projeto não tem repositório git")));
+    };
+    let Some(branch) = repository.read(cx).branch.clone() else {
+        return Task::ready(Err(anyhow::anyhow!("nenhum branch em checkout")));
+    };
+    let local_name = branch.name().to_string();
+    let upstream = branch
+        .upstream
+        .as_ref()
+        .filter(|upstream| upstream.remote_name() == Some(remote_name.as_str()))
+        .and_then(|upstream| upstream.branch_name())
+        .map(str::to_string);
+    let remote_branch = upstream.clone().unwrap_or_else(|| local_name.clone());
+    let askpass = panel::askpass_delegate(workspace, "git push", window, &mut cx.to_async());
+    cx.spawn(async move |cx| {
+        let push = repository.update(cx, |repository, cx| {
+            repository.push(
+                local_name.into(),
+                remote_branch.clone().into(),
+                remote_name.clone().into(),
+                upstream
+                    .is_none()
+                    .then_some(git::repository::PushOptions::SetUpstream),
+                askpass,
+                cx,
+            )
+        });
+        push.await?
+            .with_context(|| format!("falha no git push para {remote_name}"))?;
+        Ok(remote_branch)
     })
 }
 

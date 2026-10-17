@@ -7,7 +7,6 @@ mod new_flow_modal;
 mod runner;
 mod suggest;
 
-use ui::{primary_button, secondary_button, segment_option};
 use crate::{AgentPanel, ThreadId};
 use agent::NativeAgentConnection;
 use anyhow::{Context as _, Result};
@@ -28,6 +27,7 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 use task_agents::TaskAgent;
 use ui::{Divider, ListItem, ListItemSpacing, prelude::*};
+use ui::{primary_button, secondary_button, segment_option};
 use util::ResultExt as _;
 use workspace::{
     HideStatusItem, ItemHandle, StatusItemView, Workspace,
@@ -317,6 +317,47 @@ fn native_connection(
             .downcast::<NativeAgentConnection>()
             .context("o Zed Agent não está disponível")
     }))
+}
+
+/// What a GitHub step writes, as the confirmation before the run lists it.
+fn github_write(action: &flows::GitHubAction) -> String {
+    match action {
+        flows::GitHubAction::StartItem => {
+            "cria o branch do item, move para em andamento e atribui você".to_string()
+        }
+        flows::GitHubAction::OpenPullRequest { draft } => format!(
+            "faz push e abre o PR{} que fecha o item",
+            if *draft { " como rascunho" } else { "" }
+        ),
+        flows::GitHubAction::MoveItem { status } => format!("move o item para {status}"),
+        flows::GitHubAction::CommentItem { .. } => "comenta no item".to_string(),
+        flows::GitHubAction::WaitChecks { .. } => "espera os checks".to_string(),
+    }
+}
+
+/// The item of the GitHub project a request cites as `#204`, when the Tarefas dock has it.
+pub(crate) fn cited_project_item(
+    project: &Entity<Project>,
+    request: &str,
+    cx: &App,
+) -> Option<task_agents::ProjectItemEntry> {
+    let items = task_agents::project_items(project, cx);
+    request.split_whitespace().find_map(|word| {
+        let number: String = word
+            .split('#')
+            .nth(1)?
+            .chars()
+            .take_while(|character| character.is_ascii_digit())
+            .collect();
+        if number.is_empty() {
+            return None;
+        }
+        let suffix = format!("#{number}");
+        items
+            .iter()
+            .find(|item| item.reference.ends_with(&suffix))
+            .cloned()
+    })
 }
 
 fn run_flow(
@@ -722,12 +763,70 @@ impl FlowView {
             self.show_toast(&format!("Corrija antes de rodar. {message}"), cx);
             return;
         }
+        // Writing on GitHub is approved once for the whole run, not step by step.
+        let writes: Vec<String> = self
+            .flow
+            .steps
+            .iter()
+            .filter_map(|step| match &step.kind {
+                StepKind::GitHub(github) if github.action.writes() => {
+                    Some(format!("• {}", github_write(&github.action)))
+                }
+                _ => None,
+            })
+            .collect();
+        let answer = (!writes.is_empty()).then(|| {
+            window.prompt(
+                gpui::PromptLevel::Info,
+                "Esta esteira escreve no GitHub",
+                Some(&format!(
+                    "{}\n\nMerge nunca é um passo: fica com você.",
+                    writes.join("\n")
+                )),
+                &["Rodar", "Cancelar"],
+                cx,
+            )
+        });
+        let describe = cited_project_item(&self.project, &input, cx).map(|entry| {
+            task_agents::describe_project_item(&self.project, entry.project_id, entry.item_id, cx)
+        });
+        if answer.is_none() && describe.is_none() {
+            self.begin_run(input.clone(), input, window, cx);
+            return;
+        }
+        cx.spawn_in(window, async move |this, cx| {
+            if let Some(answer) = answer
+                && answer.await != Ok(0)
+            {
+                return anyhow::Ok(());
+            }
+            let mut run_input = input.clone();
+            if let Some(describe) = describe
+                && let Some(item) = describe.await.log_err()
+            {
+                run_input.push_str(&format!("\n\nItem do GitHub Projects:\n{item}"));
+            }
+            this.update_in(cx, |this, window, cx| {
+                this.begin_run(input, run_input, window, cx)
+            })
+        })
+        .detach_and_log_err(cx);
+    }
+
+    /// `typed` stays in the request field; `run_input` is what the first step receives.
+    fn begin_run(
+        &mut self,
+        typed: String,
+        run_input: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.input_editor
-            .update(cx, |editor, cx| editor.set_text(input.clone(), window, cx));
+            .update(cx, |editor, cx| editor.set_text(typed, window, cx));
         self.panel_tab = PanelTab::Run;
         self.stop(None, cx);
         self.step_threads = vec![Vec::new(); self.flow.steps.len()];
-        self.run = Some(FlowRun::new(self.flow.clone(), input));
+        self.run = Some(FlowRun::new(self.flow.clone(), run_input));
         if let Some(id) = &self.run_id {
             history::release(id, cx);
         }

@@ -162,6 +162,11 @@ impl MentionSet {
                 self.confirm_mention_for_sql_query(abs_path, cx)
             }
             MentionUri::Logs { id, .. } => self.confirm_mention_for_logs(id, cx),
+            MentionUri::ProjectItem {
+                project_id,
+                item_id,
+                ..
+            } => self.confirm_mention_for_project_item(project_id, item_id, cx),
             MentionUri::PullRequest {
                 number,
                 comment_id,
@@ -369,6 +374,11 @@ impl MentionSet {
                 self.confirm_mention_for_sql_query(abs_path, cx)
             }
             MentionUri::Logs { id, .. } => self.confirm_mention_for_logs(id, cx),
+            MentionUri::ProjectItem {
+                project_id,
+                item_id,
+                ..
+            } => self.confirm_mention_for_project_item(project_id, item_id, cx),
             MentionUri::PullRequest {
                 number,
                 comment_id,
@@ -779,6 +789,25 @@ impl MentionSet {
             return Task::ready(Err(anyhow!("project not found")));
         };
         let describe = task_agents::describe_pull_request(&project, reference, cx);
+        cx.spawn(async move |_, _| {
+            let content = describe.await?;
+            Ok(Mention::Text {
+                content,
+                tracked_buffers: Vec::new(),
+            })
+        })
+    }
+
+    fn confirm_mention_for_project_item(
+        &self,
+        project_id: String,
+        item_id: String,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<Mention>> {
+        let Some(project) = self.project.upgrade() else {
+            return Task::ready(Err(anyhow!("project not found")));
+        };
+        let describe = task_agents::describe_project_item(&project, project_id, item_id, cx);
         cx.spawn(async move |_, _| {
             let content = describe.await?;
             Ok(Mention::Text {

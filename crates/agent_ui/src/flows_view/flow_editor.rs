@@ -6,8 +6,8 @@ use super::FlowView;
 use crate::task_agents_view::{OpenTaskAgents, model_dropdown, selector};
 use editor::{Editor, EditorEvent};
 use flows::{
-    AgentStep, BranchStep, Criterion, DesignTarget, DesignTool, FlowStep, GateStep, OnFail,
-    ParallelStep, RunStep, StepKind, Verifier, unique_step_id, validate_flow,
+    AgentStep, BranchStep, Criterion, DesignTarget, DesignTool, FlowStep, GateStep, GitHubAction,
+    GitHubStep, OnFail, ParallelStep, RunStep, StepKind, Verifier, unique_step_id, validate_flow,
 };
 use gpui::{CursorStyle, Entity, FontWeight, Hsla, Subscription, Window};
 use task_agents::{TaskAgent, TaskAgentSource};
@@ -36,6 +36,7 @@ pub(super) enum NewStep {
     Command,
     Branch,
     Parallel,
+    GitHub(GitHubAction),
 }
 
 /// A step dragged by its handle to another place in the list.
@@ -76,6 +77,37 @@ impl Render for DragPreview {
                     .color(Color::Accent),
             )
             .child(Label::new(self.label.clone()).size(LabelSize::Small))
+    }
+}
+
+fn github_icon(action: &GitHubAction) -> IconName {
+    match action {
+        GitHubAction::StartItem => IconName::GitBranchPlus,
+        GitHubAction::OpenPullRequest { .. } => IconName::PullRequest,
+        GitHubAction::WaitChecks { .. } => IconName::CheckDouble,
+        GitHubAction::MoveItem { .. } => IconName::Blocks,
+        GitHubAction::CommentItem { .. } => IconName::Chat,
+    }
+}
+
+/// The line under a GitHub step's name, as board I writes it.
+fn github_summary(action: &GitHubAction) -> String {
+    match action {
+        GitHubAction::StartItem => {
+            "cria o branch do item · move para em andamento · atribui você".to_string()
+        }
+        GitHubAction::OpenPullRequest { draft } => format!(
+            "{}fecha o item · revisores do CODEOWNERS",
+            if *draft { "rascunho · " } else { "" }
+        ),
+        GitHubAction::WaitChecks { timeout_minutes } => {
+            format!("checks do PR · até {timeout_minutes} min")
+        }
+        GitHubAction::MoveItem { status } => format!("Status → {status}"),
+        GitHubAction::CommentItem { text } if text.trim().is_empty() => {
+            "comenta o que a esteira entregou".to_string()
+        }
+        GitHubAction::CommentItem { text } => format!("comenta “{}”", text.trim()),
     }
 }
 
@@ -240,6 +272,46 @@ impl FlowView {
                         else_to: None,
                     }),
                 }
+            }
+            NewStep::GitHub(action) => {
+                // Waiting for checks goes back to the last agent before it with the failed
+                // check's log, as the boards draw it.
+                let on_fail = match action {
+                    GitHubAction::WaitChecks { .. } => self.flow.steps
+                        [..at.min(self.flow.steps.len())]
+                        .iter()
+                        .rev()
+                        .find(|step| matches!(step.kind, StepKind::Agent(_)))
+                        .map_or(OnFail::AskYou, |step| OnFail::BackTo {
+                            step: step.id.clone(),
+                            max: 1,
+                        }),
+                    _ => OnFail::AskYou,
+                };
+                let action = match action {
+                    GitHubAction::MoveItem { status } if status.is_empty() => {
+                        GitHubAction::MoveItem {
+                            status: "Em revisão".to_string(),
+                        }
+                    }
+                    action => action,
+                };
+                let mut step = FlowStep {
+                    id: String::new(),
+                    kind: StepKind::GitHub(GitHubStep { action, on_fail }),
+                };
+                let base = match &step.kind {
+                    StepKind::GitHub(github) => match github.action {
+                        GitHubAction::StartItem => "comecar",
+                        GitHubAction::OpenPullRequest { .. } => "pr",
+                        GitHubAction::WaitChecks { .. } => "checks",
+                        GitHubAction::MoveItem { .. } => "mover",
+                        GitHubAction::CommentItem { .. } => "comentar",
+                    },
+                    _ => "github",
+                };
+                step.id = unique_step_id(&self.flow.steps, base);
+                step
             }
             NewStep::Parallel => FlowStep {
                 id: unique_step_id(&self.flow.steps, "paralelo"),
@@ -411,6 +483,21 @@ impl FlowView {
                     Default::default(),
                 ),
                 Some(StepKind::Parallel(_)) => Default::default(),
+                Some(StepKind::GitHub(github)) => (
+                    match &github.action {
+                        GitHubAction::MoveItem { status } => status.clone(),
+                        GitHubAction::CommentItem { text } => text.clone(),
+                        _ => String::new(),
+                    },
+                    match &github.action {
+                        GitHubAction::WaitChecks { timeout_minutes } => timeout_minutes.to_string(),
+                        _ => String::new(),
+                    },
+                    String::new(),
+                    String::new(),
+                    Vec::new(),
+                    Default::default(),
+                ),
                 Some(StepKind::Agent(agent_step)) => (
                     String::new(),
                     String::new(),
@@ -501,6 +588,16 @@ impl FlowView {
                 StepKind::Run(run) => run.command = command,
                 StepKind::Branch(branch) => branch.contains = note,
                 StepKind::Parallel(_) => {}
+                StepKind::GitHub(github) => match &mut github.action {
+                    GitHubAction::MoveItem { status } => *status = note.trim().to_string(),
+                    GitHubAction::CommentItem { text } => *text = note,
+                    GitHubAction::WaitChecks { timeout_minutes } => {
+                        if let Ok(minutes) = command.trim().trim_end_matches('m').parse() {
+                            *timeout_minutes = minutes;
+                        }
+                    }
+                    GitHubAction::StartItem | GitHubAction::OpenPullRequest { .. } => {}
+                },
                 StepKind::Agent(agent_step) => {
                     agent_step.instructions = instructions;
                     if let Some(target) = &mut agent_step.where_ {
@@ -827,6 +924,31 @@ impl FlowView {
                     cx,
                 )),
         );
+        if let Some(repository) = task_agents::github_steps_repository(&self.project, cx) {
+            list =
+                list.child(
+                    h_flex()
+                        .px_3()
+                        .pt_3()
+                        .pb_1()
+                        .child(section_label("GITHUB"))
+                        .child(div().flex_1())
+                        .child(description(repository)),
+                )
+                .child(v_flex().px_1().gap_px().children(
+                    GitHubAction::ALL.into_iter().map(|action| {
+                        item(
+                            format!("library-github-{}", action.key()).into(),
+                            github_icon(&action),
+                            Color::Accent,
+                            None,
+                            action.label().to_string(),
+                            NewStep::GitHub(action),
+                            cx,
+                        )
+                    }),
+                ));
+        }
         v_flex()
             .w(px(252.))
             .h_full()
@@ -1001,6 +1123,8 @@ impl FlowView {
 
     pub(super) fn render_board(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = cx.theme().colors().clone();
+        let request = self.input_editor.read(cx).text(cx);
+        let cited = super::cited_project_item(&self.project, &request, cx);
         let ask = v_flex()
             .gap_1p5()
             .px_3p5()
@@ -1009,11 +1133,69 @@ impl FlowView {
             .border_1()
             .border_color(colors.border_variant)
             .bg(colors.panel_background)
-            .child(section_label("O QUE CONSTRUIR"))
+            .child(section_label(if cited.is_some() {
+                "VEM DO GITHUB PROJECTS"
+            } else {
+                "O QUE CONSTRUIR"
+            }))
+            .when_some(cited.clone(), |this, item| {
+                let item_id = item.item_id.clone();
+                this.child(
+                    h_flex()
+                        .gap_1p5()
+                        .child(
+                            h_flex()
+                                .id("flow-cited-item")
+                                .h(px(24.))
+                                .px_2()
+                                .gap_1p5()
+                                .rounded_md()
+                                .border_1()
+                                .border_color(colors.border_focused)
+                                .bg(colors.border_focused.opacity(0.15))
+                                .cursor_pointer()
+                                .tooltip(Tooltip::text("Abrir no quadro"))
+                                .on_click(move |_, window, cx| {
+                                    window.dispatch_action(
+                                        Box::new(zed_actions::github_projects::OpenProjectItem {
+                                            item_id: item_id.clone(),
+                                        }),
+                                        cx,
+                                    )
+                                })
+                                .child(
+                                    Icon::new(IconName::ListTodo)
+                                        .size(IconSize::XSmall)
+                                        .color(Color::Accent),
+                                )
+                                .child(
+                                    Label::new(format!(
+                                        "{} {}",
+                                        item.reference
+                                            .find('#')
+                                            .map_or(item.reference.as_str(), |at| &item.reference[at..]),
+                                        item.title
+                                    ))
+                                    .size(LabelSize::Small),
+                                ),
+                        )
+                        .children(item.status.map(|status| {
+                            let (fill, color) = chip_colors(Color::Muted, cx);
+                            div()
+                                .px_1p5()
+                                .py_0p5()
+                                .rounded_sm()
+                                .bg(fill)
+                                .child(Label::new(status).size(LabelSize::XSmall).color(color))
+                        })),
+                )
+            })
             .child(self.input_editor.clone())
-            .child(description(
-                "Vira a entrada do 1º passo. Muda a cada execução sem mexer nos passos.",
-            ));
+            .child(description(if cited.is_some() {
+                "Título, corpo, subtarefas e campos do item viram a entrada do 1º passo. Rodar de um item: /esteira #204 no chat."
+            } else {
+                "Vira a entrada do 1º passo. Muda a cada execução sem mexer nos passos."
+            }));
         let mut board = v_flex().child(ask);
         if let Some(error) = &self.load_error {
             board = board.child(div().h_4()).child(
@@ -1117,6 +1299,7 @@ impl FlowView {
     fn render_insert_point(&self, at: usize, cx: &mut Context<Self>) -> impl IntoElement {
         let view = cx.entity().downgrade();
         let agents = self.agents.clone();
+        let has_github = task_agents::github_steps_repository(&self.project, cx).is_some();
         let marked = self.insert_at == Some(at);
         let dragging = cx.has_active_drag();
         let line = cx.theme().colors().border;
@@ -1195,12 +1378,20 @@ impl FlowView {
                                     );
                                 }
                                 menu = menu.separator().header("Passos");
-                                for (label, new_step) in [
+                                let mut kinds = vec![
                                     ("Você aprova", NewStep::Gate),
                                     ("Rodar comando", NewStep::Command),
                                     ("Se / senão", NewStep::Branch),
                                     ("Em paralelo", NewStep::Parallel),
-                                ] {
+                                ];
+                                if has_github {
+                                    kinds.extend(
+                                        GitHubAction::ALL.into_iter().map(|action| {
+                                            (action.label(), NewStep::GitHub(action))
+                                        }),
+                                    );
+                                }
+                                for (label, new_step) in kinds {
                                     let view = view.clone();
                                     menu = menu.entry(label, None, move |window, cx| {
                                         view.update(cx, |view, cx| {
@@ -1274,6 +1465,20 @@ impl FlowView {
                     chips.push(("só leitura".to_string(), Color::Muted));
                 }
             }
+            StepKind::GitHub(github) => {
+                if matches!(github.action, GitHubAction::WaitChecks { .. }) {
+                    chips.push(("1 critério".to_string(), Color::Muted));
+                }
+                let outputs = github.action.outputs();
+                if let Some(output) = outputs.first() {
+                    chips.push((format!("entrega {output}"), Color::Accent));
+                }
+                if let OnFail::BackTo { step, .. } = &github.on_fail
+                    && let Some(target) = self.flow.step_index(step)
+                {
+                    chips.push((format!("volta → {}", target + 1), Color::Error));
+                }
+            }
         }
         chips
     }
@@ -1343,6 +1548,13 @@ impl FlowView {
                 "Rodar comando".to_string(),
                 None,
                 format!("{} · passa se sair 0", run_step.command),
+            ),
+            StepKind::GitHub(github) => (
+                github_icon(&github.action),
+                Color::Accent,
+                github.action.label().to_string(),
+                Some("GitHub".to_string()),
+                github_summary(&github.action),
             ),
             StepKind::Branch(branch) => (
                 IconName::GitBranch,
@@ -1599,6 +1811,7 @@ impl FlowView {
                     format!("se {} contém “{}”", branch.output, branch.contains)
                 }
                 StepKind::Parallel(parallel) => format!("{} juntos", parallel.agents.len()),
+                StepKind::GitHub(github) => github_summary(&github.action),
             };
             let state = self
                 .run
@@ -1656,6 +1869,12 @@ impl FlowView {
                     _ => None,
                 },
                 StepKind::Parallel(parallel) => match &parallel.on_fail {
+                    OnFail::BackTo { step, max } => {
+                        self.flow.step_index(step).map(|target| (target, *max))
+                    }
+                    _ => None,
+                },
+                StepKind::GitHub(github) => match &github.on_fail {
                     OnFail::BackTo { step, max } => {
                         self.flow.step_index(step).map(|target| (target, *max))
                     }
@@ -1772,6 +1991,9 @@ impl FlowView {
             StepKind::Parallel(parallel) => {
                 self.render_parallel_inspector(index, parallel, window, cx)
             }
+            StepKind::GitHub(github) => self
+                .render_github_inspector(index, github, inspector, window, cx)
+                .into_any_element(),
         };
         v_flex()
             .child(header)
@@ -2331,6 +2553,271 @@ impl FlowView {
                         cx,
                     )),
             )
+    }
+
+    /// Board I: what a GitHub step does, its own setting, what it delivers and where a
+    /// failure goes.
+    fn render_github_inspector(
+        &self,
+        index: usize,
+        github: &GitHubStep,
+        inspector: &StepInspector,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let view = cx.entity().downgrade();
+        let current_key = github.action.key();
+        let action_menu = ContextMenu::build(window, cx, {
+            move |mut menu, _window, _cx| {
+                for action in GitHubAction::ALL {
+                    let view = view.clone();
+                    let selected = action.key() == current_key;
+                    menu = menu.toggleable_entry(
+                        action.label(),
+                        selected,
+                        IconPosition::Start,
+                        None,
+                        move |window, cx| {
+                            let action = match action.clone() {
+                                GitHubAction::MoveItem { status } if status.is_empty() => {
+                                    GitHubAction::MoveItem {
+                                        status: "Em revisão".to_string(),
+                                    }
+                                }
+                                action => action,
+                            };
+                            view.update(cx, |view, cx| {
+                                view.edit_flow(cx, |flow| {
+                                    if let Some(FlowStep {
+                                        kind: StepKind::GitHub(github),
+                                        ..
+                                    }) = flow.steps.get_mut(index)
+                                    {
+                                        github.action = action;
+                                    }
+                                });
+                                view.rebuild_inspector(window, cx);
+                            })
+                            .log_err();
+                        },
+                    );
+                }
+                menu
+            }
+        });
+        let setting: Option<AnyElement> = match &github.action {
+            GitHubAction::WaitChecks { .. } => Some(
+                v_flex()
+                    .gap_2()
+                    .child(section_label("TEMPO MÁXIMO"))
+                    .child(field(&inspector.command, cx))
+                    .child(description(
+                        "Minutos. Os checks que falharem rodam mais uma vez antes de o passo reprovar.",
+                    ))
+                    .into_any_element(),
+            ),
+            GitHubAction::MoveItem { .. } => Some(
+                v_flex()
+                    .gap_2()
+                    .child(section_label("COLUNA"))
+                    .child(field(&inspector.note, cx))
+                    .child(description("O nome da coluna no projeto, como Em revisão."))
+                    .into_any_element(),
+            ),
+            GitHubAction::CommentItem { .. } => Some(
+                v_flex()
+                    .gap_2()
+                    .child(section_label("COMENTÁRIO"))
+                    .child(field(&inspector.note, cx))
+                    .child(description("Vazio comenta o que a esteira entregou até aqui."))
+                    .into_any_element(),
+            ),
+            GitHubAction::OpenPullRequest { draft } => Some(
+                Checkbox::new("github-step-draft", (*draft).into())
+                    .label("Abrir como rascunho")
+                    .on_click(cx.listener(move |this, state: &ToggleState, _window, cx| {
+                        let draft = state.selected();
+                        this.edit_flow(cx, |flow| {
+                            if let Some(FlowStep {
+                                kind: StepKind::GitHub(github),
+                                ..
+                            }) = flow.steps.get_mut(index)
+                            {
+                                github.action = GitHubAction::OpenPullRequest { draft };
+                            }
+                        });
+                    }))
+                    .into_any_element(),
+            ),
+            GitHubAction::StartItem => None,
+        };
+        let mut io: Vec<(String, String, bool, &'static str)> = Vec::new();
+        if matches!(github.action, GitHubAction::WaitChecks { .. }) {
+            let source = self.flow.steps[..index]
+                .iter()
+                .enumerate()
+                .rev()
+                .find(|(_, step)| {
+                    matches!(
+                        &step.kind,
+                        StepKind::GitHub(GitHubStep {
+                            action: GitHubAction::OpenPullRequest { .. },
+                            ..
+                        })
+                    )
+                });
+            io.push(match source {
+                Some((source, _)) => (
+                    "PR".to_string(),
+                    format!("do passo {} · Abrir PR", source + 1),
+                    false,
+                    "←",
+                ),
+                None => (
+                    "PR".to_string(),
+                    "o do branch atual".to_string(),
+                    false,
+                    "←",
+                ),
+            });
+        }
+        for output in github.action.outputs() {
+            io.push((
+                output.to_string(),
+                if *output == "log do que falhou" {
+                    "volta junto para quem corrige".to_string()
+                } else {
+                    "para os próximos passos".to_string()
+                },
+                false,
+                "→",
+            ));
+        }
+        let current = match &github.on_fail {
+            OnFail::BackTo { step, .. } => self.flow.step_index(step),
+            _ => None,
+        };
+        let candidates = (0..index)
+            .filter(|step| matches!(self.flow.steps[*step].kind, StepKind::Agent(_)))
+            .collect();
+        let colors = cx.theme().colors();
+        v_flex()
+            .gap_4()
+            .child(
+                v_flex()
+                    .gap_2()
+                    .child(section_label("PASSO DO GITHUB"))
+                    .child(selector(
+                        "github-step-action",
+                        github_icon(&github.action),
+                        github.action.label(),
+                        action_menu,
+                    ))
+                    .child(description(
+                        "Não chama modelo: usa a conta do GitHub conectada no dock Repo.",
+                    )),
+            )
+            .children(setting)
+            .when(!io.is_empty(), |this| {
+                this.child(
+                    v_flex()
+                        .gap_2()
+                        .child(section_label("RECEBE E ENTREGA"))
+                        .child(self.io_rows(io, cx)),
+                )
+            })
+            .when(
+                matches!(github.action, GitHubAction::WaitChecks { .. }),
+                |this| {
+                    this.child(
+                        v_flex()
+                            .gap_2()
+                            .child(section_label("CRITÉRIOS DE ACEITE"))
+                            .child(
+                                h_flex()
+                                    .gap_2()
+                                    .p_2p5()
+                                    .rounded_md()
+                                    .border_1()
+                                    .border_color(colors.border)
+                                    .child(
+                                        Icon::new(IconName::Check)
+                                            .size(IconSize::XSmall)
+                                            .color(Color::Success),
+                                    )
+                                    .child(
+                                        Label::new("Todos os checks obrigatórios passam")
+                                            .size(LabelSize::Small),
+                                    )
+                                    .child(div().flex_1())
+                                    .child(description("verificado pelo GitHub")),
+                            ),
+                    )
+                },
+            )
+            .child(
+                v_flex()
+                    .gap_2()
+                    .child(section_label("SE NÃO PASSAR"))
+                    .child(self.step_dropdown(
+                        "github-on-fail",
+                        current,
+                        candidates,
+                        "Voltar para ",
+                        Some("Chamar você"),
+                        move |this, step, cx| {
+                            let target = step
+                                .and_then(|step| this.flow.steps.get(step))
+                                .map(|step| step.id.clone());
+                            this.edit_flow(cx, |flow| {
+                                if let Some(FlowStep {
+                                    kind: StepKind::GitHub(github),
+                                    ..
+                                }) = flow.steps.get_mut(index)
+                                {
+                                    github.on_fail = match target {
+                                        Some(step) => OnFail::BackTo { step, max: 1 },
+                                        None => OnFail::AskYou,
+                                    };
+                                }
+                            });
+                        },
+                        window,
+                        cx,
+                    )),
+            )
+            .when(github.action.writes(), |this| {
+                let status = cx.theme().status();
+                this.child(
+                    v_flex()
+                        .gap_1p5()
+                        .p_3()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(status.warning_border)
+                        .bg(status.warning_background)
+                        .child(
+                            h_flex()
+                                .gap_1p5()
+                                .child(
+                                    Icon::new(IconName::Lock)
+                                        .size(IconSize::XSmall)
+                                        .color(Color::Warning),
+                                )
+                                .child(
+                                    Label::new("ESCRITAS NO GITHUB")
+                                        .size(LabelSize::XSmall)
+                                        .color(Color::Warning),
+                                ),
+                        )
+                        .child(
+                            Label::new(
+                                "Rodar mostra a lista do que a esteira escreve (branch, PR, mover, comentar) e você aprova de uma vez. Merge nunca é um passo: fica com você.",
+                            )
+                            .size(LabelSize::Small),
+                        ),
+                )
+            })
     }
 
     fn render_agent_inspector(

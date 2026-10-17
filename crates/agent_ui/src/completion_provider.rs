@@ -166,6 +166,7 @@ pub(crate) enum PromptContextType {
     BranchDiff,
     SqlQuery,
     PullRequest,
+    ProjectItem,
     Logs,
 }
 
@@ -253,6 +254,7 @@ impl TryFrom<&str> for PromptContextType {
             "diff" => Ok(Self::BranchDiff),
             "sql" => Ok(Self::SqlQuery),
             "pr" => Ok(Self::PullRequest),
+            "item" => Ok(Self::ProjectItem),
             "log" => Ok(Self::Logs),
             _ => Err(format!("Invalid context picker mode: {}", value)),
         }
@@ -271,6 +273,7 @@ impl PromptContextType {
             Self::BranchDiff => "branch diff",
             Self::SqlQuery => "sql query",
             Self::PullRequest => "pr",
+            Self::ProjectItem => "item",
             Self::Logs => "log",
         }
     }
@@ -286,6 +289,7 @@ impl PromptContextType {
             Self::BranchDiff => "Branch Diff",
             Self::SqlQuery => "SQL Query",
             Self::PullRequest => "Pull Request",
+            Self::ProjectItem => "Itens do projeto",
             Self::Logs => "Logs (Elastic)",
         }
     }
@@ -301,6 +305,7 @@ impl PromptContextType {
             Self::BranchDiff => IconName::GitBranch,
             Self::SqlQuery => IconName::Database,
             Self::PullRequest => IconName::PullRequest,
+            Self::ProjectItem => IconName::ListTodo,
             Self::Logs => IconName::CloudPulse,
         }
     }
@@ -317,6 +322,7 @@ pub(crate) enum Match {
     BranchDiff(BranchDiffMatch),
     SqlQuery(task_agents::SqlEditorTab),
     PullRequest(task_agents::PullRequestEntry),
+    ProjectItem(task_agents::ProjectItemEntry),
     Logs(task_agents::LogMention),
 }
 
@@ -338,6 +344,7 @@ impl Match {
             Match::BranchDiff(_) => 1.,
             Match::SqlQuery(_) => 1.,
             Match::PullRequest(_) => 1.,
+            Match::ProjectItem(_) => 1.,
             Match::Logs(_) => 1.,
         }
     }
@@ -1118,6 +1125,57 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
         }
     }
 
+    fn build_project_item_completion(
+        entry: task_agents::ProjectItemEntry,
+        source_range: Range<Anchor>,
+        source: Arc<T>,
+        editor: WeakEntity<Editor>,
+        mention_set: WeakEntity<MentionSet>,
+        workspace: Entity<Workspace>,
+        cx: &mut App,
+    ) -> Completion {
+        let label = match (&entry.status, entry.is_current_branch) {
+            (_, true) => format!("{} {} · do seu branch", entry.reference, entry.title),
+            (Some(status), false) => format!("{} {} · {status}", entry.reference, entry.title),
+            (None, false) => format!("{} {}", entry.reference, entry.title),
+        };
+        let uri = MentionUri::ProjectItem {
+            project_id: entry.project_id,
+            item_id: entry.item_id,
+            reference: entry.reference,
+            title: entry.title,
+        };
+        let crease_text: SharedString = uri.name().into();
+        let display_text = format!("@{}", crease_text);
+        let new_text = format!("[{}]({}) ", display_text, uri.to_uri());
+        let new_text_len = new_text.len();
+        let icon_path = uri.icon_path(cx);
+
+        Completion {
+            replace_range: source_range.clone(),
+            new_text,
+            label: CodeLabel::plain(label, None),
+            documentation: None,
+            source: project::CompletionSource::Custom,
+            icon_path: Some(icon_path),
+            icon_color: None,
+            match_start: None,
+            snippet_deduplication_key: None,
+            insert_text_mode: None,
+            confirm: Some(confirm_completion_callback(
+                crease_text,
+                source_range.start,
+                new_text_len - 1,
+                uri,
+                source,
+                editor,
+                mention_set,
+                workspace,
+            )),
+            group: None,
+        }
+    }
+
     fn build_logs_completion(
         entry: task_agents::LogMention,
         source_range: Range<Anchor>,
@@ -1172,6 +1230,20 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
             return Vec::new();
         }
         task_agents::log_mentions(workspace.read(cx).project(), cx)
+    }
+
+    fn project_item_entries(
+        &self,
+        workspace: &Entity<Workspace>,
+        cx: &App,
+    ) -> Vec<task_agents::ProjectItemEntry> {
+        if !self
+            .source
+            .supports_context(PromptContextType::ProjectItem, cx)
+        {
+            return Vec::new();
+        }
+        task_agents::project_items(workspace.read(cx).project(), cx)
     }
 
     fn pull_request_entries(
@@ -1467,6 +1539,31 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
                 }
             }
 
+            Some(PromptContextType::ProjectItem) => {
+                let entries = self.project_item_entries(&workspace, cx);
+                if query.is_empty() {
+                    Task::ready(entries.into_iter().map(Match::ProjectItem).collect())
+                } else {
+                    let candidates = project_item_candidates(&entries, false);
+                    cx.spawn(async move |cx| {
+                        fuzzy::match_strings(
+                            &candidates,
+                            &query,
+                            false,
+                            true,
+                            candidates.len(),
+                            &Arc::new(AtomicBool::default()),
+                            cx.background_executor().clone(),
+                        )
+                        .await
+                        .into_iter()
+                        .filter_map(|mat| entries.get(mat.candidate_id).cloned())
+                        .map(Match::ProjectItem)
+                        .collect()
+                    })
+                }
+            }
+
             None if query.is_empty() => {
                 let recent_task = self.recent_context_picker_entries(&workspace, cx);
                 let entries = self
@@ -1494,12 +1591,17 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
                     .pull_request_entries(&workspace, cx)
                     .into_iter()
                     .find(|entry| entry.is_current_branch);
+                let branch_project_item = self
+                    .project_item_entries(&workspace, cx)
+                    .into_iter()
+                    .find(|entry| entry.is_current_branch);
 
                 cx.spawn(async move |_cx| {
                     let mut matches = branch_pull_request
                         .into_iter()
                         .map(Match::PullRequest)
                         .collect::<Vec<_>>();
+                    matches.extend(branch_project_item.into_iter().map(Match::ProjectItem));
                     matches.extend(sql_queries.into_iter().map(Match::SqlQuery));
                     matches.extend(log_mentions.into_iter().map(Match::Logs));
                     matches.extend(recent_task.await);
@@ -1537,6 +1639,8 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
                 };
                 let pull_requests = self.pull_request_entries(&workspace, cx);
                 let pull_request_candidates = pull_request_candidates(&pull_requests, true);
+                let project_items = self.project_item_entries(&workspace, cx);
+                let project_item_candidates = project_item_candidates(&project_items, true);
                 let sql_queries = self.sql_query_tabs(&workspace, cx);
                 let sql_query_candidates = sql_queries
                     .iter()
@@ -1594,6 +1698,25 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
                                 .get(mat.candidate_id)
                                 .cloned()
                                 .map(Match::PullRequest)
+                        }));
+                    }
+
+                    if !project_item_candidates.is_empty() {
+                        let project_item_matches = fuzzy::match_strings(
+                            &project_item_candidates,
+                            &query,
+                            false,
+                            true,
+                            project_item_candidates.len(),
+                            &Arc::new(AtomicBool::default()),
+                            cx.background_executor().clone(),
+                        )
+                        .await;
+                        matches.extend(project_item_matches.into_iter().filter_map(|mat| {
+                            project_items
+                                .get(mat.candidate_id)
+                                .cloned()
+                                .map(Match::ProjectItem)
                         }));
                     }
 
@@ -1802,6 +1925,10 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
 
         if !self.pull_request_entries(workspace, cx).is_empty() {
             entries.push(PromptContextEntry::Mode(PromptContextType::PullRequest));
+        }
+
+        if !self.project_item_entries(workspace, cx).is_empty() {
+            entries.push(PromptContextEntry::Mode(PromptContextType::ProjectItem));
         }
 
         if !self.log_mentions(workspace, cx).is_empty() {
@@ -2218,7 +2345,10 @@ impl<T: PromptCompletionProviderDelegate> CompletionProvider for PromptCompletio
                                 is_recent: true, ..
                             })
                             | Match::RecentThread(_) => 0,
-                            Match::SqlQuery(_) | Match::PullRequest(_) | Match::Logs(_) => 0,
+                            Match::SqlQuery(_)
+                            | Match::PullRequest(_)
+                            | Match::ProjectItem(_)
+                            | Match::Logs(_) => 0,
                             Match::Entry(_) | Match::BranchDiff(_) => 1,
                             _ => 2,
                         });
@@ -2244,6 +2374,10 @@ impl<T: PromptCompletionProviderDelegate> CompletionProvider for PromptCompletio
                                         Match::PullRequest(_) => Some(CompletionGroup {
                                             key: "pull-requests".into(),
                                             label: Some("Pull requests".into()),
+                                        }),
+                                        Match::ProjectItem(_) => Some(CompletionGroup {
+                                            key: "project-items".into(),
+                                            label: Some("Itens do projeto".into()),
                                         }),
                                         Match::Logs(_) => Some(CompletionGroup {
                                             key: "logs".into(),
@@ -2380,6 +2514,17 @@ impl<T: PromptCompletionProviderDelegate> CompletionProvider for PromptCompletio
                                     )),
                                     Match::PullRequest(entry) => {
                                         Some(Self::build_pull_request_completion(
+                                            entry,
+                                            source_range.clone(),
+                                            source.clone(),
+                                            editor.clone(),
+                                            mention_set.clone(),
+                                            workspace.clone(),
+                                            cx,
+                                        ))
+                                    }
+                                    Match::ProjectItem(entry) => {
+                                        Some(Self::build_project_item_completion(
                                             entry,
                                             source_range.clone(),
                                             source.clone(),
@@ -3963,6 +4108,32 @@ mod tests {
             assert!(source.read_selection(workspace, false, cx).is_none());
         });
     }
+}
+
+/// Project items match by reference, title and status, with the keyword leading when mixed in
+/// with files, as pull requests do.
+fn project_item_candidates(
+    entries: &[task_agents::ProjectItemEntry],
+    with_keyword: bool,
+) -> Vec<StringMatchCandidate> {
+    entries
+        .iter()
+        .enumerate()
+        .map(|(ix, entry)| {
+            let text = format!(
+                "{} {} {}",
+                entry.reference,
+                entry.title,
+                entry.status.as_deref().unwrap_or_default()
+            );
+            let text = if with_keyword {
+                format!("{} {text}", PromptContextType::ProjectItem.keyword())
+            } else {
+                text
+            };
+            StringMatchCandidate::new(ix, &text)
+        })
+        .collect()
 }
 
 /// Pull requests match by number, title, branch and author. Mixed in with files, only a query

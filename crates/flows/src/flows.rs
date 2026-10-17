@@ -64,6 +64,88 @@ pub enum StepKind {
     Run(RunStep),
     Branch(BranchStep),
     Parallel(ParallelStep),
+    GitHub(GitHubStep),
+}
+
+/// A step on GitHub, done with the account of the Repo dock. It calls no model.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GitHubStep {
+    pub action: GitHubAction,
+    pub on_fail: OnFail,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum GitHubAction {
+    /// Creates the item's branch linked to it, checks it out, moves the item to work in
+    /// progress and assigns it to you.
+    StartItem,
+    /// Pushes the branch and opens a pull request that closes the item.
+    OpenPullRequest { draft: bool },
+    /// Waits for the pull request's checks; the failed ones run once more before the step
+    /// fails with their log.
+    WaitChecks { timeout_minutes: u32 },
+    /// Moves the item to a column of the project, by the column's name.
+    MoveItem { status: String },
+    /// Comments on the item; an empty text posts what the run delivered.
+    CommentItem { text: String },
+}
+
+impl GitHubAction {
+    pub const ALL: [GitHubAction; 5] = [
+        GitHubAction::StartItem,
+        GitHubAction::OpenPullRequest { draft: true },
+        GitHubAction::WaitChecks {
+            timeout_minutes: 30,
+        },
+        GitHubAction::MoveItem {
+            status: String::new(),
+        },
+        GitHubAction::CommentItem {
+            text: String::new(),
+        },
+    ];
+
+    /// The name in the `.flow.md`.
+    pub fn key(&self) -> &'static str {
+        match self {
+            Self::StartItem => "start_item",
+            Self::OpenPullRequest { .. } => "open_pr",
+            Self::WaitChecks { .. } => "wait_checks",
+            Self::MoveItem { .. } => "move_item",
+            Self::CommentItem { .. } => "comment_item",
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::StartItem => "Começar o item",
+            Self::OpenPullRequest { .. } => "Abrir PR",
+            Self::WaitChecks { .. } => "Esperar checks do Actions",
+            Self::MoveItem { .. } => "Mover no projeto",
+            Self::CommentItem { .. } => "Comentar no item",
+        }
+    }
+
+    /// What the step delivers to the steps after it.
+    pub fn outputs(&self) -> &'static [&'static str] {
+        match self {
+            Self::StartItem => &["branch"],
+            Self::OpenPullRequest { .. } => &["pr"],
+            Self::WaitChecks { .. } => &["checks", "log do que falhou"],
+            Self::MoveItem { .. } | Self::CommentItem { .. } => &[],
+        }
+    }
+
+    /// Everything but waiting writes on GitHub, which the user approves when the run starts.
+    pub fn writes(&self) -> bool {
+        !matches!(self, Self::WaitChecks { .. })
+    }
+
+    fn from_key(key: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|action| action.key() == key.trim())
+    }
 }
 
 /// "Se / senão": looks at what an earlier step delivered and jumps ahead. The steps jumped over
@@ -251,6 +333,7 @@ impl FlowStep {
                 .unwrap_or_else(|| format!("/{}", step.agent)),
             StepKind::Gate(_) => "Você aprova".to_string(),
             StepKind::Run(_) => "Rodar comando".to_string(),
+            StepKind::GitHub(github) => github.action.label().to_string(),
             StepKind::Branch(_) => "Se / senão".to_string(),
             StepKind::Parallel(parallel) => {
                 let names: Vec<String> = parallel
@@ -278,6 +361,13 @@ impl FlowStep {
             StepKind::Agent(step) => &step.agent,
             StepKind::Gate(_) => "aprovacao",
             StepKind::Run(_) => "comando",
+            StepKind::GitHub(github) => match github.action {
+                GitHubAction::StartItem => "comecar",
+                GitHubAction::OpenPullRequest { .. } => "pr",
+                GitHubAction::WaitChecks { .. } => "checks",
+                GitHubAction::MoveItem { .. } => "mover",
+                GitHubAction::CommentItem { .. } => "comentar",
+            },
             StepKind::Branch(_) => "se",
             StepKind::Parallel(_) => "paralelo",
         }
@@ -317,6 +407,15 @@ impl Flow {
             from_step: None,
         }];
         for (step_index, step) in self.steps.iter().take(index).enumerate() {
+            if let StepKind::GitHub(github) = &step.kind {
+                for output in github.action.outputs() {
+                    inputs.push(AvailableInput {
+                        name: output.to_string(),
+                        from_step: Some(step_index),
+                    });
+                }
+                continue;
+            }
             let commands: Vec<&String> = match &step.kind {
                 StepKind::Agent(agent_step) => vec![&agent_step.agent],
                 StepKind::Parallel(parallel) => parallel.agents.iter().collect(),
@@ -391,6 +490,16 @@ struct RawStep {
     gate: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     run: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    github: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    draft: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    timeout: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    comment: Option<String>,
     #[serde(default, rename = "if", skip_serializing_if = "Option::is_none")]
     if_: Option<RawCondition>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -576,11 +685,42 @@ impl RawStep {
             self.run.is_some(),
             self.if_.is_some(),
             self.parallel.is_some(),
+            self.github.is_some(),
         ];
         anyhow::ensure!(
             kinds.iter().filter(|is_set| **is_set).count() == 1,
-            "cada passo tem exatamente um de `agent`, `gate`, `run`, `if` ou `parallel`"
+            "cada passo tem exatamente um de `agent`, `gate`, `run`, `if`, `parallel` ou `github`"
         );
+        if let Some(key) = self.github {
+            let action = match GitHubAction::from_key(&key) {
+                Some(GitHubAction::OpenPullRequest { .. }) => GitHubAction::OpenPullRequest {
+                    draft: self.draft.unwrap_or(true),
+                },
+                Some(GitHubAction::WaitChecks { timeout_minutes }) => GitHubAction::WaitChecks {
+                    timeout_minutes: match self.timeout.as_deref() {
+                        Some(timeout) => parse_minutes(timeout)?,
+                        None => timeout_minutes,
+                    },
+                },
+                Some(GitHubAction::MoveItem { .. }) => GitHubAction::MoveItem {
+                    status: self.status.unwrap_or_default().trim().to_string(),
+                },
+                Some(GitHubAction::CommentItem { .. }) => GitHubAction::CommentItem {
+                    text: self.comment.unwrap_or_default().trim().to_string(),
+                },
+                Some(action) => action,
+                None => anyhow::bail!(
+                    "`github: {key}` não existe; use start_item, open_pr, wait_checks, move_item ou comment_item"
+                ),
+            };
+            return Ok(StepKind::GitHub(GitHubStep {
+                action,
+                on_fail: match self.on_fail {
+                    Some(on_fail) => on_fail.into_on_fail()?,
+                    None => OnFail::AskYou,
+                },
+            }));
+        }
         if let Some(condition) = self.if_ {
             return Ok(StepKind::Branch(BranchStep {
                 output: condition.output.trim().to_string(),
@@ -701,6 +841,26 @@ impl RawStep {
                     .then(|| RawOnFail::from_on_fail(&run.on_fail)),
                 ..Default::default()
             },
+            StepKind::GitHub(github) => {
+                let mut raw = Self {
+                    github: Some(github.action.key().to_string()),
+                    on_fail: (github.on_fail != OnFail::AskYou)
+                        .then(|| RawOnFail::from_on_fail(&github.on_fail)),
+                    ..Default::default()
+                };
+                match &github.action {
+                    GitHubAction::OpenPullRequest { draft } => raw.draft = Some(*draft),
+                    GitHubAction::WaitChecks { timeout_minutes } => {
+                        raw.timeout = Some(format!("{timeout_minutes}m"))
+                    }
+                    GitHubAction::MoveItem { status } => raw.status = Some(status.clone()),
+                    GitHubAction::CommentItem { text } => {
+                        raw.comment = (!text.is_empty()).then(|| text.clone())
+                    }
+                    GitHubAction::StartItem => {}
+                }
+                raw
+            }
             StepKind::Branch(branch) => Self {
                 if_: Some(RawCondition {
                     output: branch.output.clone(),
@@ -719,6 +879,20 @@ impl RawStep {
             },
         }
     }
+}
+
+/// `30m`, `1h` or a plain number of minutes.
+fn parse_minutes(text: &str) -> Result<u32> {
+    let text = text.trim();
+    let (number, factor) = match text.strip_suffix('h') {
+        Some(hours) => (hours, 60),
+        None => (text.strip_suffix('m').unwrap_or(text), 1),
+    };
+    let number: u32 = number
+        .trim()
+        .parse()
+        .with_context(|| format!("`timeout: {text}` não é um tempo; use 30m ou 1h"))?;
+    Ok(number * factor)
 }
 
 /// The flow's id from its file name: `feature-do-zero.flow.md` → `feature-do-zero`.
@@ -788,6 +962,7 @@ pub enum FlowProblem {
     InvalidModel { step: usize, model: String },
     BranchTargetNotLater { step: usize, target: String },
     EmptyParallel { step: usize },
+    EmptyStatus { step: usize },
 }
 
 impl FlowProblem {
@@ -806,7 +981,8 @@ impl FlowProblem {
             | Self::UnknownVerifierAgent { step, .. }
             | Self::InvalidModel { step, .. }
             | Self::BranchTargetNotLater { step, .. }
-            | Self::EmptyParallel { step } => Some(*step),
+            | Self::EmptyParallel { step }
+            | Self::EmptyStatus { step } => Some(*step),
         }
     }
 }
@@ -852,6 +1028,9 @@ impl fmt::Display for FlowProblem {
             ),
             Self::EmptyParallel { .. } => {
                 write!(f, "“Em paralelo” precisa de ao menos dois agentes.")
+            }
+            Self::EmptyStatus { .. } => {
+                write!(f, "“Mover no projeto” precisa da coluna para onde mover.")
             }
         }
     }
@@ -959,6 +1138,14 @@ pub fn validate_flow(flow: &Flow, agents: &[TaskAgent]) -> Vec<FlowProblem> {
                     problems.push(FlowProblem::EmptyCommand { step: index });
                 }
                 check_back_to(&run.on_fail, &mut problems);
+            }
+            StepKind::GitHub(github) => {
+                if let GitHubAction::MoveItem { status } = &github.action
+                    && status.trim().is_empty()
+                {
+                    problems.push(FlowProblem::EmptyStatus { step: index });
+                }
+                check_back_to(&github.on_fail, &mut problems);
             }
             StepKind::Branch(branch) => {
                 let available = flow.available_inputs(index, agents);

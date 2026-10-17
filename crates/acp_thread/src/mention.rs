@@ -93,6 +93,15 @@ pub enum MentionUri {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         subcommand: Option<String>,
     },
+    /// An item of a GitHub project: an issue, a pull request or a draft. The Tarefas dock
+    /// resolves the ids.
+    ProjectItem {
+        project_id: String,
+        item_id: String,
+        /// `asylum#198`, or `rascunho`.
+        reference: String,
+        title: String,
+    },
     /// Something from the Elastic dock: an ES|QL tab, a log document, followed lines or an APM
     /// trace. The dock resolves `id`.
     Logs {
@@ -289,6 +298,16 @@ impl MentionUri {
                         comment_id,
                         file_path: query_param(&url, "path"),
                     })
+                } else if path.starts_with("/agent/project-item") {
+                    validate_query_params(&url, &["project", "item", "ref", "title"])?;
+                    Ok(Self::ProjectItem {
+                        project_id: query_param(&url, "project")
+                            .context("Missing project for project item")?,
+                        item_id: query_param(&url, "item")
+                            .context("Missing id for project item")?,
+                        reference: query_param(&url, "ref").unwrap_or_default(),
+                        title: query_param(&url, "title").unwrap_or_default(),
+                    })
                 } else if path.starts_with("/agent/logs") {
                     validate_query_params(&url, &["id", "title"])?;
                     Ok(Self::Logs {
@@ -394,6 +413,7 @@ impl MentionUri {
             | MentionUri::MergeConflict { .. }
             | MentionUri::SqlQuery { .. }
             | MentionUri::PullRequest { .. }
+            | MentionUri::ProjectItem { .. }
             | MentionUri::Logs { .. } => None,
         }
     }
@@ -467,6 +487,12 @@ impl MentionUri {
             } => match subcommand {
                 Some(subcommand) => format!("{name} {subcommand}"),
                 None => name.clone(),
+            },
+            MentionUri::ProjectItem {
+                reference, title, ..
+            } => match reference.find('#') {
+                Some(index) => format!("{} {title}", &reference[index..]),
+                None => title.clone(),
             },
             MentionUri::Logs { title, .. } => title.clone(),
         }
@@ -545,6 +571,9 @@ impl MentionUri {
             MentionUri::PullRequest { number, title, .. } if !title.is_empty() => {
                 Some(format!("#{number} {title}").into())
             }
+            MentionUri::ProjectItem {
+                reference, title, ..
+            } => Some(format!("{reference} · {title}").into()),
             _ => None,
         }
     }
@@ -568,6 +597,7 @@ impl MentionUri {
             MentionUri::MergeConflict { .. } => IconName::GitMergeConflict.path().into(),
             MentionUri::SqlQuery { .. } => IconName::Database.path().into(),
             MentionUri::PullRequest { .. } => IconName::PullRequest.path().into(),
+            MentionUri::ProjectItem { .. } => IconName::ListTodo.path().into(),
             MentionUri::Logs { .. } => IconName::CloudPulse.path().into(),
             MentionUri::Skill { .. } => IconName::Sparkle.path().into(),
         }
@@ -716,6 +746,20 @@ impl MentionUri {
                         query.append_pair("path", file_path);
                     }
                 }
+                url
+            }
+            MentionUri::ProjectItem {
+                project_id,
+                item_id,
+                reference,
+                title,
+            } => {
+                let mut url = Url::parse("zed:///agent/project-item").unwrap();
+                url.query_pairs_mut()
+                    .append_pair("project", project_id)
+                    .append_pair("item", item_id)
+                    .append_pair("ref", reference)
+                    .append_pair("title", title);
                 url
             }
             MentionUri::Logs { id, title } => {
@@ -1071,6 +1115,22 @@ mod tests {
             mention
         );
         assert_eq!(mention.name(), "query-2.sql · Homologação");
+    }
+
+    #[test]
+    fn test_project_item_uri_round_trips() {
+        let mention = MentionUri::ProjectItem {
+            project_id: "PVT_kwHOA".to_string(),
+            item_id: "PVTI_lAHOA".to_string(),
+            reference: "asylum#188".to_string(),
+            title: "Release do Windows".to_string(),
+        };
+        let uri = mention.to_uri().to_string();
+        assert_eq!(
+            MentionUri::parse(&uri, PathStyle::local()).unwrap(),
+            mention
+        );
+        assert_eq!(mention.name(), "#188 Release do Windows");
     }
 
     #[test]

@@ -15,13 +15,17 @@ pub fn suggestion_system_prompt(agents: &[TaskAgent]) -> String {
          - text: \"critério verificável\"\n        required: true\n        verify: self   # ou you, \
          { agent: <comando> }, { command: \"npm test\" }\n    on_fail: { retry: 2, then: ask_you }   # ou \
          { back_to: <id de um passo anterior>, max: 2, then: ask_you }, ask_you, continue\n  \
-         - gate: you\n    note: \"o que a pessoa aprova\"\n  - run: \"npm test\"\n    on_fail: ask_you\n---\n```\n\n\
+         - gate: you\n    note: \"o que a pessoa aprova\"\n  - run: \"npm test\"\n    on_fail: ask_you\n  \
+         - github: wait_checks   # ou start_item, open_pr (draft: true), move_item (status: \"Em revisão\"), \
+         comment_item\n    timeout: 30m\n---\n```\n\n\
          ## Regras\n\
          - Use só os agentes da lista, pelo comando exato. Não invente agentes.\n\
          - Cada agente precisa receber o que pede (`recebe`): ponha antes quem entrega isso, ou o pedido.\n\
          - Ponha um portão (`gate: you`) onde a pessoa deve olhar antes de seguir, como depois de telas ou antes do merge.\n\
          - `back_to` só aponta para um passo anterior; o id de um passo é o comando do agente.\n\
-         - Critérios curtos e verificáveis; `continue` só em passos sem critério obrigatório.\n\n\
+         - Critérios curtos e verificáveis; `continue` só em passos sem critério obrigatório.\n\
+         - Passos `github` só quando o pedido vem de um item do GitHub Projects: começar o item, abrir o PR, \
+         esperar os checks e mover o item. Merge nunca é passo.\n\n\
          ## Agentes disponíveis\n",
     );
     if agents.is_empty() {

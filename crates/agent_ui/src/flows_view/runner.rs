@@ -51,6 +51,7 @@ impl FlowView {
         match run.next_action() {
             RunAction::StartAgent { step } => self.start_agent_step(step, window, cx),
             RunAction::RunCommand { step } => self.start_command_step(step, window, cx),
+            RunAction::RunGitHub { step } => self.start_github_step(step, window, cx),
             RunAction::StartParallel { step } => self.start_parallel_step(step, window, cx),
             RunAction::Wait | RunAction::Done => {}
         }
@@ -251,6 +252,68 @@ impl FlowView {
                 {
                     match result {
                         Ok((passed, evidence)) => run.command_finished(step, passed, evidence),
+                        Err(error) => run.command_finished(step, false, format!("{error:#}")),
+                    }
+                }
+                this.drive(window, cx);
+            })
+            .ok();
+        });
+        self.running = Some(RunningStep {
+            threads: Vec::new(),
+            _task: task,
+        });
+    }
+
+    /// Hands a GitHub step to the Tarefas dock, with the run's input to find the item and what
+    /// the steps delivered so far for the pull request and comments.
+    fn start_github_step(
+        &mut self,
+        step: usize,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(run) = &mut self.run else {
+            return;
+        };
+        let StepKind::GitHub(github) = &run.flow.steps[step].kind else {
+            return;
+        };
+        let mut request = task_agents::GitHubStepRequest {
+            action: github.action.key().to_string(),
+            request: run.input.clone(),
+            ..Default::default()
+        };
+        match &github.action {
+            flows::GitHubAction::OpenPullRequest { draft } => request.draft = *draft,
+            flows::GitHubAction::WaitChecks { timeout_minutes } => {
+                request.timeout_minutes = *timeout_minutes
+            }
+            flows::GitHubAction::MoveItem { status } => request.status = status.clone(),
+            flows::GitHubAction::CommentItem { text } => request.comment = text.clone(),
+            flows::GitHubAction::StartItem => {}
+        }
+        request.summary = (0..step)
+            .map(|earlier| delivery_summary(run, earlier))
+            .filter(|summary| !summary.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        run.step_started(step);
+        let started = task_agents::run_github_step(&self.project, request, cx);
+        let task = cx.spawn_in(window, async move |this, cx| {
+            let result = started.await;
+            this.update_in(cx, |this, window, cx| {
+                this.running = None;
+                if let Some(run) = &mut this.run
+                    && !run.is_finished()
+                {
+                    match result {
+                        Ok(outcome) => run.github_finished(
+                            step,
+                            outcome.passed,
+                            outcome.evidence,
+                            outcome.outputs,
+                        ),
                         Err(error) => run.command_finished(step, false, format!("{error:#}")),
                     }
                 }
