@@ -138,6 +138,8 @@ struct Frontmatter {
     tools: Option<ToolsEntry>,
     #[serde(default)]
     permissions: BTreeMap<String, PermissionEntry>,
+    takes: Option<ToolkitsEntry>,
+    gives: Option<ToolkitsEntry>,
 }
 
 #[derive(Serialize)]
@@ -158,6 +160,10 @@ struct FrontmatterOut<'a> {
     tools: &'a BTreeMap<String, bool>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     permissions: BTreeMap<&'a str, PermissionEntry>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    takes: &'a Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    gives: &'a Vec<String>,
 }
 
 /// A `provider/model` pair, e.g. `anthropic/claude-opus-5-5`. Claude Code's aliases (`opus`,
@@ -210,6 +216,10 @@ pub struct TaskAgent {
     pub tools: BTreeMap<String, bool>,
     /// Keyed by tool name or toolkit id.
     pub permissions: BTreeMap<String, ToolPermissionRules>,
+    /// What the agent needs from earlier steps of a flow, e.g. `spec.md`.
+    pub takes: Vec<String>,
+    /// What the agent hands to later steps of a flow, e.g. `PR`.
+    pub gives: Vec<String>,
     pub instructions: String,
     pub source: TaskAgentSource,
     pub file_path: PathBuf,
@@ -266,6 +276,8 @@ impl TaskAgent {
                 .iter()
                 .map(|(name, rules)| (name.as_str(), PermissionEntry::from(rules.clone())))
                 .collect(),
+            takes: &self.takes,
+            gives: &self.gives,
         };
         let yaml = serde_yaml_ng::to_string(&frontmatter)?;
         let instructions = self.instructions.trim();
@@ -330,11 +342,14 @@ pub fn parse_task_agent(path: &Path, content: &str, source: TaskAgentSource) -> 
             .collect(),
         None => BTreeMap::new(),
     };
-    let toolkits = match frontmatter.toolkits {
+    let names = |entry: Option<ToolkitsEntry>| match entry {
         Some(ToolkitsEntry::List(names)) => names,
         Some(ToolkitsEntry::Text(text)) => split_names(&text),
         None => Vec::new(),
     };
+    let toolkits = names(frontmatter.toolkits);
+    let takes = names(frontmatter.takes);
+    let gives = names(frontmatter.gives);
     let model = frontmatter
         .model
         .filter(|model| ModelReference::parse(model).is_some());
@@ -357,6 +372,8 @@ pub fn parse_task_agent(path: &Path, content: &str, source: TaskAgentSource) -> 
             .into_iter()
             .map(|(name, entry)| (name, entry.into()))
             .collect(),
+        takes,
+        gives,
         instructions: body.trim().to_string(),
         source,
         file_path: path.to_path_buf(),
@@ -365,7 +382,7 @@ pub fn parse_task_agent(path: &Path, content: &str, source: TaskAgentSource) -> 
 
 /// Returns the YAML between the leading `---` lines and the rest of the file. A file without
 /// frontmatter is all instructions.
-fn split_frontmatter(content: &str) -> Result<(Option<&str>, &str)> {
+pub fn split_frontmatter(content: &str) -> Result<(Option<&str>, &str)> {
     let content = content.trim_start_matches('\u{feff}');
     let Some(rest) = content
         .strip_prefix("---\n")
@@ -657,9 +674,11 @@ mod tests {
 
     #[test]
     fn test_markdown_round_trip() {
-        let content = "---\nname: QA do app\ncommand: qa\nprofile: write\ntoolkits: [devices]\npermissions:\n  devices: allow\n  terminal:\n    allow: ['^npx expo ']\n---\nSuba o app.";
+        let content = "---\nname: QA do app\ncommand: qa\nprofile: write\ntoolkits: [devices]\npermissions:\n  devices: allow\n  terminal:\n    allow: ['^npx expo ']\ntakes: [PR, spec.md]\ngives: relatório\n---\nSuba o app.";
         let agent = parse_task_agent(Path::new("/x/qa.md"), content, project_source())
             .expect("agent should parse");
+        assert_eq!(agent.takes, ["PR", "spec.md"]);
+        assert_eq!(agent.gives, ["relatório"]);
         let written = agent.to_markdown().expect("agent should serialize");
         let reparsed = parse_task_agent(Path::new("/x/qa.md"), &written, project_source())
             .expect("written agent should parse");
