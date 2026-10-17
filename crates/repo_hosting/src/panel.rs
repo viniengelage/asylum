@@ -4,7 +4,8 @@ use crate::{
         self, CheckState, CheckSummary, FileChange, PullRequest, PullRequestDetail,
         PullRequestState, RemoteRepository,
     },
-    bitbucket::{self, MergeOutcome, MergeStrategy},
+    api::{MergeOutcome, MergeStrategy, NewPullRequest},
+    bitbucket, github, host,
 };
 use anyhow::Context as _;
 use askpass::AskPassDelegate;
@@ -19,15 +20,15 @@ use gpui::{
     Action as _, ClipboardItem, Div, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
     Hsla, Pixels, Stateful, Subscription, Task, WeakEntity, px,
 };
-use http_client::HttpClient;
 use project::{
     Project,
     git_store::{GitStoreEvent, Repository},
 };
-use std::{collections::HashSet, future::Future, sync::Arc, time::Duration, time::Instant};
+use std::{collections::HashSet, future::Future, time::Duration, time::Instant};
 use ui::{
-    Checkbox, CommonAnimationExt, ContextMenu, ContextMenuEntry, PopoverMenu, Tab, TabBar,
-    TabPosition, TabStyle, Tooltip, prelude::*, right_click_menu,
+    Checkbox, CommonAnimationExt, ContextMenu, ContextMenuEntry, KeyBinding, PopoverMenu, Tab,
+    TabBar, TabPosition, TabStyle, Tooltip, prelude::*, primary_button, right_click_menu,
+    secondary_button, segment_option, segmented_control,
 };
 use ui_input::{ErasedEditorEvent, InputField};
 use util::ResultExt as _;
@@ -39,6 +40,14 @@ use workspace::dock::{DockPosition, Panel, PanelEvent};
 const SYNC_INTERVAL: Duration = Duration::from_secs(90);
 /// Longer descriptions are cut here until "Mostrar mais" is clicked.
 const DESCRIPTION_PREVIEW_CHARS: usize = 280;
+
+/// What the GitHub connect screen found in the `gh` CLI.
+enum GhAccount {
+    NotChecked,
+    Checking,
+    Found(Account),
+    Missing(SharedString),
+}
 
 /// What the project's active repository is, as far as the panel is concerned.
 #[derive(Clone, PartialEq, Eq)]
@@ -145,6 +154,10 @@ struct MergeForm {
     close_source_branch: bool,
     /// Switch to the destination, pull it and delete the local branch once merged.
     clean_up_local: bool,
+    /// GitHub only: the repository lets pull requests merge themselves once allowed.
+    allows_auto_merge: bool,
+    /// Ask GitHub to merge when the checks and reviews pass, instead of merging now.
+    auto_merge: bool,
     submitting: bool,
     progress: Option<SharedString>,
     _load_task: Task<()>,
@@ -175,6 +188,8 @@ struct OpenPullRequest {
     notice: Option<SharedString>,
     pending_action: Option<PendingAction>,
     load_task: Option<Task<()>>,
+    /// Actions jobs asked to run again, until the reload shows them running.
+    rerunning_jobs: HashSet<u64>,
 }
 
 /// What the local checkout says about the branch a new pull request would come from.
@@ -219,6 +234,10 @@ pub struct RepoPanel {
     workspace: WeakEntity<Workspace>,
     email_input: Entity<InputField>,
     token_input: Entity<InputField>,
+    github_token_input: Entity<InputField>,
+    /// The account the `gh` CLI is logged into, looked up when GitHub needs connecting.
+    gh_account: GhAccount,
+    gh_task: Option<Task<()>>,
     connect_error: Option<SharedString>,
     connect_task: Option<Task<()>>,
     /// Set from the account menu: shows the token fields again while the current token keeps
@@ -258,13 +277,23 @@ impl RepoPanel {
                 .start_icon(IconName::Lock)
                 .masked(true)
         });
+        let github_token_input = cx.new(|cx| {
+            InputField::new(window, cx, "github_pat_…")
+                .start_icon(IconName::Lock)
+                .masked(true)
+        });
         let filter_input = cx.new(|cx| {
             InputField::new(window, cx, "Filtrar por título, # ou autor")
                 .start_icon(IconName::MagnifyingGlass)
         });
 
         let mut subscriptions = Vec::new();
-        for input in [&email_input, &token_input, &filter_input] {
+        for input in [
+            &email_input,
+            &token_input,
+            &github_token_input,
+            &filter_input,
+        ] {
             let editor = input.read(cx).editor().clone();
             let this = cx.weak_entity();
             subscriptions.push(editor.subscribe(
@@ -298,6 +327,9 @@ impl RepoPanel {
             workspace,
             email_input,
             token_input,
+            github_token_input,
+            gh_account: GhAccount::NotChecked,
+            gh_task: None,
             connect_error: None,
             connect_task: None,
             replacing_token: false,
@@ -320,6 +352,22 @@ impl RepoPanel {
         this
     }
 
+    /// A client for the target repository's host, when its account is connected.
+    fn client(&self, cx: &App) -> Option<host::Client> {
+        let Target::Hosted { repository, .. } = &self.target else {
+            return None;
+        };
+        self.store.read(cx).client(repository.hosting)
+    }
+
+    /// The host of the target repository; Bitbucket until one is detected.
+    fn hosting(&self) -> api::Hosting {
+        match &self.target {
+            Target::Hosted { repository, .. } => repository.hosting,
+            _ => api::Hosting::Bitbucket,
+        }
+    }
+
     fn account(&self, cx: &App) -> Option<Account> {
         let Target::Hosted { repository, .. } = &self.target else {
             return None;
@@ -336,6 +384,7 @@ impl RepoPanel {
         self.branch = branch;
         if target != self.target {
             self.target = target;
+            self.check_gh_account(cx);
             self.pull_requests = PullRequests::default();
             self.open_pull_request = None;
             self.creating = None;
@@ -351,7 +400,123 @@ impl RepoPanel {
         cx.notify();
     }
 
+    /// Looks up the `gh` CLI's account once the GitHub connect screen is about to show.
+    fn check_gh_account(&mut self, cx: &mut Context<Self>) {
+        let Target::Hosted { repository, .. } = &self.target else {
+            return;
+        };
+        if repository.hosting != api::Hosting::GitHub
+            || !matches!(self.gh_account, GhAccount::NotChecked)
+            || !matches!(
+                self.store.read(cx).connection(api::Hosting::GitHub),
+                Connection::Disconnected | Connection::Rejected
+            )
+        {
+            return;
+        }
+        self.gh_account = GhAccount::Checking;
+        let validation = self.store.read(cx).validate_github_cli(cx);
+        self.gh_task = Some(cx.spawn(async move |this, cx| {
+            let result = validation.await;
+            this.update(cx, |this, cx| {
+                this.gh_account = match result {
+                    Ok(account) => GhAccount::Found(account),
+                    Err(error) => GhAccount::Missing(format!("{error:#}").into()),
+                };
+                this.gh_task = None;
+                cx.notify();
+            })
+            .log_err();
+        }));
+        cx.notify();
+    }
+
+    fn retry_gh_account(&mut self, cx: &mut Context<Self>) {
+        self.gh_account = GhAccount::NotChecked;
+        self.check_gh_account(cx);
+    }
+
+    fn use_gh_account(&mut self, cx: &mut Context<Self>) {
+        let GhAccount::Found(account) = &self.gh_account else {
+            return;
+        };
+        if self.connect_task.is_some() {
+            return;
+        }
+        let save = self
+            .store
+            .update(cx, |store, cx| store.save(account.clone(), cx));
+        self.connect_task = Some(cx.spawn(async move |this, cx| {
+            let result = save.await;
+            this.update(cx, |this, cx| {
+                this.connect_task = None;
+                match result {
+                    Ok(()) => this.replacing_token = false,
+                    Err(error) => {
+                        log::error!("Repo: falha ao salvar o token no keychain: {error:#}");
+                        this.connect_error =
+                            Some("Não foi possível salvar o token no keychain.".into());
+                    }
+                }
+                cx.notify();
+            })
+            .log_err();
+        }));
+        cx.notify();
+    }
+
+    fn connect_github(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.connect_task.is_some() {
+            return;
+        }
+        let token = self.github_token_input.read(cx).text(cx).trim().to_string();
+        if token.is_empty() {
+            self.use_gh_account(cx);
+            return;
+        }
+        let validation = self.store.read(cx).validate_github(token, cx);
+        self.connect_error = None;
+        cx.notify();
+        self.connect_task = Some(cx.spawn_in(window, async move |this, cx| {
+            let result = match validation.await {
+                Ok(account) => {
+                    let saved = this
+                        .update(cx, |this, cx| {
+                            this.store.update(cx, |store, cx| store.save(account, cx))
+                        })
+                        .log_err();
+                    match saved {
+                        Some(saved) => saved.await.map_err(|error| {
+                            log::error!("Repo: falha ao salvar o token no keychain: {error:#}");
+                            SharedString::from("Não foi possível salvar o token no keychain.")
+                        }),
+                        None => return,
+                    }
+                }
+                Err(error) if crate::is_unauthorized(&error) => Err(
+                    "O GitHub recusou o token. Confira se ele foi copiado inteiro e não expirou."
+                        .into(),
+                ),
+                Err(error) => Err(format!("Não foi possível falar com o GitHub: {error}").into()),
+            };
+            this.update_in(cx, |this, window, cx| {
+                this.connect_task = None;
+                match result {
+                    Ok(()) => {
+                        this.replacing_token = false;
+                        this.github_token_input
+                            .update(cx, |input, cx| input.clear(window, cx));
+                    }
+                    Err(message) => this.connect_error = Some(message),
+                }
+                cx.notify();
+            })
+            .log_err();
+        }));
+    }
+
     fn connection_changed(&mut self, cx: &mut Context<Self>) {
+        self.check_gh_account(cx);
         let is_connected = self.account(cx).is_some();
         if !is_connected {
             self.sync_task = None;
@@ -370,11 +535,10 @@ impl RepoPanel {
             self.sync_task = None;
             return;
         };
-        let Some(credentials) = self.store.read(cx).bitbucket_credentials() else {
+        let Some(client) = self.client(cx) else {
             self.sync_task = None;
             return;
         };
-        let http_client = self.store.read(cx).http_client();
         self.pull_requests.is_syncing = true;
         cx.notify();
 
@@ -385,31 +549,21 @@ impl RepoPanel {
                 };
                 let result = cx
                     .background_spawn({
-                        let http_client = http_client.clone();
-                        let credentials = credentials.clone();
+                        let client = client.clone();
                         let repository = repository.clone();
                         async move {
-                            let list = bitbucket::list_open_pull_requests(
-                                &http_client,
-                                &credentials,
-                                &repository,
-                            )
-                            .await?;
+                            let list = client.list_open_pull_requests(&repository).await?;
                             let branch_number = branch.and_then(|branch| {
                                 list.iter()
                                     .find(|pull_request| pull_request.source_branch == branch)
                                     .map(|pull_request| pull_request.number)
                             });
                             let branch_checks = match branch_number {
-                                Some(number) => bitbucket::get_checks(
-                                    &http_client,
-                                    &credentials,
-                                    &repository,
-                                    number,
-                                )
-                                .await
-                                .log_err()
-                                .map(|checks| (number, checks)),
+                                Some(number) => client
+                                    .get_checks(&repository, number)
+                                    .await
+                                    .log_err()
+                                    .map(|checks| (number, checks)),
                                 None => None,
                             };
                             anyhow::Ok((list, branch_checks))
@@ -458,7 +612,11 @@ impl RepoPanel {
                 true
             }
             Err(error) if crate::is_unauthorized(&error) => {
-                self.store.update(cx, |store, cx| store.mark_rejected(cx));
+                {
+                    let hosting = self.hosting();
+                    self.store
+                        .update(cx, |store, cx| store.mark_rejected(hosting, cx));
+                }
                 false
             }
             Err(error) => {
@@ -471,7 +629,11 @@ impl RepoPanel {
         keep_syncing
     }
 
-    fn connect(&mut self, _: &menu::Confirm, _window: &mut Window, cx: &mut Context<Self>) {
+    fn connect(&mut self, _: &menu::Confirm, window: &mut Window, cx: &mut Context<Self>) {
+        if self.hosting() == api::Hosting::GitHub {
+            self.connect_github(window, cx);
+            return;
+        }
         if self.connect_task.is_some() {
             return;
         }
@@ -536,10 +698,12 @@ impl RepoPanel {
     fn start_replacing_token(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.replacing_token = true;
         self.connect_error = None;
-        if let Some(account) = self.account(cx) {
-            let email = account.credentials.email;
-            self.email_input
-                .update(cx, |input, cx| input.set_text(&email, window, cx));
+        if let Some(account) = self.account(cx)
+            && let host::Credentials::Bitbucket(credentials) = account.credentials
+        {
+            self.email_input.update(cx, |input, cx| {
+                input.set_text(&credentials.email, window, cx)
+            });
         }
         self.token_input
             .update(cx, |input, cx| input.clear(window, cx));
@@ -593,7 +757,12 @@ impl RepoPanel {
         repository: &RemoteRepository,
         show_rejected: bool,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    ) -> AnyElement {
+        if repository.hosting == api::Hosting::GitHub {
+            return self
+                .render_github_connect(repository, show_rejected, cx)
+                .into_any_element();
+        }
         let is_busy = self.connect_task.is_some();
         let can_connect = !is_busy
             && !self.email_input.read(cx).is_empty(cx)
@@ -762,6 +931,324 @@ impl RepoPanel {
                         .color(Color::Muted),
                     ),
             )
+            .into_any_element()
+    }
+
+    /// Board A: the `gh` CLI's account first, a fine-grained token for anything else.
+    fn render_github_connect(
+        &self,
+        repository: &RemoteRepository,
+        show_rejected: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let colors = cx.theme().colors();
+        let is_busy = self.connect_task.is_some();
+        let has_token = !self.github_token_input.read(cx).is_empty(cx);
+        let accent = colors.border_focused;
+
+        let gh_body: AnyElement = match &self.gh_account {
+            GhAccount::NotChecked | GhAccount::Checking => h_flex()
+                .gap_1p5()
+                .child(spinning_if(
+                    Icon::new(IconName::LoadCircle)
+                        .size(IconSize::XSmall)
+                        .color(Color::Muted),
+                    true,
+                ))
+                .child(
+                    Label::new("Procurando o login do gh…")
+                        .size(LabelSize::Small)
+                        .color(Color::Muted),
+                )
+                .into_any_element(),
+            GhAccount::Found(account) => v_flex()
+                .gap_2p5()
+                .child(
+                    h_flex()
+                        .h(px(40.))
+                        .px_2p5()
+                        .gap_2p5()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(colors.border)
+                        .bg(colors.editor_background)
+                        .child(avatar(account.user.short_name(), Color::Accent, cx))
+                        .child(Label::new(account.user.short_name().to_string()).size(LabelSize::Small))
+                        .child(div().flex_1())
+                        .child(
+                            Label::new(account.scopes.join(" · "))
+                                .size(LabelSize::XSmall)
+                                .buffer_font(cx)
+                                .color(Color::Muted)
+                                .truncate(),
+                        ),
+                )
+                .when(account.lacks_scope("project"), |this| {
+                    this.child(
+                        Label::new(
+                            "Falta o escopo project: Tarefas abre só leitura. Rode gh auth refresh -s project.",
+                        )
+                        .size(LabelSize::XSmall)
+                        .color(Color::Warning),
+                    )
+                })
+                .child(
+                    h_flex().justify_end().child(
+                        primary_button(
+                            "repo-use-gh",
+                            Some(IconName::Check),
+                            "Usar esta conta",
+                            (!has_token).then(|| {
+                                KeyBinding::for_action_in(
+                                    &menu::Confirm,
+                                    &self.focus_handle,
+                                    cx,
+                                )
+                            }),
+                            cx,
+                        )
+                        .when(is_busy, |this| this.opacity(0.5))
+                        .when(!is_busy, |this| {
+                            this.on_click(cx.listener(|this, _, _, cx| this.use_gh_account(cx)))
+                        }),
+                    ),
+                )
+                .into_any_element(),
+            GhAccount::Missing(reason) => v_flex()
+                .gap_2()
+                .child(
+                    Label::new(format!("{reason}. Rode gh auth login no terminal."))
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted),
+                )
+                .child(
+                    h_flex().justify_end().child(
+                        secondary_button(
+                            "repo-retry-gh",
+                            Some((IconName::RotateCw, Color::Muted)),
+                            "Procurar de novo",
+                            true,
+                            cx,
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| this.retry_gh_account(cx))),
+                    ),
+                )
+                .into_any_element(),
+        };
+
+        let gh_card = v_flex()
+            .w_full()
+            .gap_2p5()
+            .p_3p5()
+            .rounded_lg()
+            .border_1()
+            .border_color(accent)
+            .bg(colors.element_background)
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(
+                        Icon::new(IconName::Terminal)
+                            .size(IconSize::Small)
+                            .color(Color::Accent),
+                    )
+                    .child(
+                        Label::new("Usar a conta do gh")
+                            .size(LabelSize::Small)
+                            .weight(FontWeight::SEMIBOLD),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        div()
+                            .px_1p5()
+                            .rounded_sm()
+                            .bg(accent.opacity(0.18))
+                            .child(
+                                Label::new("recomendado")
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Accent),
+                            ),
+                    ),
+            )
+            .child(
+                Label::new(
+                    "O GitHub CLI já guarda um login nesta máquina. O token é lido com gh auth token e copiado para o Keychain do perfil.",
+                )
+                .size(LabelSize::XSmall)
+                .color(Color::Muted),
+            )
+            .child(gh_body);
+
+        let hint: Option<AnyElement> = match &self.connect_error {
+            Some(error) => Some(
+                Label::new(error.clone())
+                    .size(LabelSize::XSmall)
+                    .color(Color::Error)
+                    .into_any_element(),
+            ),
+            None if is_busy && has_token => Some(
+                Label::new("Verificando com o GitHub…")
+                    .size(LabelSize::XSmall)
+                    .color(Color::Muted)
+                    .into_any_element(),
+            ),
+            None => None,
+        };
+
+        let token_card = v_flex()
+            .w_full()
+            .gap_2p5()
+            .p_3p5()
+            .rounded_lg()
+            .border_1()
+            .border_color(colors.border)
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(
+                        Icon::new(IconName::Lock)
+                            .size(IconSize::Small)
+                            .color(Color::Muted),
+                    )
+                    .child(
+                        Label::new("Token fine-grained")
+                            .size(LabelSize::Small)
+                            .weight(FontWeight::SEMIBOLD),
+                    ),
+            )
+            .child(
+                Label::new("Para outra conta ou sem o gh instalado. Permissões que o Asylum pede:")
+                    .size(LabelSize::XSmall)
+                    .color(Color::Muted),
+            )
+            .child(
+                v_flex()
+                    .gap_1()
+                    .children(github::TOKEN_PERMISSIONS.iter().map(
+                        |(permission, level, purpose)| {
+                            h_flex()
+                                .gap_2()
+                                .child(
+                                    Icon::new(IconName::Check)
+                                        .size(IconSize::XSmall)
+                                        .color(Color::Success),
+                                )
+                                .child(Label::new(*permission).size(LabelSize::Small))
+                                .child(
+                                    Label::new(*level)
+                                        .size(LabelSize::XSmall)
+                                        .buffer_font(cx)
+                                        .color(Color::Accent),
+                                )
+                                .child(div().flex_1())
+                                .child(
+                                    Label::new(*purpose)
+                                        .size(LabelSize::XSmall)
+                                        .color(Color::Muted),
+                                )
+                        },
+                    )),
+            )
+            .child(self.github_token_input.clone())
+            .children(hint)
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(
+                        secondary_button(
+                            "repo-github-token-settings",
+                            Some((IconName::ArrowUpRight, Color::Muted)),
+                            "Criar token no GitHub",
+                            true,
+                            cx,
+                        )
+                        .on_click(|_, _, cx| cx.open_url(github::TOKEN_SETTINGS_URL)),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        secondary_button(
+                            "repo-github-connect",
+                            None,
+                            "Conectar",
+                            has_token && !is_busy,
+                            cx,
+                        )
+                        .when(has_token && !is_busy, |this| {
+                            this.on_click(
+                                cx.listener(|this, _, window, cx| this.connect_github(window, cx)),
+                            )
+                        }),
+                    ),
+            );
+
+        v_flex()
+            .key_context("RepoConnect")
+            .on_action(cx.listener(Self::connect))
+            .size_full()
+            .child(
+                v_flex()
+                    .id("repo-connect-scroll")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .items_center()
+                    .gap_4()
+                    .px_5()
+                    .pt_12()
+                    .pb_6()
+                    .when(show_rejected, |this| {
+                        this.child(render_warning(
+                            "O GitHub recusou o token salvo",
+                            "Expirou ou foi revogado? Use o gh ou cole um token novo.",
+                            cx,
+                        ))
+                    })
+                    .child(self.render_badge(cx))
+                    .child(
+                        Label::new("Conecte o GitHub")
+                            .size(LabelSize::Large)
+                            .weight(FontWeight::SEMIBOLD),
+                    )
+                    .child(
+                        div().w_full().text_center().child(
+                            Label::new(format!(
+                                "origin aponta para github.com/{}. A conta fica neste perfil; Repo e Tarefas usam a mesma conexão.",
+                                repository.full_name()
+                            ))
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
+                        ),
+                    )
+                    .child(gh_card)
+                    .child(token_card)
+                    .when(self.replacing_token, |this| {
+                        this.child(
+                            secondary_button("repo-cancel-replace", None, "Manter a conta atual", true, cx)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.replacing_token = false;
+                                    this.connect_error = None;
+                                    cx.notify();
+                                })),
+                        )
+                    }),
+            )
+            .child(
+                h_flex()
+                    .items_start()
+                    .gap_2()
+                    .px_3p5()
+                    .py_3()
+                    .border_t_1()
+                    .border_color(colors.border)
+                    .child(Icon::new(IconName::Lock).size(IconSize::XSmall).color(Color::Muted))
+                    .child(
+                        Label::new(
+                            "O token só vale para este perfil. Sem o escopo project, Tarefas abre só leitura e avisa o que falta.",
+                        )
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted),
+                    ),
+            )
     }
 
     fn render_centered_message(
@@ -813,12 +1300,13 @@ impl RepoPanel {
     fn render_account_menu(&self, cx: &Context<Self>) -> impl IntoElement {
         let panel = cx.weak_entity();
         let store = self.store.clone();
+        let hosting = self.hosting();
         PopoverMenu::new("repo-account-menu")
             .trigger_with_tooltip(
                 IconButton::new("repo-account-settings", IconName::Settings)
                     .icon_size(IconSize::Small)
                     .icon_color(Color::Muted),
-                Tooltip::text("Conta do Bitbucket"),
+                Tooltip::text(format!("Conta do {}", hosting.name())),
             )
             .anchor(gpui::Anchor::BottomRight)
             .menu(move |window, cx| {
@@ -841,10 +1329,18 @@ impl RepoPanel {
                             }),
                     )
                     .item(
-                        ContextMenuEntry::new("Gerenciar tokens na Atlassian")
-                            .icon(IconName::ArrowUpRight)
-                            .icon_color(Color::Muted)
-                            .handler(|_, cx| cx.open_url(bitbucket::TOKEN_SETTINGS_URL)),
+                        ContextMenuEntry::new(match hosting {
+                            api::Hosting::Bitbucket => "Gerenciar tokens na Atlassian",
+                            api::Hosting::GitHub => "Gerenciar tokens no GitHub",
+                        })
+                        .icon(IconName::ArrowUpRight)
+                        .icon_color(Color::Muted)
+                        .handler(move |_, cx| {
+                            cx.open_url(match hosting {
+                                api::Hosting::Bitbucket => bitbucket::TOKEN_SETTINGS_URL,
+                                api::Hosting::GitHub => "https://github.com/settings/tokens",
+                            })
+                        }),
                     )
                     .separator()
                     .item(
@@ -853,7 +1349,7 @@ impl RepoPanel {
                             .icon_color(Color::Error)
                             .handler(move |_, cx| {
                                 store
-                                    .update(cx, |store, cx| store.disconnect(cx))
+                                    .update(cx, |store, cx| store.disconnect(hosting, cx))
                                     .detach_and_log_err(cx);
                             }),
                     )
@@ -910,7 +1406,7 @@ impl RepoPanel {
                 IconButton::new("repo-open-web", IconName::ArrowUpRight)
                     .icon_size(IconSize::Small)
                     .icon_color(Color::Muted)
-                    .tooltip(Tooltip::text("Abrir no Bitbucket"))
+                    .tooltip(Tooltip::text(format!("Abrir no {}", host_name(&web_url))))
                     .on_click(move |_, _, cx| cx.open_url(&web_url)),
             )
             .child(
@@ -1013,7 +1509,10 @@ impl RepoPanel {
                                 IconButton::new("repo-branch-create-web", IconName::ArrowUpRight)
                                     .icon_size(IconSize::Small)
                                     .icon_color(Color::Muted)
-                                    .tooltip(Tooltip::text("Criar no Bitbucket"))
+                                    .tooltip(Tooltip::text(format!(
+                                        "Criar no {}",
+                                        host_name(&new_url)
+                                    )))
                                     .on_click(move |_, _, cx| cx.open_url(&new_url)),
                             ),
                     )
@@ -1140,7 +1639,7 @@ impl RepoPanel {
                         )
                         .child(div().flex_1())
                         .child(
-                            Button::new("repo-branch-web", "Abrir no Bitbucket")
+                            Button::new("repo-branch-web", format!("Abrir no {}", host_name(&url)))
                                 .style(ButtonStyle::Subtle)
                                 .label_size(LabelSize::Small)
                                 .start_icon(
@@ -1528,6 +2027,7 @@ impl RepoPanel {
             notice: None,
             pending_action: None,
             load_task: None,
+            rerunning_jobs: HashSet::default(),
         });
         self.reload_open_pull_request(cx);
         cx.notify();
@@ -1569,14 +2069,12 @@ impl RepoPanel {
         let Target::Hosted { repository, .. } = self.target.clone() else {
             return;
         };
-        let Some(credentials) = self.store.read(cx).bitbucket_credentials() else {
+        let Some(client) = self.client(cx) else {
             return;
         };
-        let http_client = self.store.read(cx).http_client();
         let workspace = self.workspace.clone();
         let load = cx.background_spawn(async move {
-            bitbucket::get_pull_request_detail(&http_client, &credentials, &repository, number)
-                .await
+            client.get_pull_request_detail(&repository, number).await
         });
         cx.spawn_in(window, async move |this, cx| {
             match load.await {
@@ -1634,21 +2132,150 @@ impl RepoPanel {
         cx.notify();
     }
 
+    /// Runs a failed GitHub Actions job again and reloads the checks once GitHub took it.
+    fn rerun_check(&mut self, job_id: u64, name: String, cx: &mut Context<Self>) {
+        let Target::Hosted { repository, .. } = self.target.clone() else {
+            return;
+        };
+        let Some(client) = self.client(cx) else {
+            return;
+        };
+        let Some(open_pull_request) = &mut self.open_pull_request else {
+            return;
+        };
+        if !open_pull_request.rerunning_jobs.insert(job_id) {
+            return;
+        }
+        cx.notify();
+        let rerun = cx.background_spawn(async move { client.rerun_job(&repository, job_id).await });
+        cx.spawn(async move |this, cx| {
+            let result = rerun.await;
+            this.update(cx, |this, cx| {
+                let Some(open_pull_request) = &mut this.open_pull_request else {
+                    return;
+                };
+                match result {
+                    Ok(()) => {
+                        open_pull_request.notice = Some(format!("{name} rodando de novo.").into());
+                        this.reload_open_pull_request(cx);
+                    }
+                    Err(error) => {
+                        open_pull_request.rerunning_jobs.remove(&job_id);
+                        open_pull_request.error =
+                            Some(format!("Não deu para re-rodar {name}: {error:#}").into());
+                    }
+                }
+                cx.notify();
+            })
+        })
+        .detach_and_log_err(cx);
+    }
+
+    /// Board C: each check of the GitHub Actions run, with Re-rodar on the failed ones.
+    fn render_checks_section(
+        &self,
+        open_pull_request: &OpenPullRequest,
+        checks: &[api::Check],
+        cx: &Context<Self>,
+    ) -> impl IntoElement {
+        let summary = CheckSummary::of(checks);
+        let colors = cx.theme().colors();
+        v_flex()
+            .child(Self::render_section_header(
+                "CHECKS · GITHUB ACTIONS",
+                None,
+                Some(
+                    Label::new(format!("{}/{}", summary.passed, summary.total))
+                        .size(LabelSize::XSmall)
+                        .color(check_summary_color(summary))
+                        .into_any_element(),
+                ),
+                cx,
+            ))
+            .children(checks.iter().enumerate().map(|(index, check)| {
+                let (icon, color) = match check.state {
+                    CheckState::Passed => (IconName::Check, Color::Success),
+                    CheckState::Failed => (IconName::XCircle, Color::Error),
+                    CheckState::Running => (IconName::LoadCircle, Color::Warning),
+                    CheckState::Stopped => (IconName::Dash, Color::Muted),
+                };
+                let url = check.url.clone();
+                let rerunning = check
+                    .rerun_job
+                    .is_some_and(|job| open_pull_request.rerunning_jobs.contains(&job));
+                let rerun = (check.state == CheckState::Failed)
+                    .then_some(check.rerun_job)
+                    .flatten();
+                let name = check.name.clone();
+                h_flex()
+                    .id(("repo-check", index))
+                    .h(px(32.))
+                    .px_2p5()
+                    .gap_2()
+                    .rounded_md()
+                    .when(check.state == CheckState::Failed, |this| {
+                        this.bg(Color::Error.color(cx).opacity(0.1))
+                    })
+                    .when_some(url, |this, url| {
+                        this.cursor_pointer()
+                            .hover(|this| this.bg(colors.element_hover))
+                            .tooltip(Tooltip::text("Abrir o log no GitHub"))
+                            .on_click(move |_, _, cx| cx.open_url(&url))
+                    })
+                    .child(spinning_if(
+                        Icon::new(icon).size(IconSize::XSmall).color(color),
+                        check.state == CheckState::Running,
+                    ))
+                    .child(
+                        div().flex_1().min_w_0().child(
+                            Label::new(check.name.clone())
+                                .size(LabelSize::Small)
+                                .buffer_font(cx)
+                                .truncate(),
+                        ),
+                    )
+                    .when_some(rerun, |this, job_id| {
+                        this.child(
+                            Button::new(
+                                ("repo-check-rerun", index),
+                                if rerunning {
+                                    "Re-rodando…"
+                                } else {
+                                    "Re-rodar"
+                                },
+                            )
+                            .style(ButtonStyle::Subtle)
+                            .label_size(LabelSize::Small)
+                            .start_icon(Icon::new(IconName::Rerun).size(IconSize::XSmall))
+                            .disabled(rerunning)
+                            .on_click(cx.listener(
+                                move |this, _, _, cx| this.rerun_check(job_id, name.clone(), cx),
+                            )),
+                        )
+                    })
+                    .when_some(check.updated_at, |this, at| {
+                        this.child(
+                            Label::new(compact_age(at, Utc::now()))
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted),
+                        )
+                    })
+            }))
+    }
+
     fn reload_open_pull_request(&mut self, cx: &mut Context<Self>) {
         let Target::Hosted { repository, .. } = self.target.clone() else {
             return;
         };
-        let Some(credentials) = self.store.read(cx).bitbucket_credentials() else {
+        let Some(client) = self.client(cx) else {
             return;
         };
-        let http_client = self.store.read(cx).http_client();
         let Some(open_pull_request) = &mut self.open_pull_request else {
             return;
         };
         let number = open_pull_request.summary.number;
         let load = cx.background_spawn(async move {
-            bitbucket::get_pull_request_detail(&http_client, &credentials, &repository, number)
-                .await
+            client.get_pull_request_detail(&repository, number).await
         });
         open_pull_request.load_task = Some(cx.spawn(async move |this, cx| {
             let result = load.await;
@@ -1661,10 +2288,15 @@ impl RepoPanel {
                         open_pull_request.summary = detail.pull_request.clone();
                         open_pull_request.detail = Some(detail);
                         open_pull_request.error = None;
+                        open_pull_request.rerunning_jobs.clear();
                     }
                     Err(error) => {
                         if crate::is_unauthorized(&error) {
-                            this.store.update(cx, |store, cx| store.mark_rejected(cx));
+                            {
+                                let hosting = this.hosting();
+                                this.store
+                                    .update(cx, |store, cx| store.mark_rejected(hosting, cx));
+                            }
                             return;
                         }
                         open_pull_request.error = Some(format!("{error:#}").into());
@@ -1680,10 +2312,9 @@ impl RepoPanel {
         let Target::Hosted { repository, .. } = self.target.clone() else {
             return;
         };
-        let Some(credentials) = self.store.read(cx).bitbucket_credentials() else {
+        let Some(client) = self.client(cx) else {
             return;
         };
-        let http_client = self.store.read(cx).http_client();
         let Some(open_pull_request) = &mut self.open_pull_request else {
             return;
         };
@@ -1701,10 +2332,9 @@ impl RepoPanel {
         cx.notify();
         cx.spawn_in(window, async move |this, cx| {
             let result = cx
-                .background_spawn(async move {
-                    bitbucket::post_comment(&http_client, &credentials, &repository, number, &text)
-                        .await
-                })
+                .background_spawn(
+                    async move { client.post_comment(&repository, number, &text).await },
+                )
                 .await;
             this.update_in(cx, |this, window, cx| {
                 let Some(open_pull_request) = &mut this.open_pull_request else {
@@ -1733,10 +2363,9 @@ impl RepoPanel {
         let Target::Hosted { repository, .. } = self.target.clone() else {
             return;
         };
-        let Some(credentials) = self.store.read(cx).bitbucket_credentials() else {
+        let Some(client) = self.client(cx) else {
             return;
         };
-        let http_client = self.store.read(cx).http_client();
         let Some(open_pull_request) = &mut self.open_pull_request else {
             return;
         };
@@ -1748,16 +2377,9 @@ impl RepoPanel {
         cx.notify();
         cx.spawn(async move |this, cx| {
             let result = cx
-                .background_spawn(async move {
-                    bitbucket::set_approval(
-                        &http_client,
-                        &credentials,
-                        &repository,
-                        number,
-                        approve,
-                    )
-                    .await
-                })
+                .background_spawn(
+                    async move { client.set_approval(&repository, number, approve).await },
+                )
                 .await;
             this.update(cx, |this, cx| {
                 let Some(open_pull_request) = &mut this.open_pull_request else {
@@ -2108,9 +2730,12 @@ impl RepoPanel {
             .child(list)
             .child(
                 Label::new(if opening {
-                    "Buscando o commit no remoto…"
+                    "Buscando o commit no remoto…".to_string()
                 } else {
-                    "↑↓ navega · Enter abre no Zed · ⌘Enter no Bitbucket"
+                    format!(
+                        "↑↓ navega · Enter abre no Zed · ⌘Enter no {}",
+                        self.hosting().name()
+                    )
                 })
                 .size(LabelSize::XSmall)
                 .color(Color::Muted),
@@ -2252,7 +2877,10 @@ impl RepoPanel {
                     .label_size(LabelSize::Small)
                     .disabled(is_fork || self.is_busy())
                     .tooltip(Tooltip::text(if is_fork {
-                        "O branch está num fork; abra o diff no Bitbucket".to_string()
+                        format!(
+                            "O branch está num fork; abra o diff no {}",
+                            self.hosting().name()
+                        )
                     } else if is_checked_out {
                         "Abre o diff no Zed".to_string()
                     } else {
@@ -2645,7 +3273,23 @@ impl RepoPanel {
             }
         };
 
+        let github_checks = self.hosting() == api::Hosting::GitHub
+            && detail.is_some_and(|detail| !detail.checks.is_empty());
+        let closed_issue = (self.hosting() == api::Hosting::GitHub)
+            .then(|| closed_issue_number(&pull_request.description))
+            .flatten();
         let task = match clickup_task_id(&pull_request.source_branch) {
+            None if let Some(issue) = closed_issue => {
+                let issue_url = format!("{}/issues/{issue}", repository.web_url());
+                Button::new("repo-pr-issue", format!("fecha #{issue}"))
+                    .style(ButtonStyle::Transparent)
+                    .label_size(LabelSize::Small)
+                    .color(Color::Accent)
+                    .end_icon(Icon::new(IconName::ArrowUpRight).size(IconSize::XSmall))
+                    .tooltip(Tooltip::text("Abrir a issue no GitHub"))
+                    .on_click(move |_, _, cx| cx.open_url(&issue_url))
+                    .into_any_element()
+            }
             Some(task_id) => {
                 let task_url = format!(
                     "https://app.clickup.com/t/{}",
@@ -2705,9 +3349,14 @@ impl RepoPanel {
                 cx,
             ))
             .child(Self::render_field("Revisores", reviewers, cx))
-            .child(Self::render_field("Checks", checks, cx))
+            .when(!github_checks, |this| {
+                this.child(Self::render_field("Checks", checks, cx))
+            })
             .child(Self::render_field("Tarefa", task, cx))
             .child(Self::render_field("Mudanças", changes, cx))
+            .when_some(detail.filter(|_| github_checks), |this, detail| {
+                this.child(self.render_checks_section(open_pull_request, &detail.checks, cx))
+            })
             .child(div().h(DynamicSpacing::Base08.px(cx)))
             .child(match &open_pull_request.merging {
                 Some(form) => self
@@ -2884,7 +3533,7 @@ impl RepoPanel {
                     .child(
                         IconButton::new("repo-pr-open", IconName::ArrowUpRight)
                             .icon_size(IconSize::Small)
-                            .tooltip(Tooltip::text("Abrir no Bitbucket"))
+                            .tooltip(Tooltip::text(format!("Abrir no {}", host_name(&url))))
                             .on_click(move |_, _, cx| cx.open_url(&url)),
                     ),
             )
@@ -2965,11 +3614,10 @@ impl RepoPanel {
         let Some(source_branch) = self.branch.clone() else {
             return;
         };
-        let Some(credentials) = self.store.read(cx).bitbucket_credentials() else {
+        let Some(client) = self.client(cx) else {
             return;
         };
         let my_id = self.account(cx).map(|account| account.user.id);
-        let http_client = self.store.read(cx).http_client();
 
         let title_input = cx.new(|cx| InputField::new(window, cx, "Título do pull request"));
         let description_editor = cx.new(|cx| {
@@ -2995,11 +3643,9 @@ impl RepoPanel {
         }
 
         let load = cx.background_spawn(async move {
-            let destination =
-                bitbucket::get_default_destination(&http_client, &credentials, &repository);
-            let branches = bitbucket::list_branches(&http_client, &credentials, &repository);
-            let reviewers =
-                bitbucket::get_default_reviewers(&http_client, &credentials, &repository);
+            let destination = client.get_default_destination(&repository);
+            let branches = client.list_branches(&repository);
+            let reviewers = client.get_default_reviewers(&repository);
             futures::join!(destination, branches, reviewers)
         });
         let load_task = cx.spawn_in(window, async move |this, cx| {
@@ -3089,13 +3735,12 @@ impl RepoPanel {
         let Target::Hosted { repository, .. } = self.target.clone() else {
             return;
         };
-        let Some(credentials) = self.store.read(cx).bitbucket_credentials() else {
+        let Some(client) = self.client(cx) else {
             return;
         };
         let needs_upstream = self
             .local_branch_status(cx)
             .is_none_or(|status| status.needs_upstream);
-        let http_client = self.store.read(cx).http_client();
         let Some(form) = &mut self.creating else {
             return;
         };
@@ -3113,14 +3758,9 @@ impl RepoPanel {
         let source = form.source_branch.clone();
         form.commits_loaded = false;
         let load = cx.background_spawn(async move {
-            bitbucket::list_commits_between(
-                &http_client,
-                &credentials,
-                &repository,
-                &source,
-                &destination,
-            )
-            .await
+            client
+                .list_commits_between(&repository, &source, &destination)
+                .await
         });
         form.commits_task = Some(cx.spawn_in(window, async move |this, cx| {
             let commits = load.await;
@@ -3198,13 +3838,13 @@ impl RepoPanel {
         else {
             return;
         };
-        let Some(credentials) = self.store.read(cx).bitbucket_credentials() else {
+        let Some(client) = self.client(cx) else {
             return;
         };
-        let http_client = self.store.read(cx).http_client();
         let status = self.local_branch_status(cx);
         let repository = self.project.read(cx).active_repository(cx);
         let is_via_collab = self.project.read(cx).is_via_collab();
+        let host_name = remote_repository.hosting.name();
         let Some(form) = &mut self.creating else {
             return;
         };
@@ -3221,9 +3861,9 @@ impl RepoPanel {
                 Some("O destino é o próprio branch.".to_string())
             }
             (_, None) => Some("Nenhum branch em checkout.".to_string()),
-            (_, Some(status)) if status.tracks_other_remote => Some(
-                "O branch acompanha outro remoto (fork); crie esse PR pelo Bitbucket.".to_string(),
-            ),
+            (_, Some(status)) if status.tracks_other_remote => Some(format!(
+                "O branch acompanha outro remoto (fork); crie esse PR pelo {host_name}."
+            )),
             (_, Some(status)) if status.behind > 0 => Some(format!(
                 "O origin tem {} commit(s) que você não tem. Faça pull antes de criar.",
                 status.behind
@@ -3247,7 +3887,7 @@ impl RepoPanel {
             return;
         };
 
-        let new_pull_request = bitbucket::NewPullRequest {
+        let new_pull_request = NewPullRequest {
             title,
             description,
             source_branch: form.source_branch.clone(),
@@ -3283,13 +3923,9 @@ impl RepoPanel {
                         .with_context(|| format!("falha no git push para {remote_name}"))?;
                 }
                 cx.background_spawn(async move {
-                    bitbucket::create_pull_request(
-                        &http_client,
-                        &credentials,
-                        &remote_repository,
-                        new_pull_request,
-                    )
-                    .await
+                    client
+                        .create_pull_request(&remote_repository, new_pull_request)
+                        .await
                 })
                 .await
             }
@@ -3924,10 +4560,9 @@ impl RepoPanel {
         let Target::Hosted { repository, .. } = self.target.clone() else {
             return;
         };
-        let Some(credentials) = self.store.read(cx).bitbucket_credentials() else {
+        let Some(client) = self.client(cx) else {
             return;
         };
-        let http_client = self.store.read(cx).http_client();
         let is_checked_out = self
             .open_pull_request
             .as_ref()
@@ -3951,11 +4586,10 @@ impl RepoPanel {
         });
 
         let load = cx.background_spawn(async move {
-            bitbucket::get_merge_strategies(&http_client, &credentials, &repository, &destination)
-                .await
+            client.get_merge_options(&repository, &destination).await
         });
         let load_task = cx.spawn(async move |this, cx| {
-            let strategies = load.await;
+            let options = load.await;
             this.update(cx, |this, cx| {
                 let Some(form) = this
                     .open_pull_request
@@ -3964,16 +4598,18 @@ impl RepoPanel {
                 else {
                     return;
                 };
-                form.strategies = strategies
+                match options
                     .context("Repo: estratégias de merge indisponíveis")
                     .log_err()
-                    .unwrap_or_else(|| {
-                        vec![
-                            MergeStrategy::MergeCommit,
-                            MergeStrategy::Squash,
-                            MergeStrategy::FastForward,
-                        ]
-                    });
+                {
+                    Some(options) => {
+                        form.strategies = options.strategies;
+                        form.allows_auto_merge = options.allows_auto_merge;
+                    }
+                    None => {
+                        form.strategies = vec![MergeStrategy::MergeCommit, MergeStrategy::Squash];
+                    }
+                }
                 form.strategy = form.strategies.first().copied();
                 cx.notify();
             })
@@ -3989,6 +4625,8 @@ impl RepoPanel {
             message_editor,
             close_source_branch: true,
             clean_up_local: is_checked_out,
+            allows_auto_merge: false,
+            auto_merge: false,
             submitting: false,
             progress: None,
             _load_task: load_task,
@@ -4029,10 +4667,9 @@ impl RepoPanel {
         else {
             return;
         };
-        let Some(credentials) = self.store.read(cx).bitbucket_credentials() else {
+        let Some(client) = self.client(cx) else {
             return;
         };
-        let http_client = self.store.read(cx).http_client();
         let repository = self.project.read(cx).active_repository(cx);
         let Some(open_pull_request) = &self.open_pull_request else {
             return;
@@ -4059,6 +4696,48 @@ impl RepoPanel {
         }
         let message = form.message_editor.read(cx).text(cx).trim().to_string();
         let close_source_branch = form.close_source_branch;
+        if form.auto_merge {
+            form.submitting = true;
+            form.progress = Some("Ligando o auto-merge…".into());
+            open_pull_request.error = None;
+            cx.notify();
+            cx.spawn(async move |this, cx| {
+                let result = cx
+                    .background_spawn(async move {
+                        client
+                            .enable_auto_merge(&remote_repository, number, strategy)
+                            .await
+                    })
+                    .await;
+                this.update(cx, |this, cx| {
+                    if let Some(open_pull_request) = &mut this.open_pull_request {
+                        match result {
+                            Ok(()) => {
+                                open_pull_request.merging = None;
+                                open_pull_request.notice = Some(
+                                    format!(
+                                        "Auto-merge ligado: entra em {destination} quando os checks e as revisões passarem."
+                                    )
+                                    .into(),
+                                );
+                            }
+                            Err(error) => {
+                                if let Some(form) = &mut open_pull_request.merging {
+                                    form.submitting = false;
+                                    form.progress = None;
+                                }
+                                open_pull_request.error =
+                                    Some(format!("Auto-merge recusado: {error:#}").into());
+                            }
+                        }
+                    }
+                    this.reload_open_pull_request(cx);
+                    cx.notify();
+                })
+            })
+            .detach_and_log_err(cx);
+            return;
+        }
         // Only a branch whose every commit is on the remote can be deleted safely: those
         // commits are in the pull request that just merged.
         let clean_up = form
@@ -4073,7 +4752,8 @@ impl RepoPanel {
                 )
             });
         form.submitting = true;
-        form.progress = Some("Fazendo o merge no Bitbucket…".into());
+        form.progress =
+            Some(format!("Fazendo o merge no {}…", remote_repository.hosting.name()).into());
         open_pull_request.error = None;
         cx.notify();
 
@@ -4085,14 +4765,10 @@ impl RepoPanel {
             let merged = async {
                 let outcome = cx
                     .background_spawn({
-                        let http_client = http_client.clone();
-                        let credentials = credentials.clone();
+                        let client = client.clone();
                         let remote_repository = remote_repository.clone();
                         async move {
-                            bitbucket::merge_pull_request(
-                                &http_client,
-                                &credentials,
-                                &remote_repository,
+                            client.merge_pull_request(&remote_repository,
                                 number,
                                 strategy,
                                 &message,
@@ -4113,15 +4789,11 @@ impl RepoPanel {
                     cx.background_executor().timer(MERGE_POLL_INTERVAL).await;
                     let task = cx
                         .background_spawn({
-                            let http_client = http_client.clone();
-                            let credentials = credentials.clone();
+                            let client = client.clone();
                             let remote_repository = remote_repository.clone();
                             let task_url = task_url.clone();
                             async move {
-                                bitbucket::get_merge_task(
-                                    &http_client,
-                                    &credentials,
-                                    &remote_repository,
+                                client.get_merge_task(&remote_repository,
                                     &task_url,
                                 )
                                 .await
@@ -4201,10 +4873,9 @@ impl RepoPanel {
         let Target::Hosted { repository, .. } = self.target.clone() else {
             return;
         };
-        let Some(credentials) = self.store.read(cx).bitbucket_credentials() else {
+        let Some(client) = self.client(cx) else {
             return;
         };
-        let http_client = self.store.read(cx).http_client();
         let Some(open_pull_request) = &self.open_pull_request else {
             return;
         };
@@ -4215,7 +4886,10 @@ impl RepoPanel {
         let answer = window.prompt(
             gpui::PromptLevel::Warning,
             &format!("Recusar o PR #{number}?"),
-            Some("Ele fecha sem merge. Dá para reabrir pelo Bitbucket, mas não daqui."),
+            Some(&format!(
+                "Ele fecha sem merge. Dá para reabrir pelo {}, mas não daqui.",
+                self.hosting().name()
+            )),
             &["Recusar", "Cancelar"],
             cx,
         );
@@ -4227,10 +4901,9 @@ impl RepoPanel {
                 this.set_pending_action(Some(PendingAction::Declining), cx)
             })?;
             let result = cx
-                .background_spawn(async move {
-                    bitbucket::decline_pull_request(&http_client, &credentials, &repository, number)
-                        .await
-                })
+                .background_spawn(
+                    async move { client.decline_pull_request(&repository, number).await },
+                )
                 .await;
             this.update(cx, |this, cx| {
                 this.set_pending_action(None, cx);
@@ -4282,38 +4955,35 @@ impl RepoPanel {
         let checked_out_source =
             self.branch.as_deref() == Some(open_pull_request.summary.source_branch.as_str());
 
-        let strategies = h_flex()
-            .flex_wrap()
-            .gap(DynamicSpacing::Base04.px(cx))
-            .children(form.strategies.iter().map(|strategy| {
-                let strategy = *strategy;
-                let selected = form.strategy == Some(strategy);
-                Button::new(
-                    SharedString::from(format!("repo-merge-{strategy:?}")),
-                    strategy.label(),
-                )
-                .style(if selected {
-                    ButtonStyle::Filled
-                } else {
-                    ButtonStyle::Outlined
-                })
-                .label_size(LabelSize::Small)
-                .toggle_state(selected)
-                .disabled(form.submitting)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    if let Some(form) = this.merge_form_mut() {
-                        form.strategy = Some(strategy);
-                        cx.notify();
-                    }
+        let hosting = self.hosting();
+        let strategies = if form.strategies.is_empty() {
+            Label::new("Carregando as estratégias do branch…")
+                .size(LabelSize::XSmall)
+                .color(Color::Muted)
+                .into_any_element()
+        } else {
+            segmented_control(cx)
+                .children(form.strategies.iter().map(|strategy| {
+                    let strategy = *strategy;
+                    let selected = form.strategy == Some(strategy);
+                    segment_option(
+                        SharedString::from(format!("repo-merge-{strategy:?}")),
+                        strategy.label(hosting),
+                        selected,
+                        !form.submitting,
+                        cx,
+                    )
+                    .when(!form.submitting, |this| {
+                        this.on_click(cx.listener(move |this, _, _, cx| {
+                            if let Some(form) = this.merge_form_mut() {
+                                form.strategy = Some(strategy);
+                                cx.notify();
+                            }
+                        }))
+                    })
                 }))
-            }))
-            .when(form.strategies.is_empty(), |this| {
-                this.child(
-                    Label::new("Carregando as estratégias do branch…")
-                        .size(LabelSize::XSmall)
-                        .color(Color::Muted),
-                )
-            });
+                .into_any_element()
+        };
         let strategy_hint = form.strategy.map(|strategy| match strategy {
             MergeStrategy::Squash | MergeStrategy::SquashFastForward => {
                 let commits = open_pull_request
@@ -4403,9 +5073,33 @@ impl RepoPanel {
                             .child(form.message_editor.clone()),
                     ),
             )
+            .when(form.allows_auto_merge, |this| {
+                this.child(
+                    Checkbox::new("repo-merge-auto", form.auto_merge.into())
+                        .label("Auto-merge quando os checks passarem")
+                        .disabled(form.submitting)
+                        .on_click({
+                            let panel = cx.weak_entity();
+                            move |state, _, cx| {
+                                let checked = state.selected();
+                                panel
+                                    .update(cx, |panel, cx| {
+                                        if let Some(form) = panel.merge_form_mut() {
+                                            form.auto_merge = checked;
+                                            cx.notify();
+                                        }
+                                    })
+                                    .log_err();
+                            }
+                        }),
+                )
+            })
             .child(
                 Checkbox::new("repo-merge-close-source", form.close_source_branch.into())
-                    .label("Fechar o branch no Bitbucket")
+                    .label(match hosting {
+                        api::Hosting::Bitbucket => "Fechar o branch no Bitbucket",
+                        api::Hosting::GitHub => "Apagar o branch depois",
+                    })
                     .disabled(form.submitting)
                     .on_click({
                         let panel = cx.weak_entity();
@@ -4482,6 +5176,16 @@ impl RepoPanel {
             }
             _ => format!("Merge em {destination}"),
         };
+        let label = if form.auto_merge {
+            "Ativar auto-merge".to_string()
+        } else {
+            label
+        };
+        let waiting_on_checks = open_pull_request.detail.as_ref().is_some_and(|detail| {
+            let summary = CheckSummary::of(&detail.checks);
+            summary.failed > 0 || summary.running > 0
+        });
+        let can_submit = !form.submitting && form.strategy.is_some() && !blocked;
         let declining = matches!(
             open_pull_request.pending_action,
             Some(PendingAction::Declining)
@@ -4510,43 +5214,63 @@ impl RepoPanel {
                         ),
                 )
             })
+            .when(form.auto_merge && waiting_on_checks, |this| {
+                this.child(
+                    h_flex()
+                        .gap(DynamicSpacing::Base06.px(cx))
+                        .child(
+                            Icon::new(IconName::Warning)
+                                .size(IconSize::XSmall)
+                                .color(Color::Warning),
+                        )
+                        .child(
+                            Label::new("O merge espera os checks pendentes passarem.")
+                                .size(LabelSize::XSmall)
+                                .color(Color::Warning),
+                        ),
+                )
+            })
             .child(
                 h_flex()
                     .gap(DynamicSpacing::Base06.px(cx))
                     .child(
-                        Button::new("repo-merge-cancel", "Cancelar")
-                            .style(ButtonStyle::Subtle)
-                            .label_size(LabelSize::Small)
-                            .disabled(form.submitting)
-                            .on_click(cx.listener(|this, _, _, cx| this.cancel_merging(cx))),
+                        secondary_button(
+                            "repo-merge-cancel",
+                            None,
+                            "Cancelar",
+                            !form.submitting,
+                            cx,
+                        )
+                        .when(!form.submitting, |this| {
+                            this.on_click(cx.listener(|this, _, _, cx| this.cancel_merging(cx)))
+                        }),
                     )
                     .child(
-                        Button::new(
+                        secondary_button(
                             "repo-merge-decline",
+                            Some((IconName::XCircle, Color::Error)),
                             if declining { "Recusando…" } else { "Recusar" },
+                            !(form.submitting || declining),
+                            cx,
                         )
-                        .style(ButtonStyle::Outlined)
-                        .label_size(LabelSize::Small)
-                        .color(Color::Error)
-                        .start_icon(
-                            Icon::new(IconName::XCircle)
-                                .size(IconSize::XSmall)
-                                .color(Color::Error),
-                        )
-                        .disabled(form.submitting || declining)
-                        .on_click(cx.listener(|this, _, window, cx| this.decline(window, cx))),
+                        .when(!(form.submitting || declining), |this| {
+                            this.on_click(
+                                cx.listener(|this, _, window, cx| this.decline(window, cx)),
+                            )
+                        }),
                     )
+                    .child(div().flex_1())
                     .child(
-                        Button::new("repo-merge-submit", label)
-                            .full_width()
-                            .style(ButtonStyle::Filled)
-                            .label_size(LabelSize::Small)
-                            .start_icon(Icon::new(IconName::Check).size(IconSize::XSmall))
-                            .disabled(form.submitting || form.strategy.is_none() || blocked)
+                        primary_button("repo-merge-submit", Some(IconName::Check), label, None, cx)
+                            .when(!can_submit, |this| this.opacity(0.5).cursor_default())
                             .when(blocked, |this| {
                                 this.tooltip(Tooltip::text("Resolva os conflitos antes do merge"))
                             })
-                            .on_click(cx.listener(|this, _, window, cx| this.merge(window, cx))),
+                            .when(can_submit, |this| {
+                                this.on_click(
+                                    cx.listener(|this, _, window, cx| this.merge(window, cx)),
+                                )
+                            }),
                     ),
             )
     }
@@ -4639,6 +5363,11 @@ fn merge_gates(pull_request: &PullRequest, detail: Option<&PullRequestDetail>) -
                 GateLevel::Blocking,
                 format!("Conflitos em {conflicts} arquivo(s)"),
             );
+        } else if detail.has_conflicts {
+            gate(
+                GateLevel::Blocking,
+                format!("Conflitos com {}", pull_request.destination_branch),
+            );
         } else {
             gate(
                 GateLevel::Ok,
@@ -4702,7 +5431,7 @@ impl RepoPanel {
     fn load_into<T, F>(
         &mut self,
         slot: fn(&mut Self) -> &mut Loadable<T>,
-        fetch: impl FnOnce(Arc<dyn HttpClient>, bitbucket::Credentials, RemoteRepository) -> F,
+        fetch: impl FnOnce(host::Client, RemoteRepository) -> F,
         cx: &mut Context<Self>,
     ) where
         T: 'static,
@@ -4712,18 +5441,21 @@ impl RepoPanel {
         let Target::Hosted { repository, .. } = self.target.clone() else {
             return;
         };
-        let Some(credentials) = self.store.read(cx).bitbucket_credentials() else {
+        let Some(client) = self.client(cx) else {
             return;
         };
-        let http_client = self.store.read(cx).http_client();
-        let load = cx.background_spawn(fetch(http_client, credentials, repository));
+        let load = cx.background_spawn(fetch(client, repository));
         let task = cx.spawn(async move |this, cx| {
             let result = load.await;
             this.update(cx, |this, cx| {
                 if let Err(error) = &result
                     && crate::is_unauthorized(error)
                 {
-                    this.store.update(cx, |store, cx| store.mark_rejected(cx));
+                    {
+                        let hosting = this.hosting();
+                        this.store
+                            .update(cx, |store, cx| store.mark_rejected(hosting, cx));
+                    }
                     return;
                 }
                 let entry = slot(this);
@@ -4752,14 +5484,8 @@ impl RepoPanel {
                 let state = self.state_filter;
                 self.load_into(
                     |this| &mut this.closed_pull_requests,
-                    move |client, credentials, repository| async move {
-                        let list = bitbucket::list_closed_pull_requests(
-                            &client,
-                            &credentials,
-                            &repository,
-                            state,
-                        )
-                        .await?;
+                    move |client, repository| async move {
+                        let list = client.list_closed_pull_requests(&repository, state).await?;
                         Ok((state, list))
                     },
                     cx,
@@ -4768,16 +5494,12 @@ impl RepoPanel {
             ListTab::PullRequests => {}
             ListTab::Pipelines => self.load_into(
                 |this| &mut this.pipelines,
-                |client, credentials, repository| async move {
-                    bitbucket::list_pipelines(&client, &credentials, &repository).await
-                },
+                |client, repository| async move { client.list_pipelines(&repository).await },
                 cx,
             ),
             ListTab::Issues => self.load_into(
                 |this| &mut this.issues,
-                |client, credentials, repository| async move {
-                    bitbucket::list_open_issues(&client, &credentials, &repository).await
-                },
+                |client, repository| async move { client.list_open_issues(&repository).await },
                 cx,
             ),
         }
@@ -4828,7 +5550,10 @@ impl RepoPanel {
             (ListTab::Issues, "Issues", issue_count),
             (
                 ListTab::Pipelines,
-                "Pipelines",
+                match self.hosting() {
+                    api::Hosting::Bitbucket => "Pipelines",
+                    api::Hosting::GitHub => "Actions",
+                },
                 running.filter(|count| *count > 0),
             ),
         ];
@@ -4996,7 +5721,10 @@ impl RepoPanel {
                 .render_centered_message(
                     IconName::PlayOutlined,
                     "Nenhum pipeline rodou ainda".into(),
-                    Some("Pipelines aparecem aqui quando o repositório tem um bitbucket-pipelines.yml.".into()),
+                    Some(match self.hosting() {
+                        api::Hosting::Bitbucket => "Pipelines aparecem aqui quando o repositório tem um bitbucket-pipelines.yml.".into(),
+                        api::Hosting::GitHub => "Runs aparecem aqui quando o repositório tem workflows em .github/workflows.".into(),
+                    }),
                     None,
                     cx,
                 )
@@ -5033,7 +5761,7 @@ impl RepoPanel {
             return self
                 .render_centered_message(
                     IconName::ListTodo,
-                    "Este repositório não usa as issues do Bitbucket".into(),
+                    format!("Este repositório não usa as issues do {}", self.hosting().name()).into(),
                     Some("Times que acompanham o trabalho no Jira ou no ClickUp não têm issues aqui.".into()),
                     None,
                     cx,
@@ -5079,10 +5807,23 @@ fn state_filter_label(state: PullRequestState) -> &'static str {
     }
 }
 
+/// Which host a web URL is on, for "Abrir no …" labels.
+fn host_name(url: &str) -> &'static str {
+    if url.starts_with("https://github.com") {
+        api::Hosting::GitHub.name()
+    } else {
+        api::Hosting::Bitbucket.name()
+    }
+}
+
 /// Errors of the on-demand tabs, with the missing scope spelled out when that's the cause.
 fn describe_tab_error(error: &anyhow::Error) -> String {
     if crate::is_forbidden(error) {
         let text = format!("{error:#}");
+        if text.contains("GitHub") {
+            return "O token não tem permissão para isso. Dê leitura de Issues e Actions ao token."
+                .to_string();
+        }
         let scope = if text.contains("issue") {
             "read:issue:bitbucket"
         } else if text.contains("pipeline") {
@@ -5144,7 +5885,7 @@ fn render_pipeline_row(pipeline: &api::Pipeline, now: DateTime<Utc>, cx: &App) -
         .rounded_md()
         .cursor_pointer()
         .hover(|style| style.bg(cx.theme().colors().ghost_element_hover))
-        .tooltip(Tooltip::text("Abrir no Bitbucket"))
+        .tooltip(Tooltip::text(format!("Abrir no {}", host_name(&url))))
         .on_click(move |_, _, cx| cx.open_url(&url))
         .child(h_flex().h(DynamicSpacing::Base20.px(cx)).child(spinning_if(
             Icon::new(icon).size(IconSize::Small).color(color),
@@ -5226,7 +5967,7 @@ fn render_issue_row(issue: &api::Issue, now: DateTime<Utc>, cx: &App) -> impl In
         .rounded_md()
         .cursor_pointer()
         .hover(|style| style.bg(cx.theme().colors().ghost_element_hover))
-        .tooltip(Tooltip::text("Abrir no Bitbucket"))
+        .tooltip(Tooltip::text(format!("Abrir no {}", host_name(&url))))
         .on_click(move |_, _, cx| cx.open_url(&url))
         .child(
             h_flex()
@@ -5310,10 +6051,9 @@ impl RepoPanel {
         let Target::Hosted { repository, .. } = self.target.clone() else {
             return;
         };
-        let Some(credentials) = self.store.read(cx).bitbucket_credentials() else {
+        let Some(client) = self.client(cx) else {
             return;
         };
-        let http_client = self.store.read(cx).http_client();
         let Some(open_pull_request) = &self.open_pull_request else {
             return;
         };
@@ -5325,15 +6065,9 @@ impl RepoPanel {
         self.set_pending_action(Some(PendingAction::Reviewing), cx);
         cx.spawn_in(window, async move |this, cx| {
             let diff = cx
-                .background_spawn(async move {
-                    bitbucket::get_pull_request_diff(
-                        &http_client,
-                        &credentials,
-                        &repository,
-                        number,
-                    )
-                    .await
-                })
+                .background_spawn(
+                    async move { client.get_pull_request_diff(&repository, number).await },
+                )
                 .await;
             this.update_in(cx, |this, window, cx| {
                 this.set_pending_action(None, cx);
@@ -5395,7 +6129,7 @@ pub(crate) fn detect_target(project: &Entity<Project>, cx: &App) -> (Target, Opt
         ("upstream", repository.remote_upstream_url.as_deref()),
     ];
     for (remote_name, url) in remotes {
-        if let Some(hosted) = url.and_then(bitbucket::parse_remote) {
+        if let Some(hosted) = url.and_then(host::parse_remote) {
             let branch = repository
                 .branch
                 .as_ref()
@@ -5481,6 +6215,25 @@ fn pull_request_matches(pull_request: &PullRequest, filter: &str) -> bool {
 
 /// The ClickUp task a branch is named after, as ClickUp's own "copy branch name" writes it:
 /// `CU-86a1b2` anywhere in the name.
+/// The issue a GitHub pull request closes, as "Closes #198" in its description says.
+pub(crate) fn closed_issue_number(description: &str) -> Option<u64> {
+    const KEYWORDS: [&str; 9] = [
+        "close", "closes", "closed", "fix", "fixes", "fixed", "resolve", "resolves", "resolved",
+    ];
+    let words: Vec<&str> = description.split_whitespace().collect();
+    words.windows(2).find_map(|pair| {
+        let keyword = pair[0].trim_end_matches(':').to_lowercase();
+        if !KEYWORDS.contains(&keyword.as_str()) {
+            return None;
+        }
+        pair[1]
+            .strip_prefix('#')?
+            .trim_end_matches(|character: char| !character.is_ascii_digit())
+            .parse()
+            .ok()
+    })
+}
+
 fn clickup_task_id(branch: &str) -> Option<String> {
     let lowercase = branch.to_lowercase();
     let start = lowercase.find("cu-")?;
@@ -5705,7 +6458,11 @@ fn pull_request_menu(
             })
             .log_err();
     })
-    .entry("Abrir no Bitbucket", None, move |_, cx| cx.open_url(&url))
+    .entry(
+        format!("Abrir no {}", host_name(&url)),
+        None,
+        move |_, cx| cx.open_url(&url),
+    )
     .entry("Copiar link", None, move |_, cx| {
         cx.write_to_clipboard(ClipboardItem::new_string(copied_url.clone()))
     })
@@ -5977,7 +6734,7 @@ impl Render for RepoPanel {
                     Some(
                         match remote_url {
                             Some(url) => {
-                                format!("{url} não é do bitbucket.org. GitHub vem a seguir.")
+                                format!("{url} não é do bitbucket.org nem do github.com.")
                             }
                             None => "O repositório não tem origin.".to_string(),
                         }
@@ -6006,6 +6763,7 @@ impl Render for RepoPanel {
                     Connection::Unreachable { message } => {
                         let message = message.clone();
                         let store = self.store.clone();
+                        let hosting = repository.hosting;
                         let actions = h_flex()
                             .gap(DynamicSpacing::Base08.px(cx))
                             .child(
@@ -6013,7 +6771,7 @@ impl Render for RepoPanel {
                                     .style(ButtonStyle::Outlined)
                                     .label_size(LabelSize::Small)
                                     .on_click(move |_, _, cx| {
-                                        store.update(cx, |store, cx| store.retry(cx))
+                                        store.update(cx, |store, cx| store.retry(hosting, cx))
                                     }),
                             )
                             .child(
@@ -6022,15 +6780,16 @@ impl Render for RepoPanel {
                                     .label_size(LabelSize::Small)
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.start_replacing_token(window, cx);
+                                        let hosting = this.hosting();
                                         this.store
-                                            .update(cx, |store, cx| store.disconnect(cx))
+                                            .update(cx, |store, cx| store.disconnect(hosting, cx))
                                             .detach_and_log_err(cx);
                                     })),
                             )
                             .into_any_element();
                         self.render_centered_message(
                             IconName::Disconnected,
-                            "Sem conexão com o Bitbucket".into(),
+                            format!("Sem conexão com o {}", repository.hosting.name()).into(),
                             Some(message),
                             Some(actions),
                             cx,
@@ -6258,6 +7017,8 @@ mod tests {
             }],
             comments: Vec::new(),
             commits: Vec::new(),
+            has_conflicts: false,
+            auto_merge: false,
         };
         let levels = |detail: &PullRequestDetail| {
             merge_gates(&pull_request, Some(detail))
@@ -6273,6 +7034,16 @@ mod tests {
             levels(&detail(FileChange::Conflict)),
             Some(GateLevel::Blocking)
         );
+    }
+
+    #[test]
+    fn finds_the_issue_a_pull_request_closes() {
+        assert_eq!(
+            closed_issue_number("Sincroniza.\n\nCloses #198."),
+            Some(198)
+        );
+        assert_eq!(closed_issue_number("fixes: #7"), Some(7));
+        assert_eq!(closed_issue_number("Relacionado a #12"), None);
     }
 
     #[test]

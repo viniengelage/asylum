@@ -7,7 +7,7 @@ mod new_flow_modal;
 mod runner;
 mod suggest;
 
-use crate::task_agents_view::{primary_button, secondary_button, segment_option};
+use ui::{primary_button, secondary_button, segment_option};
 use crate::{AgentPanel, ThreadId};
 use agent::NativeAgentConnection;
 use anyhow::{Context as _, Result};

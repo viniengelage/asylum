@@ -1,10 +1,13 @@
 //! The Repo panel: the pull requests of the repository the project's `origin` points at, with
 //! the one for the checked-out branch on top. Bitbucket Cloud authenticates with an Atlassian
-//! API token kept in the keychain, which is already scoped to the active profile.
+//! API token and GitHub with the `gh` CLI's token or a fine-grained one, both kept in the
+//! keychain, which is already scoped to the active profile.
 
 mod agent_toolkit;
-mod api;
+pub mod api;
 mod bitbucket;
+pub mod github;
+pub mod host;
 mod panel;
 
 pub use agent_toolkit::register_toolkit as register_agent_toolkit;
@@ -27,11 +30,15 @@ actions!(
         ToggleFocus,
         /// Forgets the Bitbucket token saved in the keychain.
         DisconnectBitbucket,
+        /// Forgets the GitHub token saved in the keychain.
+        DisconnectGitHub,
     ]
 );
 
 /// Ours alone, so it never collides with what git credential helpers keep for bitbucket.org.
 const BITBUCKET_CREDENTIALS_URL: &str = "https://bitbucket.org/asylum";
+/// Ours alone, so it never collides with what git credential helpers keep for github.com.
+const GITHUB_CREDENTIALS_URL: &str = "https://github.com/asylum";
 
 pub fn init(cx: &mut App) {
     workspace::register_panel_item::<RepoPanel>(cx);
@@ -75,7 +82,14 @@ pub fn init(cx: &mut App) {
         );
         workspace.register_action(|_workspace, _: &DisconnectBitbucket, _window, cx| {
             RepoStore::global(cx)
-                .update(cx, |store, cx| store.disconnect(cx))
+                .update(cx, |store, cx| {
+                    store.disconnect(api::Hosting::Bitbucket, cx)
+                })
+                .detach_and_log_err(cx);
+        });
+        workspace.register_action(|_workspace, _: &DisconnectGitHub, _window, cx| {
+            RepoStore::global(cx)
+                .update(cx, |store, cx| store.disconnect(api::Hosting::GitHub, cx))
                 .detach_and_log_err(cx);
         });
     })
@@ -122,7 +136,17 @@ fn toggle_focus(workspace: &mut Workspace, window: &mut Window, cx: &mut Context
 #[derive(Clone, Debug)]
 pub struct Account {
     pub user: api::Person,
-    credentials: bitbucket::Credentials,
+    pub(crate) credentials: host::Credentials,
+    /// The OAuth scopes the token carries. Empty for fine-grained tokens, which don't say.
+    pub scopes: Vec<String>,
+}
+
+impl Account {
+    /// Whether the token visibly lacks `scope`. Fine-grained tokens list nothing, so they are
+    /// given the benefit of the doubt and the request itself tells.
+    pub fn lacks_scope(&self, scope: &str) -> bool {
+        !self.scopes.is_empty() && !self.scopes.iter().any(|granted| granted == scope)
+    }
 }
 
 pub enum Connection {
@@ -143,7 +167,8 @@ pub struct RepoStore {
     http_client: Arc<dyn HttpClient>,
     credentials_provider: Arc<dyn CredentialsProvider>,
     bitbucket: Connection,
-    load_task: Option<Task<()>>,
+    github: Connection,
+    load_tasks: HashMap<api::Hosting, Task<()>>,
     /// The open pull requests each repository had when last listed, which the agent's `@` menu
     /// offers without asking the host again.
     pull_requests: HashMap<api::RemoteRepository, Vec<api::PullRequest>>,
@@ -152,6 +177,13 @@ pub struct RepoStore {
 pub(crate) struct GlobalRepoStore(pub(crate) Entity<RepoStore>);
 
 impl Global for GlobalRepoStore {}
+
+fn credentials_url(hosting: api::Hosting) -> &'static str {
+    match hosting {
+        api::Hosting::Bitbucket => BITBUCKET_CREDENTIALS_URL,
+        api::Hosting::GitHub => GITHUB_CREDENTIALS_URL,
+    }
+}
 
 impl RepoStore {
     /// Created on first use, so the keychain is only read by people who open the panel.
@@ -164,10 +196,12 @@ impl RepoStore {
                 http_client: cx.http_client(),
                 credentials_provider: zed_credentials_provider::global(cx),
                 bitbucket: Connection::Loading,
-                load_task: None,
+                github: Connection::Loading,
+                load_tasks: HashMap::default(),
                 pull_requests: HashMap::default(),
             };
-            store.load(cx);
+            store.load(api::Hosting::Bitbucket, cx);
+            store.load(api::Hosting::GitHub, cx);
             store
         });
         cx.set_global(GlobalRepoStore(store.clone()));
@@ -177,18 +211,33 @@ impl RepoStore {
     pub fn connection(&self, hosting: api::Hosting) -> &Connection {
         match hosting {
             api::Hosting::Bitbucket => &self.bitbucket,
+            api::Hosting::GitHub => &self.github,
         }
     }
 
-    pub(crate) fn http_client(&self) -> Arc<dyn HttpClient> {
-        self.http_client.clone()
+    fn connection_mut(&mut self, hosting: api::Hosting) -> &mut Connection {
+        match hosting {
+            api::Hosting::Bitbucket => &mut self.bitbucket,
+            api::Hosting::GitHub => &mut self.github,
+        }
     }
 
-    pub(crate) fn bitbucket_credentials(&self) -> Option<bitbucket::Credentials> {
-        match &self.bitbucket {
-            Connection::Connected(account) => Some(account.credentials.clone()),
+    /// A client for `hosting` when its account is connected.
+    pub fn client(&self, hosting: api::Hosting) -> Option<host::Client> {
+        match self.connection(hosting) {
+            Connection::Connected(account) => Some(host::Client::new(
+                self.http_client.clone(),
+                account.credentials.clone(),
+            )),
             _ => None,
         }
+    }
+
+    /// The GitHub token, for what the Repo panel doesn't cover (GitHub Projects).
+    pub fn github_client(&self) -> Option<(Arc<dyn HttpClient>, github::Credentials)> {
+        let client = self.client(api::Hosting::GitHub)?;
+        let credentials = client.github_credentials()?.clone();
+        Some((client.http_client, credentials))
     }
 
     pub(crate) fn cached_pull_requests(
@@ -207,9 +256,10 @@ impl RepoStore {
     }
 
     /// Called when a request made with the saved token came back unauthorized.
-    pub(crate) fn mark_rejected(&mut self, cx: &mut Context<Self>) {
-        if matches!(self.bitbucket, Connection::Connected(_)) {
-            self.bitbucket = Connection::Rejected;
+    pub(crate) fn mark_rejected(&mut self, hosting: api::Hosting, cx: &mut Context<Self>) {
+        let connection = self.connection_mut(hosting);
+        if matches!(connection, Connection::Connected(_)) {
+            *connection = Connection::Rejected;
             cx.notify();
         }
     }
@@ -222,69 +272,114 @@ impl RepoStore {
         cx: &App,
     ) -> Task<Result<Account>> {
         let http_client = self.http_client.clone();
-        let credentials = bitbucket::Credentials {
+        let credentials = host::Credentials::Bitbucket(bitbucket::Credentials {
             email: email.trim().to_string(),
             token: token.trim().to_string(),
-        };
+        });
         cx.background_spawn(async move { validate(&http_client, credentials).await })
+    }
+
+    /// Checks a GitHub token without saving it.
+    pub fn validate_github(&self, token: String, cx: &App) -> Task<Result<Account>> {
+        let http_client = self.http_client.clone();
+        let credentials = host::Credentials::GitHub(github::Credentials {
+            token: token.trim().to_string(),
+        });
+        cx.background_spawn(async move { validate(&http_client, credentials).await })
+    }
+
+    /// The account the `gh` CLI is logged into, checked but not saved.
+    pub fn validate_github_cli(&self, cx: &App) -> Task<Result<Account>> {
+        let http_client = self.http_client.clone();
+        cx.background_spawn(async move {
+            let token = github::token_from_gh_cli().await?;
+            validate(
+                &http_client,
+                host::Credentials::GitHub(github::Credentials { token }),
+            )
+            .await
+        })
     }
 
     pub fn save(&mut self, account: Account, cx: &mut Context<Self>) -> Task<Result<()>> {
         let credentials_provider = self.credentials_provider.clone();
-        let credentials = account.credentials.clone();
+        let hosting = account.credentials.hosting();
+        let (username, token) = match &account.credentials {
+            host::Credentials::Bitbucket(credentials) => {
+                (credentials.email.clone(), credentials.token.clone())
+            }
+            host::Credentials::GitHub(credentials) => (
+                account
+                    .user
+                    .nickname
+                    .clone()
+                    .unwrap_or_else(|| account.user.id.clone()),
+                credentials.token.clone(),
+            ),
+        };
         cx.spawn(async move |this, cx| {
             credentials_provider
-                .write_credentials(
-                    BITBUCKET_CREDENTIALS_URL,
-                    &credentials.email,
-                    credentials.token.as_bytes(),
-                    cx,
-                )
+                .write_credentials(credentials_url(hosting), &username, token.as_bytes(), cx)
                 .await?;
             this.update(cx, |this, cx| {
-                this.bitbucket = Connection::Connected(account);
+                *this.connection_mut(hosting) = Connection::Connected(account);
                 cx.notify();
             })
         })
     }
 
-    pub fn disconnect(&mut self, cx: &mut Context<Self>) -> Task<Result<()>> {
-        self.load_task = None;
-        self.bitbucket = Connection::Disconnected;
+    pub fn disconnect(
+        &mut self,
+        hosting: api::Hosting,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<()>> {
+        self.load_tasks.remove(&hosting);
+        *self.connection_mut(hosting) = Connection::Disconnected;
         cx.notify();
         let credentials_provider = self.credentials_provider.clone();
         cx.spawn(async move |_this, cx| {
             credentials_provider
-                .delete_credentials(BITBUCKET_CREDENTIALS_URL, cx)
+                .delete_credentials(credentials_url(hosting), cx)
                 .await
         })
     }
 
-    /// Checks the saved token again, after Bitbucket was unreachable.
-    pub fn retry(&mut self, cx: &mut Context<Self>) {
-        self.bitbucket = Connection::Loading;
+    /// Checks the saved token again, after the host was unreachable.
+    pub fn retry(&mut self, hosting: api::Hosting, cx: &mut Context<Self>) {
+        *self.connection_mut(hosting) = Connection::Loading;
         cx.notify();
-        self.load(cx);
+        self.load(hosting, cx);
     }
 
-    fn load(&mut self, cx: &mut Context<Self>) {
+    fn load(&mut self, hosting: api::Hosting, cx: &mut Context<Self>) {
         let credentials_provider = self.credentials_provider.clone();
         let http_client = self.http_client.clone();
-        self.load_task = Some(cx.spawn(async move |this, cx| {
+        let name = hosting.name();
+        let task = cx.spawn(async move |this, cx| {
             let saved = credentials_provider
-                .read_credentials(BITBUCKET_CREDENTIALS_URL, cx)
+                .read_credentials(credentials_url(hosting), cx)
                 .await;
             let connection = match saved {
                 Ok(None) => Connection::Disconnected,
-                Ok(Some((email, token))) => match String::from_utf8(token) {
+                Ok(Some((username, token))) => match String::from_utf8(token) {
                     Ok(token) => {
-                        let credentials = bitbucket::Credentials { email, token };
+                        let credentials = match hosting {
+                            api::Hosting::Bitbucket => {
+                                host::Credentials::Bitbucket(bitbucket::Credentials {
+                                    email: username,
+                                    token,
+                                })
+                            }
+                            api::Hosting::GitHub => {
+                                host::Credentials::GitHub(github::Credentials { token })
+                            }
+                        };
                         match validate(&http_client, credentials).await {
                             Ok(account) => Connection::Connected(account),
                             Err(error) if is_unauthorized(&error) => Connection::Rejected,
                             Err(error) => {
                                 log::warn!(
-                                    "Repo: não foi possível checar o token do Bitbucket: {error:#}"
+                                    "Repo: não foi possível checar o token do {name}: {error:#}"
                                 );
                                 Connection::Unreachable {
                                     message: error.to_string().into(),
@@ -293,32 +388,49 @@ impl RepoStore {
                         }
                     }
                     Err(error) => {
-                        log::error!("Repo: token do Bitbucket ilegível no keychain: {error}");
+                        log::error!("Repo: token do {name} ilegível no keychain: {error}");
                         Connection::Rejected
                     }
                 },
                 Err(error) => {
-                    log::error!("Repo: falha ao ler o token do Bitbucket do keychain: {error:#}");
+                    log::error!("Repo: falha ao ler o token do {name} do keychain: {error:#}");
                     Connection::Unreachable {
                         message: "Não foi possível ler o token do keychain".into(),
                     }
                 }
             };
             this.update(cx, |this, cx| {
-                this.bitbucket = connection;
+                *this.connection_mut(hosting) = connection;
                 cx.notify();
             })
             .log_err();
-        }));
+        });
+        self.load_tasks.insert(hosting, task);
     }
 }
 
 async fn validate(
     http_client: &Arc<dyn HttpClient>,
-    credentials: bitbucket::Credentials,
+    credentials: host::Credentials,
 ) -> Result<Account> {
-    let user = bitbucket::get_user(http_client, &credentials).await?;
-    Ok(Account { user, credentials })
+    match &credentials {
+        host::Credentials::Bitbucket(bitbucket_credentials) => {
+            let user = bitbucket::get_user(http_client, bitbucket_credentials).await?;
+            Ok(Account {
+                user,
+                credentials,
+                scopes: Vec::new(),
+            })
+        }
+        host::Credentials::GitHub(github_credentials) => {
+            let (user, scopes) = github::get_user(http_client, github_credentials).await?;
+            Ok(Account {
+                user,
+                credentials,
+                scopes,
+            })
+        }
+    }
 }
 
 pub fn is_forbidden(error: &anyhow::Error) -> bool {

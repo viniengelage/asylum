@@ -2,7 +2,7 @@
 //! request), the request, its name and where it is saved.
 
 use super::FlowView;
-use crate::task_agents_view::{primary_button, secondary_button, segment_option};
+use ui::{primary_button, secondary_button, segment_option};
 use editor::Editor;
 use flows::{
     AgentStep, Criterion, Flow, FlowSource, FlowStep, GateStep, OnFail, RunStep, StepKind, Verifier,

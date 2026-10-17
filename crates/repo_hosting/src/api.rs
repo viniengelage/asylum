@@ -25,12 +25,14 @@ pub enum ApiError {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Hosting {
     Bitbucket,
+    GitHub,
 }
 
 impl Hosting {
     pub fn name(self) -> &'static str {
         match self {
             Hosting::Bitbucket => "Bitbucket",
+            Hosting::GitHub => "GitHub",
         }
     }
 }
@@ -52,6 +54,7 @@ impl RemoteRepository {
     pub fn web_url(&self) -> String {
         match self.hosting {
             Hosting::Bitbucket => format!("https://bitbucket.org/{}/{}", self.owner, self.name),
+            Hosting::GitHub => format!("https://github.com/{}/{}", self.owner, self.name),
         }
     }
 }
@@ -169,6 +172,8 @@ pub struct Check {
     pub state: CheckState,
     pub url: Option<String>,
     pub updated_at: Option<DateTime<Utc>>,
+    /// The GitHub Actions job behind the check, which can be run again on its own.
+    pub rerun_job: Option<u64>,
 }
 
 /// The checks as the design summarizes them: "4/4" when every check passed.
@@ -253,6 +258,61 @@ pub struct PullRequestDetail {
     pub comments: Vec<Comment>,
     /// Newest first, as the host lists them.
     pub commits: Vec<Commit>,
+    /// GitHub says so for the whole pull request; Bitbucket marks the files instead.
+    pub has_conflicts: bool,
+    /// Whether GitHub will merge it by itself once the checks and reviews allow.
+    pub auto_merge: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MergeStrategy {
+    MergeCommit,
+    Squash,
+    FastForward,
+    SquashFastForward,
+    RebaseFastForward,
+    RebaseMerge,
+}
+
+impl MergeStrategy {
+    pub fn label(self, hosting: Hosting) -> &'static str {
+        match (self, hosting) {
+            (MergeStrategy::MergeCommit, Hosting::GitHub) => "Merge",
+            (MergeStrategy::RebaseMerge, Hosting::GitHub) => "Rebase",
+            (MergeStrategy::MergeCommit, _) => "Merge commit",
+            (MergeStrategy::Squash, _) => "Squash",
+            (MergeStrategy::FastForward, _) => "Fast-forward",
+            (MergeStrategy::SquashFastForward, _) => "Squash + FF",
+            (MergeStrategy::RebaseFastForward, _) => "Rebase + FF",
+            (MergeStrategy::RebaseMerge, _) => "Rebase + merge",
+        }
+    }
+
+    /// Whether the commits end up rewritten, so git won't see the local branch as merged.
+    pub fn rewrites_commits(self) -> bool {
+        !matches!(
+            self,
+            MergeStrategy::MergeCommit | MergeStrategy::FastForward
+        )
+    }
+}
+
+pub enum MergeOutcome {
+    Merged(PullRequest),
+    /// Bitbucket took longer than its request timeout and handed back a task to poll.
+    Pending {
+        task_url: String,
+    },
+}
+
+pub struct NewPullRequest {
+    pub title: String,
+    pub description: String,
+    pub source_branch: String,
+    pub destination_branch: String,
+    pub reviewer_ids: Vec<String>,
+    pub close_source_branch: bool,
+    pub draft: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -4,8 +4,8 @@
 
 use crate::api::{
     ApiError, ChangedFile, Check, CheckState, Comment, Commit, FileChange, Hosting, Issue,
-    Participant, ParticipantRole, Person, Pipeline, PipelineState, PullRequest, PullRequestDetail,
-    PullRequestState, RemoteRepository,
+    MergeOutcome, MergeStrategy, NewPullRequest, Participant, ParticipantRole, Person, Pipeline,
+    PipelineState, PullRequest, PullRequestDetail, PullRequestState, RemoteRepository,
 };
 use anyhow::{Context as _, Result};
 use base64::Engine as _;
@@ -237,6 +237,7 @@ impl From<Status> for Check {
             },
             url: status.url.filter(|url| !url.is_empty()),
             updated_at: status.updated_on,
+            rerun_job: None,
         }
     }
 }
@@ -660,6 +661,8 @@ pub async fn get_pull_request_detail(
             .collect(),
         comments,
         commits: commits?.into_iter().map(Commit::from).collect(),
+        has_conflicts: false,
+        auto_merge: false,
     })
 }
 
@@ -815,16 +818,6 @@ pub async fn list_commits_between(
     Ok(page.values.into_iter().map(Commit::from).collect())
 }
 
-pub struct NewPullRequest {
-    pub title: String,
-    pub description: String,
-    pub source_branch: String,
-    pub destination_branch: String,
-    pub reviewer_ids: Vec<String>,
-    pub close_source_branch: bool,
-    pub draft: bool,
-}
-
 pub async fn create_pull_request(
     client: &Arc<dyn HttpClient>,
     credentials: &Credentials,
@@ -892,16 +885,6 @@ pub async fn get_merge_strategies(
     Ok(strategies)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MergeStrategy {
-    MergeCommit,
-    Squash,
-    FastForward,
-    SquashFastForward,
-    RebaseFastForward,
-    RebaseMerge,
-}
-
 impl MergeStrategy {
     const ALL: [MergeStrategy; 3] = [
         MergeStrategy::MergeCommit,
@@ -931,33 +914,6 @@ impl MergeStrategy {
             MergeStrategy::RebaseMerge => "rebase_merge",
         }
     }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            MergeStrategy::MergeCommit => "Merge commit",
-            MergeStrategy::Squash => "Squash",
-            MergeStrategy::FastForward => "Fast-forward",
-            MergeStrategy::SquashFastForward => "Squash + FF",
-            MergeStrategy::RebaseFastForward => "Rebase + FF",
-            MergeStrategy::RebaseMerge => "Rebase + merge",
-        }
-    }
-
-    /// Whether the commits end up rewritten, so git won't see the local branch as merged.
-    pub fn rewrites_commits(self) -> bool {
-        !matches!(
-            self,
-            MergeStrategy::MergeCommit | MergeStrategy::FastForward
-        )
-    }
-}
-
-pub enum MergeOutcome {
-    Merged(PullRequest),
-    /// Bitbucket took longer than its request timeout and handed back a task to poll.
-    Pending {
-        task_url: String,
-    },
 }
 
 pub async fn merge_pull_request(

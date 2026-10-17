@@ -1,17 +1,16 @@
-//! The Repo toolkit for agents: the pull requests of the project's Bitbucket repository, their
+//! The Repo toolkit for agents: the pull requests of the project's Bitbucket or GitHub repository, their
 //! diffs, comments and merges, with the account connected in the Repo dock. It also feeds the
 //! agent's `@` menu, so a pull request can be mentioned like a file.
 
 use crate::api::{
-    ChangedFile, CheckState, FileChange, PullRequest, PullRequestDetail, PullRequestState,
+    ChangedFile, CheckState, FileChange, Hosting, PullRequest, PullRequestDetail, PullRequestState,
     RemoteRepository,
 };
-use crate::bitbucket::{MergeOutcome, MergeStrategy};
+use crate::api::{MergeOutcome, MergeStrategy, NewPullRequest};
 use crate::panel::{Target, detect_target};
-use crate::{Connection, RepoStore, bitbucket};
+use crate::{Connection, RepoStore, host};
 use anyhow::{Context as _, Result, anyhow};
 use gpui::{App, AsyncApp, Entity, Task};
-use http_client::HttpClient;
 use project::Project;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -26,6 +25,7 @@ use task_agents::{
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_DIFF_CHARS: usize = 80_000;
 const MAX_FILE_DIFF_CHARS: usize = 20_000;
+const MAX_LOG_CHARS: usize = 12_000;
 const MERGE_POLL_INTERVAL: Duration = Duration::from_secs(2);
 const MERGE_POLL_ATTEMPTS: usize = 90;
 /// How long a new window waits for git to find the repository before giving up on listing its
@@ -33,8 +33,7 @@ const MERGE_POLL_ATTEMPTS: usize = 90;
 const PREFETCH_ATTEMPTS: usize = 30;
 
 struct RepoContext {
-    client: Arc<dyn HttpClient>,
-    credentials: bitbucket::Credentials,
+    client: host::Client,
     repository: RemoteRepository,
     branch: Option<String>,
 }
@@ -44,10 +43,9 @@ async fn repo_context(project: &Entity<Project>, cx: &mut AsyncApp) -> Result<Re
     let started = Instant::now();
     loop {
         let loading = cx.update(|cx| {
-            matches!(
-                store.read(cx).connection(crate::api::Hosting::Bitbucket),
-                Connection::Loading
-            )
+            [crate::api::Hosting::Bitbucket, crate::api::Hosting::GitHub]
+                .into_iter()
+                .any(|hosting| matches!(store.read(cx).connection(hosting), Connection::Loading))
         });
         if !loading || started.elapsed() > CONNECTION_TIMEOUT {
             break;
@@ -62,17 +60,18 @@ async fn repo_context(project: &Entity<Project>, cx: &mut AsyncApp) -> Result<Re
             Target::Hosted { repository, .. } => repository,
             Target::NoRepository => anyhow::bail!("O projeto não tem repositório git."),
             Target::Unsupported { remote_url } => anyhow::bail!(
-                "O remoto {} não é do Bitbucket; só o Bitbucket é suportado por enquanto.",
+                "O remoto {} não é do Bitbucket nem do GitHub; só esses dois são suportados.",
                 remote_url.unwrap_or_else(|| "(nenhum)".into())
             ),
         };
-        let store = store.read(cx);
-        let credentials = store
-            .bitbucket_credentials()
-            .context("Nenhuma conta do Bitbucket conectada. Peça para conectar no dock Repo.")?;
+        let client = store.read(cx).client(repository.hosting).with_context(|| {
+            format!(
+                "Nenhuma conta do {} conectada. Peça para conectar no dock Repo.",
+                repository.hosting.name()
+            )
+        })?;
         Ok(RepoContext {
-            client: store.http_client(),
-            credentials,
+            client,
             repository,
             branch,
         })
@@ -91,12 +90,10 @@ async fn resolve_number(
         .branch
         .as_deref()
         .context("Sem branch ativo; diga o número do PR.")?;
-    let pull_requests = bitbucket::list_open_pull_requests(
-        &context.client,
-        &context.credentials,
-        &context.repository,
-    )
-    .await?;
+    let pull_requests = context
+        .client
+        .list_open_pull_requests(&context.repository)
+        .await?;
     remember_pull_requests(context, &pull_requests, cx);
     pull_requests
         .iter()
@@ -147,6 +144,12 @@ struct PullRequestInput {
     /// The pull request number. Defaults to the one opened from the current branch.
     #[serde(default)]
     number: Option<u64>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct JobInput {
+    /// The GitHub Actions job, as `job N` in the checks of `repo_pull_request`.
+    job_id: u64,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -254,10 +257,14 @@ fn describe_detail(detail: &PullRequestDetail, branch: Option<&str>) -> String {
         text.push_str("\nChecks:\n");
         for check in &detail.checks {
             text.push_str(&format!(
-                "- {} · {}\n",
+                "- {} · {}",
                 check.name,
                 check_state_label(check.state)
             ));
+            if let Some(job_id) = check.rerun_job {
+                text.push_str(&format!(" · job {job_id}"));
+            }
+            text.push('\n');
         }
     }
     text.push_str(&format!("\nArquivos ({}):\n", detail.files.len()));
@@ -387,13 +394,10 @@ fn describe_reference(
     let project = project.clone();
     cx.spawn(async move |cx| {
         let context = repo_context(&project, cx).await?;
-        let detail = bitbucket::get_pull_request_detail(
-            &context.client,
-            &context.credentials,
-            &context.repository,
-            reference.number,
-        )
-        .await?;
+        let detail = context
+            .client
+            .get_pull_request_detail(&context.repository, reference.number)
+            .await?;
         let mut text = describe_detail(&detail, context.branch.as_deref());
 
         if let Some(comment_id) = reference.comment_id {
@@ -425,13 +429,10 @@ fn describe_reference(
         }
 
         if let Some(path) = &reference.file_path {
-            let diff = bitbucket::get_pull_request_diff(
-                &context.client,
-                &context.credentials,
-                &context.repository,
-                reference.number,
-            )
-            .await?;
+            let diff = context
+                .client
+                .get_pull_request_diff(&context.repository, reference.number)
+                .await?;
             match file_section(&diff, path) {
                 Some(section) => {
                     let (section, truncated) = truncate_chars(section, MAX_FILE_DIFF_CHARS);
@@ -486,21 +487,19 @@ pub(crate) fn prefetch_pull_requests(project: Entity<Project>, cx: &mut App) {
             }
             cx.background_executor().timer(Duration::from_secs(1)).await;
         }
-        // Only Bitbucket projects read the keychain, as when the dock is opened.
+        // Only hosted projects read the keychain, as when the dock is opened.
         if !hosted {
             return;
         }
         let context = match repo_context(&project, cx).await {
             Ok(context) => context,
-            // Not every project is on Bitbucket, and not every profile has an account.
+            // Not every project is hosted, and not every profile has an account.
             Err(_) => return,
         };
-        match bitbucket::list_open_pull_requests(
-            &context.client,
-            &context.credentials,
-            &context.repository,
-        )
-        .await
+        match context
+            .client
+            .list_open_pull_requests(&context.repository)
+            .await
         {
             Ok(pull_requests) => remember_pull_requests(&context, &pull_requests, cx),
             Err(error) => log::warn!("Repo: falha ao listar os PRs para o Agent: {error:#}"),
@@ -512,12 +511,10 @@ pub(crate) fn prefetch_pull_requests(project: Entity<Project>, cx: &mut App) {
 fn list(project: Entity<Project>, _input: NoInput, cx: &mut App) -> Task<Result<ToolkitOutput>> {
     cx.spawn(async move |cx| {
         let context = repo_context(&project, cx).await?;
-        let pull_requests = bitbucket::list_open_pull_requests(
-            &context.client,
-            &context.credentials,
-            &context.repository,
-        )
-        .await?;
+        let pull_requests = context
+            .client
+            .list_open_pull_requests(&context.repository)
+            .await?;
         remember_pull_requests(&context, &pull_requests, cx);
         let mut text = format!(
             "{} · {} PR(s) aberto(s)\n",
@@ -540,13 +537,10 @@ fn detail(
     cx.spawn(async move |cx| {
         let context = repo_context(&project, cx).await?;
         let number = resolve_number(&context, input.number, cx).await?;
-        let detail = bitbucket::get_pull_request_detail(
-            &context.client,
-            &context.credentials,
-            &context.repository,
-            number,
-        )
-        .await?;
+        let detail = context
+            .client
+            .get_pull_request_detail(&context.repository, number)
+            .await?;
         let branch = context.branch.as_deref();
         Ok(ToolkitOutput::text(describe_detail(&detail, branch))
             .with_raw_output(pull_request_card(&detail, branch)))
@@ -561,10 +555,7 @@ fn diff(
     cx.spawn(async move |cx| {
         let context = repo_context(&project, cx).await?;
         let number = resolve_number(&context, input.number, cx).await?;
-        let diff = bitbucket::get_pull_request_diff(
-            &context.client,
-            &context.credentials,
-            &context.repository,
+        let diff = context.client.get_pull_request_diff(&context.repository,
             number,
         )
         .await?;
@@ -582,6 +573,51 @@ fn diff(
     })
 }
 
+/// The end of a failed job's log: where the error is, without the setup noise above it.
+fn check_log(
+    project: Entity<Project>,
+    input: JobInput,
+    cx: &mut App,
+) -> Task<Result<ToolkitOutput>> {
+    cx.spawn(async move |cx| {
+        let context = repo_context(&project, cx).await?;
+        let log = context
+            .client
+            .get_job_log(&context.repository, input.job_id)
+            .await?;
+        let total_lines = log.lines().count();
+        let start = log
+            .char_indices()
+            .rev()
+            .nth(MAX_LOG_CHARS)
+            .map_or(0, |(index, _)| index);
+        let tail = &log[start..];
+        Ok(ToolkitOutput::text(format!(
+            "Log do job {} ({total_lines} linhas{}):\n{tail}",
+            input.job_id,
+            if start > 0 { ", só o fim" } else { "" }
+        )))
+    })
+}
+
+fn rerun_check(
+    project: Entity<Project>,
+    input: JobInput,
+    cx: &mut App,
+) -> Task<Result<ToolkitOutput>> {
+    cx.spawn(async move |cx| {
+        let context = repo_context(&project, cx).await?;
+        context
+            .client
+            .rerun_job(&context.repository, input.job_id)
+            .await?;
+        Ok(ToolkitOutput::text(format!(
+            "Job {} rodando de novo no GitHub Actions.",
+            input.job_id
+        )))
+    })
+}
+
 fn comment(
     project: Entity<Project>,
     input: CommentInput,
@@ -593,14 +629,10 @@ fn comment(
         }
         let context = repo_context(&project, cx).await?;
         let number = resolve_number(&context, input.number, cx).await?;
-        bitbucket::post_comment(
-            &context.client,
-            &context.credentials,
-            &context.repository,
-            number,
-            &input.text,
-        )
-        .await?;
+        context
+            .client
+            .post_comment(&context.repository, number, &input.text)
+            .await?;
         Ok(ToolkitOutput::text(format!(
             "Comentário publicado no PR #{number}."
         )))
@@ -618,16 +650,16 @@ fn line_comment(
         }
         let context = repo_context(&project, cx).await?;
         let number = resolve_number(&context, input.number, cx).await?;
-        bitbucket::post_inline_comment(
-            &context.client,
-            &context.credentials,
-            &context.repository,
-            number,
-            &input.path,
-            input.line,
-            &input.text,
-        )
-        .await?;
+        context
+            .client
+            .post_inline_comment(
+                &context.repository,
+                number,
+                &input.path,
+                input.line,
+                &input.text,
+            )
+            .await?;
         Ok(ToolkitOutput::text(format!(
             "Comentário publicado em {}:{} no PR #{number}.",
             input.path, input.line
@@ -649,53 +681,45 @@ fn create(
             .source_branch
             .or_else(|| context.branch.clone())
             .context("Sem branch ativo; diga de qual branch abrir o PR.")?;
-        let branches = bitbucket::list_branches(
-            &context.client,
-            &context.credentials,
-            &context.repository,
-        )
-        .await?;
+        let branches = context.client.list_branches(&context.repository).await?;
         if !branches.contains(&source_branch) {
             anyhow::bail!(
-                "O branch `{source_branch}` não está no Bitbucket. Faça push dele antes de abrir o PR."
+                "O branch `{source_branch}` não está no {}. Faça push dele antes de abrir o PR.",
+                context.repository.hosting.name()
             );
         }
         let destination_branch = match input.destination_branch {
             Some(destination) => destination,
-            None => bitbucket::get_default_destination(
-                &context.client,
-                &context.credentials,
-                &context.repository,
-            )
-            .await?
-            .context("O repositório não tem branch padrão; diga o destino do PR.")?,
+            None => context
+                .client
+                .get_default_destination(&context.repository)
+                .await?
+                .context("O repositório não tem branch padrão; diga o destino do PR.")?,
         };
-        let reviewer_ids = bitbucket::get_default_reviewers(
-            &context.client,
-            &context.credentials,
-            &context.repository,
-        )
-        .await
-        .map(|reviewers| reviewers.into_iter().map(|person| person.id).collect())
-        .unwrap_or_else(|error| {
-            log::warn!("Repo: revisores padrão indisponíveis: {error:#}");
-            Vec::new()
-        });
-        let created = bitbucket::create_pull_request(
-            &context.client,
-            &context.credentials,
-            &context.repository,
-            bitbucket::NewPullRequest {
-                title: input.title.trim().to_string(),
-                description: input.description.unwrap_or_default(),
-                source_branch: source_branch.clone(),
-                destination_branch: destination_branch.clone(),
-                reviewer_ids,
-                close_source_branch: false,
-                draft: input.draft,
-            },
-        )
-        .await?;
+        let reviewer_ids = context
+            .client
+            .get_default_reviewers(&context.repository)
+            .await
+            .map(|reviewers| reviewers.into_iter().map(|person| person.id).collect())
+            .unwrap_or_else(|error| {
+                log::warn!("Repo: revisores padrão indisponíveis: {error:#}");
+                Vec::new()
+            });
+        let created = context
+            .client
+            .create_pull_request(
+                &context.repository,
+                NewPullRequest {
+                    title: input.title.trim().to_string(),
+                    description: input.description.unwrap_or_default(),
+                    source_branch: source_branch.clone(),
+                    destination_branch: destination_branch.clone(),
+                    reviewer_ids,
+                    close_source_branch: false,
+                    draft: input.draft,
+                },
+            )
+            .await?;
         Ok(ToolkitOutput::text(format!(
             "PR #{} aberto: {} ({source_branch} → {destination_branch})\n{}",
             created.number, created.title, created.url
@@ -707,13 +731,10 @@ fn merge(project: Entity<Project>, input: MergeInput, cx: &mut App) -> Task<Resu
     cx.spawn(async move |cx| {
         let context = repo_context(&project, cx).await?;
         let number = resolve_number(&context, input.number, cx).await?;
-        let detail = bitbucket::get_pull_request_detail(
-            &context.client,
-            &context.credentials,
-            &context.repository,
-            number,
-        )
-        .await?;
+        let detail = context
+            .client
+            .get_pull_request_detail(&context.repository, number)
+            .await?;
         let pull_request = &detail.pull_request;
         if pull_request.state != PullRequestState::Open {
             anyhow::bail!("O PR #{number} não está aberto.");
@@ -723,19 +744,17 @@ fn merge(project: Entity<Project>, input: MergeInput, cx: &mut App) -> Task<Resu
             .iter()
             .filter(|file| file.change == FileChange::Conflict)
             .count();
-        if conflicts > 0 {
+        if conflicts > 0 || detail.has_conflicts {
             anyhow::bail!(
-                "O PR #{number} tem conflitos em {conflicts} arquivo(s) com {}; resolva antes do merge.",
+                "O PR #{number} tem conflitos com {}; resolva antes do merge.",
                 pull_request.destination_branch
             );
         }
-        let strategies = bitbucket::get_merge_strategies(
-            &context.client,
-            &context.credentials,
-            &context.repository,
-            &pull_request.destination_branch,
-        )
-        .await?;
+        let strategies = context
+            .client
+            .get_merge_options(&context.repository, &pull_request.destination_branch)
+            .await?
+            .strategies;
         let strategy = match input.strategy.as_deref() {
             Some(name) => strategies
                 .iter()
@@ -746,7 +765,7 @@ fn merge(project: Entity<Project>, input: MergeInput, cx: &mut App) -> Task<Resu
                         "O destino não aceita a estratégia `{name}`. Aceita: {}.",
                         strategies
                             .iter()
-                            .map(|strategy| strategy.label())
+                            .map(|strategy| strategy.label(context.client.hosting()))
                             .collect::<Vec<_>>()
                             .join(", ")
                     )
@@ -760,28 +779,25 @@ fn merge(project: Entity<Project>, input: MergeInput, cx: &mut App) -> Task<Resu
             "Merged in {} (pull request #{number})\n\n{}",
             pull_request.source_branch, pull_request.title
         );
-        let outcome = bitbucket::merge_pull_request(
-            &context.client,
-            &context.credentials,
-            &context.repository,
-            number,
-            strategy,
-            &message,
-            input.close_source_branch,
-        )
-        .await?;
+        let outcome = context
+            .client
+            .merge_pull_request(
+                &context.repository,
+                number,
+                strategy,
+                &message,
+                input.close_source_branch,
+            )
+            .await?;
         if let MergeOutcome::Pending { task_url } = outcome {
             let mut merged = false;
             for _ in 0..MERGE_POLL_ATTEMPTS {
                 cx.background_executor().timer(MERGE_POLL_INTERVAL).await;
-                if bitbucket::get_merge_task(
-                    &context.client,
-                    &context.credentials,
-                    &context.repository,
-                    &task_url,
-                )
-                .await?
-                .is_some()
+                if context
+                    .client
+                    .get_merge_task(&context.repository, &task_url)
+                    .await?
+                    .is_some()
                 {
                     merged = true;
                     break;
@@ -798,7 +814,7 @@ fn merge(project: Entity<Project>, input: MergeInput, cx: &mut App) -> Task<Resu
             title: pull_request.title.clone(),
             url: pull_request.url.clone(),
             destination_branch: pull_request.destination_branch.clone(),
-            strategy: strategy.label().to_string(),
+            strategy: strategy.label(context.client.hosting()).to_string(),
         };
         Ok(ToolkitOutput::text(format!(
             "PR #{number} mergeado em {} ({}).",
@@ -811,11 +827,14 @@ fn merge(project: Entity<Project>, input: MergeInput, cx: &mut App) -> Task<Resu
 fn strategy_matches(strategy: MergeStrategy, name: &str) -> bool {
     let normalize = |text: &str| text.trim().to_lowercase().replace([' ', '-'], "_");
     let name = normalize(name);
-    name == strategy.api_name() || name == normalize(strategy.label())
+    name == strategy.api_name()
+        || [Hosting::Bitbucket, Hosting::GitHub]
+            .into_iter()
+            .any(|hosting| name == normalize(strategy.label(hosting)))
 }
 
-const PREFER_OVER_MCP: &str =
-    "Use this instead of any Bitbucket MCP server tool: it uses the account of the Repo dock.";
+const PREFER_OVER_MCP: &str = "Use this instead of any Bitbucket or GitHub MCP server tool: it \
+     uses the account of the Repo dock.";
 
 pub fn register_toolkit(cx: &mut App) {
     task_agents::register_pull_request_source(
@@ -829,7 +848,8 @@ pub fn register_toolkit(cx: &mut App) {
         Toolkit {
             id: "repo".into(),
             name: "Repo".into(),
-            description: "Pull requests do Bitbucket conectado no dock Repo".into(),
+            description: "Pull requests e checks do Bitbucket ou GitHub conectado no dock Repo"
+                .into(),
             icon: "pull_request".into(),
             tools: vec![
                 ToolkitTool::new(
@@ -867,6 +887,23 @@ pub fn register_toolkit(cx: &mut App) {
                     diff,
                 ),
                 ToolkitTool::new(
+                    "repo_check_log",
+                    "Leu o log do check",
+                    "Reads the end of a GitHub Actions job's log, to see why a check failed. Take \
+                     the job id from `repo_pull_request`.",
+                    ToolAccess::Read,
+                    check_log,
+                ),
+                ToolkitTool::new(
+                    "repo_rerun_check",
+                    "Re-rodou o check",
+                    "Runs a failed GitHub Actions job again, with the same commit. Only when the \
+                     user asked for it, and only for runs of their own branches; the user \
+                     confirms every re-run.",
+                    ToolAccess::AlwaysConfirm,
+                    rerun_check,
+                ),
+                ToolkitTool::new(
                     "repo_pr_comment",
                     "Comentou no PR",
                     "Publishes a general comment on a pull request. Everyone on the pull request \
@@ -894,7 +931,7 @@ pub fn register_toolkit(cx: &mut App) {
                 ToolkitTool::new(
                     REPO_MERGE_TOOL,
                     "Fez merge do PR",
-                    "Merges a pull request on Bitbucket. Only when the user asked for it: read \
+                    "Merges a pull request on Bitbucket or GitHub. Only when the user asked for it: read \
                      the pull request first so they see its checks and reviews, and the user \
                      confirms every merge.",
                     ToolAccess::AlwaysConfirm,

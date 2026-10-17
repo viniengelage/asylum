@@ -3,9 +3,7 @@
 //! the `.flow.md` that the parser reads back.
 
 use super::FlowView;
-use crate::task_agents_view::{
-    OpenTaskAgents, model_dropdown, primary_button, secondary_button, segment_option, selector,
-};
+use crate::task_agents_view::{OpenTaskAgents, model_dropdown, selector};
 use editor::{Editor, EditorEvent};
 use flows::{
     AgentStep, BranchStep, Criterion, DesignTarget, DesignTool, FlowStep, GateStep, OnFail,
@@ -13,7 +11,10 @@ use flows::{
 };
 use gpui::{CursorStyle, Entity, FontWeight, Hsla, Subscription, Window};
 use task_agents::{TaskAgent, TaskAgentSource};
-use ui::{Checkbox, ContextMenu, PopoverMenu, Tooltip, prelude::*};
+use ui::{
+    Checkbox, ContextMenu, PopoverMenu, Tooltip, prelude::*, primary_button, secondary_button,
+    segment_option,
+};
 use util::ResultExt as _;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
