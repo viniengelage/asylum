@@ -267,6 +267,7 @@ impl NewFlowModal {
         v_flex()
             .id(id)
             .flex_1()
+            .min_w_0()
             .p_3()
             .gap_1()
             .rounded_lg()
@@ -331,16 +332,18 @@ impl Render for NewFlowModal {
                             current: bool,
                             enabled: bool,
                             cx: &mut Context<Self>| {
-            Button::new(id, label)
-                .label_size(LabelSize::Small)
-                .full_width()
-                .toggle_state(personal == current)
-                .disabled(!enabled)
-                .style(ButtonStyle::Subtle)
-                .on_click(cx.listener(move |this, _, _window, cx| {
-                    this.personal = personal;
-                    cx.notify();
-                }))
+            div().flex_1().min_w_0().child(
+                Button::new(id, label)
+                    .label_size(LabelSize::Small)
+                    .full_width()
+                    .toggle_state(personal == current)
+                    .disabled(!enabled)
+                    .style(ButtonStyle::Subtle)
+                    .on_click(cx.listener(move |this, _, _window, cx| {
+                        this.personal = personal;
+                        cx.notify();
+                    })),
+            )
         };
         let project_label = self
             .project_root

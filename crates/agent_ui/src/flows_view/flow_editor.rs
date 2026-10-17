@@ -2362,29 +2362,31 @@ impl FlowView {
                     .border_color(cx.theme().colors().border)
                     .bg(cx.theme().colors().editor_background)
                     .children(DesignTool::ALL.into_iter().map(|tool| {
-                        Button::new(
-                            SharedString::from(format!("where-{}", tool.label())),
-                            tool.label(),
+                        div().flex_1().min_w_0().child(
+                            Button::new(
+                                SharedString::from(format!("where-{}", tool.label())),
+                                tool.label(),
+                            )
+                            .label_size(LabelSize::Small)
+                            .full_width()
+                            .toggle_state(tool == current_tool)
+                            .style(ButtonStyle::Subtle)
+                            .on_click(cx.listener(
+                                move |this, _, window, cx| {
+                                    this.edit_agent_step(index, cx, |agent_step| {
+                                        agent_step.where_ =
+                                            (tool != DesignTool::Code).then(|| DesignTarget {
+                                                tool,
+                                                file: agent_step
+                                                    .where_
+                                                    .as_ref()
+                                                    .and_then(|target| target.file.clone()),
+                                            });
+                                    });
+                                    this.rebuild_inspector(window, cx);
+                                },
+                            )),
                         )
-                        .label_size(LabelSize::Small)
-                        .full_width()
-                        .toggle_state(tool == current_tool)
-                        .style(ButtonStyle::Subtle)
-                        .on_click(cx.listener(
-                            move |this, _, window, cx| {
-                                this.edit_agent_step(index, cx, |agent_step| {
-                                    agent_step.where_ =
-                                        (tool != DesignTool::Code).then(|| DesignTarget {
-                                            tool,
-                                            file: agent_step
-                                                .where_
-                                                .as_ref()
-                                                .and_then(|target| target.file.clone()),
-                                        });
-                                });
-                                this.rebuild_inspector(window, cx);
-                            },
-                        ))
                     })),
             )
             .child(if current_tool == DesignTool::Code {

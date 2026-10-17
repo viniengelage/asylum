@@ -509,15 +509,17 @@ impl TaskAgentsView {
                        value: Segment,
                        current: Segment,
                        cx: &mut Context<Self>| {
-            Button::new(id, label)
-                .label_size(LabelSize::Small)
-                .full_width()
-                .toggle_state(value == current)
-                .style(ButtonStyle::Subtle)
-                .on_click(cx.listener(move |this, _, _window, cx| {
-                    this.segment = value;
-                    cx.notify();
-                }))
+            div().flex_1().min_w_0().child(
+                Button::new(id, label)
+                    .label_size(LabelSize::Small)
+                    .full_width()
+                    .toggle_state(value == current)
+                    .style(ButtonStyle::Subtle)
+                    .on_click(cx.listener(move |this, _, _window, cx| {
+                        this.segment = value;
+                        cx.notify();
+                    })),
+            )
         };
         div().px_2().pt_2().child(
             h_flex()
