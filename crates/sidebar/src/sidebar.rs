@@ -10967,6 +10967,11 @@ impl Sidebar {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
+async fn list_ios_simulators() -> anyhow::Result<Vec<IosSimulatorDevice>> {
+    Ok(Vec::new())
+}
+
 #[cfg(target_os = "macos")]
 /// Every available iOS simulator, whether or not it is booted, so the device
 /// picker can offer them all. Booted devices come first because those are the
