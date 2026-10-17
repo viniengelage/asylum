@@ -1,6 +1,6 @@
 use component::{example_group, single_example};
 
-use gpui::{App, FocusHandle, Focusable, Hsla, Length};
+use gpui::{App, FocusHandle, Focusable, Hsla, Length, Pixels};
 use std::sync::Arc;
 
 use ui::Tooltip;
@@ -46,6 +46,8 @@ pub struct InputField {
     error: Option<SharedString>,
     /// A short note at the end of the field, such as where its value came from.
     end_hint: Option<(SharedString, Color)>,
+    /// A name inside the field, before the text, and how wide its column is.
+    start_label: Option<(SharedString, Pixels)>,
 }
 
 impl Focusable for InputField {
@@ -74,6 +76,7 @@ impl InputField {
             masked: None,
             error: None,
             end_hint: None,
+            start_label: None,
         }
     }
 
@@ -116,6 +119,13 @@ impl InputField {
     /// Sets a validation error message, turning the field's border red and
     /// showing the message as hint subtext below the field. Pass `None` to
     /// clear the error.
+    /// Names the field from inside it, in a column this wide, as forms with several fields of
+    /// one kind (credentials) do.
+    pub fn start_label(mut self, label: impl Into<SharedString>, width: Pixels) -> Self {
+        self.start_label = Some((label.into(), width));
+        self
+    }
+
     pub fn end_hint(mut self, hint: impl Into<SharedString>) -> Self {
         self.end_hint = Some((hint.into(), Color::Muted));
         self
@@ -214,6 +224,17 @@ impl Render for InputField {
                     .when_some(self.start_icon, |this, icon| {
                         this.gap_1()
                             .child(Icon::new(icon).size(IconSize::Small).color(Color::Muted))
+                    })
+                    .when_some(self.start_label.clone(), |this, (label, width)| {
+                        this.gap_2().child(
+                            div().flex_none().w(width).child(
+                                Label::new(label)
+                                    .size(LabelSize::Small)
+                                    .buffer_font(cx)
+                                    .color(Color::Muted)
+                                    .truncate(),
+                            ),
+                        )
                     })
                     .child(self.editor.render(window, cx))
                     .when_some(self.end_hint.clone(), |this, (hint, color)| {

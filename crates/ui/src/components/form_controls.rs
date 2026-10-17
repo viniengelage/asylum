@@ -127,6 +127,33 @@ pub fn segmented_control(cx: &App) -> Div {
         .bg(colors.editor_background)
 }
 
+/// The radio of the boards' choice cards: an accent ring with a dot when chosen, a plain ring
+/// otherwise. The card around it owns the click.
+pub fn radio_indicator(selected: bool, cx: &App) -> Div {
+    let colors = cx.theme().colors();
+    div()
+        .flex()
+        .flex_none()
+        .size(px(16.))
+        .items_center()
+        .justify_center()
+        .rounded_full()
+        .border(px(1.5))
+        .border_color(if selected {
+            colors.border_focused
+        } else {
+            colors.border
+        })
+        .when(selected, |this| {
+            this.child(
+                div()
+                    .size(px(8.))
+                    .rounded_full()
+                    .bg(colors.text_accent),
+            )
+        })
+}
+
 /// Lets any of the controls above open a [`crate::PopoverMenu`], which only takes clickable,
 /// toggleable triggers.
 #[derive(IntoElement)]
