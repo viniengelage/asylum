@@ -2,7 +2,9 @@
 //! any write on production. Production also asks for the database name to be typed.
 
 use crate::{
+    catalog,
     connection::{Environment, SavedConnection},
+    panel::sql_line,
     session::Session,
     statements::Risk,
 };
@@ -10,7 +12,7 @@ use gpui::{
     DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Subscription, Task, px,
 };
 use std::sync::Arc;
-use ui::{TintColor, prelude::*};
+use ui::{prelude::*, secondary_button};
 use ui_input::{ErasedEditorEvent, InputField};
 use util::ResultExt as _;
 use workspace::ModalView;
@@ -33,6 +35,10 @@ pub struct WriteGuard {
     in_transaction: bool,
     note: Option<SharedString>,
     estimate: Option<Result<String, String>>,
+    /// Tables whose foreign keys can stop a DELETE: `(table, ON DELETE action)`.
+    references: Vec<(String, String)>,
+    /// The line the statement starts on in the editor.
+    line: Option<usize>,
     confirm_input: Option<Entity<InputField>>,
     on_decision: Option<OnDecision>,
     _estimate_task: Task<()>,
@@ -50,6 +56,30 @@ impl Focusable for WriteGuard {
             None => self.focus_handle.clone(),
         }
     }
+}
+
+/// Foreign keys pointing at `table` that make the server refuse a DELETE of referenced rows.
+async fn blocking_references(
+    session: &Session,
+    table: &str,
+) -> anyhow::Result<Vec<(String, String)>> {
+    let sql = format!(
+        "select c.conrelid::regclass::text,
+                case c.confdeltype when 'r' then 'RESTRICT' else 'NO ACTION' end
+           from pg_catalog.pg_constraint c
+          where c.contype = 'f' and c.confdeltype in ('r', 'a')
+            and c.confrelid = {}::regclass
+          order by 1",
+        catalog::quote_literal(table)
+    );
+    let rows = session.query_text(&sql).await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| {
+            let mut values = row.into_iter();
+            Some((values.next().flatten()?, values.next().flatten()?))
+        })
+        .collect())
 }
 
 /// The planner's row estimate from the top line of `EXPLAIN` (`… rows=12480 width=6)`).
@@ -103,7 +133,21 @@ impl WriteGuard {
             // DDL has nothing to estimate, and EXPLAIN never runs the statement itself.
             Some(session) if risk != Risk::Ddl => {
                 let explain = format!("explain {statement}");
+                let deleted_table = statement
+                    .trim_start()
+                    .to_lowercase()
+                    .starts_with("delete")
+                    .then(|| target_table(&statement))
+                    .flatten();
                 cx.spawn(async move |this, cx| {
+                    let references = match deleted_table {
+                        Some(table) => blocking_references(&session, &table)
+                            .await
+                            .log_err()
+                            .unwrap_or_default(),
+                        None => Vec::new(),
+                    };
+                    this.update(cx, |this, _| this.references = references).log_err();
                     let result = session.run(&explain, 50).await;
                     this.update(cx, |this, cx| {
                         this.estimate = Some(match result {
@@ -143,11 +187,18 @@ impl WriteGuard {
             in_transaction,
             note,
             estimate: None,
+            references: Vec::new(),
+            line: None,
             confirm_input,
             on_decision: Some(on_decision),
             _estimate_task: estimate_task,
             _subscriptions: subscriptions,
         }
+    }
+
+    pub fn at_line(mut self, line: usize) -> Self {
+        self.line = Some(line);
+        self
     }
 
     fn confirmed(&self, cx: &App) -> bool {
@@ -179,197 +230,343 @@ impl WriteGuard {
 impl Render for WriteGuard {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let production = self.connection.environment == Environment::Prod;
+        let keyword = self
+            .statement
+            .split_whitespace()
+            .next()
+            .unwrap_or("SQL")
+            .to_uppercase();
         let title = match self.risk {
-            Risk::EveryRow if production => "Escrita em todas as linhas, em prod",
-            Risk::EveryRow => "Escrita em todas as linhas",
-            Risk::Ddl if production => "Mudança de estrutura em prod",
-            Risk::Ddl => "Mudança de estrutura",
-            Risk::ProductionWrite => "Escrita em prod",
+            Risk::EveryRow if production => format!("{keyword} sem WHERE em prod"),
+            Risk::EveryRow => format!("{keyword} sem WHERE"),
+            Risk::Ddl if production => "Mudança de estrutura em prod".to_owned(),
+            Risk::Ddl => "Mudança de estrutura".to_owned(),
+            Risk::ProductionWrite => "Escrita em prod".to_owned(),
         };
-        let reason = match self.risk {
-            Risk::EveryRow => "Não há WHERE: a tabela inteira é afetada.",
-            Risk::Ddl => "O schema muda para todo mundo que usa este banco.",
-            Risk::ProductionWrite => "Esta conexão está marcada como produção.",
+        let table = target_table(&self.statement);
+        let reach = match (&self.estimate, self.risk) {
+            (_, Risk::Ddl) => (
+                "O schema muda para todo mundo que usa este banco.".to_owned(),
+                None,
+            ),
+            (Some(Ok(rows)), Risk::EveryRow) => (
+                match (keyword.as_str(), &table) {
+                    ("DELETE" | "TRUNCATE", Some(table)) => {
+                        format!("Apaga todas as {rows} de {table}")
+                    }
+                    ("UPDATE", Some(table)) => format!("Altera todas as {rows} de {table}"),
+                    _ => format!("Afeta todas as {rows}"),
+                },
+                Some("estimativa do planner, sem rodar".to_owned()),
+            ),
+            (Some(Ok(rows)), _) => (
+                format!("Afeta {rows}"),
+                Some("estimativa do planner, sem rodar".to_owned()),
+            ),
+            (Some(Err(error)), _) => ("Sem estimativa de linhas".to_owned(), Some(error.clone())),
+            (None, Risk::EveryRow) => (
+                "Não há WHERE: a tabela inteira é afetada.".to_owned(),
+                Some("estimando…".to_owned()),
+            ),
+            (None, _) => (
+                "Esta conexão está marcada como produção.".to_owned(),
+                Some("estimando…".to_owned()),
+            ),
+        };
+        let transaction_note: SharedString = match &self.note {
+            Some(note) => note.clone(),
+            None if self.in_transaction => {
+                "Já existe uma transação aberta nesta aba: nada é gravado até o COMMIT.".into()
+            }
+            None => "você vê o total afetado e decide COMMIT ou ROLLBACK".into(),
         };
         let confirmed = self.confirmed(cx);
+        let colors = cx.theme().colors();
+        let error = Color::Error.color(cx);
         let preview = self
             .statement
             .lines()
             .take(6)
-            .collect::<Vec<_>>()
-            .join("\n");
+            .collect::<Vec<_>>();
+        let consequence = |icon: IconName, color: Color, text: String, detail: Option<String>| {
+            h_flex()
+                .gap_2p5()
+                .items_start()
+                .child(div().pt_0p5().child(Icon::new(icon).size(IconSize::Small).color(color)))
+                .child(
+                    v_flex()
+                        .gap_0p5()
+                        .child(Label::new(text).size(LabelSize::Small))
+                        .children(detail.map(|detail| {
+                            Label::new(detail)
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted)
+                        })),
+                )
+        };
+        let run_label = if self.in_transaction || !production {
+            "Rodar"
+        } else {
+            "Rodar e commitar"
+        };
+        let actions = h_flex()
+            .gap_2()
+            .child(
+                h_flex()
+                    .id("db-guard-cancel")
+                    .h(px(30.))
+                    .px_3()
+                    .gap_2()
+                    .cursor_pointer()
+                    .child(Label::new("Cancelar").size(LabelSize::Small))
+                    .child(
+                        Label::new("esc")
+                            .size(LabelSize::XSmall)
+                            .buffer_font(cx)
+                            .color(Color::Muted),
+                    )
+                    .on_click(cx.listener(|_, _, _, cx| cx.emit(DismissEvent))),
+            )
+            .child(div().flex_1())
+            .when(!self.in_transaction, |this| {
+                this.child(
+                    secondary_button(
+                        "db-guard-transaction",
+                        None,
+                        "Rodar e decidir depois",
+                        confirmed,
+                        cx,
+                    )
+                    .when(confirmed, |this| {
+                        this.on_click(cx.listener(|this, _, window, cx| {
+                            this.decide(Decision::RunInTransaction, window, cx)
+                        }))
+                    }),
+                )
+            })
+            .child(
+                h_flex()
+                    .id("db-guard-run")
+                    .h(px(30.))
+                    .px_3()
+                    .rounded_md()
+                    .bg(if confirmed {
+                        error.opacity(0.85)
+                    } else {
+                        error.opacity(0.22)
+                    })
+                    .when(confirmed, |this| {
+                        this.cursor_pointer()
+                            .hover(move |style| style.bg(error))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.decide(Decision::Run, window, cx)
+                            }))
+                    })
+                    .child(
+                        Label::new(run_label)
+                            .size(LabelSize::Small)
+                            .weight(FontWeight::SEMIBOLD)
+                            .color(if confirmed {
+                                Color::Custom(gpui::white())
+                            } else {
+                                Color::Custom(error.opacity(0.75))
+                            }),
+                    ),
+            );
+        let (inline_actions, bottom_actions) = if self.confirm_input.is_none() {
+            (Some(actions), None)
+        } else {
+            (None, Some(actions))
+        };
         v_flex()
             .key_context("DatabaseWriteGuard")
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::cancel))
             .on_action(cx.listener(Self::confirm))
             .w(px(520.))
-            .elevation_3(cx)
-            .p_4()
-            .gap_3()
+            .rounded_xl()
+            .border_1()
+            .border_color(colors.border_selected)
+            .bg(colors.elevated_surface_background)
+            .shadow_lg()
+            .overflow_hidden()
             .child(
-                h_flex()
-                    .gap_3()
+                v_flex()
+                    .px_6()
+                    .pt(px(22.))
+                    .pb(px(18.))
+                    .gap_4()
                     .child(
-                        div()
-                            .size_9()
-                            .flex()
-                            .flex_none()
-                            .items_center()
-                            .justify_center()
-                            .rounded_md()
-                            .bg(Color::Error.color(cx).opacity(0.12))
+                        h_flex()
+                            .gap_3()
                             .child(
-                                Icon::new(IconName::Warning)
-                                    .size(IconSize::Medium)
-                                    .color(Color::Error),
+                                div()
+                                    .size_9()
+                                    .flex()
+                                    .flex_none()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded_lg()
+                                    .bg(error.opacity(0.12))
+                                    .child(
+                                        Icon::new(IconName::Warning)
+                                            .size(IconSize::Medium)
+                                            .color(Color::Error),
+                                    ),
+                            )
+                            .child(
+                                v_flex()
+                                    .gap_0p5()
+                                    .child(
+                                        Label::new(title)
+                                            .size(LabelSize::Large)
+                                            .weight(FontWeight::SEMIBOLD),
+                                    )
+                                    .child(
+                                        Label::new(format!(
+                                            "{} · {} · {}",
+                                            self.connection.name,
+                                            self.connection.environment.label(),
+                                            self.connection.address()
+                                        ))
+                                        .size(LabelSize::Small)
+                                        .color(Color::Muted),
+                                    ),
                             ),
+                    )
+                    .child(
+                        h_flex()
+                            .min_h(px(40.))
+                            .px_3p5()
+                            .py_2()
+                            .gap_3()
+                            .rounded_lg()
+                            .bg(colors.editor_background)
+                            .border_1()
+                            .border_color(colors.border)
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .children(preview.into_iter().map(|line| sql_line(line, cx))),
+                            )
+                            .when_some(self.line, |this, line| {
+                                this.child(
+                                    Label::new(format!("linha {line}"))
+                                        .size(LabelSize::XSmall)
+                                        .color(Color::Muted),
+                                )
+                            }),
                     )
                     .child(
                         v_flex()
-                            .child(Label::new(title).weight(FontWeight::SEMIBOLD))
-                            .child(
-                                Label::new(format!(
-                                    "{} · {} · {}",
-                                    self.connection.name,
-                                    self.connection.environment.label(),
-                                    self.connection.address()
-                                ))
-                                .size(LabelSize::XSmall)
-                                .color(Color::Muted),
-                            ),
-                    ),
-            )
-            .child(
-                v_flex()
-                    .p_2p5()
-                    .rounded_md()
-                    .bg(cx.theme().colors().editor_background)
-                    .border_1()
-                    .border_color(cx.theme().colors().border)
-                    .children(preview.lines().map(|line| {
-                        Label::new(line.to_owned())
-                            .size(LabelSize::Small)
-                            .buffer_font(cx)
-                    })),
-            )
-            .child(
-                v_flex()
-                    .gap_1()
-                    .child(
-                        h_flex()
-                            .gap_2()
-                            .child(
-                                Icon::new(IconName::Info)
-                                    .size(IconSize::Small)
-                                    .color(Color::Error),
-                            )
-                            .child(Label::new(reason).size(LabelSize::Small)),
-                    )
-                    .when_some(self.estimate.clone(), |this, estimate| {
-                        this.child(
-                            h_flex()
-                                .gap_2()
-                                .child(
-                                    Icon::new(IconName::Table)
-                                        .size(IconSize::Small)
-                                        .color(Color::Muted),
+                            .gap_3()
+                            .child(consequence(
+                                IconName::Table,
+                                Color::Error,
+                                reach.0,
+                                reach.1,
+                            ))
+                            .children(self.references.iter().map(|(table, on_delete)| {
+                                consequence(
+                                    IconName::Link,
+                                    Color::Muted,
+                                    format!(
+                                        "{table} referencia esta tabela (ON DELETE {on_delete})"
+                                    ),
+                                    Some("o Postgres pode recusar no meio".to_owned()),
                                 )
-                                .child(
-                                    Label::new(match estimate {
-                                        Ok(rows) => {
-                                            format!(
-                                                "{rows}, pela estimativa do planner (sem rodar)"
-                                            )
-                                        }
-                                        Err(error) => format!("Sem estimativa: {error}"),
-                                    })
-                                    .size(LabelSize::Small)
-                                    .color(Color::Muted),
-                                ),
-                        )
-                    })
-                    .child(
-                        h_flex()
-                            .gap_2()
-                            .child(
-                                Icon::new(IconName::RotateCcw)
-                                    .size(IconSize::Small)
-                                    .color(Color::Muted),
-                            )
-                            .child(
-                                Label::new(match &self.note {
-                                    Some(note) => note.clone(),
-                                    None if self.in_transaction => {
-                                        "Já existe uma transação aberta nesta aba: nada é gravado \
-                                         até o COMMIT."
-                                            .into()
-                                    }
-                                    None => "Numa transação você vê quantas linhas mudaram antes \
-                                             de decidir entre COMMIT e ROLLBACK."
-                                        .into(),
-                                })
-                                .size(LabelSize::Small)
-                                .color(Color::Muted),
-                            ),
-                    ),
+                            }))
+                            .child(consequence(
+                                IconName::RotateCcw,
+                                Color::Muted,
+                                if self.in_transaction {
+                                    "Roda dentro da transação aberta".to_owned()
+                                } else {
+                                    "Pode rodar numa transação aberta".to_owned()
+                                },
+                                Some(transaction_note.to_string()),
+                            )),
+                    )
+                    .when_some(inline_actions, |this, actions| {
+                        this.child(div().pt_1().child(actions))
+                    }),
             )
             .when_some(self.confirm_input.clone(), |this, input| {
                 this.child(
                     v_flex()
-                        .gap_1()
+                        .px_6()
+                        .pt_4()
+                        .pb_5()
+                        .gap_2()
+                        .border_t_1()
+                        .border_color(colors.border)
                         .child(
-                            Label::new(format!("Digite {} para liberar", self.connection.database))
-                                .size(LabelSize::Small)
-                                .color(Color::Muted),
+                            h_flex()
+                                .gap_1()
+                                .child(Label::new("Digite").size(LabelSize::Small))
+                                .child(
+                                    Label::new(self.connection.database.clone())
+                                        .size(LabelSize::Small)
+                                        .buffer_font(cx)
+                                        .weight(FontWeight::SEMIBOLD),
+                                )
+                                .child(Label::new("para liberar").size(LabelSize::Small)),
                         )
-                        .child(input),
+                        .child(input)
+                        .children(bottom_actions.map(|actions| div().pt_2().child(actions))),
                 )
             })
-            .child(
-                h_flex()
-                    .pt_1()
-                    .gap_2()
-                    .child(
-                        Button::new("db-guard-cancel", "Cancelar")
-                            .style(ButtonStyle::Subtle)
-                            .on_click(cx.listener(|_, _, _, cx| cx.emit(DismissEvent))),
-                    )
-                    .child(div().flex_1())
-                    .when(!self.in_transaction, |this| {
-                        this.child(
-                            Button::new("db-guard-transaction", "Rodar numa transação")
-                                .style(ButtonStyle::Outlined)
-                                .disabled(!confirmed)
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.decide(Decision::RunInTransaction, window, cx)
-                                })),
-                        )
-                    })
-                    .child(
-                        Button::new(
-                            "db-guard-run",
-                            if self.in_transaction || !production {
-                                "Rodar"
-                            } else {
-                                "Rodar e commitar"
-                            },
-                        )
-                        .style(ButtonStyle::Tinted(TintColor::Error))
-                        .disabled(!confirmed)
-                        .on_click(
-                            cx.listener(|this, _, window, cx| {
-                                this.decide(Decision::Run, window, cx)
-                            }),
-                        ),
-                    ),
-            )
     }
+}
+
+/// The table an `UPDATE x`, `DELETE FROM x` or `TRUNCATE x` writes to, as written.
+fn target_table(statement: &str) -> Option<String> {
+    let mut words = statement.split_whitespace();
+    let first = words.next()?.to_lowercase();
+    let mut table = match first.as_str() {
+        "update" => words.next()?,
+        "delete" => {
+            words.next().filter(|word| word.eq_ignore_ascii_case("from"))?;
+            words.next()?
+        }
+        "truncate" => match words.next()? {
+            word if word.eq_ignore_ascii_case("table") => words.next()?,
+            word => word,
+        },
+        _ => return None,
+    };
+    if table.eq_ignore_ascii_case("only") {
+        table = words.next()?;
+    }
+    let table = table.trim_end_matches(';');
+    Some(if table.contains('.') {
+        table.to_owned()
+    } else {
+        format!("public.{table}")
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finds_the_table_a_write_targets() {
+        assert_eq!(
+            target_table("delete from pix_keys;").as_deref(),
+            Some("public.pix_keys")
+        );
+        assert_eq!(
+            target_table("UPDATE audit.events SET payload = null").as_deref(),
+            Some("audit.events")
+        );
+        assert_eq!(
+            target_table("truncate table only users").as_deref(),
+            Some("public.users")
+        );
+        assert_eq!(target_table("select 1"), None);
+    }
 
     #[test]
     fn reads_the_planner_estimate() {

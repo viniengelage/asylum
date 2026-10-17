@@ -1909,6 +1909,13 @@
     },
   },
   {
+    "context": "DatabasePanel",
+    "use_key_equivalents": true,
+    "bindings": {
+      "cmd-shift-n": "database_client::NewQuery",
+    },
+  },
+  {
     "context": "DatabaseConnectView",
     "use_key_equivalents": true,
     "bindings": {

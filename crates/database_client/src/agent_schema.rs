@@ -211,6 +211,7 @@ mod tests {
             name: name.to_owned(),
             kind: RelationKind::Table,
             estimated_rows: None,
+            total_size: None,
         }
     }
 

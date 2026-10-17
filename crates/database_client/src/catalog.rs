@@ -29,10 +29,14 @@ pub struct Relation {
     pub kind: RelationKind,
     /// The planner's estimate from the last ANALYZE; `None` when the table was never analyzed.
     pub estimated_rows: Option<i64>,
+    /// Table, indexes and TOAST together, as `pg_size_pretty` prints it (`11 MB`).
+    pub total_size: Option<String>,
 }
 
 const RELATIONS_SQL: &str = "\
-select n.nspname, c.relname, c.relkind::text, c.reltuples::bigint
+select n.nspname, c.relname, c.relkind::text, c.reltuples::bigint,
+       case when c.relkind in ('r', 'p', 'm')
+            then pg_catalog.pg_size_pretty(pg_catalog.pg_total_relation_size(c.oid)) end
   from pg_catalog.pg_class c
   join pg_catalog.pg_namespace n on n.oid = c.relnamespace
  where c.relkind in ('r', 'p', 'v', 'm', 'f')
@@ -63,10 +67,136 @@ pub async fn list_databases(session: &Session) -> anyhow::Result<Vec<String>> {
         .collect())
 }
 
+/// The size of the current database, as `pg_size_pretty` prints it, for the dock's footer.
+pub async fn database_size(session: &Session) -> anyhow::Result<Option<String>> {
+    let rows = session
+        .query_text("select pg_catalog.pg_size_pretty(pg_catalog.pg_database_size(current_database()))")
+        .await?;
+    Ok(rows
+        .into_iter()
+        .next()
+        .and_then(|row| row.into_iter().next().flatten()))
+}
+
+/// The planner's row estimate and the size of table, indexes and TOAST together (as
+/// `pg_size_pretty` prints it) for one relation.
+pub async fn relation_stats(
+    session: &Session,
+    schema: &str,
+    relation: &str,
+) -> anyhow::Result<(Option<i64>, Option<String>)> {
+    let sql = format!(
+        "select c.reltuples::bigint, pg_catalog.pg_size_pretty(pg_catalog.pg_total_relation_size(c.oid))
+           from pg_catalog.pg_class c where c.oid = {}::regclass",
+        quote_literal(&qualified_name(schema, relation))
+    );
+    let rows = session.query_text(&sql).await?;
+    let mut values = rows.into_iter().next().unwrap_or_default().into_iter();
+    let estimate = values
+        .next()
+        .flatten()
+        .and_then(|rows| rows.parse::<i64>().ok())
+        .filter(|rows| *rows >= 0);
+    Ok((estimate, values.next().flatten()))
+}
+
+/// `int8` → `bigint`: the names `format_type` uses for the internal type names a result's
+/// columns come with, so the result grid reads like the table grid.
+pub fn sql_type_name(internal: &str) -> String {
+    match internal {
+        "int2" => "smallint",
+        "int4" => "integer",
+        "int8" => "bigint",
+        "float4" => "real",
+        "bool" => "boolean",
+        "bpchar" => "char",
+        other => other,
+    }
+    .to_owned()
+}
+
+/// `character varying(14)` → `varchar(14)`, the short spellings the dock and grid use. All of
+/// them are still valid SQL, so the DDL can keep them.
+pub fn short_type_name(type_name: &str) -> String {
+    const SHORT: [(&str, &str); 6] = [
+        ("character varying", "varchar"),
+        ("timestamp with time zone", "timestamptz"),
+        ("timestamp without time zone", "timestamp"),
+        ("time with time zone", "timetz"),
+        ("time without time zone", "time"),
+        ("double precision", "float8"),
+    ];
+    for (long, short) in SHORT {
+        if let Some(rest) = type_name.strip_prefix(long) {
+            return format!("{short}{rest}");
+        }
+    }
+    type_name.to_owned()
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ObjectKind {
+    Function,
+    Sequence,
+    Enum,
+}
+
+/// A function, sequence or enum the dock lists under its schema, next to the tables.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SchemaObject {
+    pub schema: String,
+    pub kind: ObjectKind,
+    pub name: String,
+}
+
+const OBJECTS_SQL: &str = "\
+select n.nspname, 'f', p.proname || '(' || pg_catalog.pg_get_function_identity_arguments(p.oid) || ')'
+  from pg_catalog.pg_proc p
+  join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+ where p.prokind in ('f', 'p')
+   and not exists (select 1 from pg_catalog.pg_depend d
+                    where d.objid = p.oid and d.deptype = 'e')
+   and n.nspname <> 'information_schema' and n.nspname not like 'pg\\_%'
+union all
+select n.nspname, 's', c.relname
+  from pg_catalog.pg_class c
+  join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+ where c.relkind = 'S'
+   and n.nspname <> 'information_schema' and n.nspname not like 'pg\\_%'
+union all
+select n.nspname, 'e', t.typname
+  from pg_catalog.pg_type t
+  join pg_catalog.pg_namespace n on n.oid = t.typnamespace
+ where t.typtype = 'e'
+   and not exists (select 1 from pg_catalog.pg_depend d
+                    where d.objid = t.oid and d.deptype = 'e')
+   and n.nspname <> 'information_schema' and n.nspname not like 'pg\\_%'
+ order by 1, 2, 3";
+
+/// Functions (without the ones extensions install), sequences and enums of every user schema.
+pub async fn list_objects(session: &Session) -> anyhow::Result<Vec<SchemaObject>> {
+    let rows = session.query_text(OBJECTS_SQL).await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| {
+            let mut values = row.into_iter();
+            let schema = values.next().flatten()?;
+            let kind = match values.next().flatten()?.as_str() {
+                "f" => ObjectKind::Function,
+                "s" => ObjectKind::Sequence,
+                "e" => ObjectKind::Enum,
+                _ => return None,
+            };
+            let name = values.next().flatten()?;
+            Some(SchemaObject { schema, kind, name })
+        })
+        .collect())
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ColumnInfo {
     pub name: String,
-    /// As `format_type` prints it: `varchar(14)`, `timestamp with time zone`, `text[]`.
+    /// As `format_type` prints it, shortened: `varchar(14)`, `timestamptz`, `text[]`.
     pub type_name: String,
     pub not_null: bool,
     pub primary_key: bool,
@@ -114,7 +244,7 @@ pub async fn list_columns(
 fn parse_column(row: Vec<Option<String>>) -> Option<ColumnInfo> {
     let mut values = row.into_iter();
     let name = values.next().flatten()?;
-    let type_name = values.next().flatten()?;
+    let type_name = short_type_name(&values.next().flatten()?);
     let mut flag = || values.next().flatten().as_deref() == Some("t");
     let (not_null, primary_key, unique) = (flag(), flag(), flag());
     Some(ColumnInfo {
@@ -187,6 +317,8 @@ pub struct ForeignKey {
     /// `FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE`.
     pub definition: String,
     pub on_delete: String,
+    /// The planner's row estimate for the table on the other end.
+    pub other_rows: Option<i64>,
 }
 
 pub async fn list_indexes(
@@ -241,7 +373,10 @@ pub async fn list_foreign_keys(
         "select c.conname, c.conrelid = {table}::regclass,
                 case when c.conrelid = {table}::regclass then c.confrelid::regclass::text
                      else c.conrelid::regclass::text end,
-                pg_catalog.pg_get_constraintdef(c.oid), c.confdeltype::text
+                pg_catalog.pg_get_constraintdef(c.oid), c.confdeltype::text,
+                (select o.reltuples::bigint from pg_catalog.pg_class o
+                  where o.oid = case when c.conrelid = {table}::regclass then c.confrelid
+                                     else c.conrelid end)
            from pg_catalog.pg_constraint c
           where c.contype = 'f' and (c.conrelid = {table}::regclass or c.confrelid = {table}::regclass)
           order by 2 desc, 3, 1"
@@ -263,6 +398,11 @@ pub async fn list_foreign_keys(
                 _ => "NO ACTION",
             }
             .to_owned();
+            let other_rows = values
+                .next()
+                .flatten()
+                .and_then(|rows| rows.parse::<i64>().ok())
+                .filter(|rows| *rows >= 0);
             Some(ForeignKey {
                 name,
                 direction: if outgoing {
@@ -273,6 +413,7 @@ pub async fn list_foreign_keys(
                 other_table,
                 definition,
                 on_delete,
+                other_rows,
             })
         })
         .collect())
@@ -351,11 +492,13 @@ fn parse_relation(row: Vec<Option<String>>) -> Option<Relation> {
         .flatten()
         .and_then(|value| value.parse::<i64>().ok())
         .filter(|rows| *rows >= 0);
+    let total_size = values.next().flatten();
     Some(Relation {
         schema,
         name,
         kind,
         estimated_rows,
+        total_size,
     })
 }
 
@@ -380,6 +523,7 @@ mod tests {
                 name: "users".into(),
                 kind: RelationKind::Table,
                 estimated_rows: None,
+                total_size: None,
             })
         );
 
@@ -388,6 +532,14 @@ mod tests {
             relation.map(|relation| relation.estimated_rows),
             Some(Some(1200))
         );
+    }
+
+    #[test]
+    fn long_type_names_are_shortened() {
+        assert_eq!(short_type_name("character varying(14)"), "varchar(14)");
+        assert_eq!(short_type_name("timestamp with time zone"), "timestamptz");
+        assert_eq!(short_type_name("timestamp with time zone[]"), "timestamptz[]");
+        assert_eq!(short_type_name("text[]"), "text[]");
     }
 
     #[test]

@@ -6,8 +6,8 @@ use crate::{
     CancelQuery, ExplainStatement, RunScript, RunStatement, catalog,
     completion::{SchemaCache, SqlCompletionProvider},
     connection::SavedConnection,
-    grid::{GridColumn, ResultGrid},
-    panel::environment_chip,
+    grid::{GridColumn, GridEvent, ResultGrid},
+    panel::{chip, environment_color, segment},
     session::{QueryOutcome, ServerError, Session},
     statements::{self, Statement, StatementKind, Transaction},
     write_guard::{Decision, WriteGuard},
@@ -16,9 +16,9 @@ use editor::{
     Editor, EditorEvent, HighlightKey, MultiBufferOffset, SelectionEffects, ToOffset as _,
 };
 use gpui::{
-    AnyElement, AnyWindowHandle, ClipboardItem, DragMoveEvent, Empty, Entity, EntityId,
-    EventEmitter, FocusHandle, Focusable, FontWeight, Global, Pixels, Subscription, Task,
-    WeakEntity, px, relative,
+    Animation, AnimationExt as _, AnyElement, AnyWindowHandle, ClipboardItem, DragMoveEvent,
+    Empty, Entity, EntityId, EventEmitter, FocusHandle, Focusable, FontWeight, Global, Pixels,
+    Subscription, Task, WeakEntity, px, relative,
 };
 use project::Project;
 use std::{
@@ -30,8 +30,8 @@ use std::{
     time::{Duration, Instant},
 };
 use ui::{
-    ToggleButtonGroup, ToggleButtonGroupSize, ToggleButtonGroupStyle, ToggleButtonSimple, Tooltip,
-    prelude::*,
+    Indicator, KeyBinding, Tooltip, prelude::*, primary_button, secondary_button,
+    segmented_control,
 };
 use util::ResultExt as _;
 use workspace::{
@@ -131,7 +131,14 @@ enum Scope {
 enum ResultTab {
     Result,
     Messages,
+    Plan,
     History,
+}
+
+#[derive(Clone, Copy)]
+enum Export {
+    Csv,
+    Json,
 }
 
 /// What goes to the server for one statement.
@@ -157,8 +164,19 @@ struct HistoryEntry {
 
 enum RunState {
     Idle,
-    Running { started: Instant, total: usize },
-    Done { summary: String, truncated: bool },
+    Running {
+        started: Instant,
+        /// 1-based, among the statements of the file, when a single one runs.
+        statement: Option<usize>,
+        reads_only: bool,
+    },
+    Done {
+        truncated: bool,
+        /// Rows of the result shown in the grid.
+        rows: Option<usize>,
+        elapsed: Duration,
+        finished: Instant,
+    },
     Failed(Failure),
 }
 
@@ -169,6 +187,7 @@ struct Failure {
     range: Option<Range<usize>>,
     line: Option<usize>,
     suggestion: Option<String>,
+    elapsed: Option<Duration>,
 }
 
 struct Executed {
@@ -194,6 +213,8 @@ pub struct SqlQueryView {
     messages: Vec<Message>,
     history: Vec<HistoryEntry>,
     tab: ResultTab,
+    /// The last EXPLAIN, one line per plan row, for the Plano tab.
+    plan_lines: Vec<String>,
     /// Set once the divider above the results is dragged; until then they take 45% of the tab.
     results_height: Option<Pixels>,
     focus_handle: FocusHandle,
@@ -259,7 +280,18 @@ impl SqlQueryView {
         let open = cx.default_global::<OpenQueryViews>();
         open.0.retain(|view| view.upgrade().is_some());
         open.0.push(this);
-        let subscriptions = vec![cx.subscribe(&editor, |this, _, event, cx| match event {
+        let open_value = cx.subscribe_in(&grid, window, |this, _, event, window, cx| {
+            if let GridEvent::OpenValue { column, value } = event {
+                crate::grid::open_value(
+                    this.workspace.clone(),
+                    column.clone(),
+                    value.clone(),
+                    window,
+                    cx,
+                );
+            }
+        });
+        let subscriptions = vec![open_value, cx.subscribe(&editor, |this, _, event, cx| match event {
             EditorEvent::DirtyChanged
             | EditorEvent::Saved
             | EditorEvent::TitleChanged
@@ -289,6 +321,7 @@ impl SqlQueryView {
             messages: Vec::new(),
             history: Vec::new(),
             tab: ResultTab::Result,
+            plan_lines: Vec::new(),
             results_height: None,
             focus_handle: cx.focus_handle(),
             run_task: Task::ready(()),
@@ -525,17 +558,22 @@ impl SqlQueryView {
                 range: None,
                 line: None,
                 suggestion: None,
+                elapsed: None,
             });
             cx.notify();
             return;
         }
         let risky = plan.iter().find_map(|planned| {
             statements::risk(planned.statement.kind, &self.connection)
-                .map(|risk| (planned.sql.clone(), risk))
+                .map(|risk| (planned.sql.clone(), risk, planned.statement.range.start))
         });
-        let Some((statement, risk)) = risky else {
+        let Some((statement, risk, start)) = risky else {
             self.execute(plan, false, cx);
             return;
+        };
+        let line = {
+            let text = self.editor.read(cx).text(cx);
+            text[..start.min(text.len())].matches('\n').count() + 1
         };
         let this = cx.weak_entity();
         let connection = self.connection.clone();
@@ -565,6 +603,7 @@ impl SqlQueryView {
                     window,
                     cx,
                 )
+                .at_line(line)
             });
         });
         if opened.is_err() {
@@ -574,6 +613,7 @@ impl SqlQueryView {
                 range: None,
                 line: None,
                 suggestion: None,
+                elapsed: None,
             });
             cx.notify();
         }
@@ -588,9 +628,22 @@ impl SqlQueryView {
                 .collect(),
             cx,
         );
+        let statement = match plan.as_slice() {
+            [planned] => {
+                let text = self.editor.read(cx).text(cx);
+                statements::split(&text)
+                    .iter()
+                    .position(|statement| statement.range == planned.statement.range)
+                    .map(|index| index + 1)
+            }
+            _ => None,
+        };
         self.state = RunState::Running {
             started: Instant::now(),
-            total: plan.len(),
+            statement,
+            reads_only: plan
+                .iter()
+                .all(|planned| planned.statement.kind == StatementKind::Read),
         };
         self.tab = ResultTab::Result;
         cx.notify();
@@ -628,6 +681,7 @@ impl SqlQueryView {
                             range: None,
                             line: None,
                             suggestion: None,
+                            elapsed: None,
                         });
                         this.clear_highlight(HighlightKey::DatabaseStatement, cx);
                         cx.notify();
@@ -647,7 +701,6 @@ impl SqlQueryView {
     fn finish(&mut self, executed: Executed, cx: &mut Context<Self>) {
         self.clear_highlight(HighlightKey::DatabaseStatement, cx);
         self.in_transaction = executed.in_transaction;
-        let elapsed = executed.elapsed.as_millis();
         for (planned, outcome) in &executed.outcomes {
             let summary = outcome_summary(planned, outcome);
             self.messages.push(Message {
@@ -674,13 +727,27 @@ impl SqlQueryView {
         let truncated = shown
             .as_ref()
             .is_some_and(|result_set| result_set.truncated);
+        let shown_rows = shown.as_ref().map(|result_set| result_set.rows.len());
+        let explained = executed
+            .outcomes
+            .iter()
+            .rev()
+            .find(|(planned, _)| planned.sql.starts_with("explain "));
+        if let Some((_, outcome)) = explained {
+            self.plan_lines = outcome
+                .result_sets
+                .iter()
+                .flat_map(|result_set| result_set.rows.iter())
+                .filter_map(|row| row.first().cloned().flatten())
+                .collect();
+        }
         if let Some(result_set) = shown {
             let columns = result_set
                 .columns
                 .into_iter()
                 .map(|column| GridColumn {
                     name: column.name,
-                    type_name: column.type_name,
+                    type_name: column.type_name.as_deref().map(catalog::sql_type_name),
                 })
                 .collect();
             self.grid.update(cx, |grid, cx| {
@@ -689,6 +756,9 @@ impl SqlQueryView {
             self.has_grid = true;
         } else if !executed.outcomes.is_empty() {
             self.has_grid = false;
+        }
+        if explained.is_some() && executed.error.is_none() {
+            self.tab = ResultTab::Plan;
         }
         match executed.error {
             Some((planned, error)) => {
@@ -742,16 +812,16 @@ impl SqlQueryView {
                     range,
                     line,
                     suggestion,
+                    elapsed: Some(executed.elapsed),
                 });
+                self.tab = ResultTab::Messages;
             }
             None => {
-                let summary = match executed.outcomes.as_slice() {
-                    [(planned, outcome)] => outcome_summary(planned, outcome),
-                    outcomes => format!("{} statements", outcomes.len()),
-                };
                 self.state = RunState::Done {
-                    summary: format!("{summary} · {elapsed} ms"),
                     truncated,
+                    rows: shown_rows,
+                    elapsed: executed.elapsed,
+                    finished: Instant::now(),
                 };
             }
         }
@@ -839,315 +909,753 @@ impl SqlQueryView {
         cx.write_to_clipboard(ClipboardItem::new_string(csv));
     }
 
+    fn copy_as_insert(&self, cx: &mut Context<Self>) {
+        let sql = self.grid.read(cx).to_insert("resultado");
+        cx.write_to_clipboard(ClipboardItem::new_string(sql));
+    }
+
+    /// Saves the whole result next to the query, under a name the user confirms.
+    fn export(&mut self, format: Export, _window: &mut Window, cx: &mut Context<Self>) {
+        let grid = self.grid.read(cx);
+        let (content, extension) = match format {
+            Export::Csv => (grid.to_csv(), "csv"),
+            Export::Json => (grid.to_json(), "json"),
+        };
+        let Some(fs) = self
+            .workspace
+            .read_with(cx, |workspace, _| workspace.app_state().fs.clone())
+            .log_err()
+        else {
+            return;
+        };
+        let stem = self
+            .path
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "resultado".to_owned());
+        let directory = self
+            .path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_default();
+        let receiver = cx.prompt_for_new_path(&directory, Some(&format!("{stem}.{extension}")));
+        cx.spawn(async move |this, cx| {
+            let result = async {
+                let Some(path) = receiver.await.map_err(|_| anyhow::anyhow!("cancelado"))?? else {
+                    return anyhow::Ok(None);
+                };
+                fs.atomic_write(path.clone(), content).await?;
+                anyhow::Ok(Some(path))
+            }
+            .await;
+            this.update(cx, |this, cx| {
+                let (text, color) = match result {
+                    Ok(Some(path)) => (format!("Exportado para {}", path.display()), Color::Default),
+                    Ok(None) => return,
+                    Err(error) => (format!("Não deu para exportar: {error:#}"), Color::Error),
+                };
+                this.messages.push(Message { text, color });
+                cx.notify();
+            })
+        })
+        .detach_and_log_err(cx);
+    }
+
     fn render_toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
         let running = self.is_running();
+        let connection = &self.connection;
+        let environment = environment_color(connection.environment);
+        let saved_in = self
+            .path
+            .to_string_lossy()
+            .split_once(".asylum/")
+            .map(|(_, rest)| format!("salvo em .asylum/{rest}"));
         h_flex()
+            .h(px(52.))
+            .flex_none()
             .px_3()
-            .py_1p5()
             .gap_2()
-            .border_b_1()
-            .border_color(cx.theme().colors().border)
             .child(
-                Icon::new(IconName::Database)
-                    .size(IconSize::Small)
-                    .color(Color::Muted),
+                h_flex()
+                    .h(px(32.))
+                    .px_2p5()
+                    .gap_2()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(cx.theme().colors().border_selected)
+                    .child(Indicator::dot().color(environment))
+                    .child(
+                        Label::new(connection.name.clone())
+                            .size(LabelSize::Small)
+                            .weight(FontWeight::SEMIBOLD),
+                    )
+                    .child(
+                        Label::new(connection.environment.label())
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
+                    ),
             )
             .child(
-                Label::new(self.connection.name.clone())
-                    .size(LabelSize::Small)
-                    .weight(FontWeight::SEMIBOLD),
-            )
-            .child(environment_chip(self.connection.environment, cx))
-            .child(
-                Label::new(self.connection.address())
+                chip(cx).child(
+                    Label::new(if self.in_transaction {
+                        "transação aberta"
+                    } else {
+                        "auto-commit"
+                    })
                     .size(LabelSize::XSmall)
-                    .buffer_font(cx)
-                    .color(Color::Muted),
+                    .color(if self.in_transaction {
+                        Color::Warning
+                    } else {
+                        Color::Default
+                    }),
+                ),
             )
-            .child(
-                Label::new(if self.in_transaction {
-                    "transação aberta"
-                } else {
-                    "auto-commit"
-                })
-                .size(LabelSize::XSmall)
-                .color(if self.in_transaction {
-                    Color::Warning
-                } else {
-                    Color::Muted
-                }),
-            )
-            .when(self.connection.read_only, |this| {
+            .when(connection.read_only, |this| {
+                this.child(chip(cx).child(Label::new("somente leitura").size(LabelSize::XSmall)))
+            })
+            .child(chip(cx).child(Label::new(format!("limite {ROW_LIMIT}")).size(LabelSize::XSmall)))
+            .when_some(saved_in, |this, saved_in| {
                 this.child(
-                    Label::new("somente leitura")
-                        .size(LabelSize::XSmall)
-                        .color(Color::Muted),
+                    div().min_w_0().child(
+                        Label::new(saved_in)
+                            .size(LabelSize::XSmall)
+                            .buffer_font(cx)
+                            .color(Color::Muted)
+                            .truncate(),
+                    ),
                 )
             })
-            .child(
-                Label::new(format!("limite {ROW_LIMIT}"))
-                    .size(LabelSize::XSmall)
-                    .color(Color::Muted),
-            )
             .child(div().flex_1())
             .when(self.in_transaction && !running, |this| {
                 this.child(
-                    Button::new("db-rollback", "Rollback")
-                        .style(ButtonStyle::Outlined)
-                        .label_size(LabelSize::Small)
-                        .on_click(cx.listener(|this, _, _, cx| {
+                    secondary_button("db-rollback", None, "Rollback", true, cx).on_click(
+                        cx.listener(|this, _, _, cx| {
                             this.end_transaction(Transaction::Rollback, cx)
-                        })),
+                        }),
+                    ),
                 )
                 .child(
-                    Button::new("db-commit", "Commit")
-                        .style(ButtonStyle::Tinted(ui::TintColor::Warning))
-                        .label_size(LabelSize::Small)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.end_transaction(Transaction::Commit, cx)
-                        })),
+                    secondary_button(
+                        "db-commit",
+                        Some((IconName::Check, Color::Warning)),
+                        "Commit",
+                        true,
+                        cx,
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.end_transaction(Transaction::Commit, cx)
+                    })),
                 )
             })
             .child(
-                Button::new("db-explain", "EXPLAIN")
-                    .style(ButtonStyle::Outlined)
-                    .label_size(LabelSize::Small)
-                    .disabled(running)
-                    .start_icon(Icon::new(IconName::ListTree).size(IconSize::Small))
-                    .key_binding(ui::KeyBinding::for_action_in(
-                        &ExplainStatement,
-                        &self.editor.focus_handle(cx),
-                        cx,
-                    ))
-                    .on_click(
+                secondary_button(
+                    "db-explain",
+                    Some((IconName::ListTree, Color::Muted)),
+                    "EXPLAIN",
+                    !running,
+                    cx,
+                )
+                .when(!running, |this| {
+                    this.on_click(
                         cx.listener(|this, _, window, cx| this.run(Scope::Explain, window, cx)),
-                    ),
+                    )
+                }),
             )
             .child(if running {
-                Button::new("db-cancel-query", "Cancelar")
-                    .style(ButtonStyle::Tinted(ui::TintColor::Error))
-                    .label_size(LabelSize::Small)
-                    .start_icon(Icon::new(IconName::Stop).size(IconSize::Small))
-                    .key_binding(ui::KeyBinding::for_action_in(
-                        &CancelQuery,
-                        &self.editor.focus_handle(cx),
-                        cx,
-                    ))
+                let error = Color::Error.color(cx);
+                h_flex()
+                    .id("db-cancel-query")
+                    .h(px(30.))
+                    .px_3()
+                    .gap_1p5()
+                    .rounded_md()
+                    .cursor_pointer()
+                    .bg(error.opacity(0.06))
+                    .border_1()
+                    .border_color(error)
+                    .child(div().size(px(9.)).rounded(px(2.)).bg(cx.theme().colors().text))
+                    .child(Label::new("Cancelar").size(LabelSize::Small))
+                    .child(
+                        KeyBinding::for_action_in(
+                            &CancelQuery,
+                            &self.editor.focus_handle(cx),
+                            cx,
+                        )
+                        .size(rems_from_px(12_f32)),
+                    )
                     .on_click(
                         cx.listener(|this, _, window, cx| this.cancel(&CancelQuery, window, cx)),
                     )
                     .into_any_element()
             } else {
-                Button::new("db-run", "Executar")
-                    .style(ButtonStyle::Tinted(ui::TintColor::Accent))
-                    .label_size(LabelSize::Small)
-                    .start_icon(Icon::new(IconName::PlayFilled).size(IconSize::Small))
-                    .key_binding(ui::KeyBinding::for_action_in(
+                primary_button(
+                    "db-run",
+                    Some(IconName::PlayFilled),
+                    "Executar",
+                    Some(KeyBinding::for_action_in(
                         &RunStatement,
                         &self.editor.focus_handle(cx),
                         cx,
-                    ))
-                    .on_click(
-                        cx.listener(|this, _, window, cx| this.run(Scope::Statement, window, cx)),
-                    )
-                    .into_any_element()
+                    )),
+                    cx,
+                )
+                .on_click(cx.listener(|this, _, window, cx| this.run(Scope::Statement, window, cx)))
+                .into_any_element()
             })
             .into_any_element()
     }
 
-    fn render_status(&self) -> AnyElement {
-        let (icon, text, color): (Option<IconName>, String, Color) = match &self.state {
-            RunState::Idle => (
-                None,
-                "⌘↵ roda o statement sob o cursor · ⌘⇧↵ o arquivo · ⌥↵ EXPLAIN".to_owned(),
-                Color::Muted,
-            ),
-            RunState::Running { started, total } => (
-                Some(IconName::LoadCircle),
-                if *total > 1 {
-                    format!(
-                        "rodando {total} statements · {:.1} s",
-                        started.elapsed().as_secs_f32()
-                    )
-                } else {
-                    format!("rodando · {:.1} s", started.elapsed().as_secs_f32())
+    /// The line under the editor: which statement ⌘↵ runs, how, and where the cursor is.
+    fn render_editor_status(&self, cx: &mut Context<Self>) -> AnyElement {
+        let editor = self.editor.read(cx);
+        let text = editor.text(cx);
+        let snapshot = editor.buffer().read(cx).snapshot(cx);
+        let cursor = editor
+            .selections
+            .newest_anchor()
+            .head()
+            .to_offset(&snapshot)
+            .0
+            .min(text.len());
+        let point = snapshot.offset_to_point(MultiBufferOffset(cursor));
+        let all = statements::split(&text);
+        let number_at = |offset: usize| {
+            statements::statement_at(&all, offset)
+                .and_then(|statement| all.iter().position(|other| other.range == statement.range))
+                .map(|index| index + 1)
+        };
+        let (icon, message, color) = match &self.state {
+            RunState::Running { statement, .. } => (
+                IconName::LoadCircle,
+                match statement {
+                    Some(number) => format!("Rodando o statement {number} · o editor continua livre"),
+                    None => "Rodando · o editor continua livre".to_owned(),
                 },
                 Color::Warning,
             ),
-            RunState::Done { summary, truncated } => (
-                Some(IconName::Check),
-                if *truncated {
-                    format!("{summary} · parou no limite de {ROW_LIMIT} linhas")
-                } else {
-                    summary.clone()
+            RunState::Failed(failure) => (
+                IconName::XCircle,
+                match failure.range.as_ref().and_then(|range| number_at(range.start)) {
+                    Some(number) => format!("1 erro no statement {number}"),
+                    None => "1 erro".to_owned(),
+                },
+                Color::Error,
+            ),
+            _ => match number_at(cursor) {
+                Some(number) => (
+                    IconName::Check,
+                    format!("Statement {number} de {} sob o cursor", all.len()),
+                    Color::Success,
+                ),
+                None => (
+                    IconName::Info,
+                    "Nenhum statement sob o cursor".to_owned(),
+                    Color::Muted,
+                ),
+            },
+        };
+        h_flex()
+            .h(px(32.))
+            .flex_none()
+            .px_3()
+            .gap_2()
+            .border_t_1()
+            .border_b_1()
+            .border_color(cx.theme().colors().border)
+            .child(Icon::new(icon).size(IconSize::Small).color(color))
+            .child(Label::new(message).size(LabelSize::Small))
+            .when(!self.is_running(), |this| {
+                this.child(
+                    div().pl_4().child(
+                        Label::new(
+                            "⌘↵ roda o statement · ⌘⇧↵ roda o arquivo · ⌥↵ EXPLAIN ANALYZE",
+                        )
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted),
+                    ),
+                )
+            })
+            .child(div().flex_1())
+            .child(
+                Label::new(format!("Ln {}, Col {}", point.row + 1, point.column + 1))
+                    .size(LabelSize::XSmall)
+                    .buffer_font(cx)
+                    .color(Color::Muted),
+            )
+            .into_any_element()
+    }
+
+    fn render_state_chip(&self, cx: &App) -> AnyElement {
+        let (icon, label, color, mono) = match &self.state {
+            RunState::Idle => return Empty.into_any_element(),
+            RunState::Running { .. } => (Some(IconName::LoadCircle), "rodando".to_owned(), Color::Warning, false),
+            RunState::Done { rows: Some(rows), truncated, .. } => (
+                None,
+                match (rows, truncated) {
+                    (_, true) => format!("{rows}+ linhas"),
+                    (1, false) => "1 linha".to_owned(),
+                    (rows, false) => format!("{rows} linhas"),
                 },
                 Color::Success,
+                false,
             ),
+            RunState::Done { .. } => (None, "ok".to_owned(), Color::Success, false),
             RunState::Failed(failure) => (
-                Some(IconName::XCircle),
+                None,
                 failure
                     .server
                     .as_ref()
                     .map(|server| format!("erro {}", server.code))
                     .unwrap_or_else(|| "erro".to_owned()),
                 Color::Error,
+                true,
             ),
         };
         h_flex()
+            .h(px(22.))
+            .px_2()
             .gap_1p5()
-            .children(icon.map(|icon| Icon::new(icon).size(IconSize::Small).color(color)))
-            .child(Label::new(text).size(LabelSize::Small).color(color))
+            .rounded_md()
+            .bg(color.color(cx).opacity(0.1))
+            .map(|this| match icon {
+                Some(icon) => this.child(Icon::new(icon).size(IconSize::XSmall).color(color)),
+                None => this.child(Indicator::dot().color(color)),
+            })
+            .child(
+                Label::new(label)
+                    .size(LabelSize::XSmall)
+                    .weight(FontWeight::SEMIBOLD)
+                    .color(color)
+                    .when(mono, |label| label.buffer_font(cx)),
+            )
             .into_any_element()
+    }
+
+    fn render_state_detail(&self) -> String {
+        match &self.state {
+            RunState::Idle => String::new(),
+            RunState::Running { started, .. } => format!(
+                "{:.1} s · aguardando o servidor",
+                started.elapsed().as_secs_f32()
+            )
+            .replace('.', ","),
+            RunState::Done {
+                elapsed, finished, ..
+            } => format!(
+                "{} ms · rodou {}",
+                elapsed.as_millis(),
+                elapsed_label(finished.elapsed())
+            ),
+            RunState::Failed(failure) => match failure.elapsed {
+                Some(elapsed) => format!("falhou em {} ms · nada foi alterado", elapsed.as_millis()),
+                None => "nada foi alterado".to_owned(),
+            },
+        }
     }
 
     fn render_failure(&self, failure: &Failure, cx: &mut Context<Self>) -> AnyElement {
         let has_range = failure.range.is_some();
+        let error = Color::Error.color(cx);
+        let text = self.editor.read(cx).text(cx);
+        // `LINE 11:  and t.stauts = …` with a caret under the column, as psql prints it.
+        let pointer = failure.range.as_ref().and_then(|range| {
+            let line_start = text[..range.start].rfind('\n').map_or(0, |index| index + 1);
+            let line_end = text[range.start..]
+                .find('\n')
+                .map_or(text.len(), |index| range.start + index);
+            let prefix = format!("LINE {}: ", failure.line?);
+            let caret = prefix.chars().count() + text[line_start..range.start].chars().count();
+            let before_caret = format!("{prefix}{}", &text[line_start..range.start]);
+            debug_assert_eq!(before_caret.chars().count(), caret);
+            Some((
+                format!("{prefix}{}", &text[line_start..line_end]),
+                before_caret,
+            ))
+        });
+        let context = format!(
+            "rodou como {} em {} {}",
+            self.connection.user,
+            self.connection.name,
+            self.connection.environment.label()
+        );
         v_flex()
-            .m_3()
-            .p_3()
-            .gap_2()
-            .rounded_md()
-            .bg(Color::Error.color(cx).opacity(0.06))
+            .rounded_lg()
+            .bg(error.opacity(0.05))
             .border_1()
-            .border_color(Color::Error.color(cx).opacity(0.3))
+            .border_color(error.opacity(0.4))
             .child(
-                h_flex()
-                    .gap_2()
+                v_flex()
+                    .p_4()
+                    .gap_2p5()
                     .child(
-                        Icon::new(IconName::XCircle)
-                            .size(IconSize::Small)
-                            .color(Color::Error),
+                        h_flex()
+                            .gap_2p5()
+                            .child(
+                                Icon::new(IconName::XCircle)
+                                    .size(IconSize::Small)
+                                    .color(Color::Error),
+                            )
+                            .child(
+                                Label::new(failure.message.clone())
+                                    .size(LabelSize::Small)
+                                    .buffer_font(cx)
+                                    .weight(FontWeight::SEMIBOLD),
+                            ),
                     )
                     .child(
-                        Label::new(failure.message.clone())
-                            .buffer_font(cx)
-                            .weight(FontWeight::SEMIBOLD),
+                        v_flex()
+                            .pl(px(26.))
+                            .gap_1()
+                            .when_some(pointer, |this, (line, caret)| {
+                                this.child(
+                                    v_flex()
+                                        .child(
+                                            Label::new(line)
+                                                .size(LabelSize::Small)
+                                                .buffer_font(cx)
+                                                .color(Color::Muted),
+                                        )
+                                        .child(
+                                            // The text before the column, invisible, keeps the
+                                            // caret under it whatever the whitespace.
+                                            h_flex()
+                                                .child(
+                                                    Label::new(caret)
+                                                        .size(LabelSize::Small)
+                                                        .buffer_font(cx)
+                                                        .color(Color::Custom(
+                                                            gpui::transparent_black(),
+                                                        )),
+                                                )
+                                                .child(
+                                                    Label::new("^")
+                                                        .size(LabelSize::Small)
+                                                        .buffer_font(cx)
+                                                        .color(Color::Error),
+                                                ),
+                                        ),
+                                )
+                            })
+                            .when_some(
+                                failure.server.as_ref().and_then(|s| s.detail.clone()),
+                                |this, detail| {
+                                    this.child(
+                                        Label::new(format!("DETAIL: {detail}"))
+                                            .size(LabelSize::Small)
+                                            .buffer_font(cx)
+                                            .color(Color::Muted),
+                                    )
+                                },
+                            )
+                            .when_some(
+                                failure.server.as_ref().and_then(|s| s.hint.clone()),
+                                |this, hint| {
+                                    this.child(
+                                        Label::new(format!("HINT: {hint}"))
+                                            .size(LabelSize::Small)
+                                            .buffer_font(cx)
+                                            .color(Color::Warning),
+                                    )
+                                },
+                            )
+                            .when(failure.server.is_some(), |this| {
+                                this.child(
+                                    Label::new(context)
+                                        .size(LabelSize::XSmall)
+                                        .color(Color::Muted),
+                                )
+                            })
+                            .when(self.in_transaction, |this| {
+                                this.child(
+                                    Label::new(
+                                        "A transação desta aba foi abortada: rode Rollback para \
+                                         continuar.",
+                                    )
+                                    .size(LabelSize::Small)
+                                    .color(Color::Warning),
+                                )
+                            }),
                     ),
             )
-            .when_some(
-                failure.server.as_ref().and_then(|s| s.detail.clone()),
-                |this, detail| {
-                    this.child(
-                        Label::new(format!("DETAIL: {detail}"))
-                            .size(LabelSize::Small)
-                            .buffer_font(cx)
-                            .color(Color::Muted),
-                    )
-                },
-            )
-            .when_some(
-                failure.server.as_ref().and_then(|s| s.hint.clone()),
-                |this, hint| {
-                    this.child(
-                        Label::new(format!("HINT: {hint}"))
-                            .size(LabelSize::Small)
-                            .buffer_font(cx)
-                            .color(Color::Warning),
-                    )
-                },
-            )
-            .when(self.in_transaction, |this| {
+            .when(failure.suggestion.is_some() || has_range, |this| {
                 this.child(
-                    Label::new("A transação desta aba foi abortada: rode Rollback para continuar.")
-                        .size(LabelSize::Small)
-                        .color(Color::Warning),
-                )
-            })
-            .child(
-                h_flex()
-                    .gap_2()
-                    .when_some(failure.suggestion.clone(), |this, suggestion| {
-                        this.child(
-                            Button::new("db-apply-suggestion", format!("Trocar por {suggestion}"))
-                                .style(ButtonStyle::Tinted(ui::TintColor::Accent))
-                                .label_size(LabelSize::Small)
+                    h_flex()
+                        .p_4()
+                        .gap_2()
+                        .border_t_1()
+                        .border_color(error.opacity(0.25))
+                        .when_some(failure.suggestion.clone(), |this, suggestion| {
+                            this.child(
+                                primary_button(
+                                    "db-apply-suggestion",
+                                    Some(IconName::Check),
+                                    format!("Trocar por {suggestion}"),
+                                    None,
+                                    cx,
+                                )
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.apply_suggestion(window, cx)
                                 })),
-                        )
-                    })
-                    .when(has_range, |this| {
-                        this.child(
-                            Button::new(
-                                "db-go-to-error",
-                                match failure.line {
-                                    Some(line) => format!("Ir para a linha {line}"),
-                                    None => "Ir para o erro".to_owned(),
-                                },
                             )
-                            .style(ButtonStyle::Outlined)
-                            .label_size(LabelSize::Small)
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.go_to_error(window, cx)),
-                            ),
-                        )
-                    }),
-            )
+                        })
+                        .when(has_range, |this| {
+                            this.child(
+                                secondary_button(
+                                    "db-go-to-error",
+                                    None,
+                                    match failure.line {
+                                        Some(line) => format!("Ir para a linha {line}"),
+                                        None => "Ir para o erro".to_owned(),
+                                    },
+                                    true,
+                                    cx,
+                                )
+                                .on_click(
+                                    cx.listener(|this, _, window, cx| this.go_to_error(window, cx)),
+                                ),
+                            )
+                        })
+                        .when(failure.server.is_some(), |this| {
+                            this.child(
+                                div().pl_3().child(
+                                    Label::new(
+                                        "O texto original do Postgres fica aqui, sem tradução, \
+                                         para dar para buscar.",
+                                    )
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted),
+                                ),
+                            )
+                        }),
+                )
+            })
             .into_any_element()
     }
 
-    fn render_results(&self, cx: &mut Context<Self>) -> AnyElement {
-        let tab_index = match self.tab {
-            ResultTab::Result => 0,
-            ResultTab::Messages => 1,
-            ResultTab::History => 2,
+    /// While a statement runs: how long, and the way to stop it on the server.
+    fn render_running(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let RunState::Running {
+            started,
+            reads_only,
+            ..
+        } = &self.state
+        else {
+            return None;
         };
+        let colors = cx.theme().colors();
+        let warning = Color::Warning.color(cx);
+        let explanation = if self.in_transaction {
+            "Dentro da transação aberta: cancelar aborta a transação."
+        } else if *reads_only {
+            "Nada muda: está em auto-commit e é SELECT."
+        } else {
+            "Em auto-commit: o que já terminou fica gravado."
+        };
+        Some(
+            div()
+                .absolute()
+                .inset_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    v_flex()
+                        .occlude()
+                        .w(px(470.))
+                        .p_5()
+                        .gap_3p5()
+                        .rounded_xl()
+                        .border_1()
+                        .border_color(colors.border_selected)
+                        .bg(colors.elevated_surface_background)
+                        .shadow_lg()
+                        .child(
+                            v_flex()
+                                .gap_1()
+                                .child(
+                                    h_flex()
+                                        .gap_2()
+                                        .child(
+                                            Icon::new(IconName::LoadCircle)
+                                                .size(IconSize::Small)
+                                                .color(Color::Warning),
+                                        )
+                                        .child(
+                                            Label::new(
+                                                format!(
+                                                    "Rodando há {:.1} s",
+                                                    started.elapsed().as_secs_f32()
+                                                )
+                                                .replace('.', ","),
+                                            )
+                                            .weight(FontWeight::SEMIBOLD),
+                                        ),
+                                )
+                                .child(
+                                    Label::new(format!(
+                                        "{} · {}",
+                                        self.connection.name,
+                                        self.connection.address()
+                                    ))
+                                    .size(LabelSize::XSmall)
+                                    .buffer_font(cx)
+                                    .color(Color::Muted),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .relative()
+                                .h(px(3.))
+                                .w_full()
+                                .rounded_sm()
+                                .overflow_hidden()
+                                .bg(colors.border_selected)
+                                .child(
+                                    div()
+                                        .absolute()
+                                        .top_0()
+                                        .h_full()
+                                        .w(px(110.))
+                                        .rounded_sm()
+                                        .bg(warning)
+                                        .with_animation(
+                                            "db-running-bar",
+                                            Animation::new(Duration::from_millis(1400)).repeat(),
+                                            |bar, delta| bar.left(px(-110. + delta * 540.)),
+                                        ),
+                                ),
+                        )
+                        .child(
+                            h_flex()
+                                .gap_3p5()
+                                .child(
+                                    h_flex()
+                                        .id("db-cancel-running")
+                                        .h(px(34.))
+                                        .px_3()
+                                        .gap_2()
+                                        .flex_none()
+                                        .rounded_md()
+                                        .cursor_pointer()
+                                        .bg(colors.element_background)
+                                        .border_1()
+                                        .border_color(colors.border_selected)
+                                        .hover(|style| style.bg(colors.element_hover))
+                                        .child(
+                                            div().size(px(9.)).rounded(px(2.)).bg(colors.text),
+                                        )
+                                        .child(Label::new("Cancelar query").size(LabelSize::Small))
+                                        .child(
+                                            KeyBinding::for_action_in(
+                                                &CancelQuery,
+                                                &self.editor.focus_handle(cx),
+                                                cx,
+                                            )
+                                            .size(rems_from_px(12_f32)),
+                                        )
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.cancel(&CancelQuery, window, cx)
+                                        })),
+                                )
+                                .child(
+                                    v_flex()
+                                        .flex_1()
+                                        .gap_0p5()
+                                        .child(
+                                            Label::new("Cancela no servidor, não só na tela.")
+                                                .size(LabelSize::Small),
+                                        )
+                                        .child(
+                                            Label::new(explanation)
+                                                .size(LabelSize::XSmall)
+                                                .color(Color::Muted),
+                                        ),
+                                ),
+                        ),
+                )
+                .into_any_element(),
+        )
+    }
+
+    fn render_results(&self, cx: &mut Context<Self>) -> AnyElement {
         let tabs = [
-            ToggleButtonSimple::new(
-                "Resultado",
-                cx.listener(|this, _, _, cx| {
-                    this.tab = ResultTab::Result;
-                    cx.notify();
-                }),
-            ),
-            ToggleButtonSimple::new(
-                "Mensagens",
-                cx.listener(|this, _, _, cx| {
-                    this.tab = ResultTab::Messages;
-                    cx.notify();
-                }),
-            ),
-            ToggleButtonSimple::new(
-                "Histórico",
-                cx.listener(|this, _, _, cx| {
-                    this.tab = ResultTab::History;
-                    cx.notify();
-                }),
-            ),
+            (ResultTab::Result, "Resultado"),
+            (ResultTab::Messages, "Mensagens"),
+            (ResultTab::Plan, "Plano"),
+            (ResultTab::History, "Histórico"),
         ];
-        let content = match (self.tab, &self.state) {
-            (ResultTab::Result, RunState::Failed(failure)) => self.render_failure(failure, cx),
-            (ResultTab::Result, _) if self.has_grid => div()
+        let failure = match &self.state {
+            RunState::Failed(failure) => Some(failure),
+            _ => None,
+        };
+        let content = match self.tab {
+            ResultTab::Result if self.has_grid => div()
                 .size_full()
-                .when(self.is_running(), |this| this.opacity(0.4))
+                .when(self.is_running(), |this| this.opacity(0.3))
                 .child(self.grid.clone())
                 .into_any_element(),
-            (ResultTab::Result, _) => div()
+            ResultTab::Result => div()
                 .p_3()
                 .child(
-                    Label::new(if self.is_running() {
-                        "Aguardando o servidor…"
-                    } else {
-                        "Rode um statement para ver o resultado aqui."
+                    Label::new(match &self.state {
+                        RunState::Running { .. } => "Aguardando o servidor…",
+                        RunState::Failed(_) => "O statement falhou: veja em Mensagens.",
+                        RunState::Done { .. } => "O statement não devolveu linhas.",
+                        RunState::Idle => "Rode um statement para ver o resultado aqui.",
                     })
                     .size(LabelSize::Small)
                     .color(Color::Muted),
                 )
                 .into_any_element(),
-            (ResultTab::Messages, _) => v_flex()
+            ResultTab::Messages => v_flex()
                 .id("db-messages")
                 .size_full()
                 .overflow_y_scroll()
+                .px_3()
+                .pb_3()
+                .gap_3()
+                .when_some(failure, |this, failure| {
+                    this.child(self.render_failure(failure, cx))
+                })
+                .child(
+                    v_flex()
+                        .gap_1()
+                        .children(self.messages.iter().rev().filter(|message| {
+                            failure.is_none_or(|failure| message.text != failure.message.as_ref())
+                        }).map(|message| {
+                            Label::new(message.text.clone())
+                                .size(LabelSize::Small)
+                                .buffer_font(cx)
+                                .color(message.color)
+                        })),
+                )
+                .into_any_element(),
+            ResultTab::Plan if self.plan_lines.is_empty() => div()
                 .p_3()
-                .gap_1()
-                .children(self.messages.iter().rev().map(|message| {
-                    Label::new(message.text.clone())
+                .child(
+                    Label::new("Rode ⌥↵ para ver o plano do statement sob o cursor.")
+                        .size(LabelSize::Small)
+                        .color(Color::Muted),
+                )
+                .into_any_element(),
+            ResultTab::Plan => v_flex()
+                .id("db-plan")
+                .size_full()
+                .overflow_y_scroll()
+                .px_3()
+                .pb_3()
+                .children(self.plan_lines.iter().map(|line| {
+                    Label::new(line.clone())
                         .size(LabelSize::Small)
                         .buffer_font(cx)
-                        .color(message.color)
+                        .color(if line.trim_start().starts_with("->") {
+                            Color::Default
+                        } else {
+                            Color::Muted
+                        })
                 }))
                 .into_any_element(),
-            (ResultTab::History, _) => v_flex()
+            ResultTab::History => v_flex()
                 .id("db-history")
                 .size_full()
                 .overflow_y_scroll()
@@ -1158,7 +1666,7 @@ impl SqlQueryView {
                         .id(("db-history-entry", index))
                         .px_2()
                         .py_1p5()
-                        .rounded_sm()
+                        .rounded_md()
                         .cursor_pointer()
                         .hover(|style| style.bg(cx.theme().colors().element_hover))
                         .tooltip(Tooltip::text("Copiar o SQL"))
@@ -1183,6 +1691,24 @@ impl SqlQueryView {
                 }))
                 .into_any_element(),
         };
+        let footer = match (&self.state, self.tab) {
+            (_, ResultTab::Result) if self.has_grid => {
+                let rows = self.grid.read(cx).row_count();
+                let truncated = matches!(self.state, RunState::Done { truncated: true, .. });
+                Some(if self.is_running() {
+                    "Abaixo, o resultado anterior, apagado até o novo chegar.".to_owned()
+                } else if truncated {
+                    format!("{rows} linhas · parou no limite de {ROW_LIMIT}")
+                } else {
+                    format!(
+                        "{rows} {} · resultado completo (abaixo do limite de {ROW_LIMIT})",
+                        if rows == 1 { "linha" } else { "linhas" }
+                    )
+                })
+            }
+            _ => None,
+        };
+        let export = self.has_grid && !self.is_running();
         v_flex()
             .relative()
             .map(|this| match self.results_height {
@@ -1190,17 +1716,22 @@ impl SqlQueryView {
                 None => this.h(relative(0.45)),
             })
             .min_h(MIN_RESULTS_HEIGHT)
-            .border_t_1()
-            .border_color(cx.theme().colors().border)
             .child(
                 div()
                     .id("db-results-resize-handle")
-                    .absolute()
-                    .top(px(-3.))
-                    .left_0()
-                    .right_0()
-                    .h(px(6.))
+                    .h(px(12.))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
                     .cursor_row_resize()
+                    .child(
+                        div()
+                            .w(px(40.))
+                            .h(px(4.))
+                            .rounded_sm()
+                            .bg(cx.theme().colors().border_selected),
+                    )
                     .on_drag(DraggedResultsDivider, |_, _, _, cx| cx.new(|_| Empty))
                     .on_click(cx.listener(|this, event: &gpui::ClickEvent, _, cx| {
                         if event.click_count() >= 2 {
@@ -1211,31 +1742,100 @@ impl SqlQueryView {
             )
             .child(
                 h_flex()
+                    .h(px(44.))
+                    .flex_none()
                     .px_3()
-                    .py_1p5()
-                    .gap_3()
+                    .gap_2p5()
                     .child(Label::new("Resultados").weight(FontWeight::SEMIBOLD))
-                    .child(self.render_status())
-                    .child(div().flex_1())
+                    .child(self.render_state_chip(cx))
                     .child(
-                        ToggleButtonGroup::single_row("db-result-tabs", tabs)
-                            .style(ToggleButtonGroupStyle::Outlined)
-                            .size(ToggleButtonGroupSize::Custom(rems_from_px(26_f32)))
-                            .label_size(LabelSize::Small)
-                            .auto_width()
-                            .selected_index(tab_index),
+                        Label::new(self.render_state_detail())
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
                     )
+                    .child(div().flex_1())
+                    .child(segmented_control(cx).children(tabs.map(|(tab, label)| {
+                        segment(("db-result-tab", tab as usize), label, tab == self.tab, cx)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.tab = tab;
+                                cx.notify();
+                            }))
+                    })))
                     .child(
                         IconButton::new("db-copy-csv", IconName::Copy)
                             .icon_size(IconSize::Small)
                             .icon_color(Color::Muted)
-                            .disabled(!self.has_grid)
+                            .disabled(!export)
                             .tooltip(Tooltip::text("Copiar o resultado como CSV"))
                             .on_click(cx.listener(|this, _, _, cx| this.copy_as_csv(cx))),
+                    )
+                    .child(
+                        IconButton::new("db-export-csv", IconName::Download)
+                            .icon_size(IconSize::Small)
+                            .icon_color(Color::Muted)
+                            .disabled(!export)
+                            .tooltip(Tooltip::text("Exportar CSV"))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.export(Export::Csv, window, cx)
+                            })),
                     ),
             )
-            .child(div().flex_1().min_h_0().child(content))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .border_t_1()
+                    .border_color(cx.theme().colors().border)
+                    .child(content),
+            )
+            .when_some(footer, |this, footer| {
+                this.child(
+                    h_flex()
+                        .h(px(40.))
+                        .flex_none()
+                        .px_3()
+                        .gap_2()
+                        .border_t_1()
+                        .border_color(cx.theme().colors().border)
+                        .child(
+                            Label::new(footer)
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted),
+                        )
+                        .child(div().flex_1())
+                        .when(export, |this| {
+                            let link = |id: &'static str, label: &'static str| {
+                                Button::new(id, label)
+                                    .style(ButtonStyle::Subtle)
+                                    .label_size(LabelSize::XSmall)
+                                    .color(Color::Accent)
+                            };
+                            this.child(link("db-export-csv-link", "Exportar CSV").on_click(
+                                cx.listener(|this, _, window, cx| {
+                                    this.export(Export::Csv, window, cx)
+                                }),
+                            ))
+                            .child(link("db-export-json", "JSON").on_click(cx.listener(
+                                |this, _, window, cx| this.export(Export::Json, window, cx),
+                            )))
+                            .child(link("db-copy-insert", "Copiar como INSERT").on_click(
+                                cx.listener(|this, _, _, cx| this.copy_as_insert(cx)),
+                            ))
+                        }),
+                )
+            })
+            .children(self.render_running(cx))
             .into_any_element()
+    }
+}
+
+/// `há 12 s`, `há 3 min`, for when the shown result ran.
+fn elapsed_label(elapsed: Duration) -> String {
+    match elapsed.as_secs() {
+        0..5 => "agora".to_owned(),
+        seconds @ 5..60 => format!("há {seconds} s"),
+        seconds @ 60..3_600 => format!("há {} min", seconds / 60),
+        seconds => format!("há {} h", seconds / 3_600),
     }
 }
 
@@ -1342,7 +1942,15 @@ impl Render for SqlQueryView {
             .size_full()
             .bg(cx.theme().colors().editor_background)
             .child(self.render_toolbar(cx))
-            .child(div().flex_1().min_h_0().child(self.editor.clone()))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .border_t_1()
+                    .border_color(cx.theme().colors().border)
+                    .child(self.editor.clone()),
+            )
+            .child(self.render_editor_status(cx))
             .child(self.render_results(cx))
     }
 }

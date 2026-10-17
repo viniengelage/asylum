@@ -1783,6 +1783,13 @@
     },
   },
   {
+    "context": "DatabasePanel",
+    "use_key_equivalents": true,
+    "bindings": {
+      "ctrl-shift-n": "database_client::NewQuery",
+    },
+  },
+  {
     "context": "DatabaseConnectView",
     "use_key_equivalents": true,
     "bindings": {

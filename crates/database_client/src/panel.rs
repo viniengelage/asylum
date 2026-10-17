@@ -1,6 +1,6 @@
 use crate::{
-    NewConnection, ToggleFocus,
-    catalog::{self, ColumnInfo, Relation, RelationKind},
+    NewConnection, NewQuery, ToggleFocus,
+    catalog::{self, ColumnInfo, ObjectKind, Relation, RelationKind, SchemaObject},
     connect_view::{self, Prefill},
     connection::{self, Environment, SavedConnection, Scope},
     discovery::{self, Source, Suggestion},
@@ -23,9 +23,12 @@ use std::{
     ops::Range,
     path::{Path, PathBuf},
     sync::Arc,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
-use ui::{ButtonLike, ContextMenu, Indicator, PopoverMenu, Tooltip, prelude::*};
+use ui::{
+    ContextMenu, Indicator, KeyBinding, PopoverMenu, PopoverTriggerArea, Tooltip, prelude::*,
+    primary_button,
+};
 use ui_input::{ErasedEditorEvent, InputField};
 use util::ResultExt as _;
 use workspace::{
@@ -46,6 +49,11 @@ pub enum ActiveState {
     Connected {
         session: Arc<Session>,
         relations: Vec<Relation>,
+        /// Functions, sequences and enums, listed next to the tables.
+        objects: Vec<SchemaObject>,
+        /// Column names by `relation_key`, so the filter also finds a table by its columns.
+        column_names: HashMap<String, Vec<String>>,
+        database_size: Option<String>,
         /// Filled only when `relations` is empty.
         other_databases: Vec<String>,
         latency: Duration,
@@ -86,13 +94,27 @@ enum TreeRow {
         expanded: bool,
     },
     Column(ColumnInfo),
+    Object {
+        kind: ObjectKind,
+        name: String,
+    },
     ColumnsLoading,
     ColumnsFailed(SharedString),
-    QueriesHeader(usize),
+    QueriesHeader,
     Query {
         path: PathBuf,
         name: String,
     },
+}
+
+#[derive(Clone, PartialEq, Eq)]
+enum ActiveItem {
+    Table {
+        connection_id: String,
+        schema: String,
+        name: String,
+    },
+    Query(PathBuf),
 }
 
 pub struct DatabasePanel {
@@ -105,6 +127,9 @@ pub struct DatabasePanel {
     connections: Vec<Stored>,
     suggestions: Vec<Suggestion>,
     saved_queries: Vec<PathBuf>,
+    query_modified: HashMap<PathBuf, SystemTime>,
+    /// What the active tab of the workspace shows, to mark it in the tree.
+    active_item: Option<ActiveItem>,
     loaded: bool,
     load_error: Option<SharedString>,
     active: Option<Active>,
@@ -121,7 +146,8 @@ impl DatabasePanel {
     pub fn new(workspace: &Workspace, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let project = workspace.project().clone();
         let filter_input = cx.new(|cx| {
-            InputField::new(window, cx, "Filtrar tabelas…").start_icon(IconName::MagnifyingGlass)
+            InputField::new(window, cx, "Filtrar tabelas, colunas, funções…")
+                .start_icon(IconName::MagnifyingGlass)
         });
         let mut subscriptions = Vec::new();
         {
@@ -145,6 +171,20 @@ impl DatabasePanel {
                 this.load(cx);
             }
         }));
+        if let Some(workspace_entity) = workspace.weak_handle().upgrade() {
+            subscriptions.push(cx.subscribe(
+                &workspace_entity,
+                |this, workspace, event, cx| {
+                    if matches!(event, workspace::Event::ActiveItemChanged) {
+                        let active_item = active_item_of(workspace.read(cx), cx);
+                        if active_item != this.active_item {
+                            this.active_item = active_item;
+                            cx.notify();
+                        }
+                    }
+                },
+            ));
+        }
         crate::agent_schema::register_panel(&project, cx.weak_entity(), cx);
         let mut this = Self {
             workspace: workspace.weak_handle(),
@@ -156,6 +196,8 @@ impl DatabasePanel {
             connections: Vec::new(),
             suggestions: Vec::new(),
             saved_queries: Vec::new(),
+            query_modified: HashMap::default(),
+            active_item: None,
             loaded: false,
             load_error: None,
             active: None,
@@ -221,6 +263,12 @@ impl DatabasePanel {
             let project_connections = connection::load_project(fs.as_ref(), &root).await;
             let suggestions = discovery::discover(fs.as_ref(), &root).await;
             let saved_queries = list_queries(fs.as_ref(), &root).await;
+            let mut query_modified = HashMap::default();
+            for path in &saved_queries {
+                if let Ok(Some(metadata)) = fs.metadata(path).await {
+                    query_modified.insert(path.clone(), metadata.mtime.timestamp_for_user());
+                }
+            }
             this.update(cx, |this, cx| {
                 let mut connections = Vec::new();
                 let mut errors = Vec::new();
@@ -242,6 +290,7 @@ impl DatabasePanel {
                 this.connections = connections;
                 this.suggestions = suggestions;
                 this.saved_queries = saved_queries;
+                this.query_modified = query_modified;
                 this.loaded = true;
                 if this.active.is_none() {
                     let preferred = this
@@ -261,6 +310,18 @@ impl DatabasePanel {
             })
             .log_err();
         });
+    }
+
+    pub(crate) fn is_loaded(&self) -> bool {
+        self.loaded
+    }
+
+    /// For the debug hook: connects to the saved connection with this id, if there is one.
+    pub(crate) fn connect_saved(&mut self, id: &str, cx: &mut Context<Self>) {
+        if let Some(stored) = self.stored(id) {
+            let connection = stored.connection.clone();
+            self.connect(connection, cx);
+        }
     }
 
     pub fn connect(&mut self, connection: SavedConnection, cx: &mut Context<Self>) {
@@ -289,16 +350,26 @@ impl DatabasePanel {
                     return;
                 }
                 active.state = match result {
-                    Ok((session, relations, other_databases, latency)) => {
+                    Ok(opened) => {
                         if this.expanded.is_empty() {
                             this.expanded.insert(schema_key("public"));
                             this.expanded.insert(group_key("public", "tables"));
                         }
+                        let mut column_names: HashMap<String, Vec<String>> = HashMap::default();
+                        for (schema, relation, column, _) in opened.columns {
+                            column_names
+                                .entry(relation_key(&schema, &relation))
+                                .or_default()
+                                .push(column.to_lowercase());
+                        }
                         ActiveState::Connected {
-                            session: Arc::new(session),
-                            relations,
-                            other_databases,
-                            latency,
+                            session: Arc::new(opened.session),
+                            relations: opened.relations,
+                            objects: opened.objects,
+                            column_names,
+                            database_size: opened.database_size,
+                            other_databases: opened.other_databases,
+                            latency: opened.latency,
                         }
                     }
                     Err(error) => ActiveState::Failed(format!("{error:#}").into()),
@@ -441,11 +512,7 @@ impl DatabasePanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> anyhow::Result<()> {
-        let root = self
-            .root
-            .clone()
-            .context("O projeto não tem pasta para guardar a query.")?;
-        let (connection, session) = self
+        let (connection, _) = self
             .session()
             .context("Nenhum banco conectado no painel Banco.")?;
         let header = format!(
@@ -453,6 +520,27 @@ impl DatabasePanel {
             connection.name,
             connection.environment.label()
         );
+        self.open_query_with(header, sql, true, window, cx)
+    }
+
+    /// A new query file with `sql` under `header`, open against the active connection and run
+    /// when `run` is set. Writes from the table tab (ALTER TABLE, the pending UPDATEs) come here
+    /// so they go through the editor and its write confirmation.
+    pub(crate) fn open_query_with(
+        &mut self,
+        header: String,
+        sql: String,
+        run: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> anyhow::Result<()> {
+        let root = self
+            .root
+            .clone()
+            .context("O projeto não tem pasta para guardar a query.")?;
+        let (connection, session) = self
+            .session()
+            .context("Nenhum banco conectado no painel Banco.")?;
         let fs = self.fs.clone();
         let workspace = self.workspace.clone();
         let project = self.project.clone();
@@ -461,6 +549,7 @@ impl DatabasePanel {
             this.update(cx, |this, cx| {
                 this.saved_queries.push(path.clone());
                 this.saved_queries.sort();
+                this.query_modified.insert(path.clone(), SystemTime::now());
                 cx.notify();
             })?;
             let view = cx
@@ -470,7 +559,9 @@ impl DatabasePanel {
                 .await?;
             view.update_in(cx, |view, window, cx| {
                 view.write_from_agent(&sql, query_view::AgentWriteMode::Append, window, cx);
-                view.run_statement(window, cx);
+                if run {
+                    view.run_statement(window, cx);
+                }
             })
         })
         .detach_and_log_err(cx);
@@ -495,6 +586,7 @@ impl DatabasePanel {
             this.update_in(cx, |this, window, cx| {
                 this.saved_queries.push(path.clone());
                 this.saved_queries.sort();
+                this.query_modified.insert(path.clone(), SystemTime::now());
                 this.open_query(path, window, cx);
                 cx.notify();
             })
@@ -569,7 +661,13 @@ impl DatabasePanel {
     fn tree_rows(&self, cx: &App) -> Vec<TreeRow> {
         let mut rows = Vec::new();
         let Some(Active {
-            state: ActiveState::Connected { relations, .. },
+            state:
+                ActiveState::Connected {
+                    relations,
+                    objects,
+                    column_names,
+                    ..
+                },
             ..
         }) = &self.active
         else {
@@ -577,21 +675,36 @@ impl DatabasePanel {
         };
         let filter = self.filter_input.read(cx).text(cx).trim().to_lowercase();
         let filtering = !filter.is_empty();
-        let mut schemas: Vec<(&str, Vec<&Relation>)> = Vec::new();
+        let mut schemas: Vec<(&str, Vec<&Relation>, Vec<&SchemaObject>)> = Vec::new();
         for relation in relations {
-            if filtering && !relation.name.to_lowercase().contains(&filter) {
+            if filtering
+                && !relation.name.to_lowercase().contains(&filter)
+                && !column_names
+                    .get(&relation_key(&relation.schema, &relation.name))
+                    .is_some_and(|columns| columns.iter().any(|column| column.contains(&filter)))
+            {
                 continue;
             }
-            match schemas.last_mut() {
-                Some((schema, list)) if *schema == relation.schema => list.push(relation),
-                _ => schemas.push((&relation.schema, vec![relation])),
+            match schemas.iter_mut().find(|(schema, _, _)| *schema == relation.schema) {
+                Some((_, list, _)) => list.push(relation),
+                None => schemas.push((&relation.schema, vec![relation], Vec::new())),
             }
         }
-        for (schema, list) in schemas {
+        for object in objects {
+            if filtering && !object.name.to_lowercase().contains(&filter) {
+                continue;
+            }
+            match schemas.iter_mut().find(|(schema, _, _)| *schema == object.schema) {
+                Some((_, _, list)) => list.push(object),
+                None => schemas.push((&object.schema, Vec::new(), vec![object])),
+            }
+        }
+        schemas.sort_by_key(|(schema, _, _)| (*schema != "public", *schema));
+        for (schema, list, schema_objects) in schemas {
             let expanded = filtering || self.expanded.contains(&schema_key(schema));
             rows.push(TreeRow::Schema {
                 name: schema.to_owned(),
-                count: list.len(),
+                count: list.len() + schema_objects.len(),
                 expanded,
             });
             if !expanded {
@@ -654,9 +767,38 @@ impl DatabasePanel {
                     }
                 }
             }
+            let object_groups = [
+                (ObjectKind::Function, "functions", "Funções", IconName::Code),
+                (ObjectKind::Sequence, "sequences", "Sequências", IconName::Hash),
+                (ObjectKind::Enum, "enums", "Enums", IconName::List),
+            ];
+            for (kind, group, label, icon) in object_groups {
+                let members: Vec<&&SchemaObject> = schema_objects
+                    .iter()
+                    .filter(|object| object.kind == kind)
+                    .collect();
+                if members.is_empty() {
+                    continue;
+                }
+                let key = group_key(schema, group);
+                let expanded = filtering || self.expanded.contains(&key);
+                rows.push(TreeRow::Group {
+                    key,
+                    label,
+                    icon,
+                    count: members.len(),
+                    expanded,
+                });
+                if expanded {
+                    rows.extend(members.into_iter().map(|object| TreeRow::Object {
+                        kind,
+                        name: object.name.clone(),
+                    }));
+                }
+            }
         }
         if !self.saved_queries.is_empty() && !filtering {
-            rows.push(TreeRow::QueriesHeader(self.saved_queries.len()));
+            rows.push(TreeRow::QueriesHeader);
             rows.extend(self.saved_queries.iter().map(|path| {
                 TreeRow::Query {
                     name: path
@@ -671,16 +813,21 @@ impl DatabasePanel {
     }
 
     fn render_row(&self, index: usize, row: TreeRow, cx: &mut Context<Self>) -> AnyElement {
+        let hover = cx.theme().colors().element_hover;
+        let accent = cx.theme().colors().border_focused;
         let base = h_flex()
             .id(("db-row", index))
             .w_full()
             .h(px(26.))
-            .px_2()
+            .pr_2()
             .gap_1p5()
-            .rounded_sm();
-        let clickable = |base: gpui::Stateful<gpui::Div>| {
-            base.cursor_pointer()
-                .hover(|style| style.bg(cx.theme().colors().element_hover))
+            .rounded_md()
+            .border_1()
+            .border_color(gpui::transparent_black());
+        let clickable =
+            |base: gpui::Stateful<gpui::Div>| base.cursor_pointer().hover(|style| style.bg(hover));
+        let selected = |base: gpui::Stateful<gpui::Div>| {
+            base.bg(accent.opacity(0.18)).border_color(accent)
         };
         let chevron = |expanded: bool| {
             Icon::new(if expanded {
@@ -697,12 +844,17 @@ impl DatabasePanel {
                 .buffer_font(cx)
                 .color(Color::Muted)
         };
+        let active_connection = self
+            .active
+            .as_ref()
+            .map(|active| active.connection.id.clone());
         match row {
             TreeRow::Schema {
                 name,
                 count: total,
                 expanded,
             } => clickable(base)
+                .pl_1()
                 .child(chevron(expanded))
                 .child(
                     Icon::new(IconName::Blocks)
@@ -710,12 +862,10 @@ impl DatabasePanel {
                         .color(Color::Muted),
                 )
                 .child(
-                    div().flex_1().min_w_0().child(
-                        Label::new(name.clone())
-                            .size(LabelSize::Small)
-                            .weight(FontWeight::MEDIUM)
-                            .truncate(),
-                    ),
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(Label::new(name.clone()).size(LabelSize::Small).truncate()),
                 )
                 .child(count(total.to_string()))
                 .on_click(cx.listener(move |this, _, _, cx| this.toggle(schema_key(&name), cx)))
@@ -727,14 +877,10 @@ impl DatabasePanel {
                 count: total,
                 expanded,
             } => clickable(base)
-                .pl(px(24.))
+                .pl(px(20.))
                 .child(chevron(expanded))
                 .child(Icon::new(icon).size(IconSize::Small).color(Color::Muted))
-                .child(
-                    div()
-                        .flex_1()
-                        .child(Label::new(label).size(LabelSize::Small).color(Color::Muted)),
-                )
+                .child(div().flex_1().child(Label::new(label).size(LabelSize::Small)))
                 .child(count(total.to_string()))
                 .on_click(cx.listener(move |this, _, _, cx| this.toggle(key.clone(), cx)))
                 .into_any_element(),
@@ -744,63 +890,74 @@ impl DatabasePanel {
                 kind,
                 estimated_rows,
                 expanded,
-            } => clickable(base)
-                .pl(px(40.))
-                .child(
-                    div()
-                        .id(("db-row-chevron", index))
-                        .child(chevron(expanded))
-                        .on_click({
-                            let schema = schema.clone();
-                            let name = name.clone();
-                            cx.listener(move |this, _, _, cx| {
-                                cx.stop_propagation();
-                                this.toggle_relation(schema.clone(), name.clone(), cx)
-                            })
-                        }),
-                )
-                .child(
-                    Icon::new(match kind {
-                        RelationKind::View | RelationKind::MaterializedView => IconName::Eye,
-                        _ => IconName::Table,
-                    })
-                    .size(IconSize::Small)
-                    .color(if expanded {
-                        Color::Accent
-                    } else {
-                        Color::Muted
-                    }),
-                )
-                .child(
-                    div().flex_1().min_w_0().child(
-                        Label::new(name.clone())
-                            .size(LabelSize::Small)
-                            .when(expanded, |label| label.weight(FontWeight::SEMIBOLD))
-                            .truncate(),
-                    ),
-                )
-                .when_some(estimated_rows, |this, rows| {
-                    this.child(count(format_count(rows)))
-                })
-                .tooltip(Tooltip::text("Abrir tabela"))
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.open_table(
-                        schema.clone(),
-                        name.clone(),
-                        kind,
-                        estimated_rows,
-                        window,
-                        cx,
+            } => {
+                let is_selected = matches!(
+                    &self.active_item,
+                    Some(ActiveItem::Table { connection_id, schema: s, name: n })
+                        if Some(connection_id) == active_connection.as_ref()
+                            && *s == schema
+                            && *n == name
+                );
+                clickable(base)
+                    .pl(px(36.))
+                    .when(is_selected, selected)
+                    .child(
+                        div()
+                            .id(("db-row-chevron", index))
+                            .child(chevron(expanded))
+                            .on_click({
+                                let schema = schema.clone();
+                                let name = name.clone();
+                                cx.listener(move |this, _, _, cx| {
+                                    cx.stop_propagation();
+                                    this.toggle_relation(schema.clone(), name.clone(), cx)
+                                })
+                            }),
                     )
-                }))
-                .into_any_element(),
+                    .child(
+                        Icon::new(match kind {
+                            RelationKind::View | RelationKind::MaterializedView => IconName::Eye,
+                            _ => IconName::Table,
+                        })
+                        .size(IconSize::Small)
+                        .color(if is_selected {
+                            Color::Accent
+                        } else {
+                            Color::Muted
+                        }),
+                    )
+                    .child(
+                        div().flex_1().min_w_0().child(
+                            Label::new(name.clone())
+                                .size(LabelSize::Small)
+                                .when(is_selected, |label| label.weight(FontWeight::SEMIBOLD))
+                                .truncate(),
+                        ),
+                    )
+                    .when_some(estimated_rows, |this, rows| {
+                        this.child(count(format_count(rows)))
+                    })
+                    .tooltip(Tooltip::text("Abrir tabela"))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.open_table(
+                            schema.clone(),
+                            name.clone(),
+                            kind,
+                            estimated_rows,
+                            window,
+                            cx,
+                        )
+                    }))
+                    .into_any_element()
+            }
             TreeRow::Column(column) => base
-                .pl(px(74.))
-                .child(div().w(px(16.)).when(column.primary_key, |this| {
+                .pl(px(70.))
+                .child(div().w(px(18.)).when(column.primary_key, |this| {
                     this.child(
                         Label::new("PK")
                             .size(LabelSize::XSmall)
                             .buffer_font(cx)
+                            .weight(FontWeight::SEMIBOLD)
                             .color(Color::Warning),
                     )
                 }))
@@ -808,7 +965,7 @@ impl DatabasePanel {
                     h_flex()
                         .flex_1()
                         .min_w_0()
-                        .gap_1p5()
+                        .gap_2()
                         .child(
                             Label::new(column.name)
                                 .size(LabelSize::Small)
@@ -826,6 +983,7 @@ impl DatabasePanel {
                     this.child(
                         Label::new("único")
                             .size(LabelSize::XSmall)
+                            .buffer_font(cx)
                             .color(Color::Accent),
                     )
                 })
@@ -834,9 +992,30 @@ impl DatabasePanel {
                         Label::new("null")
                             .size(LabelSize::XSmall)
                             .buffer_font(cx)
-                            .color(Color::Disabled),
+                            .color(Color::Muted),
                     )
                 })
+                .into_any_element(),
+            TreeRow::Object { kind, name } => base
+                .pl(px(54.))
+                .child(
+                    Icon::new(match kind {
+                        ObjectKind::Function => IconName::Code,
+                        ObjectKind::Sequence => IconName::Hash,
+                        ObjectKind::Enum => IconName::List,
+                    })
+                    .size(IconSize::XSmall)
+                    .color(Color::Muted),
+                )
+                .child(
+                    div().flex_1().min_w_0().child(
+                        Label::new(name)
+                            .size(LabelSize::Small)
+                            .buffer_font(cx)
+                            .color(Color::Muted)
+                            .truncate(),
+                    ),
+                )
                 .into_any_element(),
             TreeRow::ColumnsLoading => base
                 .pl(px(90.))
@@ -855,39 +1034,47 @@ impl DatabasePanel {
                         .truncate(),
                 )
                 .into_any_element(),
-            TreeRow::QueriesHeader(total) => h_flex()
-                .h(px(34.))
+            TreeRow::QueriesHeader => h_flex()
+                .h(px(26.))
+                .mt_1()
                 .px_2()
-                .pt_2()
                 .gap_1p5()
-                .child(
-                    Label::new("QUERIES SALVAS")
-                        .size(LabelSize::XSmall)
-                        .weight(FontWeight::SEMIBOLD)
-                        .color(Color::Muted),
-                )
-                .child(count(total.to_string()))
+                .border_t_1()
+                .border_color(cx.theme().colors().border)
+                .child(section_label("QUERIES SALVAS"))
                 .child(div().flex_1())
                 .child(
                     Label::new(QUERIES_DIR)
                         .size(LabelSize::XSmall)
                         .buffer_font(cx)
-                        .color(Color::Disabled),
+                        .color(Color::Muted),
                 )
                 .into_any_element(),
             TreeRow::Query { path, name } => {
+                let is_selected =
+                    matches!(&self.active_item, Some(ActiveItem::Query(open)) if *open == path);
+                let age = self.query_modified.get(&path).map(|modified| relative_age(*modified));
                 clickable(base)
+                    .pl(px(16.))
+                    .when(is_selected, selected)
                     .child(
                         Icon::new(IconName::FileCode)
                             .size(IconSize::Small)
-                            .color(Color::Muted),
+                            .color(if is_selected {
+                                Color::Accent
+                            } else {
+                                Color::Muted
+                            }),
                     )
                     .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(Label::new(name).size(LabelSize::Small).truncate()),
+                        div().flex_1().min_w_0().child(
+                            Label::new(name)
+                                .size(LabelSize::Small)
+                                .when(is_selected, |label| label.weight(FontWeight::SEMIBOLD))
+                                .truncate(),
+                        ),
                     )
+                    .when_some(age, |this, age| this.child(count(age)))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.open_query(path.clone(), window, cx)
                     }))
@@ -918,64 +1105,64 @@ impl DatabasePanel {
             .collect();
         let current = connection.clone();
         let scope = self.stored(&connection.id).map(|stored| stored.scope);
-        PopoverMenu::new("db-connection-menu")
-            .full_width(true)
-            .trigger(
-                ButtonLike::new("db-connection-card")
-                    .full_width()
-                    .style(ButtonStyle::Filled)
-                    .size(ButtonSize::Large)
-                    // The two-line content is taller than any `ButtonSize`, whose heights are fixed.
-                    .height(rems_from_px(52_f32).into())
+        let colors = cx.theme().colors();
+        let focused = colors.border_focused;
+        let card = h_flex()
+            .id("db-connection-card")
+            .w_full()
+            .p_3()
+            .gap_3()
+            .rounded_lg()
+            .bg(colors.element_background)
+            .border_1()
+            .border_color(colors.border_selected)
+            .hover(move |style| style.border_color(focused))
+            .child(
+                div()
+                    .size_9()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .justify_center()
+                    .rounded_lg()
+                    .bg(focused.opacity(0.22))
                     .child(
-                        h_flex()
-                            .w_full()
-                            .py_1p5()
-                            .gap_2p5()
-                            .child(
-                                div()
-                                    .size_8()
-                                    .flex()
-                                    .flex_none()
-                                    .items_center()
-                                    .justify_center()
-                                    .rounded_md()
-                                    .bg(Color::Accent.color(cx).opacity(0.12))
-                                    .child(
-                                        Icon::new(IconName::Database)
-                                            .size(IconSize::Small)
-                                            .color(Color::Accent),
-                                    ),
-                            )
-                            .child(
-                                v_flex()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .child(
-                                        h_flex()
-                                            .gap_1p5()
-                                            .child(
-                                                Label::new(connection.name.clone())
-                                                    .weight(FontWeight::SEMIBOLD)
-                                                    .truncate(),
-                                            )
-                                            .child(environment_chip(connection.environment, cx)),
-                                    )
-                                    .child(
-                                        Label::new(subtitle)
-                                            .size(LabelSize::XSmall)
-                                            .buffer_font(cx)
-                                            .color(Color::Muted)
-                                            .truncate(),
-                                    ),
-                            )
-                            .child(
-                                Icon::new(IconName::ChevronDown)
-                                    .size(IconSize::XSmall)
-                                    .color(Color::Muted),
-                            ),
+                        Icon::new(IconName::Database)
+                            .size(IconSize::Small)
+                            .color(Color::Accent),
                     ),
             )
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap_0p5()
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .child(
+                                Label::new(connection.name.clone())
+                                    .weight(FontWeight::SEMIBOLD)
+                                    .truncate(),
+                            )
+                            .child(environment_chip(connection.environment, cx)),
+                    )
+                    .child(
+                        Label::new(subtitle)
+                            .size(LabelSize::XSmall)
+                            .buffer_font(cx)
+                            .color(Color::Muted)
+                            .truncate(),
+                    ),
+            )
+            .child(
+                Icon::new(IconName::ChevronDown)
+                    .size(IconSize::Small)
+                    .color(Color::Muted),
+            );
+        PopoverMenu::new("db-connection-menu")
+            .full_width(true)
+            .trigger(PopoverTriggerArea::new(card))
             .anchor(gpui::Anchor::TopRight)
             .menu(move |window, cx| {
                 let this = this.clone();
@@ -1043,40 +1230,26 @@ impl DatabasePanel {
             ),
             ActiveState::Failed(_) => (Color::Error, "falhou".to_string()),
         };
-        let chip = |label: String, color: Color| {
-            h_flex()
-                .h(px(22.))
-                .px_2()
-                .gap_1p5()
-                .rounded_md()
-                .border_1()
-                .border_color(cx.theme().colors().border)
-                .child(Indicator::dot().color(color))
-                .child(Label::new(label).size(LabelSize::XSmall).color(color))
-        };
         let read_only = active.connection.read_only;
         h_flex()
             .px_3()
-            .pt_2()
+            .pt_3()
             .gap_1p5()
             .flex_wrap()
-            .child(chip(status, dot))
             .child(
-                h_flex()
-                    .h(px(22.))
-                    .px_2()
-                    .gap_1()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(cx.theme().colors().border)
+                chip(cx)
+                    .bg(dot.color(cx).opacity(0.08))
+                    .border_color(dot.color(cx).opacity(0.2))
+                    .child(Indicator::dot().color(dot))
+                    .child(Label::new(status).size(LabelSize::XSmall).color(dot)),
+            )
+            .child(chip(cx).child(Label::new("auto-commit").size(LabelSize::XSmall)))
+            .child(
+                chip(cx)
                     .child(
-                        Icon::new(if read_only {
-                            IconName::Lock
-                        } else {
-                            IconName::LockOff
-                        })
-                        .size(IconSize::XSmall)
-                        .color(Color::Muted),
+                        Icon::new(IconName::Lock)
+                            .size(IconSize::XSmall)
+                            .color(Color::Muted),
                     )
                     .child(
                         Label::new(if read_only {
@@ -1084,8 +1257,7 @@ impl DatabasePanel {
                         } else {
                             "leitura e escrita"
                         })
-                        .size(LabelSize::XSmall)
-                        .color(Color::Muted),
+                        .size(LabelSize::XSmall),
                     ),
             )
             .child(div().flex_1())
@@ -1102,8 +1274,12 @@ impl DatabasePanel {
     fn render_connected(&self, active: &Active, cx: &mut Context<Self>) -> AnyElement {
         let rows = self.tree_rows(cx);
         let row_count = rows.len();
-        let summary = match &active.state {
-            ActiveState::Connected { relations, .. } => {
+        let (summary, schema_count) = match &active.state {
+            ActiveState::Connected {
+                relations,
+                database_size,
+                ..
+            } => {
                 let schemas = relations
                     .iter()
                     .map(|relation| relation.schema.as_str())
@@ -1118,20 +1294,24 @@ impl DatabasePanel {
                         )
                     })
                     .count();
-                Some(format!(
+                let mut summary = format!(
                     "{tables} {} · {schemas} {}",
                     if tables == 1 { "tabela" } else { "tabelas" },
                     if schemas == 1 { "schema" } else { "schemas" }
-                ))
+                );
+                if let Some(size) = database_size {
+                    summary.push_str(&format!(" · {size}"));
+                }
+                (Some(summary), schemas)
             }
-            _ => None,
+            _ => (None, 0),
         };
         v_flex()
             .size_full()
             .child(
                 div()
                     .px_3()
-                    .pt_2p5()
+                    .pt_3()
                     .child(self.render_connection_card(active, cx)),
             )
             .child(self.render_status_row(active, cx))
@@ -1152,7 +1332,7 @@ impl DatabasePanel {
                             .m_3()
                             .p_3()
                             .gap_2()
-                            .rounded_md()
+                            .rounded_lg()
                             .bg(Color::Error.color(cx).opacity(0.08))
                             .border_1()
                             .border_color(Color::Error.color(cx).opacity(0.3))
@@ -1178,29 +1358,37 @@ impl DatabasePanel {
                             )
                             .child(
                                 h_flex()
-                                    .gap_1()
+                                    .gap_2()
                                     .child(
-                                        Button::new("db-retry", "Tentar de novo")
-                                            .style(ButtonStyle::Filled)
-                                            .label_size(LabelSize::Small)
-                                            .on_click(cx.listener(move |this, _, _, cx| {
-                                                this.connect(retry.clone(), cx)
-                                            })),
+                                        primary_button(
+                                            "db-retry",
+                                            Some(IconName::RotateCw),
+                                            "Tentar de novo",
+                                            None,
+                                            cx,
+                                        )
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.connect(retry.clone(), cx)
+                                        })),
                                     )
                                     .when_some(scope, |this, scope| {
                                         this.child(
-                                            Button::new("db-edit", "Editar conexão")
-                                                .style(ButtonStyle::Subtle)
-                                                .label_size(LabelSize::Small)
-                                                .on_click(cx.listener(
-                                                    move |this, _, window, cx| {
-                                                        this.open_connect_view(
-                                                            Prefill::Edit(edit.clone(), scope),
-                                                            window,
-                                                            cx,
-                                                        )
-                                                    },
-                                                )),
+                                            ui::secondary_button(
+                                                "db-edit",
+                                                None,
+                                                "Editar conexão",
+                                                true,
+                                                cx,
+                                            )
+                                            .on_click(cx.listener(
+                                                move |this, _, window, cx| {
+                                                    this.open_connect_view(
+                                                        Prefill::Edit(edit.clone(), scope),
+                                                        window,
+                                                        cx,
+                                                    )
+                                                },
+                                            )),
                                         )
                                     }),
                             ),
@@ -1218,14 +1406,19 @@ impl DatabasePanel {
                     ))
                     .child(self.render_tree(row_count, cx)),
                 ActiveState::Connected { .. } => this
-                    .child(div().px_3().pt_2().child(self.filter_input.clone()))
+                    .child(div().px_3().pt_3().child(self.filter_input.clone()))
                     .child(
-                        h_flex().px_3().pt_3().pb_1().child(
-                            Label::new("SCHEMAS")
-                                .size(LabelSize::XSmall)
-                                .weight(FontWeight::SEMIBOLD)
-                                .color(Color::Muted),
-                        ),
+                        h_flex()
+                            .px_3()
+                            .pt_3()
+                            .pb_1()
+                            .gap_2()
+                            .child(section_label("SCHEMAS"))
+                            .child(
+                                Label::new(schema_count.to_string())
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted),
+                            ),
                     )
                     .child(self.render_tree(row_count, cx)),
             })
@@ -1238,7 +1431,7 @@ impl DatabasePanel {
     }
 
     fn render_tree(&self, row_count: usize, cx: &mut Context<Self>) -> Div {
-        div().flex_1().min_h_0().px_1().child(
+        div().flex_1().min_h_0().px_2().child(
             uniform_list(
                 "db-tree",
                 row_count,
@@ -1267,7 +1460,7 @@ impl DatabasePanel {
             .m_3()
             .p_3()
             .gap_1p5()
-            .rounded_md()
+            .rounded_lg()
             .border_1()
             .border_color(cx.theme().colors().border)
             .child(
@@ -1301,8 +1494,9 @@ impl DatabasePanel {
 
     fn render_footer(&self, summary: Option<String>, cx: &mut Context<Self>) -> AnyElement {
         h_flex()
+            .h(px(44.))
+            .flex_none()
             .px_3()
-            .py_2()
             .gap_2()
             .border_t_1()
             .border_color(cx.theme().colors().border)
@@ -1316,22 +1510,23 @@ impl DatabasePanel {
             .child(div().flex_1())
             .when(self.session().is_some(), |this| {
                 this.child(
-                    Button::new("db-new-query", "Nova query")
-                        .style(ButtonStyle::Subtle)
-                        .label_size(LabelSize::XSmall)
-                        .color(Color::Accent)
+                    h_flex()
+                        .id("db-new-query")
+                        .gap_1p5()
+                        .cursor_pointer()
+                        .child(
+                            Label::new("Nova query")
+                                .size(LabelSize::XSmall)
+                                .weight(FontWeight::MEDIUM)
+                                .color(Color::Accent),
+                        )
+                        .child(
+                            KeyBinding::for_action_in(&NewQuery, &self.focus_handle, cx)
+                                .size(rems_from_px(11_f32)),
+                        )
                         .on_click(cx.listener(|this, _, window, cx| this.new_query(window, cx))),
                 )
             })
-            .child(
-                Button::new("db-new-connection-footer", "Nova conexão")
-                    .style(ButtonStyle::Subtle)
-                    .label_size(LabelSize::XSmall)
-                    .color(Color::Accent)
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.open_connect_view(Prefill::New, window, cx)
-                    })),
-            )
             .into_any_element()
     }
 
@@ -1342,7 +1537,7 @@ impl DatabasePanel {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let (icon, file, what) = match &suggestion.source {
-            Source::Env { file, variable } => (IconName::FileLock, file.clone(), variable.clone()),
+            Source::Env { file, variable } => (IconName::FileCode, file.clone(), variable.clone()),
             Source::Compose {
                 file,
                 service,
@@ -1359,19 +1554,21 @@ impl DatabasePanel {
             (Source::Compose { .. }, Some(_)) => "senha: POSTGRES_PASSWORD",
         };
         let chosen = suggestion.clone();
+        let accent = cx.theme().colors().border_focused;
         v_flex()
             .id(("db-suggestion", index))
-            .p_2p5()
-            .gap_0p5()
-            .rounded_md()
+            .px_3p5()
+            .py_3()
+            .gap_1()
+            .rounded_lg()
             .border_1()
             .border_color(cx.theme().colors().border)
             .bg(cx.theme().colors().element_background)
             .cursor_pointer()
-            .hover(|style| style.border_color(Color::Accent.color(cx)))
+            .hover(move |style| style.border_color(accent).bg(accent.opacity(0.18)))
             .child(
                 h_flex()
-                    .gap_1p5()
+                    .gap_2()
                     .child(Icon::new(icon).size(IconSize::Small).color(Color::Muted))
                     .child(
                         Label::new(file)
@@ -1390,6 +1587,7 @@ impl DatabasePanel {
                     .child(
                         Label::new("Usar")
                             .size(LabelSize::XSmall)
+                            .weight(FontWeight::MEDIUM)
                             .color(Color::Accent),
                     ),
             )
@@ -1403,7 +1601,7 @@ impl DatabasePanel {
             .child(
                 Label::new(password)
                     .size(LabelSize::XSmall)
-                    .color(Color::Disabled),
+                    .color(Color::Muted),
             )
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.open_connect_view(Prefill::Suggestion(chosen.clone()), window, cx)
@@ -1415,42 +1613,40 @@ impl DatabasePanel {
         let has_connections = !self.connections.is_empty();
         let section = |title: &'static str, count: usize| {
             h_flex()
-                .pt_3()
+                .pt_1()
                 .pb_1p5()
-                .gap_1p5()
-                .child(
-                    Label::new(title)
-                        .size(LabelSize::XSmall)
-                        .weight(FontWeight::SEMIBOLD)
-                        .color(Color::Muted),
-                )
+                .gap_2()
+                .child(section_label(title))
                 .child(
                     Label::new(count.to_string())
                         .size(LabelSize::XSmall)
                         .color(Color::Muted),
                 )
         };
+        let divider = || div().h_px().w_full().bg(cx.theme().colors().border);
         v_flex()
             .id("db-idle")
             .size_full()
             .overflow_y_scroll()
             .px_3()
-            .pt_6()
+            .pt_10()
             .pb_3()
-            .gap_1()
+            .gap_4()
             .child(
                 v_flex()
                     .items_center()
-                    .gap_2()
-                    .pb_3()
+                    .gap_2p5()
+                    .px_4()
+                    .pb_2()
                     .child(
                         div()
-                            .size_12()
+                            .size(px(56.))
+                            .mb_2()
                             .flex()
                             .items_center()
                             .justify_center()
-                            .rounded_lg()
-                            .bg(Color::Accent.color(cx).opacity(0.12))
+                            .rounded_xl()
+                            .bg(cx.theme().colors().border_focused.opacity(0.22))
                             .child(
                                 Icon::new(IconName::Database)
                                     .size(IconSize::Medium)
@@ -1466,7 +1662,7 @@ impl DatabasePanel {
                         .weight(FontWeight::SEMIBOLD),
                     )
                     .child(
-                        div().max_w(px(300.)).text_center().child(
+                        div().max_w(px(320.)).text_center().child(
                             Label::new(
                                 "Conecte um Postgres para listar schemas, abrir tabelas e rodar \
                                  queries sem sair do editor.",
@@ -1476,12 +1672,20 @@ impl DatabasePanel {
                         ),
                     )
                     .child(
-                        Button::new("db-new-connection", "Nova conexão")
-                            .style(ButtonStyle::Filled)
-                            .start_icon(Icon::new(IconName::Plus).size(IconSize::Small))
+                        div().pt_1p5().child(
+                            primary_button(
+                                "db-new-connection",
+                                Some(IconName::Plus),
+                                "Nova conexão",
+                                None,
+                                cx,
+                            )
+                            .w(px(168.))
+                            .justify_center()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.open_connect_view(Prefill::New, window, cx)
                             })),
+                        ),
                     ),
             )
             .when_some(self.load_error.clone(), |this, error| {
@@ -1491,66 +1695,87 @@ impl DatabasePanel {
                         .color(Color::Error),
                 )
             })
+            .when(has_connections || !self.suggestions.is_empty(), |this| {
+                this.child(divider())
+            })
             .when(has_connections, |this| {
-                this.child(section("CONEXÕES SALVAS", self.connections.len()))
-                    .children(self.connections.iter().enumerate().map(|(index, stored)| {
-                        let connection = stored.connection.clone();
-                        h_flex()
-                            .id(("db-saved", index))
-                            .h(px(30.))
-                            .px_2()
-                            .gap_1p5()
-                            .rounded_sm()
-                            .cursor_pointer()
-                            .hover(|style| style.bg(cx.theme().colors().element_hover))
-                            .child(
-                                Icon::new(IconName::Database)
-                                    .size(IconSize::Small)
-                                    .color(Color::Muted),
-                            )
-                            .child(Label::new(connection.name.clone()).size(LabelSize::Small))
-                            .child(environment_chip(connection.environment, cx))
-                            .child(
-                                div().flex_1().min_w_0().child(
-                                    Label::new(connection.address())
+                this.child(
+                    v_flex()
+                        .child(section("CONEXÕES SALVAS", self.connections.len()))
+                        .children(self.connections.iter().enumerate().map(|(index, stored)| {
+                            let connection = stored.connection.clone();
+                            h_flex()
+                                .id(("db-saved", index))
+                                .h(px(30.))
+                                .px_2()
+                                .gap_1p5()
+                                .rounded_md()
+                                .cursor_pointer()
+                                .hover(|style| style.bg(cx.theme().colors().element_hover))
+                                .child(
+                                    Icon::new(IconName::Database)
+                                        .size(IconSize::Small)
+                                        .color(Color::Muted),
+                                )
+                                .child(Label::new(connection.name.clone()).size(LabelSize::Small))
+                                .child(environment_chip(connection.environment, cx))
+                                .child(
+                                    div().flex_1().min_w_0().child(
+                                        Label::new(connection.address())
+                                            .size(LabelSize::XSmall)
+                                            .buffer_font(cx)
+                                            .color(Color::Muted)
+                                            .truncate(),
+                                    ),
+                                )
+                                .child(
+                                    Label::new("Conectar")
                                         .size(LabelSize::XSmall)
-                                        .buffer_font(cx)
-                                        .color(Color::Muted)
-                                        .truncate(),
-                                ),
-                            )
-                            .child(
-                                Label::new("Conectar")
-                                    .size(LabelSize::XSmall)
-                                    .color(Color::Accent),
-                            )
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.connect(connection.clone(), cx)
-                            }))
-                    }))
+                                        .color(Color::Accent),
+                                )
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.connect(connection.clone(), cx)
+                                }))
+                        })),
+                )
             })
             .when(!self.suggestions.is_empty(), |this| {
-                this.child(section("ENCONTRADAS NO PROJETO", self.suggestions.len()))
-                    .child(
-                        v_flex()
-                            .gap_2()
-                            .children(self.suggestions.iter().enumerate().map(
-                                |(index, suggestion)| self.render_suggestion(index, suggestion, cx),
-                            )),
-                    )
-                    .child(
-                        div().pt_2().child(
-                            Label::new(
-                                "Sugestões nunca conectam sozinhas. Nada vai para o repositório \
-                                 sem você escolher \"Projeto\".",
-                            )
-                            .size(LabelSize::XSmall)
-                            .color(Color::Disabled),
+                this.child(
+                    v_flex()
+                        .child(section("ENCONTRADAS NO PROJETO", self.suggestions.len()))
+                        .child(
+                            v_flex()
+                                .gap_2()
+                                .children(self.suggestions.iter().enumerate().map(
+                                    |(index, suggestion)| {
+                                        self.render_suggestion(index, suggestion, cx)
+                                    },
+                                )),
+                        )
+                        .child(
+                            div().pt_3().child(
+                                Label::new(
+                                    "Sugestões nunca conectam sozinhas. Nada é gravado no \
+                                     repositório sem você pedir.",
+                                )
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted),
+                            ),
                         ),
-                    )
+                )
             })
             .into_any_element()
     }
+}
+
+struct Opened {
+    session: Session,
+    relations: Vec<Relation>,
+    objects: Vec<SchemaObject>,
+    columns: Vec<(String, String, String, String)>,
+    database_size: Option<String>,
+    other_databases: Vec<String>,
+    latency: Duration,
 }
 
 async fn open_session(
@@ -1558,7 +1783,7 @@ async fn open_session(
     credentials_provider: Arc<dyn CredentialsProvider>,
     fs: Arc<dyn Fs>,
     cx: &AsyncApp,
-) -> anyhow::Result<(Session, Vec<Relation>, Vec<String>, Duration)> {
+) -> anyhow::Result<Opened> {
     let password = match credentials_provider
         .read_credentials(&connection.keychain_url(), cx)
         .await
@@ -1600,9 +1825,27 @@ async fn open_session(
     } else {
         Vec::new()
     };
+    // The dock still works without these; a failure only leaves their part of the tree empty.
+    let objects = catalog::list_objects(&session)
+        .await
+        .log_err()
+        .unwrap_or_default();
+    let columns = catalog::list_all_columns(&session)
+        .await
+        .log_err()
+        .unwrap_or_default();
+    let database_size = catalog::database_size(&session).await.log_err().flatten();
     let started = Instant::now();
     session.run("select 1", 1).await?;
-    Ok((session, relations, other_databases, started.elapsed()))
+    Ok(Opened {
+        session,
+        relations,
+        objects,
+        columns,
+        database_size,
+        other_databases,
+        latency: started.elapsed(),
+    })
 }
 
 async fn list_queries(fs: &dyn Fs, root: &Path) -> Vec<PathBuf> {
@@ -1661,6 +1904,152 @@ pub(crate) fn format_count(count: i64) -> String {
         }
         result
     }
+}
+
+/// What the workspace's active tab shows, for the tree to mark it.
+fn active_item_of(workspace: &Workspace, cx: &App) -> Option<ActiveItem> {
+    let item = workspace.active_item(cx)?;
+    if let Some(table) = item.downcast::<table_view::TableView>() {
+        let (connection_id, schema, name) = table.read(cx).relation();
+        return Some(ActiveItem::Table {
+            connection_id: connection_id.to_owned(),
+            schema: schema.to_owned(),
+            name: name.to_owned(),
+        });
+    }
+    item.downcast::<query_view::SqlQueryView>()
+        .map(|query| ActiveItem::Query(query.read(cx).path().to_path_buf()))
+}
+
+/// `há 5 min`, `há 3 h`, `ontem`, `há 5 d`, for the saved queries.
+fn relative_age(modified: SystemTime) -> String {
+    let seconds = SystemTime::now()
+        .duration_since(modified)
+        .unwrap_or_default()
+        .as_secs();
+    match seconds {
+        0..60 => "agora".to_owned(),
+        60..3_600 => format!("há {} min", seconds / 60),
+        3_600..86_400 => format!("há {} h", seconds / 3_600),
+        86_400..172_800 => "ontem".to_owned(),
+        _ => format!("há {} d", seconds / 86_400),
+    }
+}
+
+/// The uppercase heading over a group in the dock (SCHEMAS, QUERIES SALVAS).
+pub(crate) fn section_label(text: &'static str) -> Label {
+    Label::new(text)
+        .size(LabelSize::XSmall)
+        .weight(FontWeight::SEMIBOLD)
+        .color(Color::Muted)
+}
+
+const SQL_KEYWORDS: &[&str] = &[
+    "add", "alter", "and", "as", "begin", "by", "case", "column", "commit", "concurrently",
+    "create", "delete", "desc", "distinct", "else", "end", "explain", "false", "filter", "from",
+    "group", "if", "index", "insert", "interval", "into", "is", "join", "left", "limit", "not",
+    "null", "on", "or", "order", "rollback", "select", "set", "table", "then", "true", "update",
+    "values", "when", "where",
+];
+
+/// One line of SQL colored like the editor, for the read-only SQL the boards show in cards and
+/// popovers.
+pub(crate) fn sql_line(line: &str, cx: &App) -> Div {
+    let syntax = cx.theme().syntax();
+    let color_of = |name: &str, fallback: Color| {
+        syntax
+            .style_for_name(name)
+            .and_then(|style| style.color)
+            .map(Color::Custom)
+            .unwrap_or(fallback)
+    };
+    let keyword = color_of("keyword", Color::Accent);
+    let string = color_of("string", Color::Success);
+    let number = color_of("number", Color::Warning);
+    let mut tokens: Vec<(String, Color)> = Vec::new();
+    let mut push = |text: &str, color: Color| match tokens.last_mut() {
+        Some((last, last_color)) if *last_color == color => last.push_str(text),
+        _ => tokens.push((text.to_owned(), color)),
+    };
+    let mut rest = line;
+    while !rest.is_empty() {
+        if rest.starts_with("--") {
+            push(rest, Color::Muted);
+            break;
+        }
+        let first = rest.chars().next().unwrap_or(' ');
+        let end = if first == '\'' {
+            rest[1..].find('\'').map_or(rest.len(), |end| end + 2)
+        } else if first.is_alphanumeric() || first == '_' {
+            rest.find(|c: char| !(c.is_alphanumeric() || c == '_' || c == '.'))
+                .unwrap_or(rest.len())
+        } else {
+            first.len_utf8()
+        };
+        let token = &rest[..end];
+        let color = if first == '\'' {
+            string
+        } else if token.chars().all(|c| c.is_ascii_digit() || c == '.') && first.is_ascii_digit() {
+            number
+        } else if SQL_KEYWORDS.contains(&token.to_lowercase().as_str()) {
+            keyword
+        } else if first.is_alphanumeric() || first == '_' {
+            Color::Default
+        } else {
+            Color::Muted
+        };
+        push(token, color);
+        rest = &rest[end..];
+    }
+    h_flex().children(tokens.into_iter().map(|(text, color)| {
+        Label::new(text)
+            .size(LabelSize::Small)
+            .buffer_font(cx)
+            .color(color)
+            .single_line()
+    }))
+}
+
+/// The SQL clause marker of the table filter (`WHERE`, `ORDER BY`).
+pub(crate) fn sql_tag(text: &'static str, cx: &App) -> Div {
+    h_flex()
+        .flex_none()
+        .h(px(20.))
+        .px_1p5()
+        .rounded_sm()
+        .bg(cx.theme().colors().border_focused.opacity(0.22))
+        .child(
+            Label::new(text)
+                .size(LabelSize::XSmall)
+                .buffer_font(cx)
+                .weight(FontWeight::SEMIBOLD)
+                .color(Color::Accent),
+        )
+}
+
+/// A [`ui::segment_option`] as wide as its label, for segmented controls that sit in a toolbar.
+pub(crate) fn segment(
+    id: impl Into<gpui::ElementId>,
+    label: impl Into<SharedString>,
+    selected: bool,
+    cx: &App,
+) -> gpui::Stateful<Div> {
+    ui::segment_option(id, label, selected, true, cx)
+        .flex_initial()
+        .px_2p5()
+        .h(px(26.))
+}
+
+/// The small bordered pill of the boards (`auto-commit`, `limite 1000`).
+pub(crate) fn chip(cx: &App) -> Div {
+    h_flex()
+        .flex_none()
+        .h(px(24.))
+        .px_2()
+        .gap_1p5()
+        .rounded_md()
+        .border_1()
+        .border_color(cx.theme().colors().border_selected)
 }
 
 pub fn environment_color(environment: Environment) -> Color {
@@ -1726,6 +2115,7 @@ impl Render for DatabasePanel {
             .on_action(cx.listener(|this, _: &NewConnection, window, cx| {
                 this.open_connect_view(Prefill::New, window, cx)
             }))
+            .on_action(cx.listener(|this, _: &NewQuery, window, cx| this.new_query(window, cx)))
             .child(content)
     }
 }

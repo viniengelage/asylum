@@ -89,6 +89,21 @@ pub fn init(cx: &mut App) {
                     }
                     panel
                 })?;
+                // `DATABASE_CLIENT_DEBUG_CONNECT=<id>` connects to that saved connection first,
+                // which is how production (never connected on its own) gets opened.
+                if let (Ok(id), Some(panel)) =
+                    (std::env::var("DATABASE_CLIENT_DEBUG_CONNECT"), panel.clone())
+                {
+                    for _ in 0..40 {
+                        if panel.read_with(cx, |panel, _| panel.is_loaded()) {
+                            break;
+                        }
+                        cx.background_executor()
+                            .timer(std::time::Duration::from_millis(250))
+                            .await;
+                    }
+                    panel.update(cx, |panel, cx| panel.connect_saved(&id, cx));
+                }
                 if let (Some(target), Some(panel)) = (step.strip_prefix("query:"), panel.clone()) {
                     let (file, action) = match target.rsplit_once(':') {
                         Some((file, action @ ("run" | "complete"))) => {

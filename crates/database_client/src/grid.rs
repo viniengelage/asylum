@@ -3,16 +3,18 @@
 //! whole value of that cell.
 
 use crate::edits::PendingEdits;
-use editor::Editor;
+use editor::{Editor, MultiBuffer};
 use gpui::{
-    AbsoluteLength, AnyElement, ClipboardItem, Entity, EventEmitter, FocusHandle, Focusable,
-    FontWeight, actions, px,
+    AbsoluteLength, AnyElement, Anchor, ClipboardItem, Entity, EventEmitter, FocusHandle,
+    Focusable, FontWeight, WeakEntity, actions, anchored, deferred, px,
 };
 use std::ops::Range;
 use ui::{
     ColumnWidthConfig, ResizableColumnsState, Table, TableInteractionState, TableResizeBehavior,
     Tooltip, prelude::*,
 };
+use util::ResultExt as _;
+use workspace::Workspace;
 
 actions!(
     database_client,
@@ -89,6 +91,8 @@ pub enum GridEvent {
         column: usize,
         value: Option<String>,
     },
+    /// "Abrir no editor" on the selected cell: the owner opens the value in a buffer.
+    OpenValue { column: GridColumn, value: String },
 }
 
 struct CellEditor {
@@ -105,6 +109,8 @@ pub struct ResultGrid {
     sort: Option<Sort>,
     sortable: bool,
     selected: Option<(usize, usize)>,
+    /// The value popover under the selected cell; a click opens it, the keyboard closes it.
+    detail_open: bool,
     editable: bool,
     pending: PendingEdits,
     editing: Option<CellEditor>,
@@ -125,6 +131,7 @@ impl ResultGrid {
             sort: None,
             sortable,
             selected: None,
+            detail_open: false,
             editable: false,
             pending: PendingEdits::default(),
             editing: None,
@@ -286,6 +293,61 @@ impl ResultGrid {
         to_csv(&self.columns, &self.rows)
     }
 
+    /// The whole result as a JSON array of objects, values as the server sent them (text).
+    pub fn to_json(&self) -> String {
+        let rows = self
+            .rows
+            .iter()
+            .map(|row| {
+                serde_json::Value::Object(
+                    self.columns
+                        .iter()
+                        .zip(row)
+                        .map(|(column, value)| {
+                            (
+                                column.name.clone(),
+                                value
+                                    .clone()
+                                    .map_or(serde_json::Value::Null, serde_json::Value::String),
+                            )
+                        })
+                        .collect(),
+                )
+            })
+            .collect::<Vec<_>>();
+        serde_json::to_string_pretty(&rows).unwrap_or_default()
+    }
+
+    /// One multi-row INSERT into `table`; numbers go unquoted, everything else as a literal.
+    pub fn to_insert(&self, table: &str) -> String {
+        let columns = self
+            .columns
+            .iter()
+            .map(|column| crate::catalog::quote_ident(&column.name))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let rows = self
+            .rows
+            .iter()
+            .map(|row| {
+                let values = self
+                    .columns
+                    .iter()
+                    .zip(row)
+                    .map(|(column, value)| match value {
+                        None => "NULL".to_owned(),
+                        Some(value) if column.is_numeric() => value.clone(),
+                        Some(value) => crate::catalog::quote_literal(value),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("  ({values})")
+            })
+            .collect::<Vec<_>>()
+            .join(",\n");
+        format!("insert into {table} ({columns}) values\n{rows};\n")
+    }
+
     pub fn selected_value(&self) -> Option<(&GridColumn, Option<&str>)> {
         let (row, column) = self.selected?;
         let value = self.rows.get(row)?.get(column)?;
@@ -308,7 +370,19 @@ impl ResultGrid {
         let row = (row as isize + rows).clamp(0, self.rows.len() as isize - 1) as usize;
         let column = (column as isize + columns).clamp(0, self.columns.len() as isize - 1) as usize;
         self.selected = Some((row, column));
+        self.detail_open = false;
         cx.notify();
+    }
+
+    fn open_value(&mut self, cx: &mut Context<Self>) {
+        if let Some((column, value)) = self.selected_value() {
+            let event = GridEvent::OpenValue {
+                column: column.clone(),
+                value: value.unwrap_or_default().to_owned(),
+            };
+            self.detail_open = false;
+            cx.emit(event);
+        }
     }
 
     fn render_header(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
@@ -425,7 +499,23 @@ impl ResultGrid {
                                     .border_color(Color::Warning.color(cx))
                             })
                             .when(cell_selected, |this| {
-                                this.border_1().border_color(selected_border).rounded_sm()
+                                this.relative()
+                                    .border_1()
+                                    .border_color(selected_border)
+                                    .rounded_sm()
+                            })
+                            .when(cell_selected && self.detail_open, |this| {
+                                this.children(self.render_detail(row_index, cx).map(|detail| {
+                                    div().absolute().left_0().top_full().child(
+                                        deferred(
+                                            anchored()
+                                                .anchor(Anchor::TopLeft)
+                                                .snap_to_window_with_margin(px(8.))
+                                                .child(detail),
+                                        )
+                                        .with_priority(1),
+                                    )
+                                }))
                             })
                             .child(match value {
                                 Some(value) => Label::new(value.clone())
@@ -444,8 +534,12 @@ impl ResultGrid {
                             })
                             .on_click(cx.listener(
                                 move |this, event: &gpui::ClickEvent, window, cx| {
+                                    let reselected =
+                                        this.selected == Some((row_index, column_index));
                                     this.selected = Some((row_index, column_index));
+                                    this.detail_open = !(reselected && this.detail_open);
                                     if event.click_count() >= 2 {
+                                        this.detail_open = false;
                                         this.start_editing(window, cx);
                                     } else {
                                         this.editing = None;
@@ -462,75 +556,234 @@ impl ResultGrid {
             .collect()
     }
 
-    fn render_detail(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    /// The whole value of the selected cell, with what can be done with it.
+    fn render_detail(&self, row_index: usize, cx: &mut Context<Self>) -> Option<AnyElement> {
         let (column, value) = self.selected_value()?;
+        let colors = cx.theme().colors();
         let type_name = column.type_name.clone().unwrap_or_default();
-        let text = value.map(str::to_owned);
-        Some(
+        let is_json = matches!(type_name.as_str(), "json" | "jsonb");
+        let text = value.map(|value| {
+            if is_json {
+                serde_json::from_str::<serde_json::Value>(value)
+                    .ok()
+                    .and_then(|json| serde_json::to_string_pretty(&json).ok())
+                    .unwrap_or_else(|| value.to_owned())
+            } else {
+                value.to_owned()
+            }
+        });
+        let action = |id: &'static str, label: &'static str| {
             h_flex()
-                .px_3()
-                .py_1p5()
-                .gap_2()
-                .border_t_1()
-                .border_color(cx.theme().colors().border)
+                .id(id)
+                .gap_1()
+                .cursor_pointer()
+                .child(Label::new(label).size(LabelSize::Small))
+        };
+        Some(
+            v_flex()
+                .id("db-grid-detail")
+                .occlude()
+                .w(px(320.))
+                .max_h(px(360.))
+                .mt_1()
+                .rounded_lg()
+                .border_1()
+                .border_color(colors.border_selected)
+                .bg(colors.elevated_surface_background)
+                .shadow_lg()
+                .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(
-                    Label::new(column.name.clone())
-                        .size(LabelSize::Small)
-                        .buffer_font(cx)
-                        .weight(FontWeight::SEMIBOLD),
-                )
-                .child(
-                    Label::new(type_name)
-                        .size(LabelSize::XSmall)
-                        .buffer_font(cx)
-                        .color(Color::Muted),
-                )
-                .child(
-                    div().flex_1().min_w_0().child(match &text {
-                        Some(text) => Label::new(text.replace('\n', " ⏎ "))
-                            .size(LabelSize::Small)
-                            .buffer_font(cx)
-                            .truncate()
-                            .into_any_element(),
-                        None => Label::new("NULL")
-                            .size(LabelSize::Small)
-                            .buffer_font(cx)
-                            .italic()
-                            .color(Color::Disabled)
-                            .into_any_element(),
-                    }),
-                )
-                .when(self.editable, |this| {
-                    this.child(
-                        Button::new("db-grid-null", "NULL")
-                            .style(ButtonStyle::Subtle)
-                            .label_size(LabelSize::XSmall)
-                            .tooltip(Tooltip::text("Deixar esta célula NULL"))
-                            .on_click(cx.listener(|this, _, _, cx| this.set_selected_null(cx))),
-                    )
-                    .child(
-                        Button::new("db-grid-edit", "Editar")
-                            .style(ButtonStyle::Subtle)
-                            .label_size(LabelSize::XSmall)
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.start_editing(window, cx)),
-                            ),
-                    )
-                })
-                .child(
-                    IconButton::new("db-grid-copy", IconName::Copy)
-                        .icon_size(IconSize::Small)
-                        .icon_color(Color::Muted)
-                        .tooltip(Tooltip::text("Copiar valor"))
-                        .on_click(
-                            cx.listener(|this, _, window, cx| {
-                                this.copy_cell(&CopyCell, window, cx)
-                            }),
+                    h_flex()
+                        .px_3()
+                        .py_2p5()
+                        .gap_2p5()
+                        .border_b_1()
+                        .border_color(colors.border)
+                        .child(
+                            Label::new(column.name.clone())
+                                .size(LabelSize::Small)
+                                .buffer_font(cx)
+                                .weight(FontWeight::SEMIBOLD),
+                        )
+                        .child(
+                            Label::new(format!(
+                                "{type_name} · linha {}",
+                                self.first_row_number + row_index
+                            ))
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
                         ),
+                )
+                .child(
+                    v_flex()
+                        .id("db-grid-detail-value")
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_y_scroll()
+                        .px_3()
+                        .py_3()
+                        .gap_0p5()
+                        .map(|this| match &text {
+                            Some(text) => this.children(
+                                text.lines()
+                                    .map(|line| json_line(line, is_json, cx).into_any_element()),
+                            ),
+                            None => this.child(
+                                Label::new("NULL")
+                                    .size(LabelSize::Small)
+                                    .buffer_font(cx)
+                                    .italic()
+                                    .color(Color::Muted),
+                            ),
+                        }),
+                )
+                .child(
+                    h_flex()
+                        .px_3()
+                        .py_2()
+                        .gap_4()
+                        .border_t_1()
+                        .border_color(colors.border)
+                        .child(action("db-grid-copy", "Copiar").on_click(cx.listener(
+                            |this, _, window, cx| this.copy_cell(&CopyCell, window, cx),
+                        )))
+                        .when(self.editable, |this| {
+                            this.child(
+                                action("db-grid-edit", "Editar")
+                                    .child(
+                                        Label::new("↵")
+                                            .size(LabelSize::XSmall)
+                                            .buffer_font(cx)
+                                            .color(Color::Muted),
+                                    )
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.detail_open = false;
+                                        this.start_editing(window, cx)
+                                    })),
+                            )
+                        })
+                        .child(
+                            action("db-grid-open", "Abrir no editor")
+                                .on_click(cx.listener(|this, _, _, cx| this.open_value(cx))),
+                        )
+                        .child(div().flex_1())
+                        .when(self.editable, |this| {
+                            this.child(
+                                h_flex()
+                                    .id("db-grid-null")
+                                    .cursor_pointer()
+                                    .tooltip(Tooltip::text("Deixar esta célula NULL"))
+                                    .child(
+                                        Label::new("NULL")
+                                            .size(LabelSize::XSmall)
+                                            .buffer_font(cx)
+                                            .color(Color::Muted),
+                                    )
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.detail_open = false;
+                                        this.set_selected_null(cx)
+                                    })),
+                            )
+                        }),
                 )
                 .into_any_element(),
         )
     }
+}
+
+/// One line of the value popover. Pretty-printed JSON gets its keys, strings and literals
+/// colored like the board; anything else is plain.
+fn json_line(line: &str, is_json: bool, cx: &App) -> impl IntoElement {
+    let label = |text: String, color: Color| {
+        Label::new(text)
+            .size(LabelSize::Small)
+            .buffer_font(cx)
+            .color(color)
+            .single_line()
+    };
+    let string_color = Color::Custom(cx.theme().status().created);
+    let trimmed = line.trim_start();
+    let indent = line[..line.len() - trimmed.len()].to_owned();
+    let row = h_flex().child(label(indent, Color::Default));
+    if !is_json {
+        return row.child(label(trimmed.to_owned(), Color::Default));
+    }
+    let value_color = |value: &str| {
+        if value.starts_with('"') {
+            string_color
+        } else if matches!(
+            value.trim_end_matches(','),
+            "{" | "}" | "[" | "]" | "{}" | "[]"
+        ) {
+            Color::Muted
+        } else {
+            Color::Warning
+        }
+    };
+    let key_end = trimmed
+        .strip_prefix('"')
+        .and_then(|rest| rest.find("\": "))
+        .map(|end| end + 3);
+    match key_end {
+        Some(end) => row
+            .child(label(trimmed[..end].to_owned(), Color::Accent))
+            .child(label(trimmed[end..].to_owned(), value_color(&trimmed[end..]))),
+        None => row.child(label(trimmed.to_owned(), value_color(trimmed))),
+    }
+}
+
+/// "Abrir no editor": the value in a new unsaved buffer, pretty-printed and highlighted when it
+/// is JSON.
+pub(crate) fn open_value(
+    workspace: WeakEntity<Workspace>,
+    column: GridColumn,
+    value: String,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let is_json = matches!(column.type_name.as_deref(), Some("json" | "jsonb"));
+    let text = if is_json {
+        serde_json::from_str::<serde_json::Value>(&value)
+            .ok()
+            .and_then(|json| serde_json::to_string_pretty(&json).ok())
+            .unwrap_or(value)
+    } else {
+        value
+    };
+    let Some((project, language)) = workspace
+        .update(cx, |workspace, _| {
+            let language = is_json
+                .then(|| workspace.app_state().languages.language_for_name("JSON"));
+            (workspace.project().clone(), language)
+        })
+        .log_err()
+    else {
+        return;
+    };
+    window
+        .spawn(cx, async move |cx| {
+            let language = match language {
+                Some(language) => language.await.log_err(),
+                None => None,
+            };
+            let buffer = project
+                .update(cx, |project, cx| project.create_buffer(language, true, cx))
+                .await?;
+            buffer.update(cx, |buffer, cx| buffer.set_text(text, cx));
+            workspace.update_in(cx, |workspace, window, cx| {
+                let title = column.name.clone();
+                let buffer =
+                    cx.new(|cx| MultiBuffer::singleton(buffer, cx).with_title(title.clone()));
+                let editor = cx.new(|cx| {
+                    let mut editor =
+                        Editor::for_multibuffer(buffer, Some(project), window, cx);
+                    editor.set_breadcrumb_header(title);
+                    editor
+                });
+                workspace.add_item_to_active_pane(Box::new(editor), None, true, window, cx);
+            })
+        })
+        .detach_and_log_err(cx);
 }
 
 fn to_csv(columns: &[GridColumn], rows: &[Vec<Option<String>>]) -> String {
@@ -625,7 +878,6 @@ impl Render for ResultGrid {
                             .interactable(&self.interaction)
                             .width_config(ColumnWidthConfig::Resizable(self.widths.clone()))
                             .header(headers)
-                            .striped()
                             .pin_cols(1)
                             .uniform_list(
                                 "db-grid-rows",
@@ -637,7 +889,6 @@ impl Render for ResultGrid {
                     )
                 },
             ))
-            .children(self.render_detail(cx))
     }
 }
 

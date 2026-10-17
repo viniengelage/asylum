@@ -11,7 +11,7 @@ use crate::{
     connection::{Environment, SavedConnection},
     edits::{self, PendingEdits},
     grid::{GridColumn, GridEvent, ResultGrid, Sort},
-    panel::environment_chip,
+    panel::{DatabasePanel, segment, sql_line, sql_tag},
     session::{ServerError, Session},
     statements::Risk,
     write_guard::WriteGuard,
@@ -21,11 +21,11 @@ use gpui::{
     Subscription, Task, WeakEntity, px,
 };
 use std::{sync::Arc, time::Duration};
+use editor::Editor;
 use ui::{
-    Indicator, ToggleButtonGroup, ToggleButtonGroupSize, ToggleButtonGroupStyle,
-    ToggleButtonSimple, Tooltip, prelude::*,
+    Indicator, KeyBinding, Tooltip, prelude::*, primary_button, secondary_button,
+    segmented_control,
 };
-use ui_input::InputField;
 use util::ResultExt as _;
 use workspace::{
     Workspace,
@@ -97,8 +97,10 @@ pub struct TableView {
     estimated_rows: Option<i64>,
     focus_handle: FocusHandle,
     tab: Tab,
-    where_input: Entity<InputField>,
-    order_input: Entity<InputField>,
+    where_input: Entity<Editor>,
+    order_input: Entity<Editor>,
+    /// Table, indexes and TOAST, shown next to the row estimate.
+    total_size: Option<String>,
     grid: Entity<ResultGrid>,
     session: Option<Arc<Session>>,
     columns: Vec<ColumnInfo>,
@@ -134,16 +136,34 @@ impl TableView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let where_input = cx.new(|cx| {
-            InputField::new(window, cx, "created_at > now() - interval '7 days'").label("WHERE")
-        });
-        let order_input = cx.new(|cx| InputField::new(window, cx, "id desc").label("ORDER BY"));
+        let filter_editor = |placeholder: &str, window: &mut Window, cx: &mut Context<Self>| {
+            let font_family = theme::theme_settings(cx).buffer_font(cx).family.clone();
+            cx.new(|cx| {
+                let mut editor = Editor::single_line(window, cx);
+                editor.set_placeholder_text(placeholder, window, cx);
+                editor.set_text_style_refinement(gpui::TextStyleRefinement {
+                    font_family: Some(font_family),
+                    font_size: Some(rems(0.75).into()),
+                    ..Default::default()
+                });
+                editor
+            })
+        };
+        let where_input = filter_editor("created_at > now() - interval '7 days'", window, cx);
+        let order_input = filter_editor("id desc", window, cx);
         let grid = cx.new(|cx| ResultGrid::new(true, cx));
-        let subscriptions = vec![cx.subscribe(&grid, |this, _, event, cx| match event {
+        let subscriptions = vec![cx.subscribe_in(&grid, window, |this, _, event, window, cx| match event {
             GridEvent::SortRequested(column) => this.sort_by(*column, cx),
             GridEvent::CellEdited { row, column, value } => {
                 this.cell_edited(*row, *column, value.clone(), cx)
             }
+            GridEvent::OpenValue { column, value } => crate::grid::open_value(
+                this.workspace.clone(),
+                column.clone(),
+                value.clone(),
+                window,
+                cx,
+            ),
         })];
         let mut this = Self {
             workspace,
@@ -163,6 +183,7 @@ impl TableView {
             tab: Tab::Data,
             where_input,
             order_input,
+            total_size: None,
             grid,
             session: None,
             columns: Vec::new(),
@@ -178,6 +199,11 @@ impl TableView {
         this
     }
 
+    /// `(connection id, schema, name)`, for the dock to mark the table it shows.
+    pub(crate) fn relation(&self) -> (&str, &str, &str) {
+        (&self.connection.id, &self.schema, &self.name)
+    }
+
     fn open_session(&mut self, panel_session: Arc<Session>, cx: &mut Context<Self>) {
         let schema = self.schema.clone();
         let name = self.name.clone();
@@ -185,12 +211,20 @@ impl TableView {
             let result = async {
                 let session = Arc::new(panel_session.connect_read_only().await?);
                 let columns = catalog::list_columns(&session, &schema, &name).await?;
-                anyhow::Ok((session, columns))
+                let (estimate, total_size) = catalog::relation_stats(&session, &schema, &name)
+                    .await
+                    .log_err()
+                    .unwrap_or_default();
+                anyhow::Ok((session, columns, estimate, total_size))
             }
             .await;
             this.update(cx, |this, cx| match result {
-                Ok((session, columns)) => {
+                Ok((session, columns, estimate, total_size)) => {
                     this.session = Some(session);
+                    this.total_size = total_size;
+                    if this.estimated_rows.is_none() {
+                        this.estimated_rows = estimate;
+                    }
                     this.columns = columns;
                     let editable = this.can_edit();
                     this.grid
@@ -552,7 +586,7 @@ impl TableView {
 
     fn select_tab(&mut self, tab: Tab, cx: &mut Context<Self>) {
         self.tab = tab;
-        if tab != Tab::Data && self.structure.is_none() {
+        if tab != Tab::Data && !matches!(self.structure, Some(Load::Loaded(_) | Load::Loading)) {
             self.load_structure(cx);
         }
         cx.notify();
@@ -615,35 +649,42 @@ impl TableView {
     }
 
     fn render_header(&self, cx: &mut Context<Self>) -> AnyElement {
-        let tab_index = Tab::ALL
-            .iter()
-            .position(|tab| *tab == self.tab)
-            .unwrap_or(0);
-        let tabs = Tab::ALL.map(|tab| {
-            ToggleButtonSimple::new(
-                tab.label(),
-                cx.listener(move |this, _, _, cx| this.select_tab(tab, cx)),
-            )
-        });
+        let is_view = matches!(
+            self.kind,
+            RelationKind::View | RelationKind::MaterializedView
+        );
+        let facts = [
+            self.estimated_rows
+                .map(|rows| format!("{} linhas", crate::panel::format_count(rows))),
+            self.total_size.clone(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ");
         h_flex()
+            .h(px(52.))
+            .flex_none()
             .px_3()
-            .py_2()
-            .gap_2()
+            .gap_1p5()
             .child(
-                Icon::new(IconName::Database)
-                    .size(IconSize::Small)
-                    .color(Color::Muted),
+                Icon::new(if is_view {
+                    IconName::Eye
+                } else {
+                    IconName::Table
+                })
+                .size(IconSize::Small)
+                .color(Color::Muted),
             )
             .child(
                 Label::new(self.connection.name.clone())
                     .size(LabelSize::Small)
                     .color(Color::Muted),
             )
-            .child(environment_chip(self.connection.environment, cx))
             .child(
                 Icon::new(IconName::ChevronRight)
                     .size(IconSize::XSmall)
-                    .color(Color::Disabled),
+                    .color(Color::Muted),
             )
             .child(
                 Label::new(self.schema.clone())
@@ -653,59 +694,99 @@ impl TableView {
             .child(
                 Icon::new(IconName::ChevronRight)
                     .size(IconSize::XSmall)
-                    .color(Color::Disabled),
+                    .color(Color::Muted),
             )
             .child(Label::new(self.name.clone()).weight(FontWeight::SEMIBOLD))
-            .when(
-                matches!(
-                    self.kind,
-                    RelationKind::View | RelationKind::MaterializedView
-                ),
-                |this| {
-                    this.child(
-                        Label::new("view")
-                            .size(LabelSize::XSmall)
-                            .color(Color::Muted),
-                    )
-                },
-            )
-            .when_some(self.estimated_rows, |this, rows| {
+            .when(is_view, |this| {
                 this.child(
-                    Label::new(format!("~{} linhas", crate::panel::format_count(rows)))
+                    Label::new("view")
                         .size(LabelSize::XSmall)
-                        .buffer_font(cx)
                         .color(Color::Muted),
+                )
+            })
+            .when(!facts.is_empty(), |this| {
+                this.child(
+                    div()
+                        .ml_1()
+                        .h(px(22.))
+                        .px_2()
+                        .flex()
+                        .items_center()
+                        .rounded_md()
+                        .bg(cx.theme().colors().element_background)
+                        .child(
+                            Label::new(facts)
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted),
+                        ),
                 )
             })
             .child(div().flex_1())
             .child(
-                ToggleButtonGroup::single_row("db-table-tabs", tabs)
-                    .style(ToggleButtonGroupStyle::Outlined)
-                    .size(ToggleButtonGroupSize::Custom(rems_from_px(28_f32)))
-                    .label_size(LabelSize::Small)
-                    .auto_width()
-                    .selected_index(tab_index),
+                segmented_control(cx).children(Tab::ALL.map(|tab| {
+                    segment(("db-table-tab", tab as usize), tab.label(), tab == self.tab, cx)
+                        .on_click(cx.listener(move |this, _, _, cx| this.select_tab(tab, cx)))
+                })),
             )
             .into_any_element()
     }
 
     fn render_filters(&self, cx: &mut Context<Self>) -> AnyElement {
+        let divider = || {
+            div()
+                .w_px()
+                .h(px(20.))
+                .bg(cx.theme().colors().border_selected)
+        };
         h_flex()
             .key_context("DatabaseTableFilter")
+            .h(px(40.))
+            .flex_none()
             .px_3()
-            .pb_2()
-            .gap_3()
-            .items_end()
-            .child(div().flex_1().child(self.where_input.clone()))
-            .child(div().w(px(260.)).child(self.order_input.clone()))
+            .gap_2p5()
+            .border_t_1()
+            .border_b_1()
+            .border_color(cx.theme().colors().border)
+            .child(sql_tag("WHERE", cx))
+            .child(div().flex_1().min_w_0().child(self.where_input.clone()))
+            .child(divider())
+            .child(sql_tag("ORDER BY", cx))
+            .child(div().w(px(180.)).child(self.order_input.clone()))
+            .child(divider())
             .child(
-                Button::new("db-table-apply", "Aplicar")
-                    .style(ButtonStyle::Outlined)
-                    .key_binding(ui::KeyBinding::for_action_in(
+                Label::new("limite")
+                    .size(LabelSize::Small)
+                    .color(Color::Muted),
+            )
+            .child(
+                div()
+                    .h(px(22.))
+                    .px_2()
+                    .flex()
+                    .items_center()
+                    .rounded_sm()
+                    .bg(cx.theme().colors().element_background)
+                    .child(
+                        Label::new(PAGE_SIZE.to_string())
+                            .size(LabelSize::Small)
+                            .buffer_font(cx),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .id("db-table-apply")
+                    .gap_1()
+                    .cursor_pointer()
+                    .child(KeyBinding::for_action_in(
                         &ApplyTableFilter,
                         &self.focus_handle,
                         cx,
                     ))
+                    .child(
+                        Label::new("aplica")
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
+                    )
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.apply_filter(&ApplyTableFilter, window, cx)
                     })),
@@ -714,66 +795,192 @@ impl TableView {
     }
 
     fn render_footer(&self, cx: &mut Context<Self>) -> AnyElement {
-        let (summary, has_more) = match &self.data {
+        let filtered = !self.where_input.read(cx).text(cx).trim().is_empty();
+        let (summary, detail, range, has_more) = match &self.data {
             Load::Loaded(page) => {
                 let first = self.page * PAGE_SIZE + 1;
                 let last = self.page * PAGE_SIZE + page.shown;
-                let range = if page.shown == 0 {
-                    "nenhuma linha".to_owned()
-                } else {
-                    format!("linhas {first}–{last}")
+                let summary = match self.estimated_rows {
+                    Some(total) if !filtered && page.shown > 0 => format!(
+                        "{} de {} linhas",
+                        page.shown,
+                        crate::panel::format_count(total)
+                    ),
+                    _ if page.shown == 1 => "1 linha".to_owned(),
+                    _ => format!("{} linhas", page.shown),
                 };
                 let mode = if self.can_edit() {
-                    "duplo clique ou Enter edita a célula"
+                    "duplo clique edita".to_owned()
                 } else if self.columns.iter().any(|column| column.primary_key) {
-                    "somente leitura"
+                    "somente leitura".to_owned()
                 } else {
-                    "somente leitura: sem chave primária"
+                    "somente leitura: sem chave primária".to_owned()
+                };
+                let order = match self.default_order_label(cx) {
+                    Some(order) => format!(" · {order}"),
+                    None => String::new(),
                 };
                 (
-                    format!("{range} · {} ms · {mode}", page.elapsed.as_millis()),
+                    summary,
+                    format!("· {} ms{order} · {mode}", page.elapsed.as_millis()),
+                    if page.shown == 0 {
+                        "—".to_owned()
+                    } else {
+                        format!("{first}–{last}")
+                    },
                     page.has_more,
                 )
             }
-            Load::Loading => ("carregando…".to_owned(), false),
-            Load::Failed(_) => (String::new(), false),
+            Load::Loading => ("carregando…".to_owned(), String::new(), "…".to_owned(), false),
+            Load::Failed(_) => (String::new(), String::new(), "—".to_owned(), false),
         };
         let page = self.page;
+        let count = self.pending.len();
+        let colors = cx.theme().colors();
         h_flex()
+            .h(px(56.))
+            .flex_none()
             .px_3()
-            .py_1p5()
-            .gap_2()
+            .gap_3()
             .border_t_1()
-            .border_color(cx.theme().colors().border)
+            .border_color(colors.border)
+            .child(Label::new(summary).size(LabelSize::Small))
             .child(
-                Label::new(summary)
+                Label::new(detail)
                     .size(LabelSize::XSmall)
                     .color(Color::Muted),
+            )
+            .child(
+                h_flex()
+                    .h(px(28.))
+                    .px_1()
+                    .gap_2()
+                    .rounded_md()
+                    .bg(colors.element_background)
+                    .border_1()
+                    .border_color(colors.border_selected)
+                    .child(
+                        IconButton::new("db-table-previous", IconName::ChevronLeft)
+                            .icon_size(IconSize::XSmall)
+                            .disabled(page == 0)
+                            .tooltip(Tooltip::text("Página anterior"))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.go_to_page(page.saturating_sub(1), cx)
+                            })),
+                    )
+                    .child(Label::new(range).size(LabelSize::Small).buffer_font(cx))
+                    .child(
+                        IconButton::new("db-table-next", IconName::ChevronRight)
+                            .icon_size(IconSize::XSmall)
+                            .disabled(!has_more)
+                            .tooltip(Tooltip::text("Próxima página"))
+                            .on_click(
+                                cx.listener(move |this, _, _, cx| this.go_to_page(page + 1, cx)),
+                            ),
+                    ),
             )
             .child(div().flex_1())
-            .child(
-                IconButton::new("db-table-previous", IconName::ChevronLeft)
-                    .icon_size(IconSize::Small)
-                    .disabled(page == 0)
-                    .tooltip(Tooltip::text("Página anterior"))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.go_to_page(page.saturating_sub(1), cx)
-                    })),
-            )
-            .child(
-                Label::new(format!("página {}", page + 1))
-                    .size(LabelSize::XSmall)
-                    .buffer_font(cx)
-                    .color(Color::Muted),
-            )
-            .child(
-                IconButton::new("db-table-next", IconName::ChevronRight)
-                    .icon_size(IconSize::Small)
-                    .disabled(!has_more)
-                    .tooltip(Tooltip::text("Próxima página"))
-                    .on_click(cx.listener(move |this, _, _, cx| this.go_to_page(page + 1, cx))),
-            )
+            .when_some(self.notice.clone(), |this, (notice, color)| {
+                this.child(
+                    div().min_w_0().child(
+                        Label::new(notice)
+                            .size(LabelSize::Small)
+                            .color(color)
+                            .truncate(),
+                    ),
+                )
+            })
+            .when(count > 0, |this| {
+                let warning = Color::Warning.color(cx);
+                this.child(
+                    h_flex()
+                        .flex_none()
+                        .h(px(36.))
+                        .pl_3()
+                        .pr_1()
+                        .gap_3()
+                        .rounded_lg()
+                        .bg(warning.opacity(0.07))
+                        .border_1()
+                        .border_color(warning.opacity(0.4))
+                        .child(
+                            h_flex()
+                                .gap_1p5()
+                                .child(Indicator::dot().color(Color::Warning))
+                                .child(
+                                    Label::new(if count == 1 {
+                                        "1 alteração pendente".to_owned()
+                                    } else {
+                                        format!("{count} alterações pendentes")
+                                    })
+                                    .size(LabelSize::Small)
+                                    .weight(FontWeight::SEMIBOLD)
+                                    .color(Color::Warning),
+                                ),
+                        )
+                        .child(
+                            Label::new("· numa transação")
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted),
+                        )
+                        .child(
+                            Button::new("db-edits-sql", "Ver SQL")
+                                .style(ButtonStyle::Subtle)
+                                .label_size(LabelSize::Small)
+                                .color(if self.show_sql {
+                                    Color::Accent
+                                } else {
+                                    Color::Default
+                                })
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.show_sql = !this.show_sql;
+                                    cx.notify();
+                                })),
+                        )
+                        .child(
+                            Button::new("db-edits-discard", "Descartar")
+                                .style(ButtonStyle::Subtle)
+                                .label_size(LabelSize::Small)
+                                .disabled(self.applying)
+                                .on_click(cx.listener(|this, _, _, cx| this.discard_edits(cx))),
+                        )
+                        .child(
+                            primary_button(
+                                "db-edits-apply",
+                                None,
+                                if self.applying {
+                                    "Aplicando…"
+                                } else {
+                                    "Aplicar"
+                                },
+                                Some(KeyBinding::for_action_in(
+                                    &ApplyEdits,
+                                    &self.focus_handle,
+                                    cx,
+                                )),
+                                cx,
+                            )
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.apply_edits(&ApplyEdits, window, cx)
+                            })),
+                        ),
+                )
+            })
             .into_any_element()
+    }
+
+    /// The order the page falls back to, when nothing was typed or clicked.
+    fn default_order_label(&self, cx: &App) -> Option<String> {
+        if self.sort.is_some() || !self.order_input.read(cx).text(cx).trim().is_empty() {
+            return None;
+        }
+        let primary_key = self
+            .columns
+            .iter()
+            .filter(|column| column.primary_key)
+            .map(|column| column.name.as_str())
+            .collect::<Vec<_>>();
+        (!primary_key.is_empty()).then(|| format!("ordem por {}", primary_key.join(", ")))
     }
 
     fn render_message(&self, message: SharedString, error: bool, cx: &App) -> AnyElement {
@@ -782,11 +989,11 @@ impl TableView {
             .m_3()
             .p_3()
             .gap_1()
-            .rounded_md()
+            .rounded_lg()
             .when(error, |this| {
-                this.bg(Color::Error.color(cx).opacity(0.08))
+                this.bg(Color::Error.color(cx).opacity(0.06))
                     .border_1()
-                    .border_color(Color::Error.color(cx).opacity(0.3))
+                    .border_color(Color::Error.color(cx).opacity(0.4))
             })
             .children(message.split('\n').map(|line| {
                 Label::new(line.to_owned())
@@ -803,6 +1010,7 @@ impl TableView {
 
     fn render_data(&self, cx: &mut Context<Self>) -> AnyElement {
         v_flex()
+            .relative()
             .flex_1()
             .min_h_0()
             .child(self.render_filters(cx))
@@ -814,419 +1022,672 @@ impl TableView {
                 _ => div()
                     .flex_1()
                     .min_h_0()
-                    .border_t_1()
-                    .border_color(cx.theme().colors().border)
                     .child(self.grid.clone())
                     .into_any_element(),
             })
-            .children(self.render_pending(cx))
             .child(self.render_footer(cx))
+            .children(self.render_sql_preview(cx))
             .into_any_element()
     }
 
-    fn render_pending(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if self.pending.is_empty() && self.notice.is_none() {
+    /// "Ver SQL": the updates that "Aplicar" will run, floating over the grid like the board.
+    fn render_sql_preview(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.show_sql || self.pending.is_empty() {
             return None;
         }
-        let preview = self.show_sql.then(|| {
-            self.pending_updates(cx)
-                .map(|updates| edits::preview(&updates))
-        });
-        let count = self.pending.len();
+        let colors = cx.theme().colors();
+        let preview = self
+            .pending_updates(cx)
+            .map(|updates| (edits::preview(&updates), updates.len()));
+        let (text, updates) = match preview {
+            Ok(preview) => preview,
+            Err(error) => (error, 0),
+        };
+        let copy = text.clone();
+        let open = text.clone();
         Some(
             v_flex()
-                .border_t_1()
-                .border_color(cx.theme().colors().border)
-                .when_some(preview, |this, preview| {
-                    let text = match &preview {
-                        Ok(text) => text.clone(),
-                        Err(error) => error.clone(),
-                    };
-                    let copy = text.clone();
-                    this.child(
-                        v_flex()
-                            .max_h(px(260.))
-                            .id("db-edits-preview")
-                            .overflow_y_scroll()
-                            .px_3()
-                            .py_2()
-                            .gap_0p5()
-                            .bg(cx.theme().colors().editor_background)
-                            .child(
-                                h_flex()
-                                    .pb_1()
-                                    .child(
-                                        Label::new("SQL que vai rodar")
-                                            .size(LabelSize::Small)
-                                            .weight(FontWeight::SEMIBOLD),
-                                    )
-                                    .child(
-                                        Label::new(
-                                            " · as condições com ::text conferem o valor antigo",
-                                        )
-                                        .size(LabelSize::XSmall)
-                                        .color(Color::Muted),
-                                    )
-                                    .child(div().flex_1())
-                                    .child(
-                                        IconButton::new("db-copy-edits-sql", IconName::Copy)
-                                            .icon_size(IconSize::Small)
-                                            .icon_color(Color::Muted)
-                                            .tooltip(Tooltip::text("Copiar o SQL"))
-                                            .on_click(move |_, _, cx| {
-                                                cx.write_to_clipboard(ClipboardItem::new_string(
-                                                    copy.clone(),
-                                                ))
-                                            }),
-                                    ),
-                            )
-                            .children(text.lines().map(|line| {
-                                Label::new(line.to_owned())
-                                    .size(LabelSize::Small)
-                                    .buffer_font(cx)
-                                    .color(if line.contains("is not distinct from") {
-                                        Color::Warning
-                                    } else {
-                                        Color::Default
-                                    })
-                            })),
-                    )
-                })
+                .id("db-edits-preview")
+                .occlude()
+                .absolute()
+                .right_3()
+                .bottom(px(64.))
+                .w(px(516.))
+                .max_h(px(420.))
+                .rounded_lg()
+                .border_1()
+                .border_color(colors.border_selected)
+                .bg(colors.elevated_surface_background)
+                .shadow_lg()
                 .child(
                     h_flex()
-                        .px_3()
-                        .py_1p5()
+                        .px_3p5()
+                        .py_3()
+                        .gap_3()
+                        .border_b_1()
+                        .border_color(colors.border)
+                        .child(
+                            Label::new("SQL que vai rodar")
+                                .size(LabelSize::Small)
+                                .weight(FontWeight::SEMIBOLD),
+                        )
+                        .child(
+                            Label::new(format!(
+                                "{updates} {} · numa transação · {} {}",
+                                if updates == 1 { "update" } else { "updates" },
+                                self.connection.name,
+                                self.connection.environment.label()
+                            ))
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
+                        ),
+                )
+                .child(
+                    v_flex()
+                        .id("db-edits-preview-lines")
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_y_scroll()
+                        .px_1p5()
+                        .py_2p5()
+                        .children(text.lines().enumerate().map(|(index, line)| {
+                            let guard = line.contains("is not distinct from");
+                            h_flex()
+                                .h(px(21.))
+                                .px_2()
+                                .gap_3()
+                                .overflow_hidden()
+                                .rounded_sm()
+                                .when(guard, |this| {
+                                    this.bg(Color::Warning.color(cx).opacity(0.1))
+                                })
+                                .child(
+                                    div().w(px(16.)).flex().justify_end().child(
+                                        Label::new((index + 1).to_string())
+                                            .size(LabelSize::XSmall)
+                                            .buffer_font(cx)
+                                            .color(Color::Muted),
+                                    ),
+                                )
+                                .child(sql_line(line, cx))
+                        })),
+                )
+                .child(
+                    h_flex()
+                        .px_3p5()
+                        .py_2p5()
                         .gap_2()
-                        .when(count > 0, |this| {
-                            this.bg(Color::Warning.color(cx).opacity(0.08))
-                                .child(Indicator::dot().color(Color::Warning))
-                                .child(
-                                    Label::new(if count == 1 {
-                                        "1 alteração pendente".to_owned()
-                                    } else {
-                                        format!("{count} alterações pendentes")
-                                    })
-                                    .size(LabelSize::Small)
-                                    .weight(FontWeight::SEMIBOLD)
-                                    .color(Color::Warning),
+                        .items_start()
+                        .border_t_1()
+                        .border_color(colors.border)
+                        .child(
+                            Icon::new(IconName::Info)
+                                .size(IconSize::Small)
+                                .color(Color::Warning),
+                        )
+                        .child(
+                            div().flex_1().min_w_0().child(
+                                Label::new(
+                                    "As linhas âmbar conferem o valor antigo. Se alguém mudou a \
+                                     linha depois que você abriu a tabela, o update afeta 0 linhas \
+                                     e nada é sobrescrito.",
                                 )
-                                .child(
-                                    Label::new("· numa transação")
-                                        .size(LabelSize::XSmall)
-                                        .color(Color::Muted),
-                                )
-                        })
-                        .when_some(self.notice.clone(), |this, (notice, color)| {
-                            this.child(
-                                div().min_w_0().child(
-                                    Label::new(notice)
-                                        .size(LabelSize::Small)
-                                        .color(color)
-                                        .truncate(),
-                                ),
-                            )
-                        })
-                        .child(div().flex_1())
-                        .when(count > 0, |this| {
-                            this.child(
-                                Button::new(
-                                    "db-edits-sql",
-                                    if self.show_sql {
-                                        "Ocultar SQL"
-                                    } else {
-                                        "Ver SQL"
-                                    },
-                                )
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted),
+                            ),
+                        ),
+                )
+                .child(
+                    h_flex()
+                        .px_3p5()
+                        .pb_3()
+                        .gap_4()
+                        .child(
+                            Button::new("db-copy-edits-sql", "Copiar")
                                 .style(ButtonStyle::Subtle)
                                 .label_size(LabelSize::Small)
-                                .on_click(cx.listener(
-                                    |this, _, _, cx| {
-                                        this.show_sql = !this.show_sql;
-                                        cx.notify();
-                                    },
-                                )),
-                            )
-                            .child(
-                                Button::new("db-edits-discard", "Descartar")
-                                    .style(ButtonStyle::Subtle)
-                                    .label_size(LabelSize::Small)
-                                    .disabled(self.applying)
-                                    .on_click(cx.listener(|this, _, _, cx| this.discard_edits(cx))),
-                            )
-                            .child(
-                                Button::new(
-                                    "db-edits-apply",
-                                    if self.applying {
-                                        "Aplicando…"
-                                    } else {
-                                        "Aplicar"
-                                    },
-                                )
-                                .style(ButtonStyle::Tinted(ui::TintColor::Accent))
+                                .on_click(move |_, _, cx| {
+                                    cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))
+                                }),
+                        )
+                        .child(
+                            Button::new("db-open-edits-sql", "Abrir num .sql")
+                                .style(ButtonStyle::Subtle)
                                 .label_size(LabelSize::Small)
-                                .disabled(self.applying)
-                                .key_binding(ui::KeyBinding::for_action_in(
-                                    &ApplyEdits,
-                                    &self.focus_handle,
-                                    cx,
-                                ))
-                                .on_click(cx.listener(
-                                    |this, _, window, cx| this.apply_edits(&ApplyEdits, window, cx),
-                                )),
-                            )
-                        }),
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.open_in_query(
+                                        "alterações pendentes".to_owned(),
+                                        open.clone(),
+                                        window,
+                                        cx,
+                                    )
+                                })),
+                        )
+                        .child(div().flex_1())
+                        .child(
+                            Button::new("db-close-edits-sql", "fechar")
+                                .style(ButtonStyle::Subtle)
+                                .label_size(LabelSize::XSmall)
+                                .color(Color::Muted)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.show_sql = false;
+                                    cx.notify();
+                                })),
+                        ),
                 )
                 .into_any_element(),
         )
     }
 
-    fn render_rows(
+    /// SQL that changes the table goes to a new `.sql` file instead of running from here, so it
+    /// passes through the editor and its write confirmation.
+    fn open_in_query(
+        &mut self,
+        what: String,
+        sql: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let header = format!(
+            "-- {} · {} · {}.{}: {what}",
+            self.connection.name,
+            self.connection.environment.label(),
+            self.schema,
+            self.name
+        );
+        let panel = self
+            .workspace
+            .read_with(cx, |workspace, cx| workspace.panel::<DatabasePanel>(cx))
+            .ok()
+            .flatten();
+        let result = match panel {
+            Some(panel) => panel.update(cx, |panel, cx| {
+                panel.open_query_with(header, sql, false, window, cx)
+            }),
+            None => Err(anyhow::anyhow!("O painel do Banco foi fechado.")),
+        };
+        if let Err(error) = result {
+            self.notice = Some((format!("{error:#}").into(), Color::Error));
+            cx.notify();
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_section(
         &self,
-        headers: &[&'static str],
-        widths: &[f32],
-        rows: Vec<Vec<(String, Color)>>,
+        title: &'static str,
+        count: usize,
+        headers: &[(&'static str, f32)],
+        rows: Vec<Vec<Option<(String, Color, bool)>>>,
         cx: &App,
     ) -> AnyElement {
-        let row = |cells: Vec<AnyElement>| {
-            h_flex()
-                .px_3()
-                .py_1p5()
-                .gap_3()
-                .border_b_1()
-                .border_color(cx.theme().colors().border_variant)
-                .children(cells)
-        };
-        let cell = |index: usize, child: AnyElement| {
-            let width = widths.get(index).copied().unwrap_or(0.);
+        let colors = cx.theme().colors();
+        let cell = |index: usize| {
+            let width = headers.get(index).map(|(_, width)| *width).unwrap_or(0.);
+            let cell = h_flex().h_full().px_3().min_w_0();
             if width > 0. {
-                div()
-                    .w(px(width))
-                    .flex_none()
-                    .child(child)
-                    .into_any_element()
+                cell.w(px(width)).flex_none()
             } else {
-                div().flex_1().min_w_0().child(child).into_any_element()
+                cell.flex_1()
             }
         };
         v_flex()
+            .gap_2()
             .child(
-                row(headers
-                    .iter()
-                    .enumerate()
-                    .map(|(index, header)| {
-                        cell(
-                            index,
-                            Label::new(*header)
-                                .size(LabelSize::XSmall)
-                                .weight(FontWeight::SEMIBOLD)
-                                .color(Color::Muted)
-                                .into_any_element(),
-                        )
-                    })
-                    .collect())
-                .bg(cx.theme().colors().element_background),
+                h_flex()
+                    .gap_2()
+                    .child(Label::new(title).weight(FontWeight::SEMIBOLD))
+                    .child(
+                        Label::new(count.to_string())
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
+                    ),
             )
-            .children(rows.into_iter().map(|values| {
-                row(values
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, (value, color))| {
-                        cell(
-                            index,
-                            Label::new(value)
-                                .size(LabelSize::Small)
-                                .buffer_font(cx)
-                                .color(color)
-                                .into_any_element(),
+            .child(
+                v_flex()
+                    .rounded_lg()
+                    .border_1()
+                    .border_color(colors.border)
+                    .overflow_hidden()
+                    .child(
+                        h_flex()
+                            .h(px(32.))
+                            .bg(colors.element_background)
+                            .children(headers.iter().enumerate().map(|(index, (header, _))| {
+                                cell(index).child(
+                                    Label::new(*header)
+                                        .size(LabelSize::XSmall)
+                                        .weight(FontWeight::MEDIUM)
+                                        .color(Color::Muted),
+                                )
+                            })),
+                    )
+                    .children(rows.into_iter().map(|values| {
+                        h_flex()
+                            .h(px(28.))
+                            .border_t_1()
+                            .border_color(colors.border)
+                            .children(values.into_iter().enumerate().map(|(index, value)| {
+                                cell(index).children(value.map(|(text, color, mono)| {
+                                    Label::new(text)
+                                        .size(LabelSize::Small)
+                                        .color(color)
+                                        .when(mono, |label| label.buffer_font(cx))
+                                        .truncate()
+                                }))
+                            }))
+                    })),
+            )
+            .into_any_element()
+    }
+
+    fn columns_section(&self, structure: Option<&Structure>, cx: &App) -> AnyElement {
+        let mono = |text: String, color: Color| Some((text, color, true));
+        let rows = self
+            .columns
+            .iter()
+            .map(|column| {
+                let mut restrictions = Vec::new();
+                if column.primary_key {
+                    restrictions.push("PK".to_owned());
+                }
+                for index in structure.map(|structure| structure.indexes.as_slice()).unwrap_or(&[])
+                {
+                    if index.primary {
+                        continue;
+                    }
+                    let Some(expression) = index_columns(&index.definition) else {
+                        continue;
+                    };
+                    let expression = expression.trim_start_matches('(').trim_end_matches(')');
+                    if expression.split(',').count() > 1 || !mentions(expression, &column.name) {
+                        continue;
+                    }
+                    restrictions.push(if index.unique {
+                        format!("único · {}", index.name)
+                    } else if expression == column.name {
+                        "índice".to_owned()
+                    } else if expression.eq_ignore_ascii_case(&format!("{} desc", column.name)) {
+                        "índice desc".to_owned()
+                    } else {
+                        format!("índice por {expression}")
+                    });
+                }
+                if column.unique && !restrictions.iter().any(|r| r.starts_with("único")) {
+                    restrictions.push("único".to_owned());
+                }
+                let restriction_color = if column.primary_key {
+                    Color::Warning
+                } else {
+                    Color::Default
+                };
+                vec![
+                    mono(column.name.clone(), Color::Default),
+                    mono(column.type_name.clone(), Color::Accent),
+                    mono(
+                        if column.not_null { "não" } else { "sim" }.to_owned(),
+                        Color::Muted,
+                    ),
+                    match &column.default {
+                        Some(default) => mono(default.clone(), Color::Warning),
+                        None => mono("—".to_owned(), Color::Muted),
+                    },
+                    (!restrictions.is_empty()).then(|| {
+                        (
+                            restrictions.join(" · "),
+                            restriction_color,
+                            column.primary_key && restrictions.len() == 1,
                         )
-                    })
-                    .collect())
-            }))
+                    }),
+                ]
+            })
+            .collect();
+        self.render_section(
+            "Colunas",
+            self.columns.len(),
+            &[
+                ("Coluna", 180.),
+                ("Tipo", 170.),
+                ("Null", 70.),
+                ("Default", 260.),
+                ("Restrições", 0.),
+            ],
+            rows,
+            cx,
+        )
+    }
+
+    fn indexes_section(&self, structure: &Structure, cx: &App) -> AnyElement {
+        let rows = structure
+            .indexes
+            .iter()
+            .map(|index| {
+                let unused = index.scans == Some(0) && !index.primary;
+                let method = index
+                    .definition
+                    .split_once(" USING ")
+                    .and_then(|(_, rest)| rest.split_whitespace().next())
+                    .unwrap_or("btree")
+                    .to_owned();
+                let kind = if index.primary {
+                    format!("{method} · PK")
+                } else if index.unique {
+                    format!("{method} · único")
+                } else {
+                    method
+                };
+                vec![
+                    Some((index.name.clone(), Color::Default, true)),
+                    Some((
+                        index_columns(&index.definition)
+                            .unwrap_or(&index.definition)
+                            .to_owned(),
+                        Color::Muted,
+                        true,
+                    )),
+                    Some((kind, Color::Accent, true)),
+                    Some((index.size.clone(), Color::Muted, true)),
+                    Some((
+                        match index.scans {
+                            Some(0) if unused => "0 scans · candidato a remover".to_owned(),
+                            Some(scans) => format!("{} scans", format_scans(scans)),
+                            None => "sem estatística".to_owned(),
+                        },
+                        if unused { Color::Warning } else { Color::Default },
+                        false,
+                    )),
+                ]
+            })
+            .collect();
+        self.render_section(
+            "Índices",
+            structure.indexes.len(),
+            &[
+                ("Nome", 260.),
+                ("Colunas", 240.),
+                ("Tipo", 140.),
+                ("Tamanho", 100.),
+                ("Uso (desde o reset)", 0.),
+            ],
+            rows,
+            cx,
+        )
+    }
+
+    fn relations_section(&self, structure: &Structure, cx: &App) -> AnyElement {
+        let rows = structure
+            .foreign_keys
+            .iter()
+            .map(|foreign_key| {
+                vec![
+                    Some((
+                        match foreign_key.direction {
+                            ForeignKeyDirection::References => "referencia",
+                            ForeignKeyDirection::ReferencedBy => "referenciada por",
+                        }
+                        .to_owned(),
+                        Color::Muted,
+                        true,
+                    )),
+                    Some((foreign_key.other_table.clone(), Color::Default, true)),
+                    Some((
+                        foreign_key_columns(&foreign_key.definition)
+                            .unwrap_or_else(|| foreign_key.definition.clone()),
+                        Color::Default,
+                        true,
+                    )),
+                    Some((
+                        foreign_key.on_delete.clone(),
+                        if foreign_key.on_delete == "CASCADE" {
+                            Color::Error
+                        } else {
+                            Color::Accent
+                        },
+                        true,
+                    )),
+                    foreign_key.other_rows.map(|rows| {
+                        (crate::panel::format_count(rows), Color::Default, false)
+                    }),
+                ]
+            })
+            .collect();
+        self.render_section(
+            "Relações",
+            structure.foreign_keys.len(),
+            &[
+                ("Direção", 150.),
+                ("Tabela", 220.),
+                ("Coluna", 200.),
+                ("Ao apagar", 160.),
+                ("Linhas", 0.),
+            ],
+            rows,
+            cx,
+        )
+    }
+
+    fn render_structure_actions(&self, cx: &mut Context<Self>) -> AnyElement {
+        let table = qualified_name(&self.schema, &self.name);
+        let new_column = format!("alter table {table}\n    add column nova_coluna text;");
+        let new_index = format!(
+            "create index concurrently {}\n    on {table} (coluna);",
+            quote_ident(&format!("{}_coluna_idx", self.name))
+        );
+        v_flex()
+            .gap_3()
+            .pt_4()
+            .border_t_1()
+            .border_color(cx.theme().colors().border)
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(
+                        Icon::new(IconName::Info)
+                            .size(IconSize::Small)
+                            .color(Color::Muted),
+                    )
+                    .child(
+                        Label::new(
+                            "Mudar coluna, índice ou FK não roda direto: vira um ALTER TABLE num \
+                             .sql novo, que passa pelo editor e pela confirmação de escrita.",
+                        )
+                        .size(LabelSize::Small)
+                        .color(Color::Muted),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(
+                        secondary_button(
+                            "db-open-ddl",
+                            Some((IconName::FileCode, Color::Muted)),
+                            "Abrir DDL",
+                            true,
+                            cx,
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| this.select_tab(Tab::Ddl, cx))),
+                    )
+                    .child(
+                        secondary_button(
+                            "db-new-column",
+                            Some((IconName::Plus, Color::Muted)),
+                            "Nova coluna",
+                            true,
+                            cx,
+                        )
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.open_in_query(
+                                "nova coluna".to_owned(),
+                                new_column.clone(),
+                                window,
+                                cx,
+                            )
+                        })),
+                    )
+                    .child(
+                        secondary_button(
+                            "db-new-index",
+                            Some((IconName::Plus, Color::Muted)),
+                            "Novo índice",
+                            true,
+                            cx,
+                        )
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.open_in_query(
+                                "novo índice".to_owned(),
+                                new_index.clone(),
+                                window,
+                                cx,
+                            )
+                        })),
+                    ),
+            )
             .into_any_element()
     }
 
     fn render_structure_tab(&self, cx: &mut Context<Self>) -> AnyElement {
-        let content = match (&self.tab, &self.structure) {
-            (Tab::Structure, _) => self.render_rows(
-                &["Coluna", "Tipo", "Null", "Default", "Restrições"],
-                &[200., 200., 60., 240., 0.],
-                self.columns
-                    .iter()
-                    .map(|column| {
-                        let restrictions = [
-                            column.primary_key.then_some("PK"),
-                            column.unique.then_some("único"),
-                        ]
-                        .into_iter()
-                        .flatten()
-                        .collect::<Vec<_>>()
-                        .join(" · ");
-                        vec![
-                            (column.name.clone(), Color::Default),
-                            (column.type_name.clone(), Color::Accent),
-                            (
-                                if column.not_null { "não" } else { "sim" }.to_owned(),
-                                Color::Muted,
-                            ),
-                            (
-                                column.default.clone().unwrap_or_else(|| "—".to_owned()),
-                                if column.default.is_some() {
-                                    Color::Warning
-                                } else {
-                                    Color::Disabled
-                                },
-                            ),
-                            (
-                                restrictions,
-                                if column.primary_key {
-                                    Color::Warning
-                                } else {
-                                    Color::Muted
-                                },
-                            ),
-                        ]
-                    })
-                    .collect(),
-                cx,
-            ),
+        let structure = match &self.structure {
+            Some(Load::Loaded(structure)) => Some(structure),
+            _ => None,
+        };
+        let pending = match (&self.tab, &self.structure) {
+            (Tab::Structure, _) => None,
             (_, None | Some(Load::Loading)) => {
-                self.render_message("Lendo o catálogo…".into(), false, cx)
+                Some(self.render_message("Lendo o catálogo…".into(), false, cx))
             }
-            (_, Some(Load::Failed(error))) => self.render_message(error.clone(), true, cx),
-            (Tab::Indexes, Some(Load::Loaded(structure))) => {
-                if structure.indexes.is_empty() {
-                    self.render_message("Esta tabela não tem índices.".into(), false, cx)
-                } else {
-                    self.render_rows(
-                        &["Nome", "Definição", "Tamanho", "Uso"],
-                        &[240., 0., 90., 220.],
-                        structure
-                            .indexes
-                            .iter()
-                            .map(|index| {
-                                let unused = index.scans == Some(0) && !index.primary;
-                                vec![
-                                    (index.name.clone(), Color::Default),
-                                    (
-                                        index
-                                            .definition
-                                            .split_once(" USING ")
-                                            .map(|(_, rest)| rest.to_owned())
-                                            .unwrap_or_else(|| index.definition.clone()),
-                                        Color::Muted,
-                                    ),
-                                    (index.size.clone(), Color::Muted),
-                                    (
-                                        match index.scans {
-                                            Some(0) if unused => {
-                                                "0 scans · candidato a remover".to_owned()
-                                            }
-                                            Some(scans) => format!("{scans} scans"),
-                                            None => "sem estatística".to_owned(),
-                                        },
-                                        if unused { Color::Warning } else { Color::Muted },
-                                    ),
-                                ]
-                            })
-                            .collect(),
-                        cx,
+            (_, Some(Load::Failed(error))) => Some(self.render_message(error.clone(), true, cx)),
+            _ => None,
+        };
+        let content = if let Some(pending) = pending {
+            pending
+        } else {
+            match (self.tab, structure) {
+                (Tab::Structure, structure) => v_flex()
+                    .gap_6()
+                    .child(self.columns_section(structure, cx))
+                    .when_some(structure, |this, structure| {
+                        this.when(!structure.indexes.is_empty(), |this| {
+                            this.child(self.indexes_section(structure, cx))
+                        })
+                        .when(!structure.foreign_keys.is_empty(), |this| {
+                            this.child(self.relations_section(structure, cx))
+                        })
+                    })
+                    .when_some(
+                        match &self.structure {
+                            Some(Load::Failed(error)) => Some(error.clone()),
+                            _ => None,
+                        },
+                        |this, error| this.child(self.render_message(error, true, cx)),
                     )
+                    .child(self.render_structure_actions(cx))
+                    .into_any_element(),
+                (Tab::Indexes, Some(structure)) if structure.indexes.is_empty() => {
+                    self.render_message("Esta tabela não tem índices.".into(), false, cx)
                 }
-            }
-            (Tab::Relations, Some(Load::Loaded(structure))) => {
-                if structure.foreign_keys.is_empty() {
-                    self.render_message(
+                (Tab::Indexes, Some(structure)) => self.indexes_section(structure, cx),
+                (Tab::Relations, Some(structure)) if structure.foreign_keys.is_empty() => self
+                    .render_message(
                         "Nenhuma chave estrangeira aponta para esta tabela ou sai dela.".into(),
                         false,
                         cx,
-                    )
-                } else {
-                    self.render_rows(
-                        &["Direção", "Tabela", "Definição", "Ao apagar"],
-                        &[140., 220., 0., 110.],
-                        structure
-                            .foreign_keys
-                            .iter()
-                            .map(|foreign_key| {
-                                vec![
-                                    (
-                                        match foreign_key.direction {
-                                            ForeignKeyDirection::References => "referencia",
-                                            ForeignKeyDirection::ReferencedBy => "referenciada por",
-                                        }
-                                        .to_owned(),
-                                        Color::Muted,
-                                    ),
-                                    (foreign_key.other_table.clone(), Color::Default),
-                                    (foreign_key.definition.clone(), Color::Muted),
-                                    (
-                                        foreign_key.on_delete.clone(),
-                                        if foreign_key.on_delete == "CASCADE" {
-                                            Color::Error
-                                        } else {
-                                            Color::Accent
-                                        },
-                                    ),
-                                ]
-                            })
-                            .collect(),
-                        cx,
-                    )
-                }
-            }
-            (Tab::Ddl, Some(Load::Loaded(structure))) => {
-                let ddl = structure.ddl.clone();
-                v_flex()
-                    .p_3()
-                    .gap_2()
-                    .child(
-                        h_flex()
-                            .gap_2()
-                            .child(
-                                Label::new(
-                                    "Montado a partir do catálogo: colunas, defaults, restrições \
-                                     e índices.",
+                    ),
+                (Tab::Relations, Some(structure)) => self.relations_section(structure, cx),
+                (Tab::Ddl, Some(structure)) => {
+                    let ddl = structure.ddl.clone();
+                    v_flex()
+                        .gap_2()
+                        .child(
+                            h_flex()
+                                .gap_2()
+                                .child(
+                                    Label::new(
+                                        "Montado a partir do catálogo: colunas, defaults, \
+                                         restrições e índices.",
+                                    )
+                                    .size(LabelSize::Small)
+                                    .color(Color::Muted),
                                 )
-                                .size(LabelSize::XSmall)
-                                .color(Color::Muted),
-                            )
-                            .child(div().flex_1())
-                            .child(
-                                Button::new("db-copy-ddl", "Copiar")
-                                    .style(ButtonStyle::Outlined)
-                                    .label_size(LabelSize::Small)
-                                    .start_icon(Icon::new(IconName::Copy).size(IconSize::Small))
+                                .child(div().flex_1())
+                                .child(
+                                    secondary_button(
+                                        "db-copy-ddl",
+                                        Some((IconName::Copy, Color::Muted)),
+                                        "Copiar",
+                                        true,
+                                        cx,
+                                    )
                                     .on_click(move |_, _, cx| {
                                         cx.write_to_clipboard(ClipboardItem::new_string(
                                             ddl.clone(),
                                         ))
                                     }),
-                            ),
-                    )
-                    .child(
-                        v_flex()
-                            .p_3()
-                            .rounded_md()
-                            .bg(cx.theme().colors().editor_background)
-                            .border_1()
-                            .border_color(cx.theme().colors().border)
-                            .children(structure.ddl.lines().map(|line| {
-                                Label::new(line.to_owned())
-                                    .size(LabelSize::Small)
-                                    .buffer_font(cx)
-                            })),
-                    )
-                    .into_any_element()
+                                ),
+                        )
+                        .child(
+                            v_flex()
+                                .p_3()
+                                .rounded_lg()
+                                .bg(cx.theme().colors().editor_background)
+                                .border_1()
+                                .border_color(cx.theme().colors().border)
+                                .children(
+                                    structure.ddl.lines().map(|line| sql_line(line, cx)),
+                                ),
+                        )
+                        .into_any_element()
+                }
+                _ => div().into_any_element(),
             }
-            (Tab::Data, _) => div().into_any_element(),
         };
         v_flex()
             .id("db-table-structure")
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
+            .px_3()
+            .pt_1()
+            .pb_4()
             .child(content)
             .into_any_element()
+    }
+}
+
+/// `CREATE INDEX … USING btree (lower(email))` → `(lower(email))`.
+fn index_columns(definition: &str) -> Option<&str> {
+    let (_, rest) = definition.split_once(" USING ")?;
+    let start = rest.find('(')?;
+    let end = rest.rfind(')')?;
+    (start < end).then(|| &rest[start..=end])
+}
+
+/// Whether `expression` refers to `column` as a whole identifier, not inside a longer name.
+fn mentions(expression: &str, column: &str) -> bool {
+    expression
+        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .any(|word| word == column)
+}
+
+/// `FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE` → `user_id → users.id`.
+fn foreign_key_columns(definition: &str) -> Option<String> {
+    let rest = definition.strip_prefix("FOREIGN KEY (")?;
+    let (local, rest) = rest.split_once(')')?;
+    let rest = rest.trim_start().strip_prefix("REFERENCES ")?;
+    let (table, rest) = rest.split_once('(')?;
+    let (remote, _) = rest.split_once(')')?;
+    let table = table.rsplit('.').next().unwrap_or(table);
+    Some(format!("{local} → {table}.{remote}"))
+}
+
+/// `2412000` → `2,4 M`, `310245` → `310 k`, for index usage.
+fn format_scans(scans: i64) -> String {
+    if scans >= 1_000_000 {
+        format!("{:.1} M", scans as f64 / 1_000_000.0).replace('.', ",")
+    } else if scans >= 10_000 {
+        format!("{} k", scans / 1_000)
+    } else {
+        crate::panel::format_count(scans)
     }
 }
 
