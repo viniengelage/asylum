@@ -643,6 +643,8 @@ impl TaskAgentsView {
                 flows::StepKind::Agent(_) => (IconName::Person, Color::Accent),
                 flows::StepKind::Gate(_) => (IconName::UserCheck, Color::Warning),
                 flows::StepKind::Run(_) => (IconName::Terminal, Color::Success),
+                flows::StepKind::Branch(_) => (IconName::GitBranch, Color::Accent),
+                flows::StepKind::Parallel(_) => (IconName::ListTree, Color::Accent),
             };
             steps = steps.child(
                 h_flex()

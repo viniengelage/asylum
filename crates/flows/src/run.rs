@@ -35,6 +35,8 @@ pub enum StepState {
     Passed,
     /// Failed and was sent back; it runs again when the run reaches it.
     Failed,
+    /// A "Se / senão" jumped over it in this run.
+    Skipped,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -115,6 +117,10 @@ pub enum RunAction {
         step: usize,
     },
     RunCommand {
+        step: usize,
+    },
+    /// Starts every agent of an "Em paralelo" step at once.
+    StartParallel {
         step: usize,
     },
     /// Nothing to start: the run waits for the user or for work already started.
@@ -265,6 +271,11 @@ impl FlowRun {
             return;
         }
         let step = self.cursor;
+        if let StepKind::Branch(branch) = &self.flow.steps[step].kind {
+            let branch = branch.clone();
+            self.take_branch(step, &branch);
+            return;
+        }
         if let StepKind::Gate(gate) = &self.flow.steps[step].kind {
             let note = if gate.note.is_empty() {
                 "o que o passo anterior entregou".to_string()
@@ -280,6 +291,106 @@ impl FlowRun {
         }
     }
 
+    /// The latest delivery of an output in this run.
+    pub fn delivered(&self, output: &str) -> Option<&str> {
+        self.steps
+            .iter()
+            .rev()
+            .filter_map(|step| step.submission.as_ref())
+            .find_map(|submission| submission.outputs.get(output).map(String::as_str))
+    }
+
+    fn take_branch(&mut self, step: usize, branch: &crate::BranchStep) {
+        let holds = self.delivered(&branch.output).is_some_and(|value| {
+            value
+                .to_lowercase()
+                .contains(&branch.contains.to_lowercase())
+        });
+        let target_id = if holds {
+            &branch.then_to
+        } else {
+            &branch.else_to
+        };
+        let target = target_id
+            .as_deref()
+            .and_then(|id| self.flow.step_index(id))
+            .filter(|target| *target > step)
+            .unwrap_or(step + 1);
+        self.steps[step].state = StepState::Passed;
+        self.steps[step].note = Some(if holds { "sim" } else { "não" }.to_string());
+        for skipped in step + 1..target {
+            self.steps[skipped].state = StepState::Skipped;
+        }
+        let destination = if target < self.flow.steps.len() {
+            format!("segue para o passo {}", target + 1)
+        } else {
+            "segue para o fim".to_string()
+        };
+        let title = self.step_title(step, "Se / senão");
+        self.log(
+            RunEventKind::Verified,
+            title,
+            format!(
+                "{} {} “{}”: {destination}",
+                branch.output,
+                if holds { "contém" } else { "não contém" },
+                branch.contains
+            ),
+            Some(step),
+        );
+        self.cursor = target;
+        self.enter_cursor();
+    }
+
+    /// Every branch of an "Em paralelo" step finished, each with what it delivered or why it
+    /// didn't. Their outputs go on together.
+    pub fn parallel_finished(
+        &mut self,
+        step: usize,
+        label: &str,
+        results: Vec<(String, Result<Submission, String>)>,
+    ) {
+        let mut merged = Submission::default();
+        let mut failures = Vec::new();
+        for (branch, result) in results {
+            match result {
+                Ok(submission) => {
+                    let title = self.step_title(step, &branch);
+                    let delivered = if submission.outputs.is_empty() {
+                        submission.summary.clone()
+                    } else {
+                        format!(
+                            "entregou {}",
+                            submission
+                                .outputs
+                                .keys()
+                                .cloned()
+                                .collect::<Vec<_>>()
+                                .join(" + ")
+                        )
+                    };
+                    self.log(RunEventKind::Delivered, title, delivered, Some(step));
+                    if !submission.summary.is_empty() {
+                        if !merged.summary.is_empty() {
+                            merged.summary.push('\n');
+                        }
+                        merged
+                            .summary
+                            .push_str(&format!("{branch}: {}", submission.summary));
+                    }
+                    merged.outputs.extend(submission.outputs);
+                }
+                Err(reason) => failures.push(format!("{branch}: {reason}")),
+            }
+        }
+        self.steps[step].submission = Some(merged);
+        if failures.is_empty() {
+            self.pass_step(step, None);
+        } else {
+            self.fail_step(step, label, failures.join("; "));
+        }
+    }
+
     pub fn next_action(&self) -> RunAction {
         match &self.state {
             RunState::Succeeded | RunState::Cancelled => RunAction::Done,
@@ -291,7 +402,8 @@ impl FlowRun {
                         match &self.flow.steps[step].kind {
                             StepKind::Agent(_) => RunAction::StartAgent { step },
                             StepKind::Run(_) => RunAction::RunCommand { step },
-                            StepKind::Gate(_) => RunAction::Wait,
+                            StepKind::Parallel(_) => RunAction::StartParallel { step },
+                            StepKind::Gate(_) | StepKind::Branch(_) => RunAction::Wait,
                         }
                     }
                     _ => RunAction::Wait,
@@ -470,7 +582,8 @@ impl FlowRun {
         let on_fail = match &self.flow.steps[step].kind {
             StepKind::Agent(agent_step) => agent_step.on_fail.clone(),
             StepKind::Run(run) => run.on_fail.clone(),
-            StepKind::Gate(_) => OnFail::AskYou,
+            StepKind::Parallel(parallel) => parallel.on_fail.clone(),
+            StepKind::Gate(_) | StepKind::Branch(_) => OnFail::AskYou,
         };
         match on_fail {
             OnFail::Continue => {
@@ -532,6 +645,8 @@ impl FlowRun {
             StepKind::Agent(agent_step) => format!("/{}", agent_step.agent),
             StepKind::Gate(_) => "Você aprova".to_string(),
             StepKind::Run(run) => run.command.clone(),
+            StepKind::Branch(_) => "Se / senão".to_string(),
+            StepKind::Parallel(_) => "Em paralelo".to_string(),
         }
     }
 

@@ -300,3 +300,82 @@ fn test_snapshot_round_trips_and_requeues_the_running_step() {
     assert_eq!(restored.next_action(), RunAction::StartAgent { step: 1 });
     assert_eq!(restored.events, run.events);
 }
+
+#[test]
+fn test_branch_jumps_and_skips() {
+    let branch = FlowStep {
+        id: "se".to_string(),
+        kind: StepKind::Branch(crate::BranchStep {
+            output: "relatório".to_string(),
+            contains: "falhou".to_string(),
+            then_to: Some("dev-2".to_string()),
+            else_to: Some("docs".to_string()),
+        }),
+    };
+    let steps = vec![
+        agent("qa", vec![], OnFail::default_for_agent()),
+        branch,
+        agent("dev-2", vec![], OnFail::default_for_agent()),
+        agent("docs", vec![], OnFail::default_for_agent()),
+    ];
+    let mut run = FlowRun::new(flow(steps.clone()), String::new());
+    run.step_started(0);
+    let mut report = submission(&[], &[]);
+    report
+        .outputs
+        .insert("relatório".to_string(), "Tudo passou".to_string());
+    run.agent_submitted(0, "QA", report);
+    assert_eq!(run.cursor, 3);
+    assert_eq!(run.steps[2].state, StepState::Skipped);
+    assert_eq!(run.next_action(), RunAction::StartAgent { step: 3 });
+
+    let mut run = FlowRun::new(flow(steps), String::new());
+    run.step_started(0);
+    let mut report = submission(&[], &[]);
+    report.outputs.insert(
+        "relatório".to_string(),
+        "Login FALHOU no Android".to_string(),
+    );
+    run.agent_submitted(0, "QA", report);
+    assert_eq!(run.cursor, 2);
+    assert_eq!(run.steps[1].note.as_deref(), Some("sim"));
+}
+
+#[test]
+fn test_parallel_merges_outputs_and_fails_together() {
+    let parallel = FlowStep {
+        id: "paralelo".to_string(),
+        kind: StepKind::Parallel(crate::ParallelStep {
+            agents: vec!["qa".to_string(), "docs".to_string()],
+            read_only: true,
+            on_fail: OnFail::Retry { max: 1 },
+        }),
+    };
+    let mut run = FlowRun::new(flow(vec![parallel]), String::new());
+    assert_eq!(run.next_action(), RunAction::StartParallel { step: 0 });
+    run.step_started(0);
+    run.parallel_finished(
+        0,
+        "Em paralelo",
+        vec![
+            ("QA".to_string(), Ok(submission(&["relatório"], &[]))),
+            ("Docs".to_string(), Err("sem submit_step".to_string())),
+        ],
+    );
+    assert_eq!(run.steps[0].state, StepState::Failed);
+    assert_eq!(
+        run.steps[0].feedback.as_deref(),
+        Some("Docs: sem submit_step")
+    );
+    run.step_started(0);
+    run.parallel_finished(
+        0,
+        "Em paralelo",
+        vec![
+            ("QA".to_string(), Ok(submission(&["relatório"], &[]))),
+            ("Docs".to_string(), Ok(submission(&["docs"], &[]))),
+        ],
+    );
+    assert_eq!(run.state, RunState::Succeeded);
+    assert_eq!(run.delivered("docs"), Some("ok"));
+}

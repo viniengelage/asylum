@@ -9,22 +9,25 @@ use agent::{AgentTool as _, NativeAgentConnection, SubmitStepTool, SubmitStepToo
 use agent_client_protocol::schema::v2 as acp;
 use anyhow::{Context as _, Result, anyhow};
 use flows::run::{CriterionOutcome, CriterionResult, FlowRun, RunAction, Submission};
-use flows::{StepKind, Verifier};
+use flows::{StepKind, StepLimits, Verifier};
+use futures::FutureExt as _;
 use gpui::{AppContext as _, AsyncWindowContext, Entity, WeakEntity};
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use task_agents::TaskAgent;
+use util::ResultExt as _;
 use workspace::Workspace;
 
 const THREAD_READY_TIMEOUT: Duration = Duration::from_secs(30);
 const THREAD_READY_POLL: Duration = Duration::from_millis(100);
 /// How many lines of a command's output go into the evidence.
 const EVIDENCE_LINES: usize = 12;
+const LIMIT_POLL: Duration = Duration::from_secs(1);
 
 pub(super) struct RunningStep {
-    /// The thread of the step's agent while it works, so Parar can cancel it.
-    pub thread: Option<Entity<agent::Thread>>,
+    /// The threads of the step's agents while they work, so Parar can cancel them.
+    pub threads: Vec<Entity<agent::Thread>>,
     pub _task: gpui::Task<()>,
 }
 
@@ -48,6 +51,7 @@ impl FlowView {
         match run.next_action() {
             RunAction::StartAgent { step } => self.start_agent_step(step, window, cx),
             RunAction::RunCommand { step } => self.start_command_step(step, window, cx),
+            RunAction::StartParallel { step } => self.start_parallel_step(step, window, cx),
             RunAction::Wait | RunAction::Done => {}
         }
         cx.notify();
@@ -73,11 +77,16 @@ impl FlowView {
             }
         };
         run.step_started(step);
-        let prompt = step_prompt(run, step, &self.agents);
+        let prompt = step_prompt(run, step, &self.agents, None);
+        let limits = match &run.flow.steps[step].kind {
+            StepKind::Agent(agent_step) => Some(agent_step.limits),
+            _ => None,
+        };
         let title = format!("{} · {label}", run.flow.name);
         let workspace = self.workspace.clone();
         let task = cx.spawn_in(window, async move |this, cx| {
-            let outcome = run_step_thread(&this, &workspace, step, title, agent, prompt, cx).await;
+            let outcome =
+                run_step_thread(&this, &workspace, step, title, agent, prompt, limits, cx).await;
             this.update_in(cx, |this, window, cx| {
                 this.running = None;
                 if let Some(run) = &mut this.run {
@@ -118,7 +127,93 @@ impl FlowView {
             .ok();
         });
         self.running = Some(RunningStep {
-            thread: None,
+            threads: Vec::new(),
+            _task: task,
+        });
+    }
+
+    fn start_parallel_step(
+        &mut self,
+        step: usize,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(run) = &mut self.run else {
+            return;
+        };
+        let StepKind::Parallel(parallel) = run.flow.steps[step].kind.clone() else {
+            return;
+        };
+        let label = run.flow.steps[step].label(&self.agents);
+        run.step_started(step);
+        let mut branches = Vec::new();
+        for command in &parallel.agents {
+            let Some(agent) = self.agents.iter().find(|agent| &agent.command == command) else {
+                branches.push((format!("/{command}"), None));
+                continue;
+            };
+            let mut agent = with_submit_step(agent.clone());
+            if parallel.read_only {
+                agent.profile = Some(agent_settings::builtin_profiles::ASK.to_string());
+            }
+            let prompt = step_prompt(run, step, &self.agents, Some(command));
+            let title = format!("{} · {}", run.flow.name, agent.name);
+            branches.push((agent.name.clone(), Some((agent, prompt, title))));
+        }
+        let workspace = self.workspace.clone();
+        let mut tasks = Vec::new();
+        for (name, branch) in branches {
+            let Some((agent, prompt, title)) = branch else {
+                tasks.push((name, None));
+                continue;
+            };
+            let workspace = workspace.clone();
+            let task = cx.spawn_in(window, async move |this, cx| {
+                run_step_thread(
+                    &this,
+                    &workspace,
+                    step,
+                    title,
+                    agent,
+                    prompt,
+                    Some(StepLimits::default()),
+                    cx,
+                )
+                .await
+            });
+            tasks.push((name, Some(task)));
+        }
+        let task = cx.spawn_in(window, async move |this, cx| {
+            let mut results = Vec::new();
+            for (name, task) in tasks {
+                let result = match task {
+                    None => Err("o agente não existe mais; edite a esteira".to_string()),
+                    Some(task) => match task.await {
+                        Ok(StepThreadOutcome {
+                            submission: Some(submission),
+                            ..
+                        }) => Ok(submission_from_tool(submission)),
+                        Ok(StepThreadOutcome { .. }) => {
+                            Err("terminou sem chamar submit_step".to_string())
+                        }
+                        Err(error) => Err(format!("{error:#}")),
+                    },
+                };
+                results.push((name, result));
+            }
+            this.update_in(cx, |this, window, cx| {
+                this.running = None;
+                if let Some(run) = &mut this.run
+                    && !run.is_finished()
+                {
+                    run.parallel_finished(step, &label, results);
+                }
+                this.drive(window, cx);
+            })
+            .ok();
+        });
+        self.running = Some(RunningStep {
+            threads: Vec::new(),
             _task: task,
         });
     }
@@ -155,7 +250,7 @@ impl FlowView {
             .ok();
         });
         self.running = Some(RunningStep {
-            thread: None,
+            threads: Vec::new(),
             _task: task,
         });
     }
@@ -216,9 +311,10 @@ impl FlowView {
                             let agent = with_submit_step(agent.clone());
                             let prompt = verifier_prompt(&flow_name, &label, &text, &delivery);
                             let title = format!("{flow_name} · /{command} confere {label}");
-                            let outcome =
-                                run_step_thread(&this, &workspace, step, title, agent, prompt, cx)
-                                    .await?;
+                            let outcome = run_step_thread(
+                                &this, &workspace, step, title, agent, prompt, None, cx,
+                            )
+                            .await?;
                             let submission = outcome
                                 .submission
                                 .context("o verificador terminou sem chamar submit_step")?;
@@ -260,7 +356,7 @@ impl FlowView {
             .ok();
         });
         self.running = Some(RunningStep {
-            thread: None,
+            threads: Vec::new(),
             _task: task,
         });
     }
@@ -352,7 +448,8 @@ fn delivery_summary(run: &FlowRun, step: usize) -> String {
 
 /// What the step's agent reads first. Never starts with `/`: a leading command would make the
 /// native agent swap the task agent for the plain one, without this flow's overrides.
-fn step_prompt(run: &FlowRun, step: usize, agents: &[TaskAgent]) -> String {
+/// `branch` is the agent of an "Em paralelo" step that the prompt is for.
+fn step_prompt(run: &FlowRun, step: usize, agents: &[TaskAgent], branch: Option<&str>) -> String {
     let flow = &run.flow;
     let total = flow.steps.len();
     let mut prompt = format!(
@@ -371,6 +468,42 @@ fn step_prompt(run: &FlowRun, step: usize, agents: &[TaskAgent]) -> String {
         }
     }
 
+    if let (StepKind::Parallel(parallel), Some(branch)) = (&flow.steps[step].kind, branch) {
+        let others: Vec<String> = parallel
+            .agents
+            .iter()
+            .filter(|command| command.as_str() != branch)
+            .map(|command| format!("/{command}"))
+            .collect();
+        prompt.push_str(&format!(
+            "\n## Em paralelo\nVocê roda ao mesmo tempo que {}. {}\n",
+            others.join(", "),
+            if parallel.read_only {
+                "Só leitura: não altere arquivos do projeto."
+            } else {
+                "Não edite os mesmos arquivos que os outros."
+            }
+        ));
+        let gives = agents
+            .iter()
+            .find(|agent| agent.command == branch)
+            .map(|agent| agent.gives.clone())
+            .unwrap_or_default();
+        if !gives.is_empty() {
+            prompt.push_str("\n## Entregue\n");
+            for name in &gives {
+                prompt.push_str(&format!("- `{name}`\n"));
+            }
+        }
+        if let Some(feedback) = &run.steps[step].feedback {
+            prompt.push_str(&format!("\n## Refaça considerando\n{feedback}\n"));
+        }
+        prompt.push_str(
+            "\n## Como entregar\nQuando terminar, chame `submit_step` uma única vez com `summary` e `outputs` \
+             pelo nome exato acima. Depois encerre o turno.",
+        );
+        return prompt;
+    }
     let StepKind::Agent(agent_step) = &flow.steps[step].kind else {
         return prompt;
     };
@@ -462,6 +595,7 @@ fn completed_submission(thread: &AcpThread) -> Option<SubmitStepToolInput> {
 
 /// Opens a thread in the Agent panel for the step, sends the prompt with the step's task agent
 /// and waits for the turn. A turn without `submit_step` gets one reminder.
+#[allow(clippy::too_many_arguments)]
 async fn run_step_thread(
     this: &WeakEntity<FlowView>,
     workspace: &WeakEntity<Workspace>,
@@ -469,8 +603,10 @@ async fn run_step_thread(
     title: String,
     agent: TaskAgent,
     prompt: String,
+    limits: Option<StepLimits>,
     cx: &mut AsyncWindowContext,
 ) -> Result<StepThreadOutcome> {
+    let started_at = Instant::now();
     let (panel, thread_id) = workspace.update_in(cx, |workspace, window, cx| {
         let panel = workspace
             .panel::<AgentPanel>(cx)
@@ -515,11 +651,16 @@ async fn run_step_thread(
     })?;
     this.update(cx, |this, _| {
         if let Some(running) = &mut this.running {
-            running.thread = Some(native_thread.clone());
+            running.threads.push(native_thread.clone());
         }
     })?;
 
-    let stop_reason = send(&connection, &acp_thread, prompt, cx).await?;
+    let limits = limits.map(|limits| Limits {
+        limits,
+        started_at,
+        native_thread: native_thread.clone(),
+    });
+    let stop_reason = send(&connection, &acp_thread, prompt, limits.as_ref(), cx).await?;
     let submission = cx.update(|_, cx| completed_submission(acp_thread.read(cx)))?;
     if submission.is_some() || stop_reason != acp::StopReason::EndTurn {
         return Ok(StepThreadOutcome {
@@ -533,6 +674,7 @@ async fn run_step_thread(
         "Você encerrou sem chamar `submit_step`. Se o trabalho está pronto, chame `submit_step` agora; \
          se falta algo, termine e então chame."
             .to_string(),
+        limits.as_ref(),
         cx,
     )
     .await?;
@@ -543,15 +685,63 @@ async fn run_step_thread(
     })
 }
 
+struct Limits {
+    limits: StepLimits,
+    started_at: Instant,
+    native_thread: Entity<agent::Thread>,
+}
+
+fn assistant_turns(thread: &AcpThread) -> usize {
+    thread
+        .entries()
+        .iter()
+        .filter(|entry| matches!(entry, AgentThreadEntry::AssistantMessage(_)))
+        .count()
+}
+
+/// Sends a message and waits for the turn. With limits, a turn past the step's minutes or
+/// number of assistant turns is cancelled and the step fails with that reason.
 async fn send(
     connection: &Rc<NativeAgentConnection>,
     acp_thread: &Entity<AcpThread>,
     text: String,
+    limits: Option<&Limits>,
     cx: &mut AsyncWindowContext,
 ) -> Result<acp::StopReason> {
     let content = vec![acp::ContentBlock::Text(acp::TextContent::new(text))];
-    cx.update(|_, cx| connection.send_and_wait_for_completion(acp_thread.clone(), content, cx))?
-        .await
+    let mut completion = cx
+        .update(|_, cx| connection.send_and_wait_for_completion(acp_thread.clone(), content, cx))?
+        .fuse();
+    let Some(limits) = limits else {
+        return completion.await;
+    };
+    loop {
+        let mut tick = cx.background_executor().timer(LIMIT_POLL).fuse();
+        futures::select_biased! {
+            result = completion => return result,
+            _ = tick => {
+                let turns = cx.update(|_, cx| assistant_turns(acp_thread.read(cx)))?;
+                let minutes = u64::from(limits.limits.minutes);
+                let exceeded = if minutes > 0
+                    && limits.started_at.elapsed() > Duration::from_secs(minutes * 60)
+                {
+                    Some(format!("passou do limite de {minutes} min"))
+                } else if limits.limits.turns > 0 && turns > limits.limits.turns as usize {
+                    Some(format!("passou do limite de {} turnos", limits.limits.turns))
+                } else {
+                    None
+                };
+                if let Some(reason) = exceeded {
+                    let cancel = cx.update(|_, cx| {
+                        limits.native_thread.update(cx, |thread, cx| thread.cancel(cx))
+                    })?;
+                    cancel.await;
+                    completion.await.log_err();
+                    return Err(anyhow!(reason));
+                }
+            }
+        }
+    }
 }
 
 /// The panel creates the thread's view right away, but its session only exists once the native
@@ -701,7 +891,7 @@ mod tests {
             }),
         );
 
-        let prompt = step_prompt(&run, 1, &agents);
+        let prompt = step_prompt(&run, 1, &agents, None);
         assert!(!prompt.trim_start().starts_with('/'));
         assert!(prompt.contains("passo 2 de 2"));
         assert!(prompt.contains("`spec.md` (de PRODUTO): docs/todo.md"));

@@ -62,6 +62,33 @@ pub enum StepKind {
     Agent(AgentStep),
     Gate(GateStep),
     Run(RunStep),
+    Branch(BranchStep),
+    Parallel(ParallelStep),
+}
+
+/// "Se / senão": looks at what an earlier step delivered and jumps ahead. The steps jumped over
+/// are skipped in this run.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BranchStep {
+    /// The name of an output delivered before this step.
+    pub output: String,
+    /// The condition holds when the output contains this text, ignoring case.
+    pub contains: String,
+    /// Where to go when it holds; `None` is the next step.
+    pub then_to: Option<String>,
+    /// Where to go when it doesn't; `None` is the next step.
+    pub else_to: Option<String>,
+}
+
+/// "Em paralelo": several agents at the same time, each in its own thread. The step passes when
+/// all of them deliver; their outputs go on together.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParallelStep {
+    /// The agents' commands.
+    pub agents: Vec<String>,
+    /// The branches only read the project, so they can't step on each other's files.
+    pub read_only: bool,
+    pub on_fail: OnFail,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -224,6 +251,25 @@ impl FlowStep {
                 .unwrap_or_else(|| format!("/{}", step.agent)),
             StepKind::Gate(_) => "Você aprova".to_string(),
             StepKind::Run(_) => "Rodar comando".to_string(),
+            StepKind::Branch(_) => "Se / senão".to_string(),
+            StepKind::Parallel(parallel) => {
+                let names: Vec<String> = parallel
+                    .agents
+                    .iter()
+                    .map(|command| {
+                        agents
+                            .iter()
+                            .find(|agent| &agent.command == command)
+                            .map(|agent| agent.name.clone())
+                            .unwrap_or_else(|| format!("/{command}"))
+                    })
+                    .collect();
+                if names.is_empty() {
+                    "Em paralelo".to_string()
+                } else {
+                    format!("Em paralelo · {}", names.join(" + "))
+                }
+            }
         }
     }
 
@@ -232,6 +278,8 @@ impl FlowStep {
             StepKind::Agent(step) => &step.agent,
             StepKind::Gate(_) => "aprovacao",
             StepKind::Run(_) => "comando",
+            StepKind::Branch(_) => "se",
+            StepKind::Parallel(_) => "paralelo",
         }
     }
 }
@@ -269,20 +317,21 @@ impl Flow {
             from_step: None,
         }];
         for (step_index, step) in self.steps.iter().take(index).enumerate() {
-            let StepKind::Agent(agent_step) = &step.kind else {
-                continue;
+            let commands: Vec<&String> = match &step.kind {
+                StepKind::Agent(agent_step) => vec![&agent_step.agent],
+                StepKind::Parallel(parallel) => parallel.agents.iter().collect(),
+                _ => continue,
             };
-            let Some(agent) = agents
-                .iter()
-                .find(|agent| agent.command == agent_step.agent)
-            else {
-                continue;
-            };
-            for output in &agent.gives {
-                inputs.push(AvailableInput {
-                    name: output.clone(),
-                    from_step: Some(step_index),
-                });
+            for command in commands {
+                let Some(agent) = agents.iter().find(|agent| &agent.command == command) else {
+                    continue;
+                };
+                for output in &agent.gives {
+                    inputs.push(AvailableInput {
+                        name: output.clone(),
+                        from_step: Some(step_index),
+                    });
+                }
             }
         }
         inputs
@@ -342,6 +391,16 @@ struct RawStep {
     gate: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     run: Option<String>,
+    #[serde(default, rename = "if", skip_serializing_if = "Option::is_none")]
+    if_: Option<RawCondition>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    then: Option<String>,
+    #[serde(default, rename = "else", skip_serializing_if = "Option::is_none")]
+    else_: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    parallel: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    read_only: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     note: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -358,6 +417,14 @@ struct RawStep {
     on_fail: Option<RawOnFail>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     limits: Option<RawLimits>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawCondition {
+    output: String,
+    #[serde(default)]
+    contains: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -507,11 +574,35 @@ impl RawStep {
             self.agent.is_some(),
             self.gate.is_some(),
             self.run.is_some(),
+            self.if_.is_some(),
+            self.parallel.is_some(),
         ];
         anyhow::ensure!(
             kinds.iter().filter(|is_set| **is_set).count() == 1,
-            "cada passo tem exatamente um de `agent`, `gate` ou `run`"
+            "cada passo tem exatamente um de `agent`, `gate`, `run`, `if` ou `parallel`"
         );
+        if let Some(condition) = self.if_ {
+            return Ok(StepKind::Branch(BranchStep {
+                output: condition.output.trim().to_string(),
+                contains: condition.contains,
+                then_to: self.then.filter(|target| !target.trim().is_empty()),
+                else_to: self.else_.filter(|target| !target.trim().is_empty()),
+            }));
+        }
+        if let Some(parallel) = self.parallel {
+            return Ok(StepKind::Parallel(ParallelStep {
+                agents: parallel
+                    .iter()
+                    .map(|command| task_agents::command_slug(command))
+                    .filter(|command| !command.is_empty())
+                    .collect(),
+                read_only: self.read_only.unwrap_or(true),
+                on_fail: match self.on_fail {
+                    Some(on_fail) => on_fail.into_on_fail()?,
+                    None => OnFail::AskYou,
+                },
+            }));
+        }
         if let Some(gate) = self.gate {
             anyhow::ensure!(gate == "you", "`gate: {gate}` não existe; use `gate: you`");
             return Ok(StepKind::Gate(GateStep {
@@ -610,6 +701,22 @@ impl RawStep {
                     .then(|| RawOnFail::from_on_fail(&run.on_fail)),
                 ..Default::default()
             },
+            StepKind::Branch(branch) => Self {
+                if_: Some(RawCondition {
+                    output: branch.output.clone(),
+                    contains: branch.contains.clone(),
+                }),
+                then: branch.then_to.clone(),
+                else_: branch.else_to.clone(),
+                ..Default::default()
+            },
+            StepKind::Parallel(parallel) => Self {
+                parallel: Some(parallel.agents.clone()),
+                read_only: (!parallel.read_only).then_some(false),
+                on_fail: (parallel.on_fail != OnFail::AskYou)
+                    .then(|| RawOnFail::from_on_fail(&parallel.on_fail)),
+                ..Default::default()
+            },
         }
     }
 }
@@ -679,6 +786,8 @@ pub enum FlowProblem {
     EmptyCriterion { step: usize, criterion: usize },
     UnknownVerifierAgent { step: usize, agent: String },
     InvalidModel { step: usize, model: String },
+    BranchTargetNotLater { step: usize, target: String },
+    EmptyParallel { step: usize },
 }
 
 impl FlowProblem {
@@ -695,7 +804,9 @@ impl FlowProblem {
             | Self::EmptyCommand { step }
             | Self::EmptyCriterion { step, .. }
             | Self::UnknownVerifierAgent { step, .. }
-            | Self::InvalidModel { step, .. } => Some(*step),
+            | Self::InvalidModel { step, .. }
+            | Self::BranchTargetNotLater { step, .. }
+            | Self::EmptyParallel { step } => Some(*step),
         }
     }
 }
@@ -735,6 +846,13 @@ impl fmt::Display for FlowProblem {
                 f,
                 "O modelo `{model}` precisa ser provedor/modelo, ex.: anthropic/claude-opus-5-5."
             ),
+            Self::BranchTargetNotLater { target, .. } => write!(
+                f,
+                "“Se / senão” vai para `{target}`, que não é um passo depois deste."
+            ),
+            Self::EmptyParallel { .. } => {
+                write!(f, "“Em paralelo” precisa de ao menos dois agentes.")
+            }
         }
     }
 }
@@ -841,6 +959,55 @@ pub fn validate_flow(flow: &Flow, agents: &[TaskAgent]) -> Vec<FlowProblem> {
                     problems.push(FlowProblem::EmptyCommand { step: index });
                 }
                 check_back_to(&run.on_fail, &mut problems);
+            }
+            StepKind::Branch(branch) => {
+                let available = flow.available_inputs(index, agents);
+                if !available.iter().any(|input| input.name == branch.output) {
+                    problems.push(FlowProblem::MissingInput {
+                        step: index,
+                        input: if branch.output.is_empty() {
+                            "a saída que a condição olha".to_string()
+                        } else {
+                            branch.output.clone()
+                        },
+                    });
+                }
+                for target in [&branch.then_to, &branch.else_to].into_iter().flatten() {
+                    if !flow.steps[index + 1..]
+                        .iter()
+                        .any(|later| &later.id == target)
+                    {
+                        problems.push(FlowProblem::BranchTargetNotLater {
+                            step: index,
+                            target: target.clone(),
+                        });
+                    }
+                }
+            }
+            StepKind::Parallel(parallel) => {
+                if parallel.agents.len() < 2 {
+                    problems.push(FlowProblem::EmptyParallel { step: index });
+                }
+                let available = flow.available_inputs(index, agents);
+                for command in &parallel.agents {
+                    match agents.iter().find(|agent| &agent.command == command) {
+                        None => problems.push(FlowProblem::UnknownAgent {
+                            step: index,
+                            agent: command.clone(),
+                        }),
+                        Some(agent) => {
+                            for input in &agent.takes {
+                                if !available.iter().any(|available| &available.name == input) {
+                                    problems.push(FlowProblem::MissingInput {
+                                        step: index,
+                                        input: input.clone(),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+                check_back_to(&parallel.on_fail, &mut problems);
             }
         }
     }

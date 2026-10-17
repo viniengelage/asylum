@@ -6,8 +6,8 @@ use super::FlowView;
 use crate::task_agents_view::{OpenTaskAgents, model_dropdown, selector};
 use editor::{Editor, EditorEvent};
 use flows::{
-    AgentStep, Criterion, DesignTarget, DesignTool, FlowStep, GateStep, OnFail, RunStep, StepKind,
-    Verifier, unique_step_id, validate_flow,
+    AgentStep, BranchStep, Criterion, DesignTarget, DesignTool, FlowStep, GateStep, OnFail,
+    ParallelStep, RunStep, StepKind, Verifier, unique_step_id, validate_flow,
 };
 use gpui::{Entity, FontWeight, Subscription, Window};
 use task_agents::{TaskAgent, TaskAgentSource};
@@ -31,6 +31,8 @@ pub(super) enum NewStep {
     Agent(String),
     Gate,
     Command,
+    Branch,
+    Parallel,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -168,6 +170,33 @@ impl FlowView {
                     on_fail: OnFail::AskYou,
                 }),
             },
+            NewStep::Branch => {
+                let output = self
+                    .flow
+                    .available_inputs(at, &self.agents)
+                    .into_iter()
+                    .rev()
+                    .find(|input| input.from_step.is_some())
+                    .map(|input| input.name)
+                    .unwrap_or_default();
+                FlowStep {
+                    id: unique_step_id(&self.flow.steps, "se"),
+                    kind: StepKind::Branch(BranchStep {
+                        output,
+                        contains: String::new(),
+                        then_to: None,
+                        else_to: None,
+                    }),
+                }
+            }
+            NewStep::Parallel => FlowStep {
+                id: unique_step_id(&self.flow.steps, "paralelo"),
+                kind: StepKind::Parallel(ParallelStep {
+                    agents: Vec::new(),
+                    read_only: true,
+                    on_fail: OnFail::AskYou,
+                }),
+            },
         };
         let at = at.min(self.flow.steps.len());
         if self.edit_flow(cx, |flow| flow.steps.insert(at, step)) {
@@ -289,6 +318,15 @@ impl FlowView {
                     Vec::new(),
                     Default::default(),
                 ),
+                Some(StepKind::Branch(branch)) => (
+                    branch.contains.clone(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    Vec::new(),
+                    Default::default(),
+                ),
+                Some(StepKind::Parallel(_)) => Default::default(),
                 Some(StepKind::Agent(agent_step)) => (
                     String::new(),
                     String::new(),
@@ -377,6 +415,8 @@ impl FlowView {
             match &mut flow_step.kind {
                 StepKind::Gate(gate) => gate.note = note,
                 StepKind::Run(run) => run.command = command,
+                StepKind::Branch(branch) => branch.contains = note,
+                StepKind::Parallel(_) => {}
                 StepKind::Agent(agent_step) => {
                     agent_step.instructions = instructions;
                     if let Some(target) = &mut agent_step.where_ {
@@ -669,6 +709,24 @@ impl FlowView {
                     None,
                     "Rodar comando".to_string(),
                     NewStep::Command,
+                    cx,
+                ))
+                .child(item(
+                    "library-branch".into(),
+                    IconName::GitBranch,
+                    Color::Accent,
+                    None,
+                    "Se / senão".to_string(),
+                    NewStep::Branch,
+                    cx,
+                ))
+                .child(item(
+                    "library-parallel".into(),
+                    IconName::ListTree,
+                    Color::Accent,
+                    None,
+                    "Em paralelo".to_string(),
+                    NewStep::Parallel,
                     cx,
                 )),
         );
@@ -1003,6 +1061,8 @@ impl FlowView {
                                 for (label, new_step) in [
                                     ("Você aprova", NewStep::Gate),
                                     ("Rodar comando", NewStep::Command),
+                                    ("Se / senão", NewStep::Branch),
+                                    ("Em paralelo", NewStep::Parallel),
                                 ] {
                                     let view = view.clone();
                                     menu = menu.entry(label, None, move |window, cx| {
@@ -1059,6 +1119,22 @@ impl FlowView {
                     && let Some(target) = self.flow.step_index(step)
                 {
                     chips.push((format!("volta → {}", target + 1), Color::Error));
+                }
+            }
+            StepKind::Branch(branch) => {
+                let target = |id: &Option<String>| {
+                    id.as_deref()
+                        .and_then(|id| self.flow.step_index(id))
+                        .map(|target| format!("{}", target + 1))
+                        .unwrap_or_else(|| "próximo".to_string())
+                };
+                chips.push((format!("sim → {}", target(&branch.then_to)), Color::Success));
+                chips.push((format!("não → {}", target(&branch.else_to)), Color::Muted));
+            }
+            StepKind::Parallel(parallel) => {
+                chips.push((format!("{} agentes", parallel.agents.len()), Color::Muted));
+                if parallel.read_only {
+                    chips.push(("só leitura".to_string(), Color::Muted));
                 }
             }
         }
@@ -1130,6 +1206,41 @@ impl FlowView {
                 "Rodar comando".to_string(),
                 None,
                 format!("{} · passa se sair 0", run_step.command),
+            ),
+            StepKind::Branch(branch) => (
+                IconName::GitBranch,
+                Color::Accent,
+                "Se / senão".to_string(),
+                None,
+                if branch.output.is_empty() {
+                    "escolha a saída que a condição olha".to_string()
+                } else {
+                    format!("se {} contém “{}”", branch.output, branch.contains)
+                },
+            ),
+            StepKind::Parallel(parallel) => (
+                IconName::ListTree,
+                Color::Accent,
+                flow_step.label(&self.agents),
+                None,
+                if parallel.agents.is_empty() {
+                    "adicione os agentes que rodam juntos".to_string()
+                } else {
+                    format!(
+                        "{} ao mesmo tempo{}",
+                        parallel
+                            .agents
+                            .iter()
+                            .map(|command| format!("/{command}"))
+                            .collect::<Vec<_>>()
+                            .join(" + "),
+                        if parallel.read_only {
+                            " · só leitura"
+                        } else {
+                            ""
+                        }
+                    )
+                },
             ),
         };
         let is_gate = matches!(flow_step.kind, StepKind::Gate(_));
@@ -1307,6 +1418,10 @@ impl FlowView {
                     .unwrap_or_default(),
                 StepKind::Gate(_) => "pausa a esteira".to_string(),
                 StepKind::Run(run) => run.command.clone(),
+                StepKind::Branch(branch) => {
+                    format!("se {} contém “{}”", branch.output, branch.contains)
+                }
+                StepKind::Parallel(parallel) => format!("{} juntos", parallel.agents.len()),
             };
             let state = self
                 .run
@@ -1363,7 +1478,13 @@ impl FlowView {
                     }
                     _ => None,
                 },
-                StepKind::Gate(_) => None,
+                StepKind::Parallel(parallel) => match &parallel.on_fail {
+                    OnFail::BackTo { step, max } => {
+                        self.flow.step_index(step).map(|target| (target, *max))
+                    }
+                    _ => None,
+                },
+                StepKind::Gate(_) | StepKind::Branch(_) => None,
             };
             if let Some((target, max)) = back {
                 loops = loops.child(
@@ -1468,6 +1589,12 @@ impl FlowView {
             StepKind::Agent(agent_step) => self
                 .render_agent_inspector(index, agent_step, inspector, window, cx)
                 .into_any_element(),
+            StepKind::Branch(branch) => {
+                self.render_branch_inspector(index, branch, inspector, window, cx)
+            }
+            StepKind::Parallel(parallel) => {
+                self.render_parallel_inspector(index, parallel, window, cx)
+            }
         };
         v_flex()
             .child(header)
@@ -1595,6 +1722,296 @@ impl FlowView {
             menu
         });
         selector(id, IconName::Undo, label, menu)
+    }
+
+    fn render_branch_inspector(
+        &self,
+        index: usize,
+        branch: &BranchStep,
+        inspector: &StepInspector,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let outputs: Vec<(String, String)> =
+            self.available_rows(index).into_iter().skip(1).collect();
+        let view = cx.entity().downgrade();
+        let current_output = branch.output.clone();
+        let output_menu = ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
+            if outputs.is_empty() {
+                menu = menu.header("Nenhum passo antes entrega algo");
+            }
+            for (name, origin) in &outputs {
+                let view = view.clone();
+                let name = name.clone();
+                menu = menu.toggleable_entry(
+                    format!("{name} · {origin}"),
+                    name == current_output,
+                    IconPosition::Start,
+                    None,
+                    move |_window, cx| {
+                        let name = name.clone();
+                        view.update(cx, |view, cx| {
+                            view.edit_flow(cx, |flow| {
+                                if let Some(FlowStep {
+                                    kind: StepKind::Branch(branch),
+                                    ..
+                                }) = flow.steps.get_mut(index)
+                                {
+                                    branch.output = name;
+                                }
+                            });
+                        })
+                        .log_err();
+                    },
+                );
+            }
+            menu
+        });
+        let later: Vec<usize> = (index + 1..self.flow.steps.len()).collect();
+        let current = |id: &Option<String>| id.as_deref().and_then(|id| self.flow.step_index(id));
+        let set_target = move |then: bool| {
+            move |this: &mut Self, step: Option<usize>, cx: &mut Context<Self>| {
+                let id = step
+                    .and_then(|step| this.flow.steps.get(step))
+                    .map(|step| step.id.clone());
+                this.edit_flow(cx, |flow| {
+                    if let Some(FlowStep {
+                        kind: StepKind::Branch(branch),
+                        ..
+                    }) = flow.steps.get_mut(index)
+                    {
+                        if then {
+                            branch.then_to = id;
+                        } else {
+                            branch.else_to = id;
+                        }
+                    }
+                });
+            }
+        };
+        v_flex()
+            .gap_4()
+            .child(
+                v_flex()
+                    .gap_2()
+                    .child(section_label("SE A SAÍDA"))
+                    .child(selector(
+                        "branch-output",
+                        IconName::FileDoc,
+                        if branch.output.is_empty() {
+                            "escolha a saída".to_string()
+                        } else {
+                            branch.output.clone()
+                        },
+                        output_menu,
+                    ))
+                    .child(section_label("CONTÉM"))
+                    .child(field(&inspector.note, cx))
+                    .child(description(
+                        "Compara sem diferenciar maiúsculas. Olha a entrega mais recente da saída.",
+                    )),
+            )
+            .child(
+                v_flex()
+                    .gap_2()
+                    .child(section_label("ENTÃO VAI PARA"))
+                    .child(self.step_dropdown(
+                        "branch-then",
+                        current(&branch.then_to),
+                        later.clone(),
+                        "",
+                        Some("Próximo passo"),
+                        set_target(true),
+                        window,
+                        cx,
+                    )),
+            )
+            .child(
+                v_flex()
+                    .gap_2()
+                    .child(section_label("SENÃO VAI PARA"))
+                    .child(self.step_dropdown(
+                        "branch-else",
+                        current(&branch.else_to),
+                        later,
+                        "",
+                        Some("Próximo passo"),
+                        set_target(false),
+                        window,
+                        cx,
+                    ))
+                    .child(description(
+                        "Os passos pulados ficam como pulados nesta execução. Para repetir passos, use “Se não passar”.",
+                    )),
+            )
+            .into_any_element()
+    }
+
+    fn render_parallel_inspector(
+        &self,
+        index: usize,
+        parallel: &ParallelStep,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let view = cx.entity().downgrade();
+        let edit_parallel =
+            move |this: &mut Self, cx: &mut Context<Self>, change: &dyn Fn(&mut ParallelStep)| {
+                this.edit_flow(cx, |flow| {
+                    if let Some(FlowStep {
+                        kind: StepKind::Parallel(parallel),
+                        ..
+                    }) = flow.steps.get_mut(index)
+                    {
+                        change(parallel);
+                    }
+                });
+            };
+        let candidates: Vec<(String, String)> = self
+            .agents
+            .iter()
+            .filter(|agent| !parallel.agents.contains(&agent.command))
+            .map(|agent| (agent.command.clone(), agent.name.clone()))
+            .collect();
+        let add_menu = ContextMenu::build(window, cx, {
+            let view = view.clone();
+            move |mut menu, _window, _cx| {
+                if candidates.is_empty() {
+                    menu = menu.header("Todos os agentes já estão no passo");
+                }
+                for (command, name) in &candidates {
+                    let view = view.clone();
+                    let command = command.clone();
+                    menu = menu.entry(format!("{name} · /{command}"), None, move |_window, cx| {
+                        let command = command.clone();
+                        view.update(cx, |view, cx| {
+                            edit_parallel(view, cx, &|parallel| {
+                                parallel.agents.push(command.clone())
+                            })
+                        })
+                        .log_err();
+                    });
+                }
+                menu
+            }
+        });
+        let mut agents = v_flex().gap_1();
+        for (position, command) in parallel.agents.iter().enumerate() {
+            let name = self
+                .agent(command)
+                .map(|agent| agent.name.clone())
+                .unwrap_or_else(|| format!("/{command} (não existe)"));
+            agents = agents.child(
+                h_flex()
+                    .gap_2()
+                    .px_2p5()
+                    .py_1p5()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(cx.theme().colors().border)
+                    .bg(cx.theme().colors().editor_background)
+                    .child(
+                        Icon::new(IconName::Person)
+                            .size(IconSize::Small)
+                            .color(Color::Accent),
+                    )
+                    .child(Label::new(name).size(LabelSize::Small))
+                    .child(
+                        Label::new(format!("/{command}"))
+                            .size(LabelSize::XSmall)
+                            .buffer_font(cx)
+                            .color(Color::Accent),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        IconButton::new(("remove-parallel-agent", position), IconName::Close)
+                            .icon_size(IconSize::XSmall)
+                            .tooltip(Tooltip::text("Tirar do passo"))
+                            .on_click(cx.listener(move |this, _, _window, cx| {
+                                edit_parallel(this, cx, &|parallel| {
+                                    if position < parallel.agents.len() {
+                                        parallel.agents.remove(position);
+                                    }
+                                })
+                            })),
+                    ),
+            );
+        }
+        let on_fail_label = match &parallel.on_fail {
+            OnFail::Retry { .. } => "Refaz o passo com o motivo",
+            OnFail::BackTo { .. } => "Volta para um passo",
+            OnFail::AskYou => "Chama você",
+            OnFail::Continue => "Segue mesmo assim",
+        };
+        let on_fail_menu = ContextMenu::build(window, cx, {
+            move |mut menu, _window, _cx| {
+                for (label, on_fail) in [
+                    (
+                        "Refaz o passo com o motivo",
+                        OnFail::Retry {
+                            max: OnFail::DEFAULT_MAX,
+                        },
+                    ),
+                    ("Chama você", OnFail::AskYou),
+                    ("Segue mesmo assim", OnFail::Continue),
+                ] {
+                    let view = view.clone();
+                    menu = menu.entry(label, None, move |_window, cx| {
+                        let on_fail = on_fail.clone();
+                        view.update(cx, |view, cx| {
+                            edit_parallel(view, cx, &|parallel| parallel.on_fail = on_fail.clone())
+                        })
+                        .log_err();
+                    });
+                }
+                menu
+            }
+        });
+        let read_only = parallel.read_only;
+        v_flex()
+            .gap_4()
+            .child(
+                v_flex()
+                    .gap_2()
+                    .child(
+                        h_flex()
+                            .child(section_label("AGENTES AO MESMO TEMPO"))
+                            .child(div().flex_1())
+                            .child(selector("parallel-add-agent", IconName::Plus, "agente", add_menu)),
+                    )
+                    .child(agents)
+                    .child(description(
+                        "Cada um roda na sua thread. O passo passa quando todos entregam; as entregas seguem juntas.",
+                    )),
+            )
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(
+                        Checkbox::new(
+                            "parallel-read-only",
+                            if read_only {
+                                ToggleState::Selected
+                            } else {
+                                ToggleState::Unselected
+                            },
+                        )
+                        .label("Só leitura")
+                        .on_click(cx.listener(move |this, _, _window, cx| {
+                            edit_parallel(this, cx, &|parallel| parallel.read_only = !read_only)
+                        })),
+                    )
+                    .child(description(
+                        "Desmarcado, os agentes editam o mesmo projeto e podem disputar arquivos.",
+                    )),
+            )
+            .child(
+                v_flex()
+                    .gap_2()
+                    .child(section_label("SE NÃO PASSAR"))
+                    .child(selector("parallel-on-fail", IconName::Undo, on_fail_label, on_fail_menu)),
+            )
+            .into_any_element()
     }
 
     fn render_gate_inspector(

@@ -703,10 +703,10 @@ impl FlowView {
 
     /// Cancels the step that is running and, with a reason, the run itself.
     fn stop(&mut self, reason: Option<&str>, cx: &mut Context<Self>) {
-        if let Some(running) = self.running.take()
-            && let Some(thread) = running.thread
-        {
-            thread.update(cx, |thread, cx| thread.cancel(cx)).detach();
+        if let Some(running) = self.running.take() {
+            for thread in running.threads {
+                thread.update(cx, |thread, cx| thread.cancel(cx)).detach();
+            }
         }
         if let (Some(reason), Some(run)) = (reason, &mut self.run) {
             run.cancel(reason);
@@ -1320,6 +1320,7 @@ fn state_chip(state: StepState, note: Option<String>, cx: &App) -> impl IntoElem
         StepState::WaitingForYou => (Color::Warning, "esperando você"),
         StepState::Passed => (Color::Success, "ok"),
         StepState::Failed => (Color::Error, "refazendo"),
+        StepState::Skipped => (Color::Muted, "pulado"),
     };
     let text = match note {
         Some(note) => format!("{text} · {note}"),

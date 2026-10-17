@@ -316,3 +316,44 @@ fn test_reviews_suggestions() {
             .contains("`ux` · ux · recebe: spec.md · entrega: telas, tokens")
     );
 }
+
+#[test]
+fn test_parses_branches_and_parallel_steps() {
+    let content = "---\nname: x\nsteps:\n  - agent: qa\n  - if: { output: relatório, contains: falhou }\n    then: dev-rn\n  - parallel: [docs, review]\n  - agent: dev-rn\n---\n";
+    let flow = parse_flow(Path::new("x.flow.md"), content, FlowSource::Personal).expect("parses");
+    assert_eq!(
+        flow.steps[1].kind,
+        StepKind::Branch(BranchStep {
+            output: "relatório".to_string(),
+            contains: "falhou".to_string(),
+            then_to: Some("dev-rn".to_string()),
+            else_to: None,
+        })
+    );
+    assert_eq!(
+        flow.steps[2].kind,
+        StepKind::Parallel(ParallelStep {
+            agents: vec!["docs".to_string(), "review".to_string()],
+            read_only: true,
+            on_fail: OnFail::AskYou,
+        })
+    );
+    let again = parse_flow(
+        Path::new("x.flow.md"),
+        &flow.to_markdown().expect("serializes"),
+        FlowSource::Personal,
+    )
+    .expect("parses again");
+    assert_eq!(again, flow);
+    let mut agents = agents();
+    agents.retain(|agent| agent.command != "review");
+    let problems = validate_flow(&flow, &agents);
+    assert!(problems.contains(&FlowProblem::UnknownAgent {
+        step: 2,
+        agent: "review".to_string(),
+    }));
+    assert!(!problems.contains(&FlowProblem::MissingInput {
+        step: 1,
+        input: "relatório".to_string(),
+    }));
+}
