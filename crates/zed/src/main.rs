@@ -768,6 +768,8 @@ fn main() {
         prewarm_fonts(cx);
 
         editor::init(cx);
+        // After the editor, so `.flow.md` files open in the esteira editor instead of as text.
+        agent_ui::flows_view::register_project_item(cx);
         image_viewer::init(cx);
         repl::notebook::init(cx);
         diagnostics::init(cx);

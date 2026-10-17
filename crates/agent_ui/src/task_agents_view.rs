@@ -382,8 +382,29 @@ pub struct TaskAgentsView {
     draft: Option<Draft>,
     search: Entity<Editor>,
     status: Option<SharedString>,
+    segment: Segment,
+    flows: Vec<flows::Flow>,
+    selected_flow: Option<usize>,
     _load_task: Task<()>,
+    _flows_load: Task<()>,
     _subscriptions: Vec<Subscription>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Segment {
+    Agents,
+    Flows,
+}
+
+/// Opens the Agentes tab on its Esteiras segment.
+pub fn open_flows(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
+    open(workspace, window, cx);
+    if let Some(view) = workspace.item_of_type::<TaskAgentsView>(cx) {
+        view.update(cx, |view, cx| {
+            view.segment = Segment::Flows;
+            cx.notify();
+        });
+    }
 }
 
 impl TaskAgentsView {
@@ -411,13 +432,18 @@ impl TaskAgentsView {
             draft: None,
             search: search.clone(),
             status: None,
+            segment: Segment::Agents,
+            flows: Vec::new(),
+            selected_flow: None,
             _load_task: Task::ready(()),
+            _flows_load: Task::ready(()),
             _subscriptions: vec![
                 cx.subscribe(
                     &LanguageModelRegistry::global(cx),
                     |_, _, _: &language_model::Event, cx| cx.notify(),
                 ),
                 cx.observe_global::<SettingsStore>(|_, cx| cx.notify()),
+                cx.observe_global::<flows::FlowsRevision>(|this, cx| this.reload_flows(cx)),
                 cx.subscribe(&search, |_, _, event: &editor::EditorEvent, cx| {
                     if matches!(event, editor::EditorEvent::BufferEdited) {
                         cx.notify();
@@ -426,7 +452,280 @@ impl TaskAgentsView {
             ],
         };
         this.reload(None, cx);
+        this.reload_flows(cx);
         this
+    }
+
+    fn reload_flows(&mut self, cx: &mut Context<Self>) {
+        let roots = self.worktree_roots(cx);
+        let fs = self.fs.clone();
+        self._flows_load = cx.spawn(async move |this, cx| {
+            let (flows, errors) = flows::load_flows(fs, roots).await;
+            for error in errors {
+                log::warn!(
+                    "failed to load flow {}: {}",
+                    error.path.display(),
+                    error.message
+                );
+            }
+            this.update(cx, |this, cx| {
+                this.flows = flows;
+                if this
+                    .selected_flow
+                    .is_some_and(|index| index >= this.flows.len())
+                {
+                    this.selected_flow = None;
+                }
+                cx.notify();
+            })
+            .log_err();
+        });
+    }
+
+    fn render_segment(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let segment = |id: &'static str,
+                       label: &'static str,
+                       value: Segment,
+                       current: Segment,
+                       cx: &mut Context<Self>| {
+            Button::new(id, label)
+                .label_size(LabelSize::Small)
+                .full_width()
+                .toggle_state(value == current)
+                .style(ButtonStyle::Subtle)
+                .on_click(cx.listener(move |this, _, _window, cx| {
+                    this.segment = value;
+                    cx.notify();
+                }))
+        };
+        div().px_2().pt_2().child(
+            h_flex()
+                .p_0p5()
+                .gap_0p5()
+                .rounded_md()
+                .border_1()
+                .border_color(cx.theme().colors().border)
+                .bg(cx.theme().colors().editor_background)
+                .child(segment(
+                    "segment-agents",
+                    "Agentes",
+                    Segment::Agents,
+                    self.segment,
+                    cx,
+                ))
+                .child(segment(
+                    "segment-flows",
+                    "Esteiras",
+                    Segment::Flows,
+                    self.segment,
+                    cx,
+                )),
+        )
+    }
+
+    fn render_flow_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let query = self.search.read(cx).text(cx).trim().to_lowercase();
+        let mut list = v_flex()
+            .id("flows-list")
+            .size_full()
+            .gap_1()
+            .p_2()
+            .overflow_y_scroll();
+        let sections: [(&str, fn(&flows::FlowSource) -> bool); 2] = [
+            ("DO PROJETO", |source| {
+                matches!(source, flows::FlowSource::Project { .. })
+            }),
+            ("SÓ PARA MIM", |source| {
+                matches!(source, flows::FlowSource::Personal)
+            }),
+        ];
+        for (title, belongs) in sections {
+            let entries: Vec<(usize, &flows::Flow)> = self
+                .flows
+                .iter()
+                .enumerate()
+                .filter(|(_, flow)| belongs(&flow.source))
+                .filter(|(_, flow)| {
+                    query.is_empty()
+                        || flow.name.to_lowercase().contains(&query)
+                        || flow.id.contains(&query)
+                })
+                .collect();
+            if entries.is_empty() {
+                continue;
+            }
+            list = list.child(
+                div().pt_2().px_1().child(
+                    Label::new(title)
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted),
+                ),
+            );
+            for (index, flow) in entries {
+                let selected = self.selected_flow == Some(index);
+                let steps = flow.steps.len();
+                list = list.child(
+                    h_flex()
+                        .id(("flow", index))
+                        .gap_2()
+                        .px_2()
+                        .py_1p5()
+                        .rounded_md()
+                        .cursor_pointer()
+                        .when(selected, |this| {
+                            this.bg(cx.theme().colors().element_selected)
+                        })
+                        .hover(|this| this.bg(cx.theme().colors().element_hover))
+                        .child(Icon::new(IconName::ListTree).size(IconSize::Small).color(
+                            if selected {
+                                Color::Accent
+                            } else {
+                                Color::Muted
+                            },
+                        ))
+                        .child(
+                            v_flex()
+                                .min_w_0()
+                                .child(Label::new(flow.name.clone()).single_line().truncate())
+                                .child(
+                                    Label::new(format!(
+                                        "/{} · {steps} passo{}",
+                                        flow.id,
+                                        if steps == 1 { "" } else { "s" }
+                                    ))
+                                    .size(LabelSize::Small)
+                                    .color(Color::Muted),
+                                ),
+                        )
+                        .on_click(cx.listener(move |this, _, _window, cx| {
+                            this.selected_flow = Some(index);
+                            cx.notify();
+                        })),
+                );
+            }
+        }
+        if self.flows.is_empty() {
+            list = list.child(
+                v_flex()
+                    .p_2()
+                    .gap_1()
+                    .child(Label::new("Nenhuma esteira ainda."))
+                    .child(
+                        Label::new("Monte uma com os seus agentes, de um modelo ou pedindo à IA.")
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
+                    ),
+            );
+        }
+        list
+    }
+
+    fn render_flow_detail(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(flow) = self.selected_flow.and_then(|index| self.flows.get(index)) else {
+            return v_flex()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .gap_2()
+                .child(Icon::new(IconName::ListTree).size(IconSize::XLarge).color(Color::Muted))
+                .child(Label::new("Esteiras de agentes").size(LabelSize::Large))
+                .child(
+                    Label::new("Cada esteira é um .flow.md com os passos: seus agentes, portões e comandos. Rode com /esteira no composer do Agent.")
+                        .color(Color::Muted),
+                )
+                .into_any_element();
+        };
+        let path = flow.file_path.clone();
+        let flow_id = flow.id.clone();
+        let mut steps = v_flex().gap_1();
+        for (index, step) in flow.steps.iter().enumerate() {
+            let (icon, color) = match step.kind {
+                flows::StepKind::Agent(_) => (IconName::Person, Color::Accent),
+                flows::StepKind::Gate(_) => (IconName::UserCheck, Color::Warning),
+                flows::StepKind::Run(_) => (IconName::Terminal, Color::Success),
+            };
+            steps = steps.child(
+                h_flex()
+                    .gap_2()
+                    .px_3()
+                    .py_2()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(cx.theme().colors().border)
+                    .child(
+                        Label::new(format!("{}", index + 1))
+                            .size(LabelSize::Small)
+                            .color(Color::Muted)
+                            .buffer_font(cx),
+                    )
+                    .child(Icon::new(icon).size(IconSize::Small).color(color))
+                    .child(Label::new(step.label(&self.agents)).size(LabelSize::Small)),
+            );
+        }
+        v_flex()
+            .id("flow-detail")
+            .size_full()
+            .overflow_y_scroll()
+            .p_6()
+            .gap_4()
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .child(Headline::new(flow.name.clone()).size(HeadlineSize::Small))
+                            .child(
+                                Label::new(format!(
+                                    "/{} · {}",
+                                    flow.id,
+                                    crate::flows_view::flow_source_label(&flow.source)
+                                ))
+                                .size(LabelSize::Small)
+                                .color(Color::Muted),
+                            ),
+                    )
+                    .child(
+                        Button::new("open-flow", "Editar")
+                            .style(ButtonStyle::Outlined)
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                let path = path.clone();
+                                this.workspace
+                                    .update(cx, |workspace, cx| {
+                                        crate::flows_view::open_flow_path(
+                                            workspace, path, window, cx,
+                                        )
+                                    })
+                                    .log_err();
+                            })),
+                    )
+                    .child(
+                        Button::new("run-flow-from-list", "Rodar")
+                            .start_icon(Icon::new(IconName::PlayFilled).size(IconSize::Small))
+                            .style(ButtonStyle::Filled)
+                            .on_click(move |_, window, cx| {
+                                window.dispatch_action(
+                                    Box::new(crate::flows_view::RunFlow {
+                                        flow: flow_id.clone(),
+                                        input: String::new(),
+                                    }),
+                                    cx,
+                                )
+                            }),
+                    ),
+            )
+            .when(!flow.input.is_empty(), |this| {
+                this.child(
+                    Label::new(format!("Exemplo: {}", flow.input))
+                        .size(LabelSize::Small)
+                        .color(Color::Muted),
+                )
+            })
+            .child(steps)
+            .when(!flow.notes.is_empty(), |this| {
+                this.child(Label::new(flow.notes.clone()).size(LabelSize::Small))
+            })
+            .into_any_element()
     }
 
     fn worktree_roots(&self, cx: &App) -> Vec<(Arc<str>, PathBuf)> {
@@ -1564,7 +1863,7 @@ impl TaskAgentsView {
 
 /// A dropdown of every model of the connected providers, grouped by provider. `current` and
 /// the value given to `on_select` are `provider/model`; `None` is the `empty_label` entry.
-fn model_dropdown(
+pub(crate) fn model_dropdown(
     id: &'static str,
     current: Option<String>,
     empty_label: &'static str,
@@ -1639,7 +1938,7 @@ fn model_dropdown(
 
 /// The trigger of the tab's choices: what is chosen, with an icon for what kind of choice it is,
 /// sized to its content like the Agent panel's own profile and model selectors.
-fn selector(
+pub(crate) fn selector(
     id: &'static str,
     icon: IconName,
     label: impl Into<SharedString>,
@@ -1731,7 +2030,12 @@ impl Render for TaskAgentsView {
                                 .child(div().flex_1().min_w_0().child(self.search.clone())),
                         ),
                     )
-                    .child(div().flex_1().min_h_0().child(self.render_list(cx)))
+                    .child(self.render_segment(cx))
+                    .child(div().flex_1().min_h_0().child(if self.segment == Segment::Flows {
+                        self.render_flow_list(cx).into_any_element()
+                    } else {
+                        self.render_list(cx).into_any_element()
+                    }))
                     .child(
                         div().p_2().child(
                             h_flex()
@@ -1749,7 +2053,10 @@ impl Render for TaskAgentsView {
                                         .size(IconSize::Small)
                                         .color(Color::Accent),
                                 )
-                                .child(Label::new("Novo agente").color(Color::Accent))
+                                .child(
+                                    Label::new(if self.segment == Segment::Flows { "Nova esteira" } else { "Novo agente" })
+                                        .color(Color::Accent),
+                                )
                                 .child(div().flex_1())
                                 .child(
                                     Label::new("de um modelo ou com IA")
@@ -1757,7 +2064,13 @@ impl Render for TaskAgentsView {
                                         .color(Color::Muted),
                                 )
                                 .on_click(cx.listener(|this, _, window, cx| {
-                                    this.open_new_agent_modal(window, cx)
+                                    if this.segment == Segment::Flows {
+                                        this.workspace
+                                            .update(cx, |workspace, cx| crate::flows_view::new_flow(workspace, window, cx))
+                                            .log_err();
+                                    } else {
+                                        this.open_new_agent_modal(window, cx)
+                                    }
                                 })),
                         ),
                     )
@@ -1797,7 +2110,11 @@ impl Render for TaskAgentsView {
                     .flex_1()
                     .min_w_0()
                     .h_full()
-                    .child(self.render_detail(window, cx)),
+                    .child(if self.segment == Segment::Flows {
+                        self.render_flow_detail(cx)
+                    } else {
+                        self.render_detail(window, cx)
+                    }),
             )
     }
 }

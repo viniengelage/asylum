@@ -290,3 +290,29 @@ async fn test_loads_project_flows(cx: &mut gpui::TestAppContext) {
     assert_eq!(errors.len(), 1);
     assert!(errors[0].path.ends_with("quebrada.flow.md"));
 }
+
+#[test]
+fn test_reviews_suggestions() {
+    let response = format!("Aqui está:\n```markdown\n{FEATURE_DO_ZERO}```\n");
+    let flow = review_suggestion(
+        &response,
+        "feature-do-zero",
+        FlowSource::Personal,
+        &agents(),
+    )
+    .expect("the example passes");
+    assert_eq!(flow.steps.len(), 7);
+
+    let problems = review_suggestion(
+        "---\nname: x\nsteps:\n  - agent: inventado\n---\n",
+        "x",
+        FlowSource::Personal,
+        &agents(),
+    )
+    .expect_err("unknown agent");
+    assert!(problems[0].starts_with("passo 1:"));
+    assert!(
+        suggestion_system_prompt(&agents())
+            .contains("`ux` · ux · recebe: spec.md · entrega: telas, tokens")
+    );
+}

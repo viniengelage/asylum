@@ -2,7 +2,10 @@
 //! another. A flow lives in a `.flow.md` file: the steps in the YAML frontmatter and free notes
 //! for people in the body.
 
+mod authoring;
 pub mod run;
+
+pub use authoring::*;
 
 use anyhow::{Context as _, Result};
 use fs::Fs;
