@@ -17175,6 +17175,7 @@ dependencies = [
  "editor",
  "extension",
  "feature_flags",
+ "flows",
  "fs",
  "git",
  "git_ui_core",

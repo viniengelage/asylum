@@ -2,6 +2,7 @@ mod agents_section;
 mod android_device_modal;
 mod device_location_modal;
 mod device_toolkit;
+mod flows_section;
 mod thread_switcher;
 
 use device_location_modal::{DeviceLocation, DeviceLocationModal};
@@ -521,6 +522,8 @@ struct SerializedSidebar {
     pinned_agents: Vec<agents_section::AgentFilter>,
     #[serde(default)]
     agents_section_collapsed: bool,
+    #[serde(default)]
+    flows_section_collapsed: bool,
 }
 
 #[derive(Debug, Default)]
@@ -1168,6 +1171,10 @@ pub struct Sidebar {
     /// Shows only the threads of one agent; set from the AGENTES section.
     agent_filter: Option<agents_section::AgentFilter>,
     agents_section_collapsed: bool,
+    flows_section_collapsed: bool,
+    flows_section_show_all: bool,
+    /// Runs in the ESTEIRAS section showing their step threads, by run id.
+    expanded_flow_runs: std::collections::HashSet<String>,
     pinned_agents: Vec<agents_section::AgentFilter>,
     task_agents: agents_section::LoadedTaskAgents,
     width: Pixels,
@@ -1365,6 +1372,7 @@ impl Sidebar {
             this.refresh_task_agents(cx);
         })
         .detach();
+        Self::observe_flow_runs(cx).detach();
 
         cx.observe(
             &TerminalThreadMetadataStore::global(cx),
@@ -1400,6 +1408,9 @@ impl Sidebar {
             multi_workspace: multi_workspace.downgrade(),
             agent_filter: None,
             agents_section_collapsed: false,
+            flows_section_collapsed: false,
+            flows_section_show_all: false,
+            expanded_flow_runs: std::collections::HashSet::default(),
             pinned_agents: Vec::new(),
             task_agents: agents_section::LoadedTaskAgents::default(),
             width: AgentSettings::get_global(cx).threads_sidebar.default_width,
@@ -11354,6 +11365,7 @@ impl WorkspaceSidebar for Sidebar {
             },
             pinned_agents: self.pinned_agents.clone(),
             agents_section_collapsed: self.agents_section_collapsed,
+            flows_section_collapsed: self.flows_section_collapsed,
         };
         serde_json::to_string(&serialized).ok()
     }
@@ -11375,6 +11387,7 @@ impl WorkspaceSidebar for Sidebar {
             }
             self.pinned_agents = serialized.pinned_agents;
             self.agents_section_collapsed = serialized.agents_section_collapsed;
+            self.flows_section_collapsed = serialized.flows_section_collapsed;
             match serialized.active_view {
                 SerializedSidebarView::History => {
                     cx.defer_in(window, |this, window, cx| {
@@ -11581,6 +11594,7 @@ impl Render for Sidebar {
                     .child(self.render_sidebar_header(no_open_projects, window, cx))
                     .when(!no_open_projects, |this| {
                         this.child(self.render_agents_section(window, cx))
+                            .children(self.render_flows_section(cx))
                     })
                     .map(|this| {
                         if no_open_projects {

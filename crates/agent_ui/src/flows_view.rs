@@ -2,6 +2,7 @@
 //! where the gates, the criteria left to you and the steps out of retries wait for an answer.
 
 mod flow_editor;
+pub mod history;
 mod new_flow_modal;
 mod runner;
 mod suggest;
@@ -79,6 +80,95 @@ pub fn init(cx: &mut App) {
         });
     })
     .detach();
+}
+
+/// Opens a run from the history: its tab when it is still open, else a new tab with the run as
+/// it was; with `resume` an interrupted run continues.
+pub fn open_run(
+    workspace: &mut Workspace,
+    id: String,
+    resume: bool,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    let existing = workspace
+        .items_of_type::<FlowView>(cx)
+        .find(|view| view.read(cx).run_id.as_deref() == Some(id.as_str()));
+    if let Some(existing) = existing {
+        workspace.activate_item(&existing, true, true, window, cx);
+        return;
+    }
+    let Some(record) = history::records(cx)
+        .into_iter()
+        .map(|(record, _)| record)
+        .find(|record| record.id == id)
+    else {
+        return;
+    };
+    let Some((mut flow, run)) = record.restore() else {
+        show_error(
+            workspace,
+            anyhow::anyhow!("a execução de “{}” não abre mais", record.flow_name),
+            cx,
+        );
+        return;
+    };
+    flow.source = flow_source_for_path(workspace, &flow.file_path, cx);
+    let project = workspace.project().clone();
+    let connect = match native_connection(workspace, cx) {
+        Ok(connect) => connect,
+        Err(error) => {
+            show_error(workspace, error, cx);
+            return;
+        }
+    };
+    cx.spawn_in(window, async move |workspace, cx| {
+        let connection = connect.await?;
+        let agents = cx.update(|_, cx| connection.task_agents(&project, cx).to_vec())?;
+        workspace.update_in(cx, |workspace, window, cx| {
+            let weak_workspace = workspace.weak_handle();
+            let view = cx.new(|cx| {
+                FlowView::new(
+                    flow,
+                    agents,
+                    project.clone(),
+                    weak_workspace,
+                    true,
+                    window,
+                    cx,
+                )
+            });
+            workspace.add_item_to_active_pane(Box::new(view.clone()), None, true, window, cx);
+            view.update(cx, |view, cx| {
+                view.restore_run(&record, run, resume, window, cx)
+            });
+        })
+    })
+    .detach_and_log_err(cx);
+}
+
+/// Shows a step's thread in the Agent panel, loading it when it isn't open anymore.
+pub fn open_step_thread(
+    workspace: &mut Workspace,
+    thread_id: ThreadId,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    workspace.focus_panel::<AgentPanel>(window, cx);
+    if let Some(panel) = workspace.panel::<AgentPanel>(cx) {
+        panel.update(cx, |panel, cx| {
+            panel.load_agent_thread(
+                crate::Agent::NativeAgent,
+                thread_id,
+                None,
+                None,
+                true,
+                crate::AgentThreadSource::AgentPanel,
+                window,
+                cx,
+            )
+        });
+    }
 }
 
 pub(crate) fn flow_source_label(source: &FlowSource) -> String {
@@ -492,6 +582,9 @@ pub struct FlowView {
     suggesting: Option<Task<()>>,
     /// Why the file didn't parse; the tab then only offers to edit it as text.
     load_error: Option<String>,
+    /// The run's id in the history.
+    run_id: Option<String>,
+    run_started_at: Option<SystemTime>,
     _subscriptions: Vec<gpui::Subscription>,
     run: Option<FlowRun>,
     started_at: Option<Instant>,
@@ -555,6 +648,8 @@ impl FlowView {
             library_search,
             suggesting: None,
             load_error: None,
+            run_id: None,
+            run_started_at: None,
             _subscriptions: Vec::new(),
             run: None,
             started_at: None,
@@ -565,6 +660,11 @@ impl FlowView {
         };
         this.validate();
         this.subscribe_name_editor(cx);
+        this._subscriptions.push(cx.on_release(|this, cx| {
+            if let Some(id) = &this.run_id {
+                history::release(id, cx);
+            }
+        }));
         if !this.flow.steps.is_empty() {
             this.select_step(Some(0), window, cx);
         }
@@ -586,6 +686,11 @@ impl FlowView {
         self.stop(None, cx);
         self.step_threads = vec![Vec::new(); self.flow.steps.len()];
         self.run = Some(FlowRun::new(self.flow.clone(), input));
+        if let Some(id) = &self.run_id {
+            history::release(id, cx);
+        }
+        self.run_id = Some(uuid::Uuid::new_v4().to_string());
+        self.run_started_at = Some(SystemTime::now());
         self.started_at = Some(Instant::now());
         self.finished_at = None;
         self.drive(window, cx);
@@ -606,8 +711,72 @@ impl FlowView {
         if let (Some(reason), Some(run)) = (reason, &mut self.run) {
             run.cancel(reason);
         }
+        self.persist_run(cx);
         notify_runs_changed(cx);
         cx.notify();
+    }
+
+    pub(super) fn persist_run(&self, cx: &mut App) {
+        let (Some(run), Some(id)) = (&self.run, &self.run_id) else {
+            return;
+        };
+        let flow_markdown = match run.flow.to_markdown() {
+            Ok(markdown) => markdown,
+            Err(error) => {
+                log::error!("failed to keep the run of {}: {error:#}", run.flow.name);
+                return;
+            }
+        };
+        history::record(
+            history::FlowRunRecord {
+                id: id.clone(),
+                flow_id: run.flow.id.clone(),
+                flow_name: run.flow.name.clone(),
+                flow_path: run.flow.file_path.clone(),
+                flow_markdown,
+                started_at: self.run_started_at.unwrap_or_else(SystemTime::now),
+                updated_at: SystemTime::now(),
+                snapshot: run.snapshot(),
+                step_labels: run
+                    .flow
+                    .steps
+                    .iter()
+                    .map(|step| step.label(&self.agents))
+                    .collect(),
+                step_threads: self.step_threads.clone(),
+            },
+            cx,
+        );
+    }
+
+    /// Shows a run from the history; with `resume`, it continues from the step it stopped on.
+    fn restore_run(
+        &mut self,
+        record: &history::FlowRunRecord,
+        run: FlowRun,
+        resume: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.input_editor.update(cx, |editor, cx| {
+            editor.set_text(run.input.clone(), window, cx)
+        });
+        self.run = Some(run);
+        self.run_id = Some(record.id.clone());
+        self.run_started_at = Some(record.started_at);
+        self.step_threads = record.step_threads.clone();
+        self.step_threads.resize(self.flow.steps.len(), Vec::new());
+        self.panel_tab = PanelTab::Run;
+        if resume {
+            self.started_at = Some(Instant::now());
+            if let Some(run) = &mut self.run {
+                run.resume();
+            }
+            self.drive(window, cx);
+        } else {
+            self.finished_at = self.started_at;
+            cx.notify();
+        }
     }
 
     fn after_answer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -617,12 +786,7 @@ impl FlowView {
     fn open_thread(&self, thread_id: ThreadId, window: &mut Window, cx: &mut Context<Self>) {
         self.workspace
             .update(cx, |workspace, cx| {
-                workspace.focus_panel::<AgentPanel>(window, cx);
-                if let Some(panel) = workspace.panel::<AgentPanel>(cx) {
-                    panel.update(cx, |panel, cx| {
-                        panel.activate_retained_thread(thread_id, true, window, cx)
-                    });
-                }
+                open_step_thread(workspace, thread_id, window, cx)
             })
             .log_err();
     }
@@ -1301,9 +1465,9 @@ impl Item for FlowView {
     }
 }
 
-/// Bumped whenever a run changes, so the status bar chip re-renders.
+/// Bumped whenever a run changes, so the status bar chip and the sidebar re-render.
 #[derive(Default)]
-struct FlowRunsRevision(usize);
+pub struct FlowRunsRevision(usize);
 
 impl gpui::Global for FlowRunsRevision {}
 

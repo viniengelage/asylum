@@ -278,3 +278,25 @@ fn test_cancel_stops_everything() {
         Some(RunEventKind::Stopped)
     );
 }
+
+#[test]
+fn test_snapshot_round_trips_and_requeues_the_running_step() {
+    let mut run = FlowRun::new(
+        flow(vec![
+            agent("produto", vec![], OnFail::default_for_agent()),
+            agent("dev", vec![], OnFail::default_for_agent()),
+        ]),
+        "pedido".to_string(),
+    );
+    run.step_started(0);
+    run.agent_submitted(0, "Produto", submission(&["spec.md"], &[]));
+    run.step_started(1);
+    let json = serde_json::to_string(&run.snapshot()).expect("serializes");
+    let snapshot: RunSnapshot = serde_json::from_str(&json).expect("deserializes");
+    let restored = FlowRun::restore(run.flow.clone(), snapshot).expect("same steps");
+    assert!(restored.was_interrupted());
+    assert_eq!(restored.steps[0].state, StepState::Passed);
+    assert_eq!(restored.steps[1].state, StepState::Queued);
+    assert_eq!(restored.next_action(), RunAction::StartAgent { step: 1 });
+    assert_eq!(restored.events, run.events);
+}

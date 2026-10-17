@@ -37,6 +37,7 @@ struct StepThreadOutcome {
 impl FlowView {
     /// Starts whatever the run needs next. Called after every change to the run.
     pub(super) fn drive(&mut self, window: &mut gpui::Window, cx: &mut gpui::Context<Self>) {
+        self.persist_run(cx);
         super::notify_runs_changed(cx);
         if self.running.is_some() {
             return;

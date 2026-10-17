@@ -4,10 +4,11 @@
 //! user.
 
 use crate::{Criterion, Flow, OnFail, StepKind, Verifier};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::time::SystemTime;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum RunState {
     Running,
     WaitingForYou(Waiting),
@@ -15,7 +16,7 @@ pub enum RunState {
     Cancelled,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Waiting {
     /// A "você aprova" step.
     Gate { step: usize },
@@ -25,7 +26,7 @@ pub enum Waiting {
     Exhausted { step: usize, reason: String },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StepState {
     Queued,
     Running,
@@ -36,7 +37,7 @@ pub enum StepState {
     Failed,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CriterionOutcome {
     Passed,
     Failed,
@@ -44,7 +45,7 @@ pub enum CriterionOutcome {
     WithYou,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CriterionResult {
     pub index: usize,
     pub outcome: CriterionOutcome,
@@ -53,7 +54,7 @@ pub struct CriterionResult {
 }
 
 /// What an agent step delivered through `submit_step`.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Submission {
     pub summary: String,
     pub outputs: BTreeMap<String, String>,
@@ -61,7 +62,7 @@ pub struct Submission {
     pub self_checks: BTreeMap<usize, (bool, String)>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StepRun {
     pub state: StepState,
     /// How many times the step started in this run.
@@ -87,7 +88,7 @@ impl StepRun {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RunEventKind {
     You,
     Delivered,
@@ -99,7 +100,7 @@ pub enum RunEventKind {
     Stopped,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunEvent {
     pub kind: RunEventKind,
     pub title: String,
@@ -136,7 +137,72 @@ pub struct FlowRun {
     retries: BTreeMap<usize, u8>,
 }
 
+/// Everything a run knows besides its flow, to keep it across restarts.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunSnapshot {
+    pub input: String,
+    pub steps: Vec<StepRun>,
+    pub cursor: usize,
+    pub state: RunState,
+    pub events: Vec<RunEvent>,
+    backs: BTreeMap<usize, u8>,
+    retries: BTreeMap<usize, u8>,
+}
+
 impl FlowRun {
+    pub fn snapshot(&self) -> RunSnapshot {
+        RunSnapshot {
+            input: self.input.clone(),
+            steps: self.steps.clone(),
+            cursor: self.cursor,
+            state: self.state.clone(),
+            events: self.events.clone(),
+            backs: self.backs.clone(),
+            retries: self.retries.clone(),
+        }
+    }
+
+    /// Brings back a run saved with [`FlowRun::snapshot`]. A step that was working when the app
+    /// closed lost its thread's turn, so it runs again when the run resumes.
+    pub fn restore(flow: Flow, snapshot: RunSnapshot) -> Option<Self> {
+        if snapshot.steps.len() != flow.steps.len() {
+            return None;
+        }
+        let mut run = Self {
+            flow,
+            input: snapshot.input,
+            steps: snapshot.steps,
+            cursor: snapshot.cursor,
+            state: snapshot.state,
+            events: snapshot.events,
+            backs: snapshot.backs,
+            retries: snapshot.retries,
+        };
+        for step in &mut run.steps {
+            if matches!(step.state, StepState::Running | StepState::Verifying) {
+                step.state = StepState::Queued;
+            }
+        }
+        Some(run)
+    }
+
+    /// Continues a restored run.
+    pub fn resume(&mut self) {
+        if self.state == RunState::Running {
+            self.log(
+                RunEventKind::You,
+                "Você retomou",
+                "a esteira continua do passo em que parou.",
+                None,
+            );
+        }
+    }
+
+    /// Whether the run stopped midway because the app closed, rather than finishing or waiting.
+    pub fn was_interrupted(&self) -> bool {
+        self.state == RunState::Running
+    }
+
     pub fn new(flow: Flow, input: String) -> Self {
         let steps = flow.steps.iter().map(|_| StepRun::new()).collect();
         let mut run = Self {

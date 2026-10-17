@@ -1251,6 +1251,7 @@ async fn test_restore_serialized_archive_view_does_not_panic(cx: &mut TestAppCon
         active_view: SerializedSidebarView::History,
         pinned_agents: Vec::new(),
         agents_section_collapsed: false,
+        flows_section_collapsed: false,
     })
     .expect("serialization should succeed");
 
