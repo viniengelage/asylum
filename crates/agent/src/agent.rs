@@ -1288,7 +1288,8 @@ impl NativeAgent {
             })??;
             let (task, task_agents_task, flows_task) = task;
             let (project_context, skills, skill_issue_data) = task.await;
-            let (task_agents, task_agent_errors) = task_agents_task.await;
+            let (mut task_agents, task_agent_errors) = task_agents_task.await;
+            task_agents.retain(|agent| agent.enabled);
             let (flows, flow_errors) = flows_task.await;
             for error in flow_errors {
                 log::warn!(

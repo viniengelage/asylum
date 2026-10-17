@@ -141,6 +141,11 @@ struct Frontmatter {
     takes: Option<ToolkitsEntry>,
     gives: Option<ToolkitsEntry>,
     context_servers: Option<ToolkitsEntry>,
+    enabled: Option<bool>,
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
 }
 
 #[derive(Serialize)]
@@ -167,6 +172,8 @@ struct FrontmatterOut<'a> {
     gives: &'a Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     context_servers: &'a Vec<String>,
+    #[serde(skip_serializing_if = "is_true")]
+    enabled: bool,
 }
 
 /// A `provider/model` pair, e.g. `anthropic/claude-opus-5-5`. Claude Code's aliases (`opus`,
@@ -226,9 +233,16 @@ pub struct TaskAgent {
     /// MCP servers whose tools are all turned on, by server id, over the profile's.
     #[serde(default)]
     pub context_servers: Vec<String>,
+    /// Off keeps the file but hides the agent from the composer and the esteiras.
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
     pub instructions: String,
     pub source: TaskAgentSource,
     pub file_path: PathBuf,
+}
+
+fn default_enabled() -> bool {
+    true
 }
 
 impl TaskAgent {
@@ -285,6 +299,7 @@ impl TaskAgent {
             takes: &self.takes,
             context_servers: &self.context_servers,
             gives: &self.gives,
+            enabled: self.enabled,
         };
         let yaml = serde_yaml_ng::to_string(&frontmatter)?;
         let instructions = self.instructions.trim();
@@ -383,6 +398,7 @@ pub fn parse_task_agent(path: &Path, content: &str, source: TaskAgentSource) -> 
         takes,
         gives,
         context_servers,
+        enabled: frontmatter.enabled.unwrap_or(true),
         instructions: body.trim().to_string(),
         source,
         file_path: path.to_path_buf(),
@@ -635,6 +651,27 @@ mod tests {
         )
         .expect("round trip should parse");
         assert_eq!(reparsed.permissions, agent.permissions);
+    }
+
+    #[test]
+    fn test_turned_off_agent_round_trips() {
+        let path = Path::new("/app/.asylum/agents/revisar.md");
+        let agent = parse_task_agent(path, "---\nname: Revisor\n---\nRevisa.", project_source())
+            .expect("agent should parse");
+        assert!(agent.enabled);
+        assert!(!agent.to_markdown().expect("serializes").contains("enabled"));
+
+        let off = TaskAgent {
+            enabled: false,
+            ..agent
+        };
+        let reparsed = parse_task_agent(
+            path,
+            &off.to_markdown().expect("serializes"),
+            project_source(),
+        )
+        .expect("round trip should parse");
+        assert!(!reparsed.enabled);
     }
 
     #[test]

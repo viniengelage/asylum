@@ -1831,6 +1831,7 @@ mod tests {
             takes: takes.iter().map(|name| name.to_string()).collect(),
             gives: gives.iter().map(|name| name.to_string()).collect(),
             context_servers: Vec::new(),
+            enabled: true,
             instructions: String::new(),
             source: task_agents::TaskAgentSource::Personal,
             file_path: PathBuf::new(),

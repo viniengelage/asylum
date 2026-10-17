@@ -6,21 +6,18 @@ mod new_agent_modal;
 use crate::{AgentInitialContent, AgentPanel, AgentThreadSource};
 use agent::AgentTool as _;
 use agent_client_protocol::schema::v2 as acp;
-use agent_settings::{AgentProfile, AgentSettings};
+use agent_settings::AgentProfile;
 use anyhow::Result;
 use editor::Editor;
 use fs::Fs;
 use gpui::{
-    App, Context, Entity, EventEmitter, FocusHandle, Focusable, Subscription, Task, WeakEntity,
-    Window, actions,
+    App, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Pixels, Stateful,
+    Subscription, Task, WeakEntity, Window, actions,
 };
 use language_model::LanguageModelRegistry;
 use new_agent_modal::NewAgentModal;
 use project::Project;
-use settings::{
-    LanguageModelProviderSetting, LanguageModelSelection, Settings as _, SettingsStore,
-    update_settings_file,
-};
+use settings::{Settings as _, SettingsStore};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -29,7 +26,7 @@ use task_agents::{
     TaskAgent, TaskAgentSource, ToolAccess, ToolPermissionRules, ToolkitSummary, command_slug,
     load_task_agents, personal_agents_dir, toolkits,
 };
-use ui::{Chip, ContextMenu, Divider, DropdownMenu, Switch, Tooltip, prelude::*};
+use ui::{ContextMenu, DropdownMenu, KeyBinding, Switch, Tooltip, prelude::*};
 use util::ResultExt as _;
 use workspace::{
     HideStatusItem, ItemHandle, StatusItemView, Workspace,
@@ -306,6 +303,7 @@ fn template_agent(template: Option<&Template>) -> TaskAgent {
         takes: Vec::new(),
         gives: Vec::new(),
         context_servers: Vec::new(),
+        enabled: true,
         instructions: template
             .map(|template| template.instructions.to_string())
             .unwrap_or_else(|| "Descreva aqui o que o agente faz, passo a passo.".to_string()),
@@ -317,18 +315,6 @@ fn template_agent(template: Option<&Template>) -> TaskAgent {
 /// How many times the model may fix its own file before what it wrote is saved as is.
 const MAX_AUTHORING_REPAIRS: usize = 2;
 
-fn source_label(source: &TaskAgentSource) -> SharedString {
-    match source {
-        TaskAgentSource::Project { worktree_root_name } => {
-            format!("{worktree_root_name}/{PROJECT_AGENTS_DIR}").into()
-        }
-        TaskAgentSource::Personal => "só para mim".into(),
-        TaskAgentSource::Imported { worktree_root_name } => {
-            format!("{worktree_root_name}/.claude/agents").into()
-        }
-    }
-}
-
 fn permission_label(mode: Option<PermissionMode>) -> &'static str {
     match mode {
         None => "padrão",
@@ -339,17 +325,45 @@ fn permission_label(mode: Option<PermissionMode>) -> &'static str {
 }
 
 /// The Zed Agent's tools that ask before acting, with what they do.
-const BUILTIN_PERMISSION_TOOLS: &[(&str, &str)] = &[
-    (agent::TerminalTool::NAME, "Roda comandos no terminal"),
-    (agent::EditFileTool::NAME, "Edita arquivos"),
-    (agent::WriteFileTool::NAME, "Cria e sobrescreve arquivos"),
-    (agent::DeletePathTool::NAME, "Apaga arquivos e pastas"),
-    (agent::MovePathTool::NAME, "Move e renomeia arquivos"),
-    (agent::CopyPathTool::NAME, "Copia arquivos"),
-    (agent::CreateDirectoryTool::NAME, "Cria pastas"),
-    (agent::FetchTool::NAME, "Busca uma URL"),
-    (agent::WebSearchTool::NAME, "Pesquisa na web"),
-    (agent::SkillTool::NAME, "Roda uma skill"),
+const BUILTIN_PERMISSION_TOOLS: &[(&str, &str, &str)] = &[
+    (
+        agent::TerminalTool::NAME,
+        "rodar terminal",
+        "Roda comandos no terminal",
+    ),
+    (
+        agent::EditFileTool::NAME,
+        "editar arquivos",
+        "Edita arquivos",
+    ),
+    (
+        agent::WriteFileTool::NAME,
+        "criar arquivos",
+        "Cria e sobrescreve arquivos",
+    ),
+    (
+        agent::DeletePathTool::NAME,
+        "apagar",
+        "Apaga arquivos e pastas",
+    ),
+    (
+        agent::MovePathTool::NAME,
+        "mover",
+        "Move e renomeia arquivos",
+    ),
+    (agent::CopyPathTool::NAME, "copiar", "Copia arquivos"),
+    (
+        agent::CreateDirectoryTool::NAME,
+        "criar pastas",
+        "Cria pastas",
+    ),
+    (agent::FetchTool::NAME, "buscar URL", "Busca uma URL"),
+    (
+        agent::WebSearchTool::NAME,
+        "pesquisar na web",
+        "Pesquisa na web",
+    ),
+    (agent::SkillTool::NAME, "rodar skill", "Roda uma skill"),
 ];
 
 fn next_permission(mode: Option<PermissionMode>) -> Option<PermissionMode> {
@@ -363,6 +377,8 @@ fn next_permission(mode: Option<PermissionMode>) -> Option<PermissionMode> {
 
 struct Draft {
     agent: TaskAgent,
+    /// The agent as saved, to tell whether the draft has changes.
+    original: TaskAgent,
     name: Entity<Editor>,
     command: Entity<Editor>,
     description: Entity<Editor>,
@@ -384,6 +400,8 @@ pub struct TaskAgentsView {
     search: Entity<Editor>,
     status: Option<SharedString>,
     segment: Segment,
+    editing_name: bool,
+    adding_io: Option<(IoList, Entity<Editor>)>,
     flows: Vec<flows::Flow>,
     selected_flow: Option<usize>,
     _load_task: Task<()>,
@@ -434,6 +452,8 @@ impl TaskAgentsView {
             search: search.clone(),
             status: None,
             segment: Segment::Agents,
+            editing_name: false,
+            adding_io: None,
             flows: Vec::new(),
             selected_flow: None,
             _load_task: Task::ready(()),
@@ -805,15 +825,19 @@ impl TaskAgentsView {
         let instructions = {
             let text = agent.instructions.clone();
             cx.new(|cx| {
-                let mut editor = Editor::auto_height(12, 40, window, cx);
+                let mut editor = Editor::multi_line(window, cx);
                 editor.set_placeholder_text("Instruções em Markdown", window, cx);
                 editor.set_text(text, window, cx);
                 editor.set_soft_wrap();
                 editor
             })
         };
+        self.set_markdown_language(&instructions, cx);
         self.selected = Some(index);
+        self.editing_name = false;
+        self.adding_io = None;
         self.draft = Some(Draft {
+            original: agent.clone(),
             agent,
             name,
             command,
@@ -822,6 +846,23 @@ impl TaskAgentsView {
         });
         self.status = None;
         cx.notify();
+    }
+
+    fn set_markdown_language(&self, editor: &Entity<Editor>, cx: &mut Context<Self>) {
+        let Some(buffer) = editor.read(cx).buffer().read(cx).as_singleton() else {
+            return;
+        };
+        let language = self
+            .project
+            .read(cx)
+            .languages()
+            .language_for_name("Markdown");
+        cx.spawn(async move |_, cx| {
+            let language = language.await?;
+            buffer.update(cx, |buffer, cx| buffer.set_language(Some(language), cx));
+            anyhow::Ok(())
+        })
+        .detach_and_log_err(cx);
     }
 
     fn collect_draft(&self, cx: &App) -> Option<TaskAgent> {
@@ -1214,14 +1255,14 @@ impl TaskAgentsView {
     }
 
     fn render_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let sections: [(&str, fn(&TaskAgentSource) -> bool); 3] = [
-            ("DO PROJETO", |source| {
+        let sections: [(&str, Option<&str>, fn(&TaskAgentSource) -> bool); 3] = [
+            ("DO PROJETO", Some(PROJECT_AGENTS_DIR), |source| {
                 matches!(source, TaskAgentSource::Project { .. })
             }),
-            ("SÓ PARA MIM", |source| {
+            ("SÓ PARA MIM", None, |source| {
                 matches!(source, TaskAgentSource::Personal)
             }),
-            ("IMPORTADOS", |source| {
+            ("IMPORTADOS", Some(".claude/agents"), |source| {
                 matches!(source, TaskAgentSource::Imported { .. })
             }),
         ];
@@ -1232,13 +1273,13 @@ impl TaskAgentsView {
                 || agent.command.to_lowercase().contains(&query)
                 || agent.description.to_lowercase().contains(&query)
         };
+        let dirty = self.is_dirty(cx);
         let mut list = v_flex()
             .id("task-agents-list")
             .size_full()
-            .gap_1()
-            .p_2()
+            .pb_2()
             .overflow_y_scroll();
-        for (title, belongs) in sections {
+        for (title, path, belongs) in sections {
             let entries = self
                 .agents
                 .iter()
@@ -1249,117 +1290,216 @@ impl TaskAgentsView {
                 continue;
             }
             list = list.child(
-                div().pt_2().px_1().child(
-                    Label::new(title)
-                        .size(LabelSize::XSmall)
-                        .color(Color::Muted),
-                ),
+                h_flex()
+                    .px_3p5()
+                    .pt_2p5()
+                    .pb_1()
+                    .gap_1p5()
+                    .child(
+                        Label::new(title)
+                            .size(LabelSize::XSmall)
+                            .weight(FontWeight::SEMIBOLD)
+                            .color(Color::Muted),
+                    )
+                    .when_some(path, |this, path| {
+                        this.child(
+                            Label::new(path)
+                                .size(LabelSize::XSmall)
+                                .color(Color::Disabled)
+                                .buffer_font(cx),
+                        )
+                    })
+                    .child(div().flex_1())
+                    .child(
+                        Label::new(entries.len().to_string())
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
+                    ),
             );
             for (index, agent) in entries {
                 let selected = self.selected == Some(index);
+                let badge = if selected && dirty {
+                    Some("não salvo")
+                } else if !agent.enabled {
+                    Some("desligado")
+                } else if !agent.source.is_editable() {
+                    Some("leitura")
+                } else {
+                    None
+                };
                 list = list.child(
-                    h_flex()
-                        .id(("task-agent", index))
-                        .gap_2()
-                        .px_2()
-                        .py_1p5()
-                        .rounded_md()
-                        .cursor_pointer()
-                        .when(selected, |this| {
-                            this.bg(cx.theme().colors().element_selected)
-                        })
-                        .hover(|this| this.bg(cx.theme().colors().element_hover))
-                        .child(Icon::new(IconName::UserGroup).size(IconSize::Small).color(
-                            if selected {
-                                Color::Accent
-                            } else {
-                                Color::Muted
-                            },
-                        ))
-                        .child(
-                            v_flex()
-                                .min_w_0()
-                                .child(Label::new(agent.name.clone()).single_line().truncate())
-                                .child(
-                                    Label::new(format!("/{}", agent.command))
-                                        .size(LabelSize::Small)
-                                        .color(Color::Accent)
-                                        .buffer_font(cx),
-                                ),
-                        )
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.select(index, window, cx);
-                        })),
+                    div().px_1p5().child(
+                        h_flex()
+                            .id(("task-agent", index))
+                            .h(px(46.))
+                            .px_2()
+                            .gap_2p5()
+                            .rounded_lg()
+                            .border_1()
+                            .cursor_pointer()
+                            .map(|this| {
+                                if selected {
+                                    this.bg(cx.theme().colors().element_selected)
+                                        .border_color(cx.theme().colors().border)
+                                } else {
+                                    this.border_color(gpui::transparent_black())
+                                        .hover(|this| this.bg(cx.theme().colors().element_hover))
+                                }
+                            })
+                            .child(agent_tile(agent, px(28.), IconSize::Small, cx))
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(
+                                        Label::new(agent.name.clone())
+                                            .weight(if selected {
+                                                FontWeight::SEMIBOLD
+                                            } else {
+                                                FontWeight::MEDIUM
+                                            })
+                                            .color(if agent.enabled {
+                                                Color::Default
+                                            } else {
+                                                Color::Muted
+                                            })
+                                            .single_line()
+                                            .truncate(),
+                                    )
+                                    .child(
+                                        h_flex()
+                                            .gap_1()
+                                            .min_w_0()
+                                            .child(
+                                                Label::new(format!("/{}", agent.command))
+                                                    .size(LabelSize::XSmall)
+                                                    .color(Color::Accent)
+                                                    .buffer_font(cx),
+                                            )
+                                            .child(
+                                                Label::new(format!(
+                                                    "· {}",
+                                                    self.agent_detail(agent, cx)
+                                                ))
+                                                .size(LabelSize::XSmall)
+                                                .color(Color::Muted)
+                                                .single_line()
+                                                .truncate(),
+                                            ),
+                                    ),
+                            )
+                            .when_some(badge, |this, badge| this.child(list_badge(badge, cx)))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.select(index, window, cx);
+                            })),
+                    ),
                 );
             }
         }
         if self.agents.is_empty() {
             list = list.child(
-                v_flex().p_2().gap_1().child(Label::new("Nenhum agente ainda.")).child(
-                    Label::new(
-                        "Crie um a partir de um modelo, ou peça ao agente para criar um para você.",
-                    )
-                    .size(LabelSize::Small)
-                    .color(Color::Muted),
-                ),
+                v_flex()
+                    .p_3()
+                    .gap_1()
+                    .child(Label::new("Nenhum agente ainda."))
+                    .child(
+                        Label::new(
+                            "Crie um a partir de um modelo, ou peça ao agente para criar um para você.",
+                        )
+                        .size(LabelSize::Small)
+                        .color(Color::Muted),
+                    ),
             );
         }
         for error in &self.load_errors {
             list = list.child(
-                Label::new(format!(
-                    "{}: {}",
-                    error
-                        .path
-                        .file_name()
-                        .map(|name| name.to_string_lossy().into_owned())
-                        .unwrap_or_default(),
-                    error.message
-                ))
-                .size(LabelSize::XSmall)
-                .color(Color::Error),
+                div().px_3p5().pt_1().child(
+                    Label::new(format!(
+                        "{}: {}",
+                        error
+                            .path
+                            .file_name()
+                            .map(|name| name.to_string_lossy().into_owned())
+                            .unwrap_or_default(),
+                        error.message
+                    ))
+                    .size(LabelSize::XSmall)
+                    .color(Color::Error),
+                ),
             );
         }
         list
     }
 
-    fn render_field(
-        label: &'static str,
-        hint: Option<&'static str>,
-        editor: &Entity<Editor>,
-        cx: &App,
-    ) -> impl IntoElement {
-        v_flex()
-            .gap_1()
-            .child(Label::new(label).size(LabelSize::Small).color(Color::Muted))
-            .child(
-                div()
-                    .px_2()
-                    .py_1()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(cx.theme().colors().border)
-                    .bg(cx.theme().colors().editor_background)
-                    .child(editor.clone()),
-            )
-            .when_some(hint, |this, hint| {
-                this.child(Label::new(hint).size(LabelSize::XSmall).color(Color::Muted))
-            })
+    /// The second line of an agent in the list, after its command: the esteiras it is a step
+    /// of, or else how much it may do.
+    fn agent_detail(&self, agent: &TaskAgent, cx: &App) -> String {
+        let flows = self.flows_using(&agent.command).len();
+        if flows > 0 {
+            return format!("{flows} esteira{}", if flows == 1 { "" } else { "s" });
+        }
+        match agent.profile.as_deref() {
+            Some("ask") => "só leitura".to_string(),
+            Some("write") => "escreve".to_string(),
+            Some(id) => AgentProfile::available_profiles(cx)
+                .iter()
+                .find(|(profile_id, _)| profile_id.0.as_ref() == id)
+                .map(|(_, name)| name.to_string())
+                .unwrap_or_else(|| id.to_string()),
+            None => "perfil da thread".to_string(),
+        }
     }
 
-    fn render_card(title: &'static str, cx: &App) -> Div {
+    fn flows_using(&self, command: &str) -> Vec<usize> {
+        self.flows
+            .iter()
+            .enumerate()
+            .filter(|(_, flow)| {
+                flow.steps.iter().any(|step| match &step.kind {
+                    flows::StepKind::Agent(agent_step) => agent_step.agent == command,
+                    flows::StepKind::Parallel(parallel) => {
+                        parallel.agents.iter().any(|agent| agent == command)
+                    }
+                    _ => false,
+                })
+            })
+            .map(|(index, _)| index)
+            .collect()
+    }
+
+    fn is_dirty(&self, cx: &App) -> bool {
+        match (self.draft.as_ref(), self.collect_draft(cx)) {
+            (Some(draft), Some(current)) => current != draft.original,
+            _ => false,
+        }
+    }
+
+    fn render_card(title: &'static str, action: Option<AnyElement>, cx: &App) -> Div {
         v_flex()
-            .gap_2()
-            .p_3()
+            .w_full()
             .rounded_lg()
             .border_1()
             .border_color(cx.theme().colors().border_variant)
+            .bg(cx.theme().colors().panel_background)
+            .overflow_hidden()
             .child(
-                Label::new(title)
-                    .size(LabelSize::XSmall)
-                    .color(Color::Muted),
+                h_flex()
+                    .h(px(40.))
+                    .flex_none()
+                    .px_3p5()
+                    .gap_2()
+                    .border_b_1()
+                    .border_color(cx.theme().colors().border_variant)
+                    .child(
+                        Label::new(title)
+                            .size(LabelSize::XSmall)
+                            .weight(FontWeight::SEMIBOLD)
+                            .color(Color::Muted),
+                    )
+                    .child(div().flex_1())
+                    .children(action),
             )
     }
-
     fn render_profile_dropdown(
         &self,
         window: &mut Window,
@@ -1448,261 +1588,6 @@ impl TaskAgentsView {
         )
     }
 
-    fn render_subagent_model_dropdown(
-        &self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let current = AgentSettings::get_global(cx)
-            .subagent_model
-            .as_ref()
-            .map(|selection| format!("{}/{}", selection.provider.0, selection.model));
-        let fs = self.fs.clone();
-        model_dropdown(
-            "subagent-default-model",
-            current,
-            "Mesmo modelo da thread",
-            move |model, cx| {
-                let selection = model
-                    .as_deref()
-                    .and_then(task_agents::ModelReference::parse)
-                    .map(|reference| LanguageModelSelection {
-                        provider: LanguageModelProviderSetting(reference.provider),
-                        model: reference.model,
-                        enable_thinking: false,
-                        effort: None,
-                        speed: None,
-                    });
-                update_settings_file(fs.clone(), cx, move |settings, _cx| {
-                    settings.agent.get_or_insert_default().subagent_model = selection;
-                });
-            },
-            window,
-            cx,
-        )
-    }
-
-    fn render_builtin_permissions(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let Some(draft) = self.draft.as_ref() else {
-            return v_flex();
-        };
-        let agent = &draft.agent;
-        let editable = agent.source.is_editable();
-        let mode_of = |key: &str| agent.permissions.get(key).and_then(|rules| rules.default);
-        let all_mode = mode_of(ALL_TOOLS_PERMISSION_KEY);
-        let mut tools_row = h_flex().flex_wrap().gap_1();
-        for (name, title) in BUILTIN_PERMISSION_TOOLS {
-            let tool_mode = mode_of(name);
-            let effective = tool_mode.or(all_mode);
-            let color = match effective {
-                Some(PermissionMode::Allow) => Color::Success,
-                Some(PermissionMode::Confirm) => Color::Warning,
-                Some(PermissionMode::Deny) => Color::Error,
-                None => Color::Muted,
-            };
-            let patterns = agent
-                .permissions
-                .get(*name)
-                .map(|rules| rules.allow.len() + rules.confirm.len() + rules.deny.len())
-                .unwrap_or(0);
-            let tool_name = name.to_string();
-            tools_row = tools_row.child(
-                Button::new(SharedString::from(format!("builtin-perm-{name}")), *name)
-                    .label_size(LabelSize::XSmall)
-                    .style(ButtonStyle::Outlined)
-                    .start_icon(
-                        Icon::new(IconName::Circle)
-                            .size(IconSize::XSmall)
-                            .color(color),
-                    )
-                    .disabled(!editable)
-                    .tooltip(Tooltip::text(format!(
-                        "{title} · {}{}{}. Clique para trocar (padrão → livre → pede → nunca).",
-                        permission_label(effective),
-                        if tool_mode.is_none() && all_mode.is_some() {
-                            " (de todas as ferramentas)"
-                        } else {
-                            ""
-                        },
-                        if patterns > 0 {
-                            format!(" · {patterns} regra(s) por regex no arquivo")
-                        } else {
-                            String::new()
-                        },
-                    )))
-                    .on_click(cx.listener(move |this, _, _window, cx| {
-                        this.cycle_permission(&tool_name, cx);
-                    })),
-            );
-        }
-        v_flex()
-            .gap_1p5()
-            .child(
-                h_flex()
-                    .gap_2()
-                    .child(
-                        Label::new("Todas as ferramentas")
-                            .size(LabelSize::Small)
-                            .color(Color::Muted),
-                    )
-                    .child(
-                        Button::new(
-                            "builtin-perm-all",
-                            format!("tudo: {}", permission_label(all_mode)),
-                        )
-                        .label_size(LabelSize::XSmall)
-                        .style(ButtonStyle::Subtle)
-                        .disabled(!editable)
-                        .tooltip(Tooltip::text(
-                            "Vale para toda ferramenta sem permissão própria, toolkits e MCP inclusive",
-                        ))
-                        .on_click(cx.listener(|this, _, _window, cx| {
-                            this.cycle_permission(ALL_TOOLS_PERMISSION_KEY, cx);
-                        })),
-                    ),
-            )
-            .child(tools_row)
-    }
-
-    fn render_toolkits(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let Some(draft) = self.draft.as_ref() else {
-            return v_flex();
-        };
-        let agent = &draft.agent;
-        let editable = agent.source.is_editable();
-        let mut column = v_flex().gap_2();
-        let all_mode = agent
-            .permissions
-            .get(ALL_TOOLS_PERMISSION_KEY)
-            .and_then(|rules| rules.default);
-        let registered = toolkits(cx);
-        if registered.is_empty() {
-            column = column.child(
-                Label::new("Nenhum toolkit registrado nesta build.")
-                    .size(LabelSize::Small)
-                    .color(Color::Muted),
-            );
-        }
-        for toolkit in registered {
-            let on = agent.toolkits.iter().any(|id| id == toolkit.id.as_ref());
-            let toolkit_id = toolkit.id.to_string();
-            let toolkit_mode = agent
-                .permissions
-                .get(toolkit.id.as_ref())
-                .and_then(|rules| rules.default);
-            let mut tools_row = h_flex().flex_wrap().gap_1();
-            for tool in &toolkit.tools {
-                let tool_mode = agent
-                    .permissions
-                    .get(tool.name.as_ref())
-                    .and_then(|rules| rules.default);
-                let effective = tool_mode.or(toolkit_mode).or(all_mode);
-                let color = match effective {
-                    Some(PermissionMode::Allow) => Color::Success,
-                    Some(PermissionMode::Confirm) => Color::Warning,
-                    Some(PermissionMode::Deny) => Color::Error,
-                    None if tool.access == ToolAccess::Read => Color::Success,
-                    None => Color::Warning,
-                };
-                let default_label = if tool.access == ToolAccess::Read {
-                    "livre"
-                } else {
-                    "pede"
-                };
-                let mode_label = match effective {
-                    None => default_label,
-                    mode => permission_label(mode),
-                };
-                let tool_name = tool.name.to_string();
-                tools_row = tools_row.child(
-                    Button::new(
-                        SharedString::from(format!("perm-{}", tool.name)),
-                        tool.name.clone(),
-                    )
-                    .label_size(LabelSize::XSmall)
-                    .style(ButtonStyle::Outlined)
-                    .color(if on { Color::Default } else { Color::Muted })
-                    .start_icon(
-                        Icon::new(IconName::Circle)
-                            .size(IconSize::XSmall)
-                            .color(color),
-                    )
-                    .disabled(!editable)
-                    .tooltip(Tooltip::text(format!(
-                        "{} · {}{}. Clique para trocar (padrão → livre → pede → nunca).",
-                        tool.title,
-                        mode_label,
-                        if tool_mode.is_none() {
-                            " (padrão)"
-                        } else {
-                            ""
-                        }
-                    )))
-                    .on_click(cx.listener(move |this, _, _window, cx| {
-                        this.cycle_permission(&tool_name, cx);
-                    })),
-                );
-            }
-            let toggle_id = toolkit_id.clone();
-            let toolkit_key = toolkit_id.clone();
-            column = column.child(
-                v_flex()
-                    .gap_1p5()
-                    .p_2()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(cx.theme().colors().border_variant)
-                    .child(
-                        h_flex()
-                            .gap_2()
-                            .child(
-                                Icon::from_path(format!("icons/{}.svg", toolkit.icon))
-                                    .size(IconSize::Small)
-                                    .color(if on { Color::Accent } else { Color::Muted }),
-                            )
-                            .child(
-                                v_flex()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .child(Label::new(toolkit.name.clone()))
-                                    .child(
-                                        Label::new(toolkit.description.clone())
-                                            .size(LabelSize::XSmall)
-                                            .color(Color::Muted),
-                                    ),
-                            )
-                            .child(
-                                Button::new(
-                                    SharedString::from(format!("toolkit-mode-{toolkit_id}")),
-                                    format!("tudo: {}", permission_label(toolkit_mode)),
-                                )
-                                .label_size(LabelSize::XSmall)
-                                .style(ButtonStyle::Subtle)
-                                .disabled(!editable)
-                                .tooltip(Tooltip::text(
-                                    "Permissão de todas as ferramentas do toolkit, salvo as que têm a sua",
-                                ))
-                                .on_click(cx.listener(move |this, _, _window, cx| {
-                                    this.cycle_permission(&toolkit_key, cx);
-                                })),
-                            )
-                            .child(
-                                Switch::new(
-                                    SharedString::from(format!("toolkit-{toggle_id}")),
-                                    if on { ToggleState::Selected } else { ToggleState::Unselected },
-                                )
-                                .disabled(!editable)
-                                .on_click(cx.listener(move |this, _, _window, cx| {
-                                    this.toggle_toolkit(&toggle_id, cx);
-                                })),
-                            ),
-                    )
-                    .child(tools_row),
-            );
-        }
-        column
-    }
-
     fn render_detail(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let Some(draft) = self.draft.as_ref() else {
             return v_flex()
@@ -1728,139 +1613,955 @@ impl TaskAgentsView {
                 )
                 .into_any_element();
         };
-        let agent = &draft.agent;
-        let editable = agent.source.is_editable();
         v_flex()
-            .id("task-agent-detail")
             .size_full()
-            .overflow_y_scroll()
-            .p_4()
+            .px(px(22.))
+            .py(px(18.))
             .gap_4()
+            .child(self.render_detail_header(cx))
             .child(
-                h_flex()
-                    .gap_3()
-                    .child(Icon::new(IconName::UserGroup).size(IconSize::Medium).color(Color::Accent))
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .child(Label::new(agent.name.clone()).size(LabelSize::Large))
-                            .child(
-                                Label::new(agent.file_path.display().to_string())
-                                    .size(LabelSize::XSmall)
-                                    .color(Color::Muted)
-                                    .buffer_font(cx)
-                                    .truncate(),
-                            ),
-                    )
-                    .child(
-                        Chip::new(source_label(&agent.source)).label_color(Color::Muted),
-                    )
-                    .child(
-                        IconButton::new("open-agent-file", IconName::FileMarkdown)
-                            .icon_size(IconSize::Small)
-                            .tooltip(Tooltip::text("Abrir o .md"))
-                            .on_click(cx.listener(|this, _, window, cx| this.open_file(window, cx))),
-                    )
-                    .when(editable, |this| {
-                        this.child(
-                            IconButton::new("delete-agent", IconName::Trash)
-                                .icon_size(IconSize::Small)
-                                .tooltip(Tooltip::text("Apagar o agente"))
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.delete_selected(window, cx)
-                                })),
-                        )
-                        .child(
-                            Button::new("run-agent", "Chamar")
-                                .style(ButtonStyle::Outlined)
-                                .start_icon(Icon::new(IconName::PlayOutlined).size(IconSize::XSmall))
-                                .tooltip(Tooltip::text("Abre uma thread nova com /comando"))
-                                .on_click(cx.listener(|this, _, window, cx| this.run_selected(window, cx))),
-                        )
-                        .child(
-                            Button::new("save-agent", "Salvar")
-                                .style(ButtonStyle::Filled)
-                                .on_click(cx.listener(|this, _, _window, cx| this.save(cx))),
-                        )
-                    })
-                    .when(!editable, |this| {
-                        this.child(
-                            Button::new("copy-agent", "Copiar para o projeto")
-                                .style(ButtonStyle::Filled)
-                                .tooltip(Tooltip::text(
-                                    "Agentes do .claude/agents são só leitura; a cópia vira um agente do projeto",
-                                ))
-                                .on_click(cx.listener(|this, _, _window, cx| this.copy_to_project(cx))),
-                        )
-                    }),
+                div()
+                    .w_full()
+                    .px_1()
+                    .py_0p5()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(gpui::transparent_black())
+                    .hover(|this| this.border_color(cx.theme().colors().border_variant))
+                    .text_color(cx.theme().colors().text_muted)
+                    .child(draft.description.clone()),
             )
             .when_some(self.status.clone(), |this, status| {
                 this.child(Label::new(status).size(LabelSize::Small).color(Color::Muted))
             })
             .child(
-                Self::render_card("IDENTIDADE", cx)
-                    .child(Self::render_field("Nome", None, &draft.name, cx))
-                    .child(Self::render_field(
-                        "Comando",
-                        Some("Digite /comando no composer do Agent para chamar este agente."),
-                        &draft.command,
-                        cx,
-                    ))
-                    .child(Self::render_field("Descrição", None, &draft.description, cx)),
-            )
-            .child(
-                Self::render_card("MODELO E PERFIL", cx)
-                    .child(setting_row(
-                        "Ferramentas",
-                        "perfil base; os toolkits abaixo somam a ele",
-                        self.render_profile_dropdown(window, cx),
-                    ))
-                    .child(setting_row(
-                        "Modelo",
-                        "sobrepõe o modelo da thread",
-                        self.render_model_dropdown(window, cx),
-                    ))
-                    .child(setting_row(
-                        "Subagents",
-                        "modelo dos subagents que ele abre",
-                        self.render_agent_subagent_model_dropdown(window, cx),
-                    )),
-            )
-            .child(
-                Self::render_card("PERMISSÕES DO ZED AGENT", cx)
+                h_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .items_start()
+                    .gap_4()
                     .child(
-                        Label::new(
-                            "Decide o que o agente e os subagents dele rodam sem perguntar. Padrão segue as suas configurações; o que você nega nelas continua negado.",
-                        )
-                        .size(LabelSize::XSmall)
-                        .color(Color::Muted),
+                        v_flex()
+                            .id("task-agent-settings")
+                            .w(px(560.))
+                            .flex_none()
+                            .h_full()
+                            .gap_4()
+                            .overflow_y_scroll()
+                            .child(self.render_call_card(cx))
+                            .child(self.render_model_card(window, cx))
+                            .child(self.render_io_card(cx))
+                            .child(
+                                Label::new(
+                                    "As esteiras usam o que ele recebe e entrega para avisar quando falta algo antes deste passo.",
+                                )
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted),
+                            ),
                     )
-                    .child(self.render_builtin_permissions(cx)),
-            )
-            .child(
-                Self::render_card("FERRAMENTAS DO ASYLUM", cx)
                     .child(
-                        Label::new(
-                            "Ligue os toolkits que o agente usa. Cada ferramenta é livre, pede confirmação ou nunca roda; o que você nega nas configurações continua negado.",
-                        )
-                        .size(LabelSize::XSmall)
-                        .color(Color::Muted),
-                    )
-                    .child(self.render_toolkits(cx)),
-            )
-            .child(
-                Self::render_card("INSTRUÇÕES", cx).child(
-                    div()
-                        .p_2()
-                        .rounded_md()
-                        .border_1()
-                        .border_color(cx.theme().colors().border)
-                        .bg(cx.theme().colors().editor_background)
-                        .child(draft.instructions.clone()),
-                ),
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .h_full()
+                            .child(self.render_instructions_card(cx)),
+                    ),
             )
             .into_any_element()
+    }
+
+    fn render_detail_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let Some(draft) = self.draft.as_ref() else {
+            return h_flex();
+        };
+        let agent = &draft.agent;
+        let editable = agent.source.is_editable();
+        let source_badge = match &agent.source {
+            TaskAgentSource::Project { .. } => "projeto",
+            TaskAgentSource::Personal => "só para mim",
+            TaskAgentSource::Imported { .. } => "importado · só leitura",
+        };
+        let name = if self.editing_name {
+            div()
+                .w(px(280.))
+                .px_1p5()
+                .py_0p5()
+                .rounded_md()
+                .border_1()
+                .border_color(cx.theme().colors().border_focused)
+                .bg(cx.theme().colors().editor_background)
+                .on_action(cx.listener(|this, _: &menu::Confirm, _window, cx| {
+                    this.editing_name = false;
+                    cx.notify();
+                }))
+                .child(draft.name.clone())
+                .into_any_element()
+        } else {
+            h_flex()
+                .gap_1()
+                .child(
+                    Label::new(draft.name.read(cx).text(cx))
+                        .size(LabelSize::Large)
+                        .weight(FontWeight::SEMIBOLD),
+                )
+                .when(editable, |this| {
+                    this.child(
+                        IconButton::new("rename-agent", IconName::Pencil)
+                            .icon_size(IconSize::XSmall)
+                            .icon_color(Color::Muted)
+                            .tooltip(Tooltip::text("Renomear"))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.editing_name = true;
+                                if let Some(draft) = this.draft.as_ref() {
+                                    draft.name.focus_handle(cx).focus(window, cx);
+                                }
+                                cx.notify();
+                            })),
+                    )
+                })
+                .into_any_element()
+        };
+        h_flex()
+            .w_full()
+            .gap_3()
+            .child(agent_tile(agent, px(40.), IconSize::Medium, cx))
+            .child(
+                v_flex()
+                    .min_w_0()
+                    .gap_0p5()
+                    .child(name)
+                    .child(
+                        Label::new(self.display_path(&agent.file_path, cx))
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted)
+                            .buffer_font(cx)
+                            .truncate(),
+                    ),
+            )
+            .child(list_badge(source_badge, cx))
+            .child(div().flex_1())
+            .when(editable, |this| {
+                this.child(
+                    h_flex()
+                        .gap_2()
+                        .child(
+                            Switch::new(
+                                "task-agent-enabled",
+                                if agent.enabled {
+                                    ToggleState::Selected
+                                } else {
+                                    ToggleState::Unselected
+                                },
+                            )
+                            .label("Ativo")
+                            .on_click(cx.listener(|this, _, _window, cx| {
+                                if let Some(draft) = this.draft.as_mut() {
+                                    draft.agent.enabled = !draft.agent.enabled;
+                                    cx.notify();
+                                }
+                            })),
+                        ),
+                )
+                .child(
+                    IconButton::new("delete-agent", IconName::Trash)
+                        .icon_size(IconSize::Small)
+                        .icon_color(Color::Muted)
+                        .tooltip(Tooltip::text("Apagar o agente"))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.delete_selected(window, cx)
+                        })),
+                )
+            })
+            .child(
+                Button::new("run-agent", "Chamar")
+                    .style(ButtonStyle::Outlined)
+                    .start_icon(Icon::new(IconName::PlayOutlined).size(IconSize::XSmall))
+                    .tooltip(Tooltip::text("Abre uma thread nova com /comando"))
+                    .on_click(cx.listener(|this, _, window, cx| this.run_selected(window, cx))),
+            )
+            .map(|this| {
+                if editable {
+                    this.child(
+                        Button::new("save-agent", "Salvar")
+                            .style(ButtonStyle::Filled)
+                            .key_binding(KeyBinding::for_action_in(
+                                &workspace::Save { save_intent: None },
+                                &self.focus_handle,
+                                cx,
+                            ))
+                            .on_click(cx.listener(|this, _, _window, cx| this.save(cx))),
+                    )
+                } else {
+                    this.child(
+                        Button::new("copy-agent", "Copiar para o projeto")
+                            .style(ButtonStyle::Filled)
+                            .tooltip(Tooltip::text(
+                                "Agentes do .claude/agents são só leitura; a cópia vira um agente do projeto",
+                            ))
+                            .on_click(cx.listener(|this, _, _window, cx| this.copy_to_project(cx))),
+                    )
+                }
+            })
+    }
+
+    /// The file relative to its project, or under `~` for the user's own agents.
+    fn display_path(&self, path: &std::path::Path, cx: &App) -> String {
+        for (_, root) in self.worktree_roots(cx) {
+            if let Ok(relative) = path.strip_prefix(&root) {
+                return relative.display().to_string();
+            }
+        }
+        match path.strip_prefix(util::paths::home_dir()) {
+            Ok(relative) => format!("~/{}", relative.display()),
+            Err(_) => path.display().to_string(),
+        }
+    }
+
+    fn render_call_card(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let Some(draft) = self.draft.as_ref() else {
+            return div();
+        };
+        let using = self.flows_using(&draft.agent.command);
+        let flow_names = using
+            .iter()
+            .filter_map(|index| self.flows.get(*index))
+            .map(|flow| flow.name.clone())
+            .collect::<Vec<_>>();
+        let flows_text = match flow_names.as_slice() {
+            [] => "ainda não é passo de nenhuma esteira".to_string(),
+            [only] => format!("passo de {only}"),
+            [rest @ .., last] => format!("passo de {} e {last}", rest.join(", ")),
+        };
+        let first_flow = using.first().copied();
+        div().child(
+            Self::render_card("QUANDO CHAMAR", None, cx)
+                .child(card_row(
+                    Some(IconName::AtSign),
+                    h_flex()
+                        .gap_2()
+                        .child(Label::new("Composer do Agent").weight(FontWeight::MEDIUM))
+                        .child(
+                            h_flex()
+                                .h(px(22.))
+                                .px_1p5()
+                                .gap_0p5()
+                                .rounded(px(4.))
+                                .border_1()
+                                .border_color(cx.theme().colors().border)
+                                .bg(cx.theme().colors().editor_background)
+                                .child(
+                                    Label::new("/")
+                                        .size(LabelSize::Small)
+                                        .color(Color::Accent)
+                                        .buffer_font(cx),
+                                )
+                                .child(div().w(px(120.)).child(draft.command.clone())),
+                        )
+                        .into_any_element(),
+                    "digite no chat; o que vier depois vira o pedido",
+                    None,
+                    false,
+                    cx,
+                ))
+                .child(card_row(
+                    Some(IconName::ListTree),
+                    Label::new("Esteiras")
+                        .weight(FontWeight::MEDIUM)
+                        .into_any_element(),
+                    flows_text,
+                    first_flow.map(|index| {
+                        Button::new("agent-flows", "Ver")
+                            .style(ButtonStyle::Transparent)
+                            .color(Color::Accent)
+                            .label_size(LabelSize::Small)
+                            .on_click(cx.listener(move |this, _, _window, cx| {
+                                this.segment = Segment::Flows;
+                                this.selected_flow = Some(index);
+                                cx.notify();
+                            }))
+                            .into_any_element()
+                    }),
+                    true,
+                    cx,
+                )),
+        )
+    }
+
+    fn render_model_card(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let Some(draft) = self.draft.as_ref() else {
+            return div();
+        };
+        let agent = draft.agent.clone();
+        let editable = agent.source.is_editable();
+        let registered = toolkits(cx);
+
+        let mut toolkit_chips = h_flex().flex_wrap().gap_1p5();
+        for toolkit in registered.iter() {
+            let on = agent.toolkits.iter().any(|id| id == toolkit.id.as_ref());
+            let toolkit_id = toolkit.id.to_string();
+            toolkit_chips = toolkit_chips.child(
+                chip(
+                    SharedString::from(format!("toolkit-{toolkit_id}")),
+                    toolkit.name.clone(),
+                    if on { ChipLook::On } else { ChipLook::Off },
+                    false,
+                    cx,
+                )
+                .tooltip(Tooltip::text(toolkit.description.clone()))
+                .when(editable, |this| {
+                    this.on_click(cx.listener(move |this, _, _window, cx| {
+                        this.toggle_toolkit(&toolkit_id, cx);
+                    }))
+                }),
+            );
+        }
+
+        let configured = self
+            .project
+            .read(cx)
+            .context_server_store()
+            .read(cx)
+            .configured_server_ids()
+            .into_iter()
+            .map(|id| id.0.to_string())
+            .collect::<Vec<_>>();
+        let mut servers = configured.clone();
+        for server in &agent.context_servers {
+            if !servers.contains(server) {
+                servers.push(server.clone());
+            }
+        }
+        let mut server_chips = h_flex().flex_wrap().gap_1p5();
+        if servers.is_empty() {
+            server_chips = server_chips.child(
+                Label::new("Nenhum MCP configurado (Configurações → MCP).")
+                    .size(LabelSize::Small)
+                    .color(Color::Muted),
+            );
+        }
+        for server in servers {
+            let on = agent.context_servers.contains(&server);
+            let missing = !configured.contains(&server);
+            let server_id = server.clone();
+            server_chips = server_chips.child(
+                chip(
+                    SharedString::from(format!("mcp-{server}")),
+                    server.into(),
+                    if missing {
+                        ChipLook::Never
+                    } else if on {
+                        ChipLook::On
+                    } else {
+                        ChipLook::Off
+                    },
+                    true,
+                    cx,
+                )
+                .when(missing, |this| {
+                    this.tooltip(Tooltip::text("Não está configurado neste Zed"))
+                })
+                .when(editable, |this| {
+                    this.on_click(cx.listener(move |this, _, _window, cx| {
+                        this.toggle_context_server(&server_id, cx);
+                    }))
+                }),
+            );
+        }
+
+        let mode_of = |key: &str| agent.permissions.get(key).and_then(|rules| rules.default);
+        let all_mode = mode_of(ALL_TOOLS_PERMISSION_KEY);
+        let mut permission_chips = h_flex().flex_wrap().gap_1p5();
+        let mut permission_tools: Vec<(String, SharedString, SharedString, Option<ToolAccess>)> =
+            BUILTIN_PERMISSION_TOOLS
+                .iter()
+                .map(|(name, label, title)| {
+                    (
+                        name.to_string(),
+                        SharedString::from(*label),
+                        SharedString::from(*title),
+                        None,
+                    )
+                })
+                .collect();
+        for toolkit in registered.iter() {
+            if !agent.toolkits.iter().any(|id| id == toolkit.id.as_ref()) {
+                continue;
+            }
+            for tool in &toolkit.tools {
+                permission_tools.push((
+                    tool.name.to_string(),
+                    tool.title.to_lowercase().into(),
+                    tool.description.clone(),
+                    Some(tool.access),
+                ));
+            }
+        }
+        for (name, label, title, access) in permission_tools {
+            let tool_mode = mode_of(&name);
+            let toolkit_mode = access.and_then(|_| {
+                registered
+                    .iter()
+                    .find(|toolkit| toolkit.tools.iter().any(|tool| tool.name.as_ref() == name))
+                    .and_then(|toolkit| mode_of(toolkit.id.as_ref()))
+            });
+            let effective = tool_mode.or(toolkit_mode).or(all_mode);
+            let look = match (effective, access) {
+                (Some(PermissionMode::Allow), _) => ChipLook::On,
+                (Some(PermissionMode::Confirm), _) => ChipLook::Ask,
+                (Some(PermissionMode::Deny), _) => ChipLook::Never,
+                (None, Some(ToolAccess::Read)) => ChipLook::On,
+                (None, Some(_)) => ChipLook::Ask,
+                (None, None) => ChipLook::Off,
+            };
+            let mode_label = match (effective, access) {
+                (None, Some(ToolAccess::Read)) => "padrão (livre)",
+                (None, Some(_)) => "padrão (pede)",
+                (mode, _) => permission_label(mode),
+            };
+            let key = name.clone();
+            permission_chips = permission_chips.child(
+                chip(
+                    SharedString::from(format!("perm-{name}")),
+                    label,
+                    look,
+                    false,
+                    cx,
+                )
+                .tooltip(Tooltip::text(format!(
+                    "{title} · {mode_label}. Clique para trocar (padrão → livre → pede → nunca)."
+                )))
+                .when(editable, |this| {
+                    this.on_click(cx.listener(move |this, _, _window, cx| {
+                        this.cycle_permission(&key, cx);
+                    }))
+                }),
+            );
+        }
+
+        let dropdown = |element: AnyElement| div().w(px(210.)).flex().justify_end().child(element);
+        div().child(
+            Self::render_card("MODELO E PERMISSÕES", None, cx)
+                .child(card_row(
+                    None,
+                    Label::new("Modelo").weight(FontWeight::MEDIUM).into_any_element(),
+                    "sobrepõe o modelo da thread",
+                    Some(
+                        dropdown(self.render_model_dropdown(window, cx).into_any_element())
+                            .into_any_element(),
+                    ),
+                    false,
+                    cx,
+                ))
+                .child(card_row(
+                    None,
+                    Label::new("Ferramentas").weight(FontWeight::MEDIUM).into_any_element(),
+                    "perfil base; toolkits e MCPs somam a ele",
+                    Some(
+                        dropdown(self.render_profile_dropdown(window, cx).into_any_element())
+                            .into_any_element(),
+                    ),
+                    false,
+                    cx,
+                ))
+                .child(card_row(
+                    None,
+                    Label::new("Subagents").weight(FontWeight::MEDIUM).into_any_element(),
+                    "modelo dos subagents que ele abre",
+                    Some(
+                        dropdown(
+                            self.render_agent_subagent_model_dropdown(window, cx)
+                                .into_any_element(),
+                        )
+                        .into_any_element(),
+                    ),
+                    false,
+                    cx,
+                ))
+                .child(chip_row(
+                    "Toolkits",
+                    "ferramentas do Asylum",
+                    None,
+                    toolkit_chips,
+                    false,
+                    cx,
+                ))
+                .child(chip_row(
+                    "MCPs",
+                    "servidores ligados inteiros",
+                    None,
+                    server_chips,
+                    false,
+                    cx,
+                ))
+                .child(chip_row(
+                    "Permissões",
+                    "clique para trocar: padrão → livre → pede → nunca",
+                    Some(
+                        Button::new(
+                            "builtin-perm-all",
+                            format!("tudo: {}", permission_label(all_mode)),
+                        )
+                        .label_size(LabelSize::XSmall)
+                        .style(ButtonStyle::Subtle)
+                        .disabled(!editable)
+                        .tooltip(Tooltip::text(
+                            "Vale para toda ferramenta sem permissão própria, toolkits e MCP inclusive",
+                        ))
+                        .on_click(cx.listener(|this, _, _window, cx| {
+                            this.cycle_permission(ALL_TOOLS_PERMISSION_KEY, cx);
+                        }))
+                        .into_any_element(),
+                    ),
+                    permission_chips,
+                    true,
+                    cx,
+                )),
+        )
+    }
+
+    fn render_io_card(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let Some(draft) = self.draft.as_ref() else {
+            return div();
+        };
+        let editable = draft.agent.source.is_editable();
+        let row = |list: IoList, cx: &mut Context<Self>| {
+            let (values, title, hint) = match list {
+                IoList::Takes => (
+                    &draft.agent.takes,
+                    "Recebe",
+                    "o que pede de passos anteriores",
+                ),
+                IoList::Gives => (
+                    &draft.agent.gives,
+                    "Entrega",
+                    "o que passa para os próximos",
+                ),
+            };
+            let mut chips = h_flex().flex_wrap().gap_1p5();
+            for (index, value) in values.iter().enumerate() {
+                chips = chips.child(
+                    h_flex()
+                        .h(px(24.))
+                        .pl_2()
+                        .pr_0p5()
+                        .gap_0p5()
+                        .rounded(px(5.))
+                        .border_1()
+                        .border_color(cx.theme().colors().border)
+                        .bg(cx.theme().colors().element_background)
+                        .child(
+                            Label::new(value.clone())
+                                .size(LabelSize::Small)
+                                .buffer_font(cx),
+                        )
+                        .when(editable, |this| {
+                            this.child(
+                                IconButton::new(
+                                    SharedString::from(format!("io-remove-{list:?}-{index}")),
+                                    IconName::Close,
+                                )
+                                .icon_size(IconSize::XSmall)
+                                .icon_color(Color::Muted)
+                                .on_click(cx.listener(
+                                    move |this, _, _window, cx| {
+                                        this.remove_io(list, index, cx);
+                                    },
+                                )),
+                            )
+                        }),
+                );
+            }
+            match &self.adding_io {
+                Some((adding, editor)) if *adding == list => {
+                    chips = chips.child(
+                        div()
+                            .w(px(140.))
+                            .h(px(24.))
+                            .px_1p5()
+                            .flex()
+                            .items_center()
+                            .rounded(px(5.))
+                            .border_1()
+                            .border_color(cx.theme().colors().border_focused)
+                            .bg(cx.theme().colors().editor_background)
+                            .on_action(cx.listener(|this, _: &menu::Confirm, _window, cx| {
+                                this.commit_io(cx);
+                            }))
+                            .on_action(cx.listener(|this, _: &menu::Cancel, _window, cx| {
+                                this.adding_io = None;
+                                cx.notify();
+                            }))
+                            .child(editor.clone()),
+                    );
+                }
+                _ if editable => {
+                    chips = chips.child(
+                        Button::new(SharedString::from(format!("io-add-{list:?}")), "adicionar")
+                            .style(ButtonStyle::Outlined)
+                            .label_size(LabelSize::Small)
+                            .color(Color::Muted)
+                            .start_icon(Icon::new(IconName::Plus).size(IconSize::XSmall))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.start_adding_io(list, window, cx);
+                            })),
+                    );
+                }
+                _ => {}
+            }
+            (title, hint, chips)
+        };
+        let (takes_title, takes_hint, takes_chips) = row(IoList::Takes, cx);
+        let (gives_title, gives_hint, gives_chips) = row(IoList::Gives, cx);
+        div().child(
+            Self::render_card("ENTRADA E SAÍDA", None, cx)
+                .child(chip_row(
+                    takes_title,
+                    takes_hint,
+                    None,
+                    takes_chips,
+                    false,
+                    cx,
+                ))
+                .child(chip_row(
+                    gives_title,
+                    gives_hint,
+                    None,
+                    gives_chips,
+                    true,
+                    cx,
+                )),
+        )
+    }
+
+    fn render_instructions_card(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let Some(draft) = self.draft.as_ref() else {
+            return div();
+        };
+        let lines = draft
+            .instructions
+            .read(cx)
+            .buffer()
+            .read(cx)
+            .read(cx)
+            .max_point()
+            .row
+            + 1;
+        div().size_full().child(
+            Self::render_card(
+                "INSTRUÇÕES",
+                Some(
+                    Button::new("open-agent-file", "Abrir .md")
+                        .style(ButtonStyle::Transparent)
+                        .color(Color::Accent)
+                        .label_size(LabelSize::Small)
+                        .start_icon(
+                            Icon::new(IconName::FileMarkdown)
+                                .size(IconSize::XSmall)
+                                .color(Color::Accent),
+                        )
+                        .on_click(cx.listener(|this, _, window, cx| this.open_file(window, cx)))
+                        .into_any_element(),
+                ),
+                cx,
+            )
+            .size_full()
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .py_2()
+                    .bg(cx.theme().colors().editor_background)
+                    .child(draft.instructions.clone()),
+            )
+            .child(
+                h_flex()
+                    .h(px(36.))
+                    .flex_none()
+                    .px_3p5()
+                    .gap_2()
+                    .border_t_1()
+                    .border_color(cx.theme().colors().border_variant)
+                    .child(
+                        Icon::new(IconName::Info)
+                            .size(IconSize::XSmall)
+                            .color(Color::Muted),
+                    )
+                    .child(
+                        Label::new("Corpo do .md. O frontmatter sai dos campos ao lado.")
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        Label::new(format!(
+                            "{lines} linha{} · markdown",
+                            if lines == 1 { "" } else { "s" }
+                        ))
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted)
+                        .buffer_font(cx),
+                    ),
+            ),
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum IoList {
+    Takes,
+    Gives,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ChipLook {
+    On,
+    Off,
+    Ask,
+    Never,
+}
+
+fn stable_hash(text: &str) -> usize {
+    text.bytes().fold(0usize, |hash, byte| {
+        hash.wrapping_mul(31).wrapping_add(byte as usize)
+    })
+}
+
+/// The template's icon for the agents made from one; any other agent gets one from its id, so
+/// it keeps the same tile across sessions.
+fn agent_icon(agent: &TaskAgent) -> IconName {
+    if let Some(template) = TEMPLATES
+        .iter()
+        .find(|template| template.command == agent.command)
+    {
+        return template.icon;
+    }
+    const ICONS: &[IconName] = &[
+        IconName::UserGroup,
+        IconName::Sparkle,
+        IconName::Book,
+        IconName::Code,
+        IconName::Terminal,
+        IconName::ListTodo,
+        IconName::FileTextOutlined,
+        IconName::History,
+    ];
+    ICONS
+        .get(stable_hash(&agent.id) % ICONS.len())
+        .copied()
+        .unwrap_or(IconName::UserGroup)
+}
+
+fn agent_tile(agent: &TaskAgent, size: Pixels, icon_size: IconSize, cx: &App) -> impl IntoElement {
+    let color = cx
+        .theme()
+        .players()
+        .color_for_participant(stable_hash(&agent.id) as u32)
+        .cursor;
+    div()
+        .size(size)
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(size / 5.6)
+        .bg(color.opacity(0.16))
+        .child(
+            Icon::new(agent_icon(agent))
+                .size(icon_size)
+                .color(Color::Custom(color)),
+        )
+}
+
+fn list_badge(text: &'static str, cx: &App) -> impl IntoElement {
+    div()
+        .flex_none()
+        .px_2()
+        .py_px()
+        .rounded_full()
+        .bg(cx.theme().colors().element_hover)
+        .child(Label::new(text).size(LabelSize::XSmall).color(Color::Muted))
+}
+
+fn card_row(
+    icon: Option<IconName>,
+    title: AnyElement,
+    hint: impl Into<SharedString>,
+    trailing: Option<AnyElement>,
+    last: bool,
+    cx: &App,
+) -> impl IntoElement {
+    h_flex()
+        .w_full()
+        .px_3p5()
+        .py_2p5()
+        .gap_2p5()
+        .when(!last, |this| {
+            this.border_b_1()
+                .border_color(cx.theme().colors().border_variant)
+        })
+        .when_some(icon, |this, icon| {
+            this.child(Icon::new(icon).size(IconSize::Small).color(Color::Muted))
+        })
+        .child(
+            v_flex().flex_1().min_w_0().gap_0p5().child(title).child(
+                Label::new(hint.into())
+                    .size(LabelSize::Small)
+                    .color(Color::Muted)
+                    .truncate(),
+            ),
+        )
+        .children(trailing)
+}
+
+fn chip_row(
+    title: &'static str,
+    hint: &'static str,
+    action: Option<AnyElement>,
+    chips: Div,
+    last: bool,
+    cx: &App,
+) -> impl IntoElement {
+    v_flex()
+        .w_full()
+        .px_3p5()
+        .py_2p5()
+        .gap_2()
+        .when(!last, |this| {
+            this.border_b_1()
+                .border_color(cx.theme().colors().border_variant)
+        })
+        .child(
+            h_flex()
+                .gap_2()
+                .child(Label::new(title).weight(FontWeight::MEDIUM))
+                .child(Label::new(hint).size(LabelSize::Small).color(Color::Muted))
+                .child(div().flex_1())
+                .children(action),
+        )
+        .child(chips)
+}
+
+fn chip(
+    id: SharedString,
+    label: SharedString,
+    look: ChipLook,
+    monospace: bool,
+    cx: &App,
+) -> Stateful<Div> {
+    let colors = cx.theme().colors();
+    let status = cx.theme().status();
+    let (background, border, label_color) = match look {
+        ChipLook::On => (colors.element_hover, colors.border, Color::Default),
+        ChipLook::Off => (
+            colors.editor_background,
+            colors.border_variant,
+            Color::Muted,
+        ),
+        ChipLook::Ask => (
+            status.warning.opacity(0.12),
+            status.warning.opacity(0.4),
+            Color::Warning,
+        ),
+        ChipLook::Never => (
+            colors.editor_background,
+            colors.border_variant,
+            Color::Muted,
+        ),
+    };
+    h_flex()
+        .id(id)
+        .h(px(24.))
+        .px_2()
+        .gap_1p5()
+        .rounded(px(5.))
+        .border_1()
+        .border_color(border)
+        .bg(background)
+        .cursor_pointer()
+        .hover(|this| this.border_color(colors.border_focused))
+        .map(|this| match look {
+            ChipLook::Ask => this.child(
+                Icon::new(IconName::Lock)
+                    .size(IconSize::XSmall)
+                    .color(Color::Warning),
+            ),
+            _ => this.child(
+                div()
+                    .size(px(6.))
+                    .flex_none()
+                    .rounded_full()
+                    .bg(match look {
+                        ChipLook::On => status.success,
+                        ChipLook::Never => status.error,
+                        _ => colors.text_disabled,
+                    }),
+            ),
+        })
+        .child(
+            Label::new(label)
+                .size(LabelSize::Small)
+                .color(label_color)
+                .when(look == ChipLook::Never, |this| this.strikethrough())
+                .when(monospace, |this| this.buffer_font(cx)),
+        )
+}
+
+impl TaskAgentsView {
+    fn toggle_context_server(&mut self, server: &str, cx: &mut Context<Self>) {
+        let Some(draft) = self.draft.as_mut() else {
+            return;
+        };
+        let servers = &mut draft.agent.context_servers;
+        if let Some(position) = servers.iter().position(|id| id == server) {
+            servers.remove(position);
+        } else {
+            servers.push(server.to_string());
+        }
+        cx.notify();
+    }
+
+    fn start_adding_io(&mut self, list: IoList, window: &mut Window, cx: &mut Context<Self>) {
+        let editor = cx.new(|cx| {
+            let mut editor = Editor::single_line(window, cx);
+            editor.set_placeholder_text("ex.: spec.md", window, cx);
+            editor
+        });
+        editor.focus_handle(cx).focus(window, cx);
+        self.adding_io = Some((list, editor));
+        cx.notify();
+    }
+
+    fn commit_io(&mut self, cx: &mut Context<Self>) {
+        let Some((list, editor)) = self.adding_io.take() else {
+            return;
+        };
+        let value = editor.read(cx).text(cx).trim().to_string();
+        if let Some(draft) = self.draft.as_mut()
+            && !value.is_empty()
+        {
+            let values = match list {
+                IoList::Takes => &mut draft.agent.takes,
+                IoList::Gives => &mut draft.agent.gives,
+            };
+            if !values.contains(&value) {
+                values.push(value);
+            }
+        }
+        cx.notify();
+    }
+
+    fn remove_io(&mut self, list: IoList, index: usize, cx: &mut Context<Self>) {
+        let Some(draft) = self.draft.as_mut() else {
+            return;
+        };
+        let values = match list {
+            IoList::Takes => &mut draft.agent.takes,
+            IoList::Gives => &mut draft.agent.gives,
+        };
+        if index < values.len() {
+            values.remove(index);
+        }
+        cx.notify();
     }
 }
 
@@ -1973,24 +2674,6 @@ pub(crate) fn selector(
     .attach(gpui::Anchor::BottomRight)
 }
 
-/// A labeled setting with its control on the right, as in the agent's cards.
-fn setting_row(
-    title: &'static str,
-    hint: &'static str,
-    control: impl IntoElement,
-) -> impl IntoElement {
-    h_flex()
-        .gap_3()
-        .justify_between()
-        .child(
-            v_flex()
-                .min_w_0()
-                .child(Label::new(title))
-                .child(Label::new(hint).size(LabelSize::XSmall).color(Color::Muted)),
-        )
-        .child(div().flex_none().max_w(px(280.)).child(control))
-}
-
 impl TaskAgentsView {
     fn apply_pending_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(index) = self.pending_selection.take() {
@@ -2002,53 +2685,59 @@ impl TaskAgentsView {
 impl Render for TaskAgentsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.apply_pending_selection(window, cx);
+        let flows_segment = self.segment == Segment::Flows;
         h_flex()
             .key_context("TaskAgents")
             .track_focus(&self.focus_handle)
+            .on_action(cx.listener(|this, _: &workspace::Save, _window, cx| {
+                if this.segment == Segment::Agents {
+                    this.save(cx);
+                }
+            }))
             .size_full()
             .bg(cx.theme().colors().editor_background)
             .child(
                 v_flex()
-                    .w(px(280.))
+                    .w(px(300.))
                     .h_full()
                     .flex_none()
                     .border_r_1()
                     .border_color(cx.theme().colors().border)
                     .bg(cx.theme().colors().panel_background)
+                    .child(self.render_segment(cx))
                     .child(
-                        div().p_2().child(
+                        div().p_2p5().child(
                             h_flex()
-                                .gap_2()
+                                .h(px(30.))
+                                .gap_1p5()
                                 .px_2()
-                                .py_1()
                                 .rounded_md()
                                 .border_1()
                                 .border_color(cx.theme().colors().border_variant)
                                 .bg(cx.theme().colors().editor_background)
                                 .child(
                                     Icon::new(IconName::MagnifyingGlass)
-                                        .size(IconSize::Small)
+                                        .size(IconSize::XSmall)
                                         .color(Color::Muted),
                                 )
                                 .child(div().flex_1().min_w_0().child(self.search.clone())),
                         ),
                     )
-                    .child(self.render_segment(cx))
-                    .child(div().flex_1().min_h_0().child(if self.segment == Segment::Flows {
+                    .child(div().flex_1().min_h_0().child(if flows_segment {
                         self.render_flow_list(cx).into_any_element()
                     } else {
                         self.render_list(cx).into_any_element()
                     }))
                     .child(
-                        div().p_2().child(
+                        div().px_2p5().py_2().child(
                             h_flex()
                                 .id("new-task-agent")
+                                .h(px(34.))
                                 .gap_2()
-                                .px_2()
-                                .py_1p5()
-                                .rounded_md()
+                                .px_2p5()
+                                .rounded_lg()
                                 .border_1()
-                                .border_color(cx.theme().colors().border_variant)
+                                .border_color(cx.theme().colors().border)
                                 .cursor_pointer()
                                 .hover(|this| this.bg(cx.theme().colors().element_hover))
                                 .child(
@@ -2057,8 +2746,13 @@ impl Render for TaskAgentsView {
                                         .color(Color::Accent),
                                 )
                                 .child(
-                                    Label::new(if self.segment == Segment::Flows { "Nova esteira" } else { "Novo agente" })
-                                        .color(Color::Accent),
+                                    Label::new(if flows_segment {
+                                        "Nova esteira"
+                                    } else {
+                                        "Novo agente"
+                                    })
+                                    .weight(FontWeight::MEDIUM)
+                                    .color(Color::Accent),
                                 )
                                 .child(div().flex_1())
                                 .child(
@@ -2069,7 +2763,9 @@ impl Render for TaskAgentsView {
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     if this.segment == Segment::Flows {
                                         this.workspace
-                                            .update(cx, |workspace, cx| crate::flows_view::new_flow(workspace, window, cx))
+                                            .update(cx, |workspace, cx| {
+                                                crate::flows_view::new_flow(workspace, window, cx)
+                                            })
                                             .log_err();
                                     } else {
                                         this.open_new_agent_modal(window, cx)
@@ -2077,35 +2773,36 @@ impl Render for TaskAgentsView {
                                 })),
                         ),
                     )
-                    .child(Divider::horizontal())
                     .child(
-                        v_flex()
-                            .p_2()
-                            .gap_2()
-                            .child(setting_row(
-                                "Subagents",
-                                "padrão do Zed Agent",
-                                self.render_subagent_model_dropdown(window, cx),
-                            ))
-                            .child(
-                                v_flex()
-                                    .p_2()
-                                    .gap_0p5()
-                                    .rounded_md()
-                                    .bg(cx.theme().colors().editor_background)
-                                    .child(
-                                        Label::new("COMO FICA NO REPO")
-                                            .size(LabelSize::XSmall)
-                                            .color(Color::Muted),
-                                    )
-                                    .child(
-                                        Label::new(
-                                            "Cada agente é um .md com frontmatter em .asylum/agents; vai no git e o time inteiro usa.",
-                                        )
+                        div().p_2p5().child(
+                            v_flex()
+                                .p_2p5()
+                                .gap_1()
+                                .rounded_lg()
+                                .border_1()
+                                .border_color(cx.theme().colors().border_variant)
+                                .bg(cx.theme().colors().editor_background)
+                                .child(
+                                    Label::new("COMO FICA NO REPO")
                                         .size(LabelSize::XSmall)
+                                        .weight(FontWeight::SEMIBOLD)
                                         .color(Color::Muted),
-                                    ),
-                            ),
+                                )
+                                .child(
+                                    Label::new(if flows_segment {
+                                        format!(
+                                            "Cada esteira é um .flow.md em {}; vai no git e o time inteiro usa.",
+                                            flows::PROJECT_FLOWS_DIR
+                                        )
+                                    } else {
+                                        format!(
+                                            "Cada agente é um .md com frontmatter em {PROJECT_AGENTS_DIR}; vai no git e o time inteiro usa."
+                                        )
+                                    })
+                                    .size(LabelSize::Small)
+                                    .color(Color::Muted),
+                                ),
+                        ),
                     ),
             )
             .child(
@@ -2113,7 +2810,7 @@ impl Render for TaskAgentsView {
                     .flex_1()
                     .min_w_0()
                     .h_full()
-                    .child(if self.segment == Segment::Flows {
+                    .child(if flows_segment {
                         self.render_flow_detail(cx)
                     } else {
                         self.render_detail(window, cx)

@@ -56,6 +56,7 @@ fn agent(command: &str, takes: &[&str], gives: &[&str]) -> TaskAgent {
         takes: takes.iter().map(|name| name.to_string()).collect(),
         gives: gives.iter().map(|name| name.to_string()).collect(),
         context_servers: Vec::new(),
+        enabled: true,
         instructions: String::new(),
         source: TaskAgentSource::Personal,
         file_path: PathBuf::new(),

@@ -867,6 +867,7 @@ mod tests {
             takes: Vec::new(),
             gives: gives.iter().map(|name| name.to_string()).collect(),
             context_servers: Vec::new(),
+            enabled: true,
             instructions: "Instruções do agente.".to_string(),
             source: task_agents::TaskAgentSource::Personal,
             file_path: PathBuf::new(),
