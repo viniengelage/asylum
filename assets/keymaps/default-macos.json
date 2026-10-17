@@ -1210,6 +1210,16 @@
     },
   },
   {
+    "context": "FlowView",
+    "use_key_equivalents": true,
+    "bindings": {
+      "alt-up": "esteiras::SubirPasso",
+      "alt-down": "esteiras::DescerPasso",
+      "backspace": "esteiras::RemoverPasso",
+      "delete": "esteiras::RemoverPasso",
+    },
+  },
+  {
     "context": "NewFlow",
     "use_key_equivalents": true,
     "bindings": {

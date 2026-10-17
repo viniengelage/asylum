@@ -1786,6 +1786,7 @@ impl TaskAgentsView {
                     this.child(
                         primary_button(
                             "save-agent",
+                            None,
                             "Salvar",
                             Some(KeyBinding::for_action_in(
                                 &workspace::Save { save_intent: None },
@@ -2911,6 +2912,7 @@ impl StatusItemView for TaskAgentsToolkitButton {
 /// button style is a neutral gray in the Polar theme, so it can't say "this is the next step".
 pub(crate) fn primary_button(
     id: impl Into<gpui::ElementId>,
+    icon: Option<IconName>,
     label: impl Into<SharedString>,
     key_binding: Option<KeyBinding>,
     cx: &App,
@@ -2920,12 +2922,17 @@ pub(crate) fn primary_button(
         .id(id)
         .h(px(30.))
         .px_3()
-        .gap_2()
+        .gap_1p5()
         .flex_none()
         .rounded_md()
         .cursor_pointer()
         .bg(fill)
         .hover(move |this| this.bg(fill.opacity(0.85)))
+        .children(icon.map(|icon| {
+            Icon::new(icon)
+                .size(IconSize::XSmall)
+                .color(Color::Custom(gpui::white()))
+        }))
         .child(
             Label::new(label)
                 .size(LabelSize::Small)
@@ -2938,7 +2945,9 @@ pub(crate) fn primary_button(
 /// The bordered companion of [`primary_button`], e.g. Cancelar.
 pub(crate) fn secondary_button(
     id: impl Into<gpui::ElementId>,
+    icon: Option<(IconName, Color)>,
     label: impl Into<SharedString>,
+    enabled: bool,
     cx: &App,
 ) -> Stateful<Div> {
     let colors = cx.theme().colors();
@@ -2946,13 +2955,21 @@ pub(crate) fn secondary_button(
         .id(id)
         .h(px(30.))
         .px_3()
+        .gap_1p5()
         .flex_none()
         .rounded_md()
-        .cursor_pointer()
         .border_1()
         .border_color(colors.border)
-        .hover(|this| this.bg(colors.element_hover))
-        .child(Label::new(label).size(LabelSize::Small))
+        .when(enabled, |this| {
+            this.cursor_pointer()
+                .hover(|this| this.bg(colors.element_hover))
+        })
+        .children(icon.map(|(icon, color)| Icon::new(icon).size(IconSize::XSmall).color(color)))
+        .child(Label::new(label).size(LabelSize::Small).color(if enabled {
+            Color::Default
+        } else {
+            Color::Muted
+        }))
 }
 
 /// Two or more choices side by side; the chosen one is filled, as in the boards.

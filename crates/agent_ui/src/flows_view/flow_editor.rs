@@ -3,13 +3,15 @@
 //! the `.flow.md` that the parser reads back.
 
 use super::FlowView;
-use crate::task_agents_view::{OpenTaskAgents, model_dropdown, selector};
+use crate::task_agents_view::{
+    OpenTaskAgents, model_dropdown, primary_button, secondary_button, segment_option, selector,
+};
 use editor::{Editor, EditorEvent};
 use flows::{
     AgentStep, BranchStep, Criterion, DesignTarget, DesignTool, FlowStep, GateStep, OnFail,
     ParallelStep, RunStep, StepKind, Verifier, unique_step_id, validate_flow,
 };
-use gpui::{Entity, FontWeight, Subscription, Window};
+use gpui::{CursorStyle, Entity, FontWeight, Hsla, Subscription, Window};
 use task_agents::{TaskAgent, TaskAgentSource};
 use ui::{Checkbox, ContextMenu, PopoverMenu, Tooltip, prelude::*};
 use util::ResultExt as _;
@@ -33,6 +35,55 @@ pub(super) enum NewStep {
     Command,
     Branch,
     Parallel,
+}
+
+/// A step dragged by its handle to another place in the list.
+#[derive(Clone)]
+pub(super) struct DraggedStep {
+    index: usize,
+    label: SharedString,
+    icon: IconName,
+}
+
+/// An agent or a kind of step dragged from the library into the list.
+#[derive(Clone)]
+pub(super) struct DraggedNewStep {
+    new_step: NewStep,
+    label: SharedString,
+    icon: IconName,
+}
+
+struct DragPreview {
+    icon: IconName,
+    label: SharedString,
+}
+
+impl Render for DragPreview {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        h_flex()
+            .h(px(30.))
+            .px_2p5()
+            .gap_2()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().colors().border_focused)
+            .bg(cx.theme().colors().elevated_surface_background)
+            .shadow_md()
+            .child(
+                Icon::new(self.icon)
+                    .size(IconSize::Small)
+                    .color(Color::Accent),
+            )
+            .child(Label::new(self.label.clone()).size(LabelSize::Small))
+    }
+}
+
+/// A chip's fill and text: tinted by what it says, as in the step component of the boards.
+fn chip_colors(color: Color, cx: &App) -> (Hsla, Color) {
+    match color {
+        Color::Muted => (cx.theme().colors().element_hover, Color::Muted),
+        color => (color.color(cx).opacity(0.14), color),
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -216,6 +267,38 @@ impl FlowView {
         };
         if self.edit_flow(cx, |flow| flow.steps.swap(index, target)) {
             self.select_step(Some(target), window, cx);
+        }
+    }
+
+    /// Moves the step at `from` to the insert point `at`, the gap before the step now at `at`.
+    pub(super) fn move_step_to(
+        &mut self,
+        from: usize,
+        at: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if from >= self.flow.steps.len() || at == from || at == from + 1 {
+            return;
+        }
+        let target = if at > from { at - 1 } else { at };
+        if self.edit_flow(cx, |flow| {
+            let step = flow.steps.remove(from);
+            flow.steps.insert(target, step);
+        }) {
+            self.select_step(Some(target), window, cx);
+        }
+    }
+
+    pub(super) fn move_selected(&mut self, up: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(index) = self.selected {
+            self.move_step(index, up, window, cx);
+        }
+    }
+
+    pub(super) fn remove_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(index) = self.selected {
+            self.remove_step(index, window, cx);
         }
     }
 
@@ -634,10 +717,23 @@ impl FlowView {
                             .color(Color::Accent),
                     )
                 })
-                .child(Label::new(name).size(LabelSize::Small).truncate())
+                .child(Label::new(name.clone()).size(LabelSize::Small).truncate())
                 .child(div().flex_1())
                 .child(Label::new("+").color(Color::Muted))
-                .tooltip(Tooltip::text("Adicionar à esteira"))
+                .tooltip(Tooltip::text("Clique ou arraste para a esteira"))
+                .on_drag(
+                    DraggedNewStep {
+                        new_step: new_step.clone(),
+                        label: name.into(),
+                        icon,
+                    },
+                    |dragged, _offset, _window, cx| {
+                        cx.new(|_| DragPreview {
+                            icon: dragged.icon,
+                            label: dragged.label.clone(),
+                        })
+                    },
+                )
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.insert_step(at, new_step.clone(), window, cx)
                 }))
@@ -786,7 +882,7 @@ impl FlowView {
                     .child(description(if self.insert_at.is_some() {
                         "Clique para inserir no ponto marcado na esteira."
                     } else {
-                        "Clique para adicionar ao fim da esteira. Cada agente traz a sua config; o passo pode sobrescrever só nesta esteira."
+                        "Clique ou arraste para a esteira. Cada agente traz a sua config; o passo pode sobrescrever só nesta esteira."
                     })),
             )
     }
@@ -796,20 +892,7 @@ impl FlowView {
     pub(super) fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let running = self.is_running();
         let colors = cx.theme().colors();
-        let segment = |id: &'static str,
-                       label: &'static str,
-                       selected: bool,
-                       view: BoardView,
-                       cx: &mut Context<Self>| {
-            Button::new(id, label)
-                .label_size(LabelSize::Small)
-                .toggle_state(selected)
-                .style(ButtonStyle::Subtle)
-                .on_click(cx.listener(move |this, _, _window, cx| {
-                    this.board_view = view;
-                    cx.notify();
-                }))
-        };
+        let can_suggest = !running && self.suggesting.is_none();
         h_flex()
             .h(px(50.))
             .flex_none()
@@ -819,75 +902,95 @@ impl FlowView {
             .border_color(colors.border)
             .child(
                 div()
-                    .w(px(220.))
+                    .w(px(260.))
                     .px_1p5()
                     .py_0p5()
                     .rounded_md()
                     .border_1()
-                    .border_color(colors.border_variant)
+                    .border_color(gpui::transparent_black())
+                    .hover(|this| this.border_color(colors.border))
                     .child(self.name_editor.clone()),
             )
             .child(div().flex_1())
             .child(
                 h_flex()
+                    .w(px(150.))
                     .p_0p5()
                     .gap_0p5()
                     .rounded_md()
                     .border_1()
                     .border_color(colors.border)
                     .bg(colors.editor_background)
-                    .child(segment(
-                        "board-list",
-                        "Lista",
-                        self.board_view == BoardView::List,
-                        BoardView::List,
-                        cx,
-                    ))
-                    .child(segment(
-                        "board-canvas",
-                        "Canvas",
-                        self.board_view == BoardView::Canvas,
-                        BoardView::Canvas,
-                        cx,
-                    )),
+                    .child(
+                        segment_option(
+                            "board-list",
+                            "Lista",
+                            self.board_view == BoardView::List,
+                            true,
+                            cx,
+                        )
+                        .on_click(cx.listener(|this, _, _window, cx| {
+                            this.board_view = BoardView::List;
+                            cx.notify();
+                        })),
+                    )
+                    .child(
+                        segment_option(
+                            "board-canvas",
+                            "Canvas",
+                            self.board_view == BoardView::Canvas,
+                            true,
+                            cx,
+                        )
+                        .on_click(cx.listener(|this, _, _window, cx| {
+                            this.board_view = BoardView::Canvas;
+                            cx.notify();
+                        })),
+                    ),
             )
             .child(
-                Button::new("suggest-steps", "Sugerir passos")
-                    .start_icon(Icon::new(IconName::Sparkle).size(IconSize::Small))
-                    .style(ButtonStyle::Outlined)
-                    .disabled(running || self.suggesting.is_some())
-                    .on_click(cx.listener(|this, _, window, cx| this.suggest_steps(window, cx))),
+                secondary_button("suggest-steps", None, "Sugerir passos", can_suggest, cx).when(
+                    can_suggest,
+                    |this| {
+                        this.on_click(
+                            cx.listener(|this, _, window, cx| this.suggest_steps(window, cx)),
+                        )
+                    },
+                ),
             )
             .child(
-                Button::new("show-flow-file", ".flow.md")
-                    .start_icon(Icon::new(IconName::Code).size(IconSize::Small))
-                    .style(ButtonStyle::Outlined)
+                secondary_button("show-flow-file", None, ".flow.md", true, cx)
                     .tooltip(Tooltip::text("Editar como texto"))
                     .on_click(cx.listener(|this, _, window, cx| this.open_flow_file(window, cx))),
             )
             .child(
-                Button::new("save-flow", if self.saved { "Salva" } else { "Salvar" })
-                    .start_icon(Icon::new(IconName::Download).size(IconSize::Small))
-                    .style(ButtonStyle::Outlined)
-                    .disabled(self.saved)
-                    .on_click(cx.listener(|this, _, _window, cx| this.save(cx).detach())),
+                secondary_button(
+                    "save-flow",
+                    None,
+                    if self.saved { "Salva" } else { "Salvar" },
+                    !self.saved,
+                    cx,
+                )
+                .when(!self.saved, |this| {
+                    this.on_click(cx.listener(|this, _, _window, cx| this.save(cx).detach()))
+                }),
             )
             .child(if running {
-                Button::new("stop-flow", "Parar")
-                    .start_icon(
-                        Icon::new(IconName::Stop)
-                            .size(IconSize::Small)
-                            .color(Color::Error),
-                    )
-                    .style(ButtonStyle::Outlined)
-                    .on_click(cx.listener(|this, _, _window, cx| {
+                secondary_button(
+                    "stop-flow",
+                    Some((IconName::Stop, Color::Error)),
+                    "Parar",
+                    true,
+                    cx,
+                )
+                .on_click(
+                    cx.listener(|this, _, _window, cx| {
                         this.stop(Some("você parou a esteira."), cx)
-                    }))
-                    .into_any_element()
+                    }),
+                )
+                .into_any_element()
             } else {
-                Button::new("run-flow", "Rodar")
-                    .start_icon(Icon::new(IconName::PlayFilled).size(IconSize::Small))
-                    .style(ButtonStyle::Filled)
+                primary_button("run-flow", Some(IconName::PlayFilled), "Rodar", None, cx)
                     .on_click(cx.listener(|this, _, window, cx| this.rerun(window, cx)))
                     .into_any_element()
             })
@@ -969,10 +1072,29 @@ impl FlowView {
                 }
                 board = board.child(self.render_insert_point(index + 1, cx));
             }
+            if !self.flow.steps.is_empty() {
+                let binding = |action: &dyn gpui::Action, cx: &App| {
+                    ui::KeyBinding::for_action_in(action, &self.focus_handle, cx)
+                        .size(rems_from_px(11_f32))
+                };
+                let hint = |text: &'static str| {
+                    Label::new(text).size(LabelSize::XSmall).color(Color::Muted)
+                };
+                board = board.child(
+                    h_flex()
+                        .pt_2()
+                        .gap_1()
+                        .child(binding(&super::SubirPasso, cx))
+                        .child(binding(&super::DescerPasso, cx))
+                        .child(hint("move o passo selecionado ·"))
+                        .child(binding(&super::RemoverPasso, cx))
+                        .child(hint("remove · arraste pela alça ou da coluna da esquerda")),
+                );
+            }
             if self.flow.steps.is_empty() {
                 board = board.child(
                     div().py_8().flex().justify_center().child(
-                        Label::new("Esteira vazia. Clique num agente à esquerda, use + ou peça “Sugerir passos”.")
+                        Label::new("Esteira vazia. Clique ou arraste um agente da esquerda, use + ou peça “Sugerir passos”.")
                             .color(Color::Muted),
                     ),
                 );
@@ -995,15 +1117,29 @@ impl FlowView {
         let view = cx.entity().downgrade();
         let agents = self.agents.clone();
         let marked = self.insert_at == Some(at);
-        let line = cx.theme().colors().border_variant;
+        let dragging = cx.has_active_drag();
+        let line = cx.theme().colors().border;
+        let accent = cx.theme().colors().text_accent;
         h_flex()
-            .h(px(26.))
-            .pl(px(26.))
+            .id(("insert-point", at))
+            .h(px(if dragging { 34. } else { 26. }))
+            .pl(px(32.))
             .relative()
+            .rounded_md()
+            .drag_over::<DraggedStep>(move |style, _, _, _| style.bg(accent.opacity(0.12)))
+            .drag_over::<DraggedNewStep>(move |style, _, _, _| style.bg(accent.opacity(0.12)))
+            .on_drop(cx.listener(move |this, dragged: &DraggedStep, window, cx| {
+                this.move_step_to(dragged.index, at, window, cx)
+            }))
+            .on_drop(
+                cx.listener(move |this, dragged: &DraggedNewStep, window, cx| {
+                    this.insert_step(at, dragged.new_step.clone(), window, cx)
+                }),
+            )
             .child(
                 div()
                     .absolute()
-                    .left(px(34.))
+                    .left(px(42.))
                     .top_0()
                     .bottom_0()
                     .w_px()
@@ -1015,7 +1151,7 @@ impl FlowView {
                         .absolute()
                         .left_0()
                         .right_0()
-                        .top(px(12.))
+                        .top(px(if dragging { 16. } else { 12. }))
                         .h(px(2.))
                         .rounded_full()
                         .bg(cx.theme().colors().text_accent),
@@ -1250,6 +1386,20 @@ impl FlowView {
         let threads = self.step_threads.get(index).cloned().unwrap_or_default();
         let last = self.flow.steps.len().saturating_sub(1);
         let view = cx.entity().downgrade();
+        let accent = colors.text_accent;
+        let is_command = matches!(flow_step.kind, StepKind::Run(_));
+        let tile = if is_gate {
+            cx.theme().status().warning_background
+        } else if is_command {
+            cx.theme().status().success.opacity(0.14)
+        } else {
+            accent.opacity(0.14)
+        };
+        let dragged = DraggedStep {
+            index,
+            label: title.clone().into(),
+            icon,
+        };
         h_flex()
             .id(("flow-step", index))
             .gap_3()
@@ -1258,20 +1408,49 @@ impl FlowView {
             .border_1()
             .cursor_pointer()
             .border_color(if selected {
-                colors.text_accent
+                accent
             } else if is_gate {
                 cx.theme().status().warning_border
             } else {
                 colors.border
             })
             .bg(if selected {
-                colors.element_selected
+                accent.opacity(0.10)
             } else {
                 colors.panel_background
             })
             .when(dimmed, |this| this.opacity(0.5))
-            .on_click(
-                cx.listener(move |this, _, window, cx| this.select_step(Some(index), window, cx)),
+            .drag_over::<DraggedStep>(move |style, _, _, _| style.border_color(accent))
+            .drag_over::<DraggedNewStep>(move |style, _, _, _| style.border_color(accent))
+            .on_drop(cx.listener(move |this, dragged: &DraggedStep, window, cx| {
+                this.move_step_to(dragged.index, index, window, cx)
+            }))
+            .on_drop(
+                cx.listener(move |this, dragged: &DraggedNewStep, window, cx| {
+                    this.insert_step(index, dragged.new_step.clone(), window, cx)
+                }),
+            )
+            .on_click(cx.listener(move |this, _, window, cx| {
+                window.focus(&this.focus_handle, cx);
+                this.select_step(Some(index), window, cx)
+            }))
+            .child(
+                div()
+                    .id(("step-handle", index))
+                    .flex_none()
+                    .cursor(CursorStyle::OpenHand)
+                    .tooltip(Tooltip::text("Arraste para mudar a ordem"))
+                    .child(
+                        Icon::new(IconName::Menu)
+                            .size(IconSize::Small)
+                            .color(Color::Muted),
+                    )
+                    .on_drag(dragged, |dragged, _offset, _window, cx| {
+                        cx.new(|_| DragPreview {
+                            icon: dragged.icon,
+                            label: dragged.label.clone(),
+                        })
+                    }),
             )
             .child(
                 Label::new(format!("{}", index + 1))
@@ -1284,11 +1463,7 @@ impl FlowView {
                     .size(px(30.))
                     .flex_none()
                     .rounded_md()
-                    .bg(if is_gate {
-                        cx.theme().status().warning_background
-                    } else {
-                        colors.element_hover
-                    })
+                    .bg(tile)
                     .flex()
                     .items_center()
                     .justify_center()
@@ -1328,14 +1503,15 @@ impl FlowView {
                 h_flex()
                     .gap_1p5()
                     .children(self.step_chips(flow_step).into_iter().map(|(text, color)| {
+                        let (fill, text_color) = chip_colors(color, cx);
                         div()
                             .h(px(22.))
                             .px_2()
                             .flex()
                             .items_center()
                             .rounded_md()
-                            .bg(cx.theme().colors().element_hover)
-                            .child(Label::new(text).size(LabelSize::XSmall).color(color))
+                            .bg(fill)
+                            .child(Label::new(text).size(LabelSize::XSmall).color(text_color))
                     })),
             )
             .when_some(state, |this, state| {
@@ -2362,31 +2538,28 @@ impl FlowView {
                     .border_color(cx.theme().colors().border)
                     .bg(cx.theme().colors().editor_background)
                     .children(DesignTool::ALL.into_iter().map(|tool| {
-                        div().flex_1().min_w_0().child(
-                            Button::new(
-                                SharedString::from(format!("where-{}", tool.label())),
-                                tool.label(),
-                            )
-                            .label_size(LabelSize::Small)
-                            .full_width()
-                            .toggle_state(tool == current_tool)
-                            .style(ButtonStyle::Subtle)
-                            .on_click(cx.listener(
-                                move |this, _, window, cx| {
-                                    this.edit_agent_step(index, cx, |agent_step| {
-                                        agent_step.where_ =
-                                            (tool != DesignTool::Code).then(|| DesignTarget {
-                                                tool,
-                                                file: agent_step
-                                                    .where_
-                                                    .as_ref()
-                                                    .and_then(|target| target.file.clone()),
-                                            });
-                                    });
-                                    this.rebuild_inspector(window, cx);
-                                },
-                            )),
+                        segment_option(
+                            SharedString::from(format!("where-{}", tool.label())),
+                            tool.label(),
+                            tool == current_tool,
+                            true,
+                            cx,
                         )
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                this.edit_agent_step(index, cx, |agent_step| {
+                                    agent_step.where_ =
+                                        (tool != DesignTool::Code).then(|| DesignTarget {
+                                            tool,
+                                            file: agent_step
+                                                .where_
+                                                .as_ref()
+                                                .and_then(|target| target.file.clone()),
+                                        });
+                                });
+                                this.rebuild_inspector(window, cx);
+                            },
+                        ))
                     })),
             )
             .child(if current_tool == DesignTool::Code {

@@ -7,6 +7,7 @@ mod new_flow_modal;
 mod runner;
 mod suggest;
 
+use crate::task_agents_view::{primary_button, secondary_button, segment_option};
 use crate::{AgentPanel, ThreadId};
 use agent::NativeAgentConnection;
 use anyhow::{Context as _, Result};
@@ -57,6 +58,12 @@ gpui::actions!(
         AbrirExecucaoAtiva,
         /// Lists the esteiras in the Agentes tab.
         MostrarEsteiras,
+        /// Moves the selected step of the esteira up.
+        SubirPasso,
+        /// Moves the selected step of the esteira down.
+        DescerPasso,
+        /// Removes the selected step of the esteira.
+        RemoverPasso,
     ]
 );
 
@@ -640,6 +647,11 @@ impl FlowView {
             let mut editor = Editor::single_line(window, cx);
             editor.set_placeholder_text("Nome da esteira", window, cx);
             editor.set_text(flow.name.clone(), window, cx);
+            editor.set_text_style_refinement(gpui::TextStyleRefinement {
+                font_size: Some(rems(0.9375).into()),
+                font_weight: Some(gpui::FontWeight::SEMIBOLD),
+                ..Default::default()
+            });
             editor
         });
         let library_search = cx.new(|cx| {
@@ -852,10 +864,14 @@ impl FlowView {
                     .items_center()
                     .child(Label::new("Nenhuma execução ainda.").color(Color::Muted))
                     .child(
-                        Button::new("run-from-panel", "Rodar esteira")
-                            .start_icon(Icon::new(IconName::PlayFilled).size(IconSize::Small))
-                            .style(ButtonStyle::Filled)
-                            .on_click(cx.listener(|this, _, window, cx| this.rerun(window, cx))),
+                        primary_button(
+                            "run-from-panel",
+                            Some(IconName::PlayFilled),
+                            "Rodar esteira",
+                            None,
+                            cx,
+                        )
+                        .on_click(cx.listener(|this, _, window, cx| this.rerun(window, cx))),
                     ),
             );
         };
@@ -866,39 +882,41 @@ impl FlowView {
         } else {
             done as f32 / total as f32
         };
-        let header = h_flex()
-            .h(px(44.))
-            .flex_none()
-            .px_3()
-            .gap_2()
-            .border_b_1()
-            .border_color(colors.border)
-            .child(Label::new("Execução").weight(FontWeight::SEMIBOLD))
-            .child(
-                Label::new(format!(
-                    "{done} de {total} · {} min",
-                    self.elapsed_minutes()
-                ))
-                .size(LabelSize::XSmall)
-                .color(Color::Muted),
-            )
-            .child(div().flex_1())
-            .child(if run.is_finished() {
-                Button::new("rerun-flow", "Rodar de novo")
-                    .label_size(LabelSize::Small)
-                    .style(ButtonStyle::Outlined)
-                    .on_click(cx.listener(|this, _, window, cx| this.rerun(window, cx)))
-                    .into_any_element()
-            } else {
-                Button::new("stop-run", "Parar")
-                    .label_size(LabelSize::Small)
-                    .start_icon(Icon::new(IconName::Stop).size(IconSize::XSmall))
-                    .style(ButtonStyle::Outlined)
+        let header =
+            h_flex()
+                .h(px(44.))
+                .flex_none()
+                .px_3()
+                .gap_2()
+                .border_b_1()
+                .border_color(colors.border)
+                .child(Label::new("Execução").weight(FontWeight::SEMIBOLD))
+                .child(
+                    Label::new(format!(
+                        "{done} de {total} · {} min",
+                        self.elapsed_minutes()
+                    ))
+                    .size(LabelSize::XSmall)
+                    .color(Color::Muted),
+                )
+                .child(div().flex_1())
+                .child(if run.is_finished() {
+                    secondary_button("rerun-flow", None, "Rodar de novo", true, cx)
+                        .on_click(cx.listener(|this, _, window, cx| this.rerun(window, cx)))
+                        .into_any_element()
+                } else {
+                    secondary_button(
+                        "stop-run",
+                        Some((IconName::Stop, Color::Error)),
+                        "Parar",
+                        true,
+                        cx,
+                    )
                     .on_click(cx.listener(|this, _, _window, cx| {
                         this.stop(Some("você parou a esteira."), cx)
                     }))
                     .into_any_element()
-            });
+                });
         let bar = div().px_4().pt_3().child(
             div()
                 .h(px(4.))
@@ -1006,8 +1024,7 @@ impl FlowView {
                                 .gap_2()
                                 .justify_end()
                                 .child(
-                                    Button::new("exhausted-stop", "Encerrar")
-                                        .style(ButtonStyle::Outlined)
+                                    secondary_button("exhausted-stop", None, "Encerrar", true, cx)
                                         .on_click(cx.listener(|this, _, window, cx| {
                                             if let Some(run) = &mut this.run {
                                                 run.answer_exhausted(false);
@@ -1016,14 +1033,21 @@ impl FlowView {
                                         })),
                                 )
                                 .child(
-                                    Button::new("exhausted-retry", "Refazer mais uma vez")
-                                        .style(ButtonStyle::Filled)
-                                        .on_click(cx.listener(|this, _, window, cx| {
+                                    primary_button(
+                                        "exhausted-retry",
+                                        None,
+                                        "Refazer mais uma vez",
+                                        None,
+                                        cx,
+                                    )
+                                    .on_click(cx.listener(
+                                        |this, _, window, cx| {
                                             if let Some(run) = &mut this.run {
                                                 run.answer_exhausted(true);
                                             }
                                             this.after_answer(window, cx);
-                                        })),
+                                        },
+                                    )),
                                 ),
                         ),
                     );
@@ -1129,9 +1153,8 @@ impl FlowView {
                     .gap_2()
                     .justify_end()
                     .child(
-                        Button::new("gate-adjust", "Pedir ajuste")
-                            .style(ButtonStyle::Outlined)
-                            .on_click(cx.listener(|this, _, window, cx| {
+                        secondary_button("gate-adjust", None, "Pedir ajuste", true, cx).on_click(
+                            cx.listener(|this, _, window, cx| {
                                 let note = this.adjust_editor.read(cx).text(cx);
                                 this.adjust_editor
                                     .update(cx, |editor, cx| editor.clear(window, cx));
@@ -1139,11 +1162,11 @@ impl FlowView {
                                     run.answer_gate(false, &note);
                                 }
                                 this.after_answer(window, cx);
-                            })),
+                            }),
+                        ),
                     )
                     .child(
-                        Button::new("gate-approve", "Aprovar e seguir")
-                            .style(ButtonStyle::Filled)
+                        primary_button("gate-approve", None, "Aprovar e seguir", None, cx)
                             .on_click(cx.listener(|this, _, window, cx| {
                                 if let Some(run) = &mut this.run {
                                     run.answer_gate(true, "");
@@ -1183,8 +1206,7 @@ impl FlowView {
                     .gap_2()
                     .justify_end()
                     .child(
-                        Button::new("criteria-accept", "Aceitar sem")
-                            .style(ButtonStyle::Outlined)
+                        secondary_button("criteria-accept", None, "Aceitar sem", true, cx)
                             .on_click(cx.listener({
                                 let label = label.clone();
                                 move |this, _, window, cx| {
@@ -1196,8 +1218,7 @@ impl FlowView {
                             })),
                     )
                     .child(
-                        Button::new("criteria-redo", "Pedir para refazer")
-                            .style(ButtonStyle::Filled)
+                        primary_button("criteria-redo", None, "Pedir para refazer", None, cx)
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 if let Some(run) = &mut this.run {
                                     run.answer_criteria(step, &label, false);
@@ -1386,15 +1407,12 @@ impl Render for FlowView {
                    tab: PanelTab,
                    current: PanelTab,
                    cx: &mut Context<Self>| {
-            Button::new(id, label)
-                .label_size(LabelSize::Small)
-                .full_width()
-                .toggle_state(tab == current)
-                .style(ButtonStyle::Subtle)
-                .on_click(cx.listener(move |this, _, _window, cx| {
+            segment_option(id, label, tab == current, true, cx).on_click(cx.listener(
+                move |this, _, _window, cx| {
                     this.panel_tab = tab;
                     cx.notify();
-                }))
+                },
+            ))
         };
         let current_tab = self.panel_tab;
         let right = v_flex()
@@ -1431,6 +1449,17 @@ impl Render for FlowView {
         v_flex()
             .key_context("FlowView")
             .track_focus(&self.focus_handle)
+            .on_action(
+                cx.listener(|this, _: &SubirPasso, window, cx| {
+                    this.move_selected(true, window, cx)
+                }),
+            )
+            .on_action(cx.listener(|this, _: &DescerPasso, window, cx| {
+                this.move_selected(false, window, cx)
+            }))
+            .on_action(
+                cx.listener(|this, _: &RemoverPasso, window, cx| this.remove_selected(window, cx)),
+            )
             .size_full()
             .bg(colors.editor_background)
             .child(
@@ -1885,6 +1914,22 @@ mod tests {
                 .map(|step| step.id.as_str())
                 .collect();
             assert_eq!(ids, ["produto", "aprovacao", "dev", "comando"]);
+
+            let order = |view: &FlowView| -> Vec<String> {
+                view.flow.steps.iter().map(|step| step.id.clone()).collect()
+            };
+            view.move_step_to(3, 0, window, cx);
+            assert_eq!(order(view), ["comando", "produto", "aprovacao", "dev"]);
+            assert_eq!(view.selected, Some(0));
+            view.move_step_to(0, 4, window, cx);
+            assert_eq!(order(view), ["produto", "aprovacao", "dev", "comando"]);
+            assert_eq!(view.selected, Some(3));
+            view.move_step_to(1, 2, window, cx);
+            assert_eq!(
+                order(view),
+                ["produto", "aprovacao", "dev", "comando"],
+                "dropping a step right after itself keeps the order"
+            );
         });
         let save = view.update(cx, |view, cx| view.save(cx));
         assert!(save.await);

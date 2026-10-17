@@ -651,12 +651,13 @@ impl Render for NewFlowModal {
                     )
                     .child(div().flex_1())
                     .child(
-                        secondary_button("new-flow-cancel", "Cancelar", cx)
+                        secondary_button("new-flow-cancel", None, "Cancelar", true, cx)
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(DismissEvent))),
                     )
                     .child(
                         primary_button(
                             "new-flow-create",
+                            None,
                             if suggest { "Sugerir e abrir" } else { "Criar e abrir" },
                             Some(create_binding),
                             cx,

@@ -1107,6 +1107,15 @@
     },
   },
   {
+    "context": "FlowView",
+    "bindings": {
+      "alt-up": "esteiras::SubirPasso",
+      "alt-down": "esteiras::DescerPasso",
+      "backspace": "esteiras::RemoverPasso",
+      "delete": "esteiras::RemoverPasso",
+    },
+  },
+  {
     "context": "NewFlow",
     "bindings": {
       "ctrl-enter": "menu::Confirm",
