@@ -184,6 +184,62 @@ fn collect_property_paths(
     }
 }
 
+/// Turns strings into the booleans and numbers the schema asks for. A placeholder like
+/// `"{{secret.rememberMe}}"` has to be quoted to keep the template valid JSON, so after
+/// substitution it is always a string.
+pub fn coerce_to_schema(document: &Value, schema: &Value, value: &mut Value) {
+    coerce_at(document, schema, value, 0);
+}
+
+fn coerce_at(document: &Value, schema: &Value, value: &mut Value, depth: usize) {
+    if depth > MAX_EXAMPLE_DEPTH {
+        return;
+    }
+    let schema = deref(document, schema);
+    if let Some(parts) = schema.get("allOf").and_then(Value::as_array) {
+        for part in parts {
+            coerce_at(document, part, value, depth + 1);
+        }
+    }
+    match value {
+        Value::Object(object) => {
+            if let Some(properties) = schema.get("properties").and_then(Value::as_object) {
+                for (name, property) in properties {
+                    if let Some(field) = object.get_mut(name) {
+                        coerce_at(document, property, field, depth + 1);
+                    }
+                }
+            }
+        }
+        Value::Array(items) => {
+            if let Some(item_schema) = schema.get("items") {
+                for item in items {
+                    coerce_at(document, item_schema, item, depth + 1);
+                }
+            }
+        }
+        Value::String(text) => {
+            let text = text.trim();
+            let coerced = match schema_type(schema) {
+                Some("boolean") => match text {
+                    "true" => Some(Value::Bool(true)),
+                    "false" => Some(Value::Bool(false)),
+                    _ => None,
+                },
+                Some("integer") => text.parse::<i64>().ok().map(Value::from),
+                Some("number") => serde_json::from_str::<serde_json::Number>(text)
+                    .ok()
+                    .map(Value::Number),
+                _ => None,
+            };
+            if let Some(coerced) = coerced {
+                *value = coerced;
+            }
+        }
+        _ => {}
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Issue {
     /// Where in the body, as a JSON pointer (`/user/id`); empty for the root.

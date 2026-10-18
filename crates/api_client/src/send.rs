@@ -2,7 +2,7 @@
 
 use crate::{
     config::{BodyKind, HeaderEntry, RequestDraft},
-    spec::{ApiKeyLocation, ParameterLocation, SchemeKind, Spec, is_json_content_type},
+    spec::{ApiKeyLocation, Operation, ParameterLocation, SchemeKind, Spec, is_json_content_type},
     vars::{self, SECRET_PREFIX},
 };
 use anyhow::{Context as _, Result};
@@ -405,6 +405,29 @@ pub(crate) fn mask(value: &str) -> String {
     format!("{start}…{end}")
 }
 
+/// The body with `"true"` and `"42"` turned into what the schema expects, rewritten only when
+/// something changed so a hand-formatted body goes out as typed.
+fn typed_json_body(spec: &Spec, operation: &Operation, body: String) -> String {
+    let Some(request_body) = operation.request_body.as_ref() else {
+        return body;
+    };
+    let Some(schema) = request_body.schema.as_ref() else {
+        return body;
+    };
+    if !is_json_content_type(&request_body.content_type) {
+        return body;
+    }
+    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&body) else {
+        return body;
+    };
+    let mut typed = parsed.clone();
+    crate::schema::coerce_to_schema(&spec.document, schema, &mut typed);
+    if typed == parsed {
+        return body;
+    }
+    serde_json::to_string_pretty(&typed).unwrap_or(body)
+}
+
 pub fn prepare(
     spec: &Spec,
     operation_key: &str,
@@ -510,7 +533,7 @@ pub fn prepare(
             .body
             .as_ref()
             .filter(|body| !body.trim().is_empty())
-            .map(|body| PreparedBody::Text(fill(body)))
+            .map(|body| PreparedBody::Text(typed_json_body(spec, operation, fill(body))))
     };
 
     let mut headers: Vec<(String, String)> = Vec::new();
@@ -687,6 +710,13 @@ openapi: 3.0.3
 info: { title: T, version: "1" }
 security: [{ bearerAuth: [] }, { apiKeyAuth: [] }]
 components:
+  schemas:
+    Login:
+      type: object
+      properties:
+        email: { type: string }
+        rememberMe: { type: boolean }
+        days: { type: integer }
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer }
     apiKeyAuth: { type: apiKey, in: header, name: x-api-key }
@@ -700,6 +730,14 @@ paths:
         content: { application/json: { schema: { type: object } } }
       responses:
         '200': { description: ok, content: { application/json: { schema: { type: object } } } }
+  /login:
+    post:
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Login' }
+      responses: { '200': { description: ok } }
   /health:
     get:
       security: []
@@ -737,6 +775,34 @@ paths:
             "tenant" => Some("trix".to_string()),
             _ => None,
         }
+    }
+
+    #[test]
+    fn types_placeholders_the_schema_wants_as_booleans_and_numbers() {
+        let spec = spec();
+        let draft = RequestDraft {
+            url: "{{baseUrl}}/login".to_string(),
+            body: Some(
+                r#"{"email":"{{secret.email}}","rememberMe":"{{secret.rememberMe}}","days":"{{secret.days}}"}"#
+                    .to_string(),
+            ),
+            ..RequestDraft::default()
+        };
+        let variables = |name: &str| match name {
+            "baseUrl" => Some("https://api.trix.com.br".to_string()),
+            "secret.email" => Some("true".to_string()),
+            "secret.rememberMe" => Some("true".to_string()),
+            "secret.days" => Some("30".to_string()),
+            _ => None,
+        };
+        let prepared = prepare(&spec, "POST /login", &draft, &[], &variables).unwrap();
+        let Some(PreparedBody::Text(body)) = prepared.body else {
+            panic!("expected a text body");
+        };
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&body).unwrap(),
+            serde_json::json!({ "email": "true", "rememberMe": true, "days": 30 })
+        );
     }
 
     #[test]
