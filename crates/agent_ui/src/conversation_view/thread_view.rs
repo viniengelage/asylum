@@ -202,14 +202,23 @@ fn is_plan_execution_prompt(blocks: &[acp_v2::ContentBlock]) -> bool {
     })
 }
 
-/// The profile a plan runs under: the user's default, unless that's Plan
-/// itself, which can't change files.
+/// The profile a plan runs under: the user's default when it can change files,
+/// otherwise Write. The profile picker saves every choice as the default, so the
+/// default is often Ask or Plan, under which the plan couldn't be carried out.
 fn plan_execution_profile(cx: &App) -> AgentProfileId {
     let settings = AgentSettings::get_global(cx);
-    if settings.default_profile.as_str() == agent_settings::builtin_profiles::PLAN {
-        AgentProfileId(agent_settings::builtin_profiles::WRITE.into())
-    } else {
+    let default_can_edit = settings.default_profile.as_str()
+        != agent_settings::builtin_profiles::PLAN
+        && settings
+            .profiles
+            .get(&settings.default_profile)
+            .is_some_and(|profile| {
+                profile.is_tool_enabled(<agent::EditFileTool as agent::AgentTool>::NAME)
+            });
+    if default_can_edit {
         settings.default_profile.clone()
+    } else {
+        AgentProfileId(agent_settings::builtin_profiles::WRITE.into())
     }
 }
 
