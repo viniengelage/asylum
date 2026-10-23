@@ -82,9 +82,9 @@ use theme::ActiveTheme;
 use ui::{
     AgentThreadStatus, ButtonLike, CommonAnimationExt, ContextMenu, ContextMenuEntry, GradientFade,
     HeaderBar, HighlightedLabel, IconPosition, KeyBinding, PopoverMenu, PopoverMenuHandle,
-    ProjectEmptyState, ScrollAxes, Scrollbars, TAB_STRIP_RADIUS, Tab, TabBar, TabPosition,
-    TabStyle, ThreadItem, ThreadItemWorktreeInfo, TintColor, Tooltip, WithScrollbar, prelude::*,
-    primary_button, progress_line, render_modifiers, right_click_menu, secondary_button,
+    ProjectEmptyState, ScrollAxes, Scrollbars, TAB_STRIP_RADIUS, Tab, ThreadItem,
+    ThreadItemWorktreeInfo, TintColor, Tooltip, WithScrollbar, prelude::*, primary_button,
+    progress_line, render_modifiers, right_click_menu, secondary_button,
 };
 use unicode_segmentation::UnicodeSegmentation as _;
 use util::ResultExt as _;
@@ -358,6 +358,58 @@ fn sidebar_row_frame(row: AnyElement, is_selected: bool, is_focused: bool, cx: &
 ///
 /// Callers attach the click handler only while the action is available; without one the
 /// button reads as disabled.
+/// A row of the devices instance's + menu: the platform's icon on a raised square, its name and
+/// what picking it does. A platform already open elsewhere stays pickable but recedes.
+fn instance_menu_entry(
+    kind: DeviceInstanceKind,
+    description: &'static str,
+    dimmed: bool,
+    cx: &App,
+) -> AnyElement {
+    let colors = cx.theme().colors();
+    h_flex()
+        .w_full()
+        .min_w(px(276.))
+        .py_1()
+        .gap_2p5()
+        .when(dimmed, |this| this.opacity(0.55))
+        .child(
+            div()
+                .size(DEVICE_TOOL_SIZE)
+                .flex()
+                .flex_none()
+                .items_center()
+                .justify_center()
+                .rounded(px(6.))
+                .bg(colors.elevated_surface_background)
+                .child(
+                    Icon::new(kind.icon())
+                        .size(IconSize::XSmall)
+                        .color(Color::Muted),
+                ),
+        )
+        .child(
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .child(
+                    Label::new(kind.label())
+                        .size(LabelSize::Small)
+                        .weight(FontWeight::MEDIUM),
+                )
+                .child(
+                    Label::new(description)
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted),
+                ),
+        )
+        .into_any_element()
+}
+
+/// Side of the square tools in the device toolbar and height of its Run button, per the
+/// toolkit's Pencil board.
+const DEVICE_TOOL_SIZE: Pixels = px(26.);
+
 fn primary_action_button(id: impl Into<ElementId>, enabled: bool, cx: &App) -> Stateful<Div> {
     let colors = cx.theme().colors();
     let fill = colors.border_focused;
@@ -1302,6 +1354,8 @@ pub struct Sidebar {
     /// Platform tabs removed from this instance's header. Never holds every kind, so the
     /// header always keeps one tab.
     hidden_device_tabs: Vec<DeviceInstanceKind>,
+    /// The platform tab under the pointer, which is the only one showing its remove button.
+    hovered_device_tab: Option<DeviceInstanceKind>,
     restoring_tasks: HashMap<agent_ui::ThreadId, Task<()>>,
     recent_projects_popover_handle: PopoverMenuHandle<SidebarRecentProjects>,
     project_header_menu_handles: HashMap<usize, PopoverMenuHandle<ContextMenu>>,
@@ -1503,6 +1557,7 @@ impl Sidebar {
             device_software_keyboard_visible: false,
             device_dark_appearance: false,
             hidden_device_tabs: Vec::new(),
+            hovered_device_tab: None,
             restoring_tasks: HashMap::new(),
             recent_projects_popover_handle: PopoverMenuHandle::default(),
             project_header_menu_handles: HashMap::new(),
@@ -8255,6 +8310,7 @@ impl Sidebar {
         };
 
         let start_expo = primary_action_button("device-start-expo", device_ready, cx)
+            .h(DEVICE_TOOL_SIZE)
             .px(DynamicSpacing::Base12.px(cx))
             .aria_label("Iniciar Expo")
             .tooltip(Tooltip::text("Iniciar Expo"))
@@ -8443,7 +8499,8 @@ impl Sidebar {
                 IconButton::new("device-settings", IconName::Settings)
                     .icon_size(IconSize::Small)
                     .size(ButtonSize::Medium)
-                    .width(ButtonSize::Medium.rems())
+                    .height(DEVICE_TOOL_SIZE.into())
+                    .width(DEVICE_TOOL_SIZE)
                     // The popover toggles the button while its menu is open; this is what
                     // makes the open state read as the active tool.
                     .selected_style(ButtonStyle::Tinted(TintColor::Accent))
@@ -11121,23 +11178,29 @@ impl Sidebar {
                         menu = menu.header("Adicionar à dock");
                         for kind in hidden_tabs.iter().copied() {
                             let this = this.clone();
-                            menu = menu.item(
-                                ContextMenuEntry::new(kind.label())
-                                    .icon(kind.icon())
-                                    .description("Volta como aba desta instância")
-                                    .handler(move |window, cx| {
-                                        this.update(cx, |this, cx| {
-                                            this.add_device_tab(kind, window, cx);
-                                        })
-                                        .log_err();
-                                    }),
+                            menu = menu.custom_entry(
+                                move |_window, cx| {
+                                    instance_menu_entry(
+                                        kind,
+                                        "Volta como aba desta instância",
+                                        false,
+                                        cx,
+                                    )
+                                },
+                                move |window, cx| {
+                                    this.update(cx, |this, cx| {
+                                        this.add_device_tab(kind, window, cx);
+                                    })
+                                    .log_err();
+                                },
                             );
                         }
                         menu = menu.separator();
                     }
                     menu = menu.header("Nova instância à direita");
                     for kind in DeviceInstanceKind::ALL {
-                        let description = if open_kinds.contains(&kind) {
+                        let already_open = open_kinds.contains(&kind);
+                        let description = if already_open {
                             "Já aberto em outra instância"
                         } else {
                             match kind {
@@ -11146,16 +11209,16 @@ impl Sidebar {
                             }
                         };
                         let this = this.clone();
-                        menu = menu.item(
-                            ContextMenuEntry::new(kind.label())
-                                .icon(kind.icon())
-                                .description(description)
-                                .handler(move |window, cx| {
-                                    this.update(cx, |this, cx| {
-                                        this.request_new_device_instance(kind, window, cx);
-                                    })
-                                    .log_err();
-                                }),
+                        menu = menu.custom_entry(
+                            move |_window, cx| {
+                                instance_menu_entry(kind, description, already_open, cx)
+                            },
+                            move |window, cx| {
+                                this.update(cx, |this, cx| {
+                                    this.request_new_device_instance(kind, window, cx);
+                                })
+                                .log_err();
+                            },
                         );
                     }
                     menu
@@ -11173,6 +11236,8 @@ impl Sidebar {
             .trigger_with_tooltip(
                 IconButton::new("add-device-instance", IconName::Plus)
                     .icon_size(IconSize::Small)
+                    .height(DEVICE_TOOL_SIZE.into())
+                    .width(DEVICE_TOOL_SIZE)
                     .selected_style(ButtonStyle::Tinted(TintColor::Accent)),
                 Tooltip::text("Nova instância à direita"),
             )
@@ -11185,82 +11250,126 @@ impl Sidebar {
         let current_kind = self.device_instance_kind();
         let visible_tabs = self.visible_device_tabs();
         let removable = visible_tabs.len() > 1;
-        let last_index = visible_tabs.len().saturating_sub(1);
 
-        let tabs = visible_tabs.into_iter().enumerate().map(|(index, kind)| {
+        let colors = cx.theme().colors().clone();
+        let hovered = self.hovered_device_tab;
+        let tabs = visible_tabs.into_iter().map(|kind| {
             let selected = kind == current_kind;
-            let position = if index == 0 {
-                TabPosition::First
-            } else if index == last_index {
-                TabPosition::Last
-            } else {
-                TabPosition::Middle(std::cmp::Ordering::Equal)
-            };
+            let show_remove = removable && hovered == Some(kind);
             let (tab_id, remove_id) = match kind {
                 DeviceInstanceKind::Android => ("device-tab-android", "remove-device-tab-android"),
                 DeviceInstanceKind::Ios => ("device-tab-ios", "remove-device-tab-ios"),
             };
-            Tab::new(tab_id)
-                .style(TabStyle::Pill)
-                .position(position)
-                .full_width(true)
-                .toggle_state(selected)
-                .start_slot(
+            // Drawn here rather than with `ui::Tab`, whose slot keeps the remove button's
+            // width even while it is hidden; the board only makes room for it under the pointer.
+            h_flex()
+                .id(tab_id)
+                .h(DEVICE_TOOL_SIZE)
+                .pl(px(12.))
+                .pr(if show_remove { px(8.) } else { px(12.) })
+                .gap(px(6.))
+                .rounded(px(6.))
+                .cursor_pointer()
+                .map(|this| {
+                    if selected {
+                        this.bg(colors.element_selected)
+                    } else {
+                        this.hover(|style| style.bg(colors.element_hover))
+                    }
+                })
+                .on_hover(cx.listener(move |this, hovering: &bool, _, cx| {
+                    let next = if *hovering {
+                        Some(kind)
+                    } else if this.hovered_device_tab == Some(kind) {
+                        None
+                    } else {
+                        this.hovered_device_tab
+                    };
+                    if next != this.hovered_device_tab {
+                        this.hovered_device_tab = next;
+                        cx.notify();
+                    }
+                }))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.show_device_instance_kind(kind, window, cx);
+                }))
+                .child(
                     Icon::new(kind.icon())
-                        .size(IconSize::Small)
+                        .size(IconSize::XSmall)
                         .color(if selected {
                             Color::Accent
                         } else {
                             Color::Muted
                         }),
                 )
-                .when(removable, |tab| {
-                    // The pill keeps the selected tab's slot visible; removing is rarer than
-                    // switching, so the x waits for the pointer on every tab.
-                    tab.end_slot(
-                        div().visible_on_hover("").child(
-                            IconButton::new(remove_id, IconName::Close)
-                                .icon_size(IconSize::XSmall)
-                                .tooltip(Tooltip::text("Remover da dock"))
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.remove_device_tab(kind, window, cx);
-                                })),
-                        ),
-                    )
-                })
                 .child(
                     Label::new(kind.label())
                         .size(LabelSize::Small)
                         .weight(if selected {
                             FontWeight::SEMIBOLD
                         } else {
-                            FontWeight::MEDIUM
+                            FontWeight::NORMAL
                         })
-                        .when(!selected, |label| label.color(Color::Muted)),
+                        .color(if selected {
+                            Color::Default
+                        } else {
+                            Color::Muted
+                        }),
                 )
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.show_device_instance_kind(kind, window, cx);
-                }))
+                .when(show_remove, |this| {
+                    this.child(
+                        IconButton::new(remove_id, IconName::Close)
+                            .icon_size(IconSize::Indicator)
+                            .height(px(16.).into())
+                            .width(px(16.))
+                            .tooltip(Tooltip::text("Remover da dock"))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.hovered_device_tab = None;
+                                this.remove_device_tab(kind, window, cx);
+                            })),
+                    )
+                })
         });
 
+        let header_button = |button: IconButton| {
+            button
+                .icon_size(IconSize::Small)
+                .height(DEVICE_TOOL_SIZE.into())
+                .width(DEVICE_TOOL_SIZE)
+        };
         v_flex()
             .flex_1()
             .min_h_0()
             .overflow_hidden()
             .child(
-                TabBar::segmented("device-platform-tabs")
-                    .style(TabStyle::Pill)
-                    .children(tabs)
-                    .end_child(self.render_add_device_instance_button(cx))
+                h_flex()
+                    .w_full()
+                    .h(px(46.))
+                    .flex_none()
+                    .px_2()
+                    .gap_1()
+                    .border_b_1()
+                    .border_color(colors.border)
+                    .child(
+                        h_flex()
+                            .p(px(3.))
+                            .gap(px(2.))
+                            .rounded(px(8.))
+                            .bg(colors.elevated_surface_background)
+                            .border_1()
+                            .border_color(colors.border)
+                            .children(tabs),
+                    )
+                    .child(div().flex_1())
+                    .child(self.render_add_device_instance_button(cx))
                     .when(self.device_instance_split, |this| {
-                        this.end_child(
+                        this.child(header_button(
                             IconButton::new("close-device-instance", IconName::Close)
-                                .icon_size(IconSize::Small)
                                 .tooltip(Tooltip::text("Fechar instância"))
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.request_close_device_instance(window, cx);
                                 })),
-                        )
+                        ))
                     }),
             )
             .child(v_flex().flex_1().min_h_0().map(|this| {
@@ -12142,7 +12251,8 @@ fn device_toolbar_button(
     IconButton::new(id, icon)
         .icon_size(IconSize::Small)
         .size(ButtonSize::Medium)
-        .width(ButtonSize::Medium.rems())
+        .height(DEVICE_TOOL_SIZE.into())
+        .width(DEVICE_TOOL_SIZE)
         .aria_label(tooltip)
         .tooltip(Tooltip::text(tooltip))
         .disabled(!device_ready)

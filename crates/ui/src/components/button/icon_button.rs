@@ -87,6 +87,13 @@ impl IconButton {
         self
     }
 
+    /// Overrides the height that [`ButtonSize`] sets, for bars laid out to sizes between the
+    /// presets.
+    pub fn height(mut self, height: DefiniteLength) -> Self {
+        self.base = self.base.height(height);
+        self
+    }
+
     pub fn active_background(mut self, background: Hsla) -> Self {
         self.base.active_background = Some(background);
         self
