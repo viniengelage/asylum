@@ -1105,8 +1105,25 @@ extern "C" fn native_host_window_cannot_become_main(_: &Object, _: Sel) -> BOOL 
 unsafe extern "C" {
     fn CGPathCreateMutable() -> *mut CGPath;
     fn CGPathAddRect(path: *mut CGPath, transform: *const c_void, rect: CGRect);
+    fn CGPathMoveToPoint(path: *mut CGPath, transform: *const c_void, x: f64, y: f64);
+    fn CGPathAddLineToPoint(path: *mut CGPath, transform: *const c_void, x: f64, y: f64);
+    fn CGPathAddArc(
+        path: *mut CGPath,
+        transform: *const c_void,
+        x: f64,
+        y: f64,
+        radius: f64,
+        start_angle: f64,
+        end_angle: f64,
+        clockwise: bool,
+    );
+    fn CGPathCloseSubpath(path: *mut CGPath);
     fn CGPathRelease(path: *mut CGPath);
 }
+
+/// Corner radius of GPUI's overlays: menus, popovers and tooltips are all drawn `rounded_lg`.
+/// The occlusions arrive as plain rects, so the mask assumes this radius for every one.
+const OVERLAY_CORNER_RADIUS: f64 = 8.;
 
 /// Cuts `occlusions` out of the child window hosting a native view. The window is already
 /// non-opaque over a clear background, so the window server treats the cut-out pixels as empty:
@@ -1124,12 +1141,22 @@ unsafe fn set_native_host_window_mask(child_window: id, occlusions: &[NSRect]) {
         }
 
         let window_frame: NSRect = msg_send![child_window, frame];
-        let holes: Vec<NSRect> = occlusions
+        // Each hole next to the occlusion it came from, in the container's coordinates.
+        let visible: Vec<(NSRect, NSRect)> = occlusions
             .iter()
             .filter_map(|occlusion| {
-                clip_to_container(*occlusion, window_frame)
+                let hole = clip_to_container(*occlusion, window_frame)?;
+                let local = NSRect::new(
+                    NSPoint::new(
+                        occlusion.origin.x - window_frame.origin.x,
+                        occlusion.origin.y - window_frame.origin.y,
+                    ),
+                    occlusion.size,
+                );
+                Some((local, hole))
             })
             .collect();
+        let holes: Vec<NSRect> = visible.iter().map(|(_, hole)| *hole).collect();
 
         if holes.is_empty() {
             let _: () = msg_send![layer, setMask: nil];
@@ -1139,6 +1166,30 @@ unsafe fn set_native_host_window_mask(child_window: id, occlusions: &[NSRect]) {
         let path = CGPathCreateMutable();
         for rect in unmasked_rects(window_frame.size, &holes) {
             CGPathAddRect(path, ptr::null(), rect);
+        }
+        // The overlays are rounded, so the slivers between each hole's corners and the overlay's
+        // curve stay part of the hosted view; otherwise the menu shows square corners over it.
+        for fillet in corner_fillets(window_frame.size, &visible) {
+            let (center_x, center_y) = fillet.center();
+            CGPathMoveToPoint(path, ptr::null(), fillet.corner.x, fillet.corner.y);
+            CGPathAddLineToPoint(
+                path,
+                ptr::null(),
+                fillet.corner.x + fillet.inward_x * fillet.radius,
+                fillet.corner.y,
+            );
+            let (start, end, clockwise) = fillet.arc();
+            CGPathAddArc(
+                path,
+                ptr::null(),
+                center_x,
+                center_y,
+                fillet.radius,
+                start,
+                end,
+                clockwise,
+            );
+            CGPathCloseSubpath(path);
         }
         let mask: id = msg_send![class!(CAShapeLayer), layer];
         let _: () = msg_send![mask, setFrame: NSRect::new(NSPoint::new(0., 0.), window_frame.size)];
@@ -1153,7 +1204,8 @@ unsafe fn set_native_host_window_mask(child_window: id, occlusions: &[NSRect]) {
 fn clip_to_container(rect: NSRect, window_frame: NSRect) -> Option<NSRect> {
     let min_x = (rect.origin.x - window_frame.origin.x).max(0.);
     let min_y = (rect.origin.y - window_frame.origin.y).max(0.);
-    let max_x = (rect.origin.x - window_frame.origin.x + rect.size.width).min(window_frame.size.width);
+    let max_x =
+        (rect.origin.x - window_frame.origin.x + rect.size.width).min(window_frame.size.width);
     let max_y =
         (rect.origin.y - window_frame.origin.y + rect.size.height).min(window_frame.size.height);
     (max_x > min_x && max_y > min_y).then(|| {
@@ -1218,6 +1270,96 @@ fn unmasked_rects(container: NSSize, holes: &[NSRect]) -> Vec<CGRect> {
         }
     }
     rects
+}
+
+/// The part of an occlusion's corner square that lies outside its rounded corner.
+struct CornerFillet {
+    corner: CGPoint,
+    /// `1.` when the occlusion extends to the right of `corner`, `-1.` to the left.
+    inward_x: f64,
+    /// `1.` when the occlusion extends above `corner`, `-1.` below.
+    inward_y: f64,
+    radius: f64,
+}
+
+impl CornerFillet {
+    fn center(&self) -> (f64, f64) {
+        (
+            self.corner.x + self.inward_x * self.radius,
+            self.corner.y + self.inward_y * self.radius,
+        )
+    }
+
+    /// The quarter arc from the point on the corner's horizontal edge to the one on its vertical
+    /// edge, as `(start, end, clockwise)` for `CGPathAddArc`.
+    fn arc(&self) -> (f64, f64, bool) {
+        let start = (-self.inward_y).atan2(0.);
+        let end = 0f64.atan2(-self.inward_x);
+        let mut sweep = end - start;
+        if sweep > std::f64::consts::PI {
+            sweep -= 2. * std::f64::consts::PI;
+        } else if sweep < -std::f64::consts::PI {
+            sweep += 2. * std::f64::consts::PI;
+        }
+        (start, end, sweep < 0.)
+    }
+}
+
+/// Fillets for the corners of each `(occlusion, hole)` pair (the occlusion unclipped, both in
+/// container coordinates) that fall inside the container. A corner cut off by the container's
+/// edge is not really there, and one whose square another hole covers would hand that hole's
+/// area back to the hosted view.
+fn corner_fillets(container: NSSize, visible: &[(NSRect, NSRect)]) -> Vec<CornerFillet> {
+    let mut fillets = Vec::new();
+    for (index, (occlusion, _)) in visible.iter().enumerate() {
+        let radius = OVERLAY_CORNER_RADIUS
+            .min(occlusion.size.width / 2.)
+            .min(occlusion.size.height / 2.);
+        if radius <= 0. {
+            continue;
+        }
+        let left = occlusion.origin.x;
+        let right = left + occlusion.size.width;
+        let bottom = occlusion.origin.y;
+        let top = bottom + occlusion.size.height;
+        for (x, y, inward_x, inward_y) in [
+            (left, bottom, 1., 1.),
+            (right, bottom, -1., 1.),
+            (left, top, 1., -1.),
+            (right, top, -1., -1.),
+        ] {
+            let inside =
+                (0. ..=container.width).contains(&x) && (0. ..=container.height).contains(&y);
+            if !inside {
+                continue;
+            }
+            let square = NSRect::new(
+                NSPoint::new(x.min(x + inward_x * radius), y.min(y + inward_y * radius)),
+                NSSize::new(radius, radius),
+            );
+            let covered_by_another = visible
+                .iter()
+                .enumerate()
+                .any(|(other, (_, hole))| other != index && rects_overlap(&square, hole));
+            if covered_by_another {
+                continue;
+            }
+            fillets.push(CornerFillet {
+                corner: CGPoint::new(x, y),
+                inward_x,
+                inward_y,
+                radius,
+            });
+        }
+    }
+    fillets
+}
+
+fn rects_overlap(left: &NSRect, right: &NSRect) -> bool {
+    left.origin.x < right.origin.x + right.size.width - 0.01
+        && right.origin.x < left.origin.x + left.size.width - 0.01
+        && left.origin.y < right.origin.y + right.size.height - 0.01
+        && right.origin.y < left.origin.y + left.size.height - 0.01
 }
 
 fn sort_and_dedup(values: &mut Vec<f64>) {
@@ -4511,6 +4653,59 @@ mod tests {
         NSRect::new(NSPoint::new(x, y), NSSize::new(width, height))
     }
 
+    fn corners(fillets: &[CornerFillet]) -> Vec<(f64, f64)> {
+        fillets
+            .iter()
+            .map(|fillet| (fillet.corner.x, fillet.corner.y))
+            .collect()
+    }
+
+    #[test]
+    fn corner_fillets_round_every_corner_inside_the_container() {
+        let menu = hole(20., 20., 60., 40.);
+        let fillets = corner_fillets(NSSize::new(100., 100.), &[(menu, menu)]);
+        assert_eq!(
+            corners(&fillets),
+            [(20., 20.), (80., 20.), (20., 60.), (80., 60.)]
+        );
+        assert!(
+            fillets
+                .iter()
+                .all(|fillet| fillet.radius == OVERLAY_CORNER_RADIUS)
+        );
+    }
+
+    #[test]
+    fn corner_fillets_skip_corners_outside_or_under_another_hole() {
+        // The menu runs past the container's top, and a submenu overlaps its bottom-right
+        // corner; the submenu's own top-left corner sits over the menu, so it stays square too.
+        let menu = hole(20., 50., 60., 80.);
+        let menu_hole = hole(20., 50., 60., 50.);
+        let submenu = hole(75., 40., 20., 20.);
+        let fillets = corner_fillets(
+            NSSize::new(100., 100.),
+            &[(menu, menu_hole), (submenu, submenu)],
+        );
+        assert_eq!(
+            corners(&fillets),
+            [(20., 50.), (75., 40.), (95., 40.), (95., 60.)]
+        );
+    }
+
+    #[test]
+    fn corner_fillet_arcs_take_the_short_way() {
+        let fillet = CornerFillet {
+            corner: CGPoint::new(0., 0.),
+            inward_x: 1.,
+            inward_y: 1.,
+            radius: 8.,
+        };
+        let (start, end, clockwise) = fillet.arc();
+        assert_eq!(start, -std::f64::consts::FRAC_PI_2);
+        assert_eq!(end, std::f64::consts::PI);
+        assert!(clockwise);
+    }
+
     #[test]
     fn unmasked_rects_leaves_everything_but_the_hole() {
         let container = NSSize::new(100., 100.);
@@ -4534,7 +4729,10 @@ mod tests {
         );
 
         // The two holes share a 10x10 corner, so together they remove 2 * 900 - 100 points.
-        assert_eq!(covered_area(&rects), 100. * 100. - (2. * 30. * 30. - 10. * 10.));
+        assert_eq!(
+            covered_area(&rects),
+            100. * 100. - (2. * 30. * 30. - 10. * 10.)
+        );
     }
 
     #[test]
