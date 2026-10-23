@@ -70,7 +70,9 @@ pub async fn list_databases(session: &Session) -> anyhow::Result<Vec<String>> {
 /// The size of the current database, as `pg_size_pretty` prints it, for the dock's footer.
 pub async fn database_size(session: &Session) -> anyhow::Result<Option<String>> {
     let rows = session
-        .query_text("select pg_catalog.pg_size_pretty(pg_catalog.pg_database_size(current_database()))")
+        .query_text(
+            "select pg_catalog.pg_size_pretty(pg_catalog.pg_database_size(current_database()))",
+        )
         .await?;
     Ok(rows
         .into_iter()
@@ -538,7 +540,10 @@ mod tests {
     fn long_type_names_are_shortened() {
         assert_eq!(short_type_name("character varying(14)"), "varchar(14)");
         assert_eq!(short_type_name("timestamp with time zone"), "timestamptz");
-        assert_eq!(short_type_name("timestamp with time zone[]"), "timestamptz[]");
+        assert_eq!(
+            short_type_name("timestamp with time zone[]"),
+            "timestamptz[]"
+        );
         assert_eq!(short_type_name("text[]"), "text[]");
     }
 

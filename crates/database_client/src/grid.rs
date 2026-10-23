@@ -5,7 +5,7 @@
 use crate::edits::PendingEdits;
 use editor::{Editor, MultiBuffer};
 use gpui::{
-    AbsoluteLength, AnyElement, Anchor, ClipboardItem, Entity, EventEmitter, FocusHandle,
+    AbsoluteLength, Anchor, AnyElement, ClipboardItem, Entity, EventEmitter, FocusHandle,
     Focusable, FontWeight, WeakEntity, actions, anchored, deferred, px,
 };
 use std::ops::Range;
@@ -644,9 +644,11 @@ impl ResultGrid {
                         .gap_4()
                         .border_t_1()
                         .border_color(colors.border)
-                        .child(action("db-grid-copy", "Copiar").on_click(cx.listener(
-                            |this, _, window, cx| this.copy_cell(&CopyCell, window, cx),
-                        )))
+                        .child(action("db-grid-copy", "Copiar").on_click(
+                            cx.listener(|this, _, window, cx| {
+                                this.copy_cell(&CopyCell, window, cx)
+                            }),
+                        ))
                         .when(self.editable, |this| {
                             this.child(
                                 action("db-grid-edit", "Editar")
@@ -727,7 +729,10 @@ fn json_line(line: &str, is_json: bool, cx: &App) -> impl IntoElement {
     match key_end {
         Some(end) => row
             .child(label(trimmed[..end].to_owned(), Color::Accent))
-            .child(label(trimmed[end..].to_owned(), value_color(&trimmed[end..]))),
+            .child(label(
+                trimmed[end..].to_owned(),
+                value_color(&trimmed[end..]),
+            )),
         None => row.child(label(trimmed.to_owned(), value_color(trimmed))),
     }
 }
@@ -752,8 +757,8 @@ pub(crate) fn open_value(
     };
     let Some((project, language)) = workspace
         .update(cx, |workspace, _| {
-            let language = is_json
-                .then(|| workspace.app_state().languages.language_for_name("JSON"));
+            let language =
+                is_json.then(|| workspace.app_state().languages.language_for_name("JSON"));
             (workspace.project().clone(), language)
         })
         .log_err()
@@ -775,8 +780,7 @@ pub(crate) fn open_value(
                 let buffer =
                     cx.new(|cx| MultiBuffer::singleton(buffer, cx).with_title(title.clone()));
                 let editor = cx.new(|cx| {
-                    let mut editor =
-                        Editor::for_multibuffer(buffer, Some(project), window, cx);
+                    let mut editor = Editor::for_multibuffer(buffer, Some(project), window, cx);
                     editor.set_breadcrumb_header(title);
                     editor
                 });

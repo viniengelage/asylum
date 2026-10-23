@@ -16,8 +16,8 @@ use editor::{
     Editor, EditorEvent, HighlightKey, MultiBufferOffset, SelectionEffects, ToOffset as _,
 };
 use gpui::{
-    Animation, AnimationExt as _, AnyElement, AnyWindowHandle, ClipboardItem, DragMoveEvent,
-    Empty, Entity, EntityId, EventEmitter, FocusHandle, Focusable, FontWeight, Global, Pixels,
+    Animation, AnimationExt as _, AnyElement, AnyWindowHandle, ClipboardItem, DragMoveEvent, Empty,
+    Entity, EntityId, EventEmitter, FocusHandle, Focusable, FontWeight, Global, Pixels,
     Subscription, Task, WeakEntity, px, relative,
 };
 use project::Project;
@@ -30,8 +30,7 @@ use std::{
     time::{Duration, Instant},
 };
 use ui::{
-    Indicator, KeyBinding, Tooltip, prelude::*, primary_button, secondary_button,
-    segmented_control,
+    Indicator, KeyBinding, Tooltip, prelude::*, primary_button, secondary_button, segmented_control,
 };
 use util::ResultExt as _;
 use workspace::{
@@ -41,6 +40,7 @@ use workspace::{
 
 const ROW_LIMIT: usize = 1000;
 const MAX_HISTORY: usize = 50;
+const CANCEL_GRACE: Duration = Duration::from_secs(3);
 const MIN_RESULTS_HEIGHT: Pixels = px(160.);
 const MIN_EDITOR_HEIGHT: Pixels = px(80.);
 
@@ -220,6 +220,7 @@ pub struct SqlQueryView {
     focus_handle: FocusHandle,
     run_task: Task<()>,
     tick_task: Task<()>,
+    cancel_task: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -291,20 +292,23 @@ impl SqlQueryView {
                 );
             }
         });
-        let subscriptions = vec![open_value, cx.subscribe(&editor, |this, _, event, cx| match event {
-            EditorEvent::DirtyChanged
-            | EditorEvent::Saved
-            | EditorEvent::TitleChanged
-            | EditorEvent::FileHandleChanged => cx.emit(ItemEvent::UpdateTab),
-            EditorEvent::Edited { .. } => {
-                // The server's position no longer points at the same text.
-                if matches!(this.state, RunState::Failed(_)) {
-                    this.clear_highlight(HighlightKey::DatabaseError, cx);
+        let subscriptions = vec![
+            open_value,
+            cx.subscribe(&editor, |this, _, event, cx| match event {
+                EditorEvent::DirtyChanged
+                | EditorEvent::Saved
+                | EditorEvent::TitleChanged
+                | EditorEvent::FileHandleChanged => cx.emit(ItemEvent::UpdateTab),
+                EditorEvent::Edited { .. } => {
+                    // The server's position no longer points at the same text.
+                    if matches!(this.state, RunState::Failed(_)) {
+                        this.clear_highlight(HighlightKey::DatabaseError, cx);
+                    }
+                    cx.emit(ItemEvent::Edit);
                 }
-                cx.emit(ItemEvent::Edit);
-            }
-            _ => {}
-        })];
+                _ => {}
+            }),
+        ];
         Self {
             workspace,
             project_id: project.entity_id(),
@@ -326,6 +330,7 @@ impl SqlQueryView {
             focus_handle: cx.focus_handle(),
             run_task: Task::ready(()),
             tick_task: Task::ready(()),
+            cancel_task: Task::ready(()),
             _subscriptions: subscriptions,
         }
     }
@@ -646,6 +651,7 @@ impl SqlQueryView {
                 .all(|planned| planned.statement.kind == StatementKind::Read),
         };
         self.tab = ResultTab::Result;
+        self.cancel_task = Task::ready(());
         cx.notify();
         self.tick_task = cx.spawn(async move |this, cx| {
             loop {
@@ -663,6 +669,16 @@ impl SqlQueryView {
                 }
             }
         });
+        // A connection that died (server restart, idle timeout) fails every statement sent to it,
+        // so the tab opens a new one; whatever transaction it had is gone with it.
+        if self
+            .session
+            .as_ref()
+            .is_some_and(|session| session.is_closed())
+        {
+            self.session = None;
+            self.in_transaction = false;
+        }
         let session = self.session.clone();
         let panel_session = self.panel_session.clone();
         let in_transaction = self.in_transaction;
@@ -830,11 +846,54 @@ impl SqlQueryView {
     }
 
     fn cancel(&mut self, _: &CancelQuery, _window: &mut Window, cx: &mut Context<Self>) {
-        let (true, Some(session)) = (self.is_running(), self.session.clone()) else {
+        if !self.is_running() {
+            return;
+        }
+        let Some(session) = self.session.clone() else {
+            self.abandon_run("Cancelado antes de a sessão abrir.", cx);
             return;
         };
         cx.background_spawn(async move { session.cancel().await })
             .detach_and_log_err(cx);
+        // The server never answers a cancel request, so it looks delivered even when the
+        // connection it targets is gone or half-open and the statement will never return; on a
+        // stalled network the request itself can hang. Past the grace period the tab stops
+        // waiting and drops that connection.
+        self.cancel_task = cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(CANCEL_GRACE).await;
+            this.update(cx, |this, cx| {
+                if this.is_running() {
+                    this.abandon_run(
+                        "O servidor não respondeu ao cancelamento. A conexão desta aba foi \
+                         descartada; a próxima execução abre outra.",
+                        cx,
+                    );
+                }
+            })
+            .log_err();
+        });
+    }
+
+    /// Stops waiting for the running statement and drops the tab's connection with it, which also
+    /// makes the server roll back an open transaction once it notices.
+    fn abandon_run(&mut self, message: impl Into<SharedString>, cx: &mut Context<Self>) {
+        let elapsed = match &self.state {
+            RunState::Running { started, .. } => Some(started.elapsed()),
+            _ => None,
+        };
+        self.run_task = Task::ready(());
+        self.session = None;
+        self.in_transaction = false;
+        self.clear_highlight(HighlightKey::DatabaseStatement, cx);
+        self.state = RunState::Failed(Failure {
+            message: message.into(),
+            server: None,
+            range: None,
+            line: None,
+            suggestion: None,
+            elapsed,
+        });
+        cx.notify();
     }
 
     fn end_transaction(&mut self, transaction: Transaction, cx: &mut Context<Self>) {
@@ -950,7 +1009,9 @@ impl SqlQueryView {
             .await;
             this.update(cx, |this, cx| {
                 let (text, color) = match result {
-                    Ok(Some(path)) => (format!("Exportado para {}", path.display()), Color::Default),
+                    Ok(Some(path)) => {
+                        (format!("Exportado para {}", path.display()), Color::Default)
+                    }
                     Ok(None) => return,
                     Err(error) => (format!("Não deu para exportar: {error:#}"), Color::Error),
                 };
@@ -1013,7 +1074,9 @@ impl SqlQueryView {
             .when(connection.read_only, |this| {
                 this.child(chip(cx).child(Label::new("somente leitura").size(LabelSize::XSmall)))
             })
-            .child(chip(cx).child(Label::new(format!("limite {ROW_LIMIT}")).size(LabelSize::XSmall)))
+            .child(
+                chip(cx).child(Label::new(format!("limite {ROW_LIMIT}")).size(LabelSize::XSmall)),
+            )
             .when_some(saved_in, |this, saved_in| {
                 this.child(
                     div().min_w_0().child(
@@ -1042,9 +1105,9 @@ impl SqlQueryView {
                         true,
                         cx,
                     )
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.end_transaction(Transaction::Commit, cx)
-                    })),
+                    .on_click(
+                        cx.listener(|this, _, _, cx| this.end_transaction(Transaction::Commit, cx)),
+                    ),
                 )
             })
             .child(
@@ -1073,15 +1136,16 @@ impl SqlQueryView {
                     .bg(error.opacity(0.06))
                     .border_1()
                     .border_color(error)
-                    .child(div().size(px(9.)).rounded(px(2.)).bg(cx.theme().colors().text))
+                    .child(
+                        div()
+                            .size(px(9.))
+                            .rounded(px(2.))
+                            .bg(cx.theme().colors().text),
+                    )
                     .child(Label::new("Cancelar").size(LabelSize::Small))
                     .child(
-                        KeyBinding::for_action_in(
-                            &CancelQuery,
-                            &self.editor.focus_handle(cx),
-                            cx,
-                        )
-                        .size(rems_from_px(12_f32)),
+                        KeyBinding::for_action_in(&CancelQuery, &self.editor.focus_handle(cx), cx)
+                            .size(rems_from_px(12_f32)),
                     )
                     .on_click(
                         cx.listener(|this, _, window, cx| this.cancel(&CancelQuery, window, cx)),
@@ -1128,14 +1192,20 @@ impl SqlQueryView {
             RunState::Running { statement, .. } => (
                 IconName::LoadCircle,
                 match statement {
-                    Some(number) => format!("Rodando o statement {number} · o editor continua livre"),
+                    Some(number) => {
+                        format!("Rodando o statement {number} · o editor continua livre")
+                    }
                     None => "Rodando · o editor continua livre".to_owned(),
                 },
                 Color::Warning,
             ),
             RunState::Failed(failure) => (
                 IconName::XCircle,
-                match failure.range.as_ref().and_then(|range| number_at(range.start)) {
+                match failure
+                    .range
+                    .as_ref()
+                    .and_then(|range| number_at(range.start))
+                {
                     Some(number) => format!("1 erro no statement {number}"),
                     None => "1 erro".to_owned(),
                 },
@@ -1167,11 +1237,9 @@ impl SqlQueryView {
             .when(!self.is_running(), |this| {
                 this.child(
                     div().pl_4().child(
-                        Label::new(
-                            "⌘↵ roda o statement · ⌘⇧↵ roda o arquivo · ⌥↵ EXPLAIN ANALYZE",
-                        )
-                        .size(LabelSize::XSmall)
-                        .color(Color::Muted),
+                        Label::new("⌘↵ roda o statement · ⌘⇧↵ roda o arquivo · ⌥↵ EXPLAIN ANALYZE")
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
                     ),
                 )
             })
@@ -1188,8 +1256,17 @@ impl SqlQueryView {
     fn render_state_chip(&self, cx: &App) -> AnyElement {
         let (icon, label, color, mono) = match &self.state {
             RunState::Idle => return Empty.into_any_element(),
-            RunState::Running { .. } => (Some(IconName::LoadCircle), "rodando".to_owned(), Color::Warning, false),
-            RunState::Done { rows: Some(rows), truncated, .. } => (
+            RunState::Running { .. } => (
+                Some(IconName::LoadCircle),
+                "rodando".to_owned(),
+                Color::Warning,
+                false,
+            ),
+            RunState::Done {
+                rows: Some(rows),
+                truncated,
+                ..
+            } => (
                 None,
                 match (rows, truncated) {
                     (_, true) => format!("{rows}+ linhas"),
@@ -1247,7 +1324,9 @@ impl SqlQueryView {
                 elapsed_label(finished.elapsed())
             ),
             RunState::Failed(failure) => match failure.elapsed {
-                Some(elapsed) => format!("falhou em {} ms · nada foi alterado", elapsed.as_millis()),
+                Some(elapsed) => {
+                    format!("falhou em {} ms · nada foi alterado", elapsed.as_millis())
+                }
                 None => "nada foi alterado".to_owned(),
             },
         }
@@ -1393,9 +1472,9 @@ impl SqlQueryView {
                                     None,
                                     cx,
                                 )
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.apply_suggestion(window, cx)
-                                })),
+                                .on_click(cx.listener(
+                                    |this, _, window, cx| this.apply_suggestion(window, cx),
+                                )),
                             )
                         })
                         .when(has_range, |this| {
@@ -1541,9 +1620,7 @@ impl SqlQueryView {
                                         .border_1()
                                         .border_color(colors.border_selected)
                                         .hover(|style| style.bg(colors.element_hover))
-                                        .child(
-                                            div().size(px(9.)).rounded(px(2.)).bg(colors.text),
-                                        )
+                                        .child(div().size(px(9.)).rounded(px(2.)).bg(colors.text))
                                         .child(Label::new("Cancelar query").size(LabelSize::Small))
                                         .child(
                                             KeyBinding::for_action_in(
@@ -1618,16 +1695,21 @@ impl SqlQueryView {
                     this.child(self.render_failure(failure, cx))
                 })
                 .child(
-                    v_flex()
-                        .gap_1()
-                        .children(self.messages.iter().rev().filter(|message| {
-                            failure.is_none_or(|failure| message.text != failure.message.as_ref())
-                        }).map(|message| {
-                            Label::new(message.text.clone())
-                                .size(LabelSize::Small)
-                                .buffer_font(cx)
-                                .color(message.color)
-                        })),
+                    v_flex().gap_1().children(
+                        self.messages
+                            .iter()
+                            .rev()
+                            .filter(|message| {
+                                failure
+                                    .is_none_or(|failure| message.text != failure.message.as_ref())
+                            })
+                            .map(|message| {
+                                Label::new(message.text.clone())
+                                    .size(LabelSize::Small)
+                                    .buffer_font(cx)
+                                    .color(message.color)
+                            }),
+                    ),
                 )
                 .into_any_element(),
             ResultTab::Plan if self.plan_lines.is_empty() => div()
@@ -1694,7 +1776,13 @@ impl SqlQueryView {
         let footer = match (&self.state, self.tab) {
             (_, ResultTab::Result) if self.has_grid => {
                 let rows = self.grid.read(cx).row_count();
-                let truncated = matches!(self.state, RunState::Done { truncated: true, .. });
+                let truncated = matches!(
+                    self.state,
+                    RunState::Done {
+                        truncated: true,
+                        ..
+                    }
+                );
                 Some(if self.is_running() {
                     "Abaixo, o resultado anterior, apagado até o novo chegar.".to_owned()
                 } else if truncated {
@@ -1818,9 +1906,11 @@ impl SqlQueryView {
                             .child(link("db-export-json", "JSON").on_click(cx.listener(
                                 |this, _, window, cx| this.export(Export::Json, window, cx),
                             )))
-                            .child(link("db-copy-insert", "Copiar como INSERT").on_click(
-                                cx.listener(|this, _, _, cx| this.copy_as_insert(cx)),
-                            ))
+                            .child(
+                                link("db-copy-insert", "Copiar como INSERT").on_click(
+                                    cx.listener(|this, _, _, cx| this.copy_as_insert(cx)),
+                                ),
+                            )
                         }),
                 )
             })

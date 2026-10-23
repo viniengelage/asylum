@@ -27,11 +27,14 @@ pub use panel::DatabasePanel;
 pub use session::{Column, ConnectTarget, QueryOutcome, ResultSet, ServerError, Session};
 pub use tls::SslMode;
 
-use gpui::{Subscription, WeakEntity, actions};
+use editor::Editor;
+use gpui::{Entity, Subscription, Task, WeakEntity, actions};
 use std::any::TypeId;
 use ui::{Tooltip, prelude::*};
 use util::ResultExt as _;
-use workspace::{HideStatusItem, ItemHandle, StatusItemView, Workspace, dock::StatusBarButton};
+use workspace::{
+    HideStatusItem, ItemHandle, SaveIntent, StatusItemView, Workspace, dock::StatusBarButton,
+};
 
 actions!(
     database_client,
@@ -63,7 +66,11 @@ actions!(
 
 pub fn init(cx: &mut App) {
     workspace::register_panel_item::<DatabasePanel>(cx);
-    cx.observe_new(|workspace: &mut Workspace, window, cx| {
+    cx.observe_new(|workspace: &mut Workspace, mut window, cx| {
+        if let Some(window) = window.as_deref_mut() {
+            cx.subscribe_in(&cx.entity(), window, open_asylum_sql_as_query)
+                .detach();
+        }
         // `panel` opens the dock, `connect` also opens the connection form,
         // `table:<schema>.<name>[:<tab>]` opens a table once the dock has connected and
         // `query:<file relative to the project>[:run|:complete]` opens a SQL file and runs it or
@@ -91,9 +98,10 @@ pub fn init(cx: &mut App) {
                 })?;
                 // `DATABASE_CLIENT_DEBUG_CONNECT=<id>` connects to that saved connection first,
                 // which is how production (never connected on its own) gets opened.
-                if let (Ok(id), Some(panel)) =
-                    (std::env::var("DATABASE_CLIENT_DEBUG_CONNECT"), panel.clone())
-                {
+                if let (Ok(id), Some(panel)) = (
+                    std::env::var("DATABASE_CLIENT_DEBUG_CONNECT"),
+                    panel.clone(),
+                ) {
                     for _ in 0..40 {
                         if panel.read_with(cx, |panel, _| panel.is_loaded()) {
                             break;
@@ -218,6 +226,82 @@ pub fn init(cx: &mut App) {
         });
     })
     .detach();
+}
+
+/// A `.sql` under `.asylum`, opened from anywhere (project panel, file finder), replaces its
+/// plain editor with the SQL tab of the dock's connection. Without a connection it stays text.
+fn open_asylum_sql_as_query(
+    workspace: &mut Workspace,
+    _: &Entity<Workspace>,
+    event: &workspace::Event,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    let workspace::Event::ItemAdded { item } = event else {
+        return;
+    };
+    // Not `act_as`: the SQL tab itself acts as its editor, and would be replaced by itself.
+    if item.to_any_view().downcast::<Editor>().is_err() || item.is_dirty(cx) {
+        return;
+    }
+    let Some(path) = item.project_path(cx).and_then(|project_path| {
+        workspace
+            .project()
+            .read(cx)
+            .absolute_path(&project_path, cx)
+    }) else {
+        return;
+    };
+    let is_asylum_sql = path
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("sql"))
+        && path
+            .components()
+            .any(|component| component.as_os_str() == ".asylum");
+    if !is_asylum_sql {
+        return;
+    }
+    let Some((connection, session)) = workspace
+        .panel::<DatabasePanel>(cx)
+        .and_then(|panel| panel.read(cx).session())
+    else {
+        return;
+    };
+    let editor_id = item.item_id();
+    let workspace_handle = cx.weak_entity();
+    let project = workspace.project().clone();
+    // The editor is still being added to its pane while this event is handled.
+    window.defer(cx, move |window, cx| {
+        let opened = query_view::open(
+            workspace_handle.clone(),
+            project,
+            connection,
+            session,
+            path,
+            window,
+            cx,
+        );
+        window
+            .spawn(cx, async move |cx| {
+                opened.await?;
+                workspace_handle
+                    .update_in(cx, |workspace, window, cx| {
+                        let pane = workspace
+                            .panes()
+                            .iter()
+                            .find(|pane| pane.read(cx).index_for_item_id(editor_id).is_some())
+                            .cloned();
+                        match pane {
+                            Some(pane) => pane.update(cx, |pane, cx| {
+                                pane.close_item_by_id(editor_id, SaveIntent::Skip, window, cx)
+                            }),
+                            None => Task::ready(Ok(())),
+                        }
+                    })?
+                    .await
+            })
+            .detach_and_log_err(cx);
+    });
 }
 
 /// Adds the panel the first time it is asked for, so projects without a database don't get a

@@ -147,7 +147,8 @@ impl WriteGuard {
                             .unwrap_or_default(),
                         None => Vec::new(),
                     };
-                    this.update(cx, |this, _| this.references = references).log_err();
+                    this.update(cx, |this, _| this.references = references)
+                        .log_err();
                     let result = session.run(&explain, 50).await;
                     this.update(cx, |this, cx| {
                         this.estimate = Some(match result {
@@ -283,16 +284,16 @@ impl Render for WriteGuard {
         let confirmed = self.confirmed(cx);
         let colors = cx.theme().colors();
         let error = Color::Error.color(cx);
-        let preview = self
-            .statement
-            .lines()
-            .take(6)
-            .collect::<Vec<_>>();
+        let preview = self.statement.lines().take(6).collect::<Vec<_>>();
         let consequence = |icon: IconName, color: Color, text: String, detail: Option<String>| {
             h_flex()
                 .gap_2p5()
                 .items_start()
-                .child(div().pt_0p5().child(Icon::new(icon).size(IconSize::Small).color(color)))
+                .child(
+                    div()
+                        .pt_0p5()
+                        .child(Icon::new(icon).size(IconSize::Small).color(color)),
+                )
                 .child(
                     v_flex()
                         .gap_0p5()
@@ -461,12 +462,7 @@ impl Render for WriteGuard {
                     .child(
                         v_flex()
                             .gap_3()
-                            .child(consequence(
-                                IconName::Table,
-                                Color::Error,
-                                reach.0,
-                                reach.1,
-                            ))
+                            .child(consequence(IconName::Table, Color::Error, reach.0, reach.1))
                             .children(self.references.iter().map(|(table, on_delete)| {
                                 consequence(
                                     IconName::Link,
@@ -527,7 +523,9 @@ fn target_table(statement: &str) -> Option<String> {
     let mut table = match first.as_str() {
         "update" => words.next()?,
         "delete" => {
-            words.next().filter(|word| word.eq_ignore_ascii_case("from"))?;
+            words
+                .next()
+                .filter(|word| word.eq_ignore_ascii_case("from"))?;
             words.next()?
         }
         "truncate" => match words.next()? {

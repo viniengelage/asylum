@@ -13,7 +13,8 @@ use gpui::{
 };
 use std::time::Instant;
 use ui::{
-    Switch, SwitchColor, ToggleState, prelude::*, primary_button, secondary_button, segmented_control,
+    Switch, SwitchColor, ToggleState, prelude::*, primary_button, secondary_button,
+    segmented_control,
 };
 use ui_input::{ErasedEditorEvent, InputField};
 use util::ResultExt as _;
@@ -97,7 +98,12 @@ impl ConnectView {
                 .masked(true)
         });
 
-        let ssh_host_input = input("bastion ou usuário@bastion.exemplo.com", "Host SSH", window, cx);
+        let ssh_host_input = input(
+            "bastion ou usuário@bastion.exemplo.com",
+            "Host SSH",
+            window,
+            cx,
+        );
         let ssh_port_input = input("22", "Porta SSH", window, cx);
 
         let mut subscriptions = Vec::new();
@@ -585,11 +591,10 @@ impl Render for ConnectView {
                 .child(div().flex_1().child(left))
                 .child(div().flex_1().child(right))
         };
-        let environment = v_flex()
-            .gap_1()
-            .child(field_label("Ambiente"))
-            .child(
-                segmented_control(cx).h(px(36.)).children(Environment::ALL.map(|environment| {
+        let environment = v_flex().gap_1().child(field_label("Ambiente")).child(
+            segmented_control(cx)
+                .h(px(36.))
+                .children(Environment::ALL.map(|environment| {
                     let selected = environment == self.environment;
                     segment(
                         ("db-environment", environment as usize),
@@ -602,11 +607,11 @@ impl Render for ConnectView {
                         this.bg(environment_color.opacity(0.1))
                             .border_color(environment_color)
                     })
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.set_environment(environment, cx)
-                    }))
+                    .on_click(
+                        cx.listener(move |this, _, _, cx| this.set_environment(environment, cx)),
+                    )
                 })),
-            );
+        );
         let ssh_open = self.ssh_enabled;
 
         v_flex()
@@ -672,8 +677,8 @@ impl Render for ConnectView {
                         v_flex().gap_1().child(field_label("SSL")).child(
                             h_flex()
                                 .gap_3p5()
-                                .child(segmented_control(cx).h(px(36.)).children(
-                                    ssl_modes.map(|mode| {
+                                .child(segmented_control(cx).h(px(36.)).children(ssl_modes.map(
+                                    |mode| {
                                         let label = Label::new(mode.as_str())
                                             .size(LabelSize::Small)
                                             .buffer_font(cx);
@@ -689,13 +694,15 @@ impl Render for ConnectView {
                                         } else {
                                             Color::Muted
                                         }))
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.ssl_mode = mode;
-                                            this.test = TestState::Idle;
-                                            cx.notify();
-                                        }))
-                                    }),
-                                ))
+                                        .on_click(
+                                            cx.listener(move |this, _, _, cx| {
+                                                this.ssl_mode = mode;
+                                                this.test = TestState::Idle;
+                                                cx.notify();
+                                            }),
+                                        )
+                                    },
+                                )))
                                 .child(
                                     div().flex_1().min_w_0().child(
                                         Label::new(ssl_hint)
@@ -835,10 +842,12 @@ impl Render for ConnectView {
                                                 cx,
                                             )
                                             .h(px(28.))
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.scope = Scope::Profile;
-                                                cx.notify();
-                                            })),
+                                            .on_click(
+                                                cx.listener(|this, _, _, cx| {
+                                                    this.scope = Scope::Profile;
+                                                    cx.notify();
+                                                }),
+                                            ),
                                         )
                                         .child(
                                             segment(
@@ -848,10 +857,12 @@ impl Render for ConnectView {
                                                 cx,
                                             )
                                             .h(px(28.))
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.scope = Scope::Project;
-                                                cx.notify();
-                                            })),
+                                            .on_click(
+                                                cx.listener(|this, _, _, cx| {
+                                                    this.scope = Scope::Project;
+                                                    cx.notify();
+                                                }),
+                                            ),
                                         ),
                                 ),
                             )

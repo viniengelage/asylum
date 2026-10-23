@@ -16,15 +16,14 @@ use crate::{
     statements::Risk,
     write_guard::WriteGuard,
 };
+use editor::Editor;
 use gpui::{
     AnyElement, ClipboardItem, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
     Subscription, Task, WeakEntity, px,
 };
 use std::{sync::Arc, time::Duration};
-use editor::Editor;
 use ui::{
-    Indicator, KeyBinding, Tooltip, prelude::*, primary_button, secondary_button,
-    segmented_control,
+    Indicator, KeyBinding, Tooltip, prelude::*, primary_button, secondary_button, segmented_control,
 };
 use util::ResultExt as _;
 use workspace::{
@@ -152,19 +151,21 @@ impl TableView {
         let where_input = filter_editor("created_at > now() - interval '7 days'", window, cx);
         let order_input = filter_editor("id desc", window, cx);
         let grid = cx.new(|cx| ResultGrid::new(true, cx));
-        let subscriptions = vec![cx.subscribe_in(&grid, window, |this, _, event, window, cx| match event {
-            GridEvent::SortRequested(column) => this.sort_by(*column, cx),
-            GridEvent::CellEdited { row, column, value } => {
-                this.cell_edited(*row, *column, value.clone(), cx)
-            }
-            GridEvent::OpenValue { column, value } => crate::grid::open_value(
-                this.workspace.clone(),
-                column.clone(),
-                value.clone(),
-                window,
-                cx,
-            ),
-        })];
+        let subscriptions = vec![
+            cx.subscribe_in(&grid, window, |this, _, event, window, cx| match event {
+                GridEvent::SortRequested(column) => this.sort_by(*column, cx),
+                GridEvent::CellEdited { row, column, value } => {
+                    this.cell_edited(*row, *column, value.clone(), cx)
+                }
+                GridEvent::OpenValue { column, value } => crate::grid::open_value(
+                    this.workspace.clone(),
+                    column.clone(),
+                    value.clone(),
+                    window,
+                    cx,
+                ),
+            }),
+        ];
         let mut this = Self {
             workspace,
             connection,
@@ -722,12 +723,15 @@ impl TableView {
                 )
             })
             .child(div().flex_1())
-            .child(
-                segmented_control(cx).children(Tab::ALL.map(|tab| {
-                    segment(("db-table-tab", tab as usize), tab.label(), tab == self.tab, cx)
-                        .on_click(cx.listener(move |this, _, _, cx| this.select_tab(tab, cx)))
-                })),
-            )
+            .child(segmented_control(cx).children(Tab::ALL.map(|tab| {
+                segment(
+                    ("db-table-tab", tab as usize),
+                    tab.label(),
+                    tab == self.tab,
+                    cx,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| this.select_tab(tab, cx)))
+            })))
             .into_any_element()
     }
 
@@ -831,7 +835,12 @@ impl TableView {
                     page.has_more,
                 )
             }
-            Load::Loading => ("carregando…".to_owned(), String::new(), "…".to_owned(), false),
+            Load::Loading => (
+                "carregando…".to_owned(),
+                String::new(),
+                "…".to_owned(),
+                false,
+            ),
             Load::Failed(_) => (String::new(), String::new(), "—".to_owned(), false),
         };
         let page = self.page;
@@ -960,9 +969,9 @@ impl TableView {
                                 )),
                                 cx,
                             )
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.apply_edits(&ApplyEdits, window, cx)
-                            })),
+                            .on_click(cx.listener(
+                                |this, _, window, cx| this.apply_edits(&ApplyEdits, window, cx),
+                            )),
                         ),
                 )
             })
@@ -1098,9 +1107,7 @@ impl TableView {
                                 .gap_3()
                                 .overflow_hidden()
                                 .rounded_sm()
-                                .when(guard, |this| {
-                                    this.bg(Color::Warning.color(cx).opacity(0.1))
-                                })
+                                .when(guard, |this| this.bg(Color::Warning.color(cx).opacity(0.1)))
                                 .child(
                                     div().w(px(16.)).flex().justify_end().child(
                                         Label::new((index + 1).to_string())
@@ -1249,19 +1256,16 @@ impl TableView {
                     .border_1()
                     .border_color(colors.border)
                     .overflow_hidden()
-                    .child(
-                        h_flex()
-                            .h(px(32.))
-                            .bg(colors.element_background)
-                            .children(headers.iter().enumerate().map(|(index, (header, _))| {
-                                cell(index).child(
-                                    Label::new(*header)
-                                        .size(LabelSize::XSmall)
-                                        .weight(FontWeight::MEDIUM)
-                                        .color(Color::Muted),
-                                )
-                            })),
-                    )
+                    .child(h_flex().h(px(32.)).bg(colors.element_background).children(
+                        headers.iter().enumerate().map(|(index, (header, _))| {
+                            cell(index).child(
+                                Label::new(*header)
+                                    .size(LabelSize::XSmall)
+                                    .weight(FontWeight::MEDIUM)
+                                    .color(Color::Muted),
+                            )
+                        }),
+                    ))
                     .children(rows.into_iter().map(|values| {
                         h_flex()
                             .h(px(28.))
@@ -1291,7 +1295,9 @@ impl TableView {
                 if column.primary_key {
                     restrictions.push("PK".to_owned());
                 }
-                for index in structure.map(|structure| structure.indexes.as_slice()).unwrap_or(&[])
+                for index in structure
+                    .map(|structure| structure.indexes.as_slice())
+                    .unwrap_or(&[])
                 {
                     if index.primary {
                         continue;
@@ -1393,7 +1399,11 @@ impl TableView {
                             Some(scans) => format!("{} scans", format_scans(scans)),
                             None => "sem estatística".to_owned(),
                         },
-                        if unused { Color::Warning } else { Color::Default },
+                        if unused {
+                            Color::Warning
+                        } else {
+                            Color::Default
+                        },
                         false,
                     )),
                 ]
@@ -1445,9 +1455,9 @@ impl TableView {
                         },
                         true,
                     )),
-                    foreign_key.other_rows.map(|rows| {
-                        (crate::panel::format_count(rows), Color::Default, false)
-                    }),
+                    foreign_key
+                        .other_rows
+                        .map(|rows| (crate::panel::format_count(rows), Color::Default, false)),
                 ]
             })
             .collect();
@@ -1516,14 +1526,16 @@ impl TableView {
                             true,
                             cx,
                         )
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.open_in_query(
-                                "nova coluna".to_owned(),
-                                new_column.clone(),
-                                window,
-                                cx,
-                            )
-                        })),
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                this.open_in_query(
+                                    "nova coluna".to_owned(),
+                                    new_column.clone(),
+                                    window,
+                                    cx,
+                                )
+                            },
+                        )),
                     )
                     .child(
                         secondary_button(
@@ -1533,14 +1545,16 @@ impl TableView {
                             true,
                             cx,
                         )
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.open_in_query(
-                                "novo índice".to_owned(),
-                                new_index.clone(),
-                                window,
-                                cx,
-                            )
-                        })),
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                this.open_in_query(
+                                    "novo índice".to_owned(),
+                                    new_index.clone(),
+                                    window,
+                                    cx,
+                                )
+                            },
+                        )),
                     ),
             )
             .into_any_element()
@@ -1618,11 +1632,13 @@ impl TableView {
                                         true,
                                         cx,
                                     )
-                                    .on_click(move |_, _, cx| {
-                                        cx.write_to_clipboard(ClipboardItem::new_string(
-                                            ddl.clone(),
-                                        ))
-                                    }),
+                                    .on_click(
+                                        move |_, _, cx| {
+                                            cx.write_to_clipboard(ClipboardItem::new_string(
+                                                ddl.clone(),
+                                            ))
+                                        },
+                                    ),
                                 ),
                         )
                         .child(
@@ -1632,9 +1648,7 @@ impl TableView {
                                 .bg(cx.theme().colors().editor_background)
                                 .border_1()
                                 .border_color(cx.theme().colors().border)
-                                .children(
-                                    structure.ddl.lines().map(|line| sql_line(line, cx)),
-                                ),
+                                .children(structure.ddl.lines().map(|line| sql_line(line, cx))),
                         )
                         .into_any_element()
                 }

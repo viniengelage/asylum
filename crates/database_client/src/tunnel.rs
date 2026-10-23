@@ -96,7 +96,12 @@ pub async fn open(
 ) -> anyhow::Result<Tunnel> {
     let local_port = free_local_port()?;
     let mut child = util::command::new_command("ssh")
-        .args(ssh_arguments(tunnel, local_port, database_host, database_port))
+        .args(ssh_arguments(
+            tunnel,
+            local_port,
+            database_host,
+            database_port,
+        ))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -176,7 +181,8 @@ mod tests {
         assert!(format!("{error:#}").contains("asylum-no-such-host.invalid"));
 
         // A stand-in `ssh` that only listens on the forwarded local port.
-        let directory = std::env::temp_dir().join(format!("asylum-fake-ssh-{}", std::process::id()));
+        let directory =
+            std::env::temp_dir().join(format!("asylum-fake-ssh-{}", std::process::id()));
         std::fs::create_dir_all(&directory).unwrap();
         let script = directory.join("ssh");
         std::fs::write(

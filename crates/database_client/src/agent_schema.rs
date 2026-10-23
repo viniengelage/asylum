@@ -18,7 +18,9 @@ impl Global for PanelRegistry {}
 
 impl PanelRegistry {
     pub(crate) fn panel(&self, project: &Entity<Project>) -> Option<Entity<DatabasePanel>> {
-        self.0.get(&project.entity_id()).and_then(|panel| panel.upgrade())
+        self.0
+            .get(&project.entity_id())
+            .and_then(|panel| panel.upgrade())
     }
 }
 

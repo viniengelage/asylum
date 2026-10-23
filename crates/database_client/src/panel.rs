@@ -172,9 +172,8 @@ impl DatabasePanel {
             }
         }));
         if let Some(workspace_entity) = workspace.weak_handle().upgrade() {
-            subscriptions.push(cx.subscribe(
-                &workspace_entity,
-                |this, workspace, event, cx| {
+            subscriptions.push(
+                cx.subscribe(&workspace_entity, |this, workspace, event, cx| {
                     if matches!(event, workspace::Event::ActiveItemChanged) {
                         let active_item = active_item_of(workspace.read(cx), cx);
                         if active_item != this.active_item {
@@ -182,8 +181,8 @@ impl DatabasePanel {
                             cx.notify();
                         }
                     }
-                },
-            ));
+                }),
+            );
         }
         crate::agent_schema::register_panel(&project, cx.weak_entity(), cx);
         let mut this = Self {
@@ -685,7 +684,10 @@ impl DatabasePanel {
             {
                 continue;
             }
-            match schemas.iter_mut().find(|(schema, _, _)| *schema == relation.schema) {
+            match schemas
+                .iter_mut()
+                .find(|(schema, _, _)| *schema == relation.schema)
+            {
                 Some((_, list, _)) => list.push(relation),
                 None => schemas.push((&relation.schema, vec![relation], Vec::new())),
             }
@@ -694,7 +696,10 @@ impl DatabasePanel {
             if filtering && !object.name.to_lowercase().contains(&filter) {
                 continue;
             }
-            match schemas.iter_mut().find(|(schema, _, _)| *schema == object.schema) {
+            match schemas
+                .iter_mut()
+                .find(|(schema, _, _)| *schema == object.schema)
+            {
                 Some((_, _, list)) => list.push(object),
                 None => schemas.push((&object.schema, Vec::new(), vec![object])),
             }
@@ -769,7 +774,12 @@ impl DatabasePanel {
             }
             let object_groups = [
                 (ObjectKind::Function, "functions", "Funções", IconName::Code),
-                (ObjectKind::Sequence, "sequences", "Sequências", IconName::Hash),
+                (
+                    ObjectKind::Sequence,
+                    "sequences",
+                    "Sequências",
+                    IconName::Hash,
+                ),
                 (ObjectKind::Enum, "enums", "Enums", IconName::List),
             ];
             for (kind, group, label, icon) in object_groups {
@@ -826,9 +836,8 @@ impl DatabasePanel {
             .border_color(gpui::transparent_black());
         let clickable =
             |base: gpui::Stateful<gpui::Div>| base.cursor_pointer().hover(|style| style.bg(hover));
-        let selected = |base: gpui::Stateful<gpui::Div>| {
-            base.bg(accent.opacity(0.18)).border_color(accent)
-        };
+        let selected =
+            |base: gpui::Stateful<gpui::Div>| base.bg(accent.opacity(0.18)).border_color(accent);
         let chevron = |expanded: bool| {
             Icon::new(if expanded {
                 IconName::ChevronDown
@@ -880,7 +889,11 @@ impl DatabasePanel {
                 .pl(px(20.))
                 .child(chevron(expanded))
                 .child(Icon::new(icon).size(IconSize::Small).color(Color::Muted))
-                .child(div().flex_1().child(Label::new(label).size(LabelSize::Small)))
+                .child(
+                    div()
+                        .flex_1()
+                        .child(Label::new(label).size(LabelSize::Small)),
+                )
                 .child(count(total.to_string()))
                 .on_click(cx.listener(move |this, _, _, cx| this.toggle(key.clone(), cx)))
                 .into_any_element(),
@@ -1053,19 +1066,20 @@ impl DatabasePanel {
             TreeRow::Query { path, name } => {
                 let is_selected =
                     matches!(&self.active_item, Some(ActiveItem::Query(open)) if *open == path);
-                let age = self.query_modified.get(&path).map(|modified| relative_age(*modified));
+                let age = self
+                    .query_modified
+                    .get(&path)
+                    .map(|modified| relative_age(*modified));
                 clickable(base)
                     .pl(px(16.))
                     .when(is_selected, selected)
-                    .child(
-                        Icon::new(IconName::FileCode)
-                            .size(IconSize::Small)
-                            .color(if is_selected {
-                                Color::Accent
-                            } else {
-                                Color::Muted
-                            }),
-                    )
+                    .child(Icon::new(IconName::FileCode).size(IconSize::Small).color(
+                        if is_selected {
+                            Color::Accent
+                        } else {
+                            Color::Muted
+                        },
+                    ))
                     .child(
                         div().flex_1().min_w_0().child(
                             Label::new(name)
@@ -1367,9 +1381,11 @@ impl DatabasePanel {
                                             None,
                                             cx,
                                         )
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.connect(retry.clone(), cx)
-                                        })),
+                                        .on_click(
+                                            cx.listener(move |this, _, _, cx| {
+                                                this.connect(retry.clone(), cx)
+                                            }),
+                                        ),
                                     )
                                     .when_some(scope, |this, scope| {
                                         this.child(
@@ -1380,15 +1396,15 @@ impl DatabasePanel {
                                                 true,
                                                 cx,
                                             )
-                                            .on_click(cx.listener(
-                                                move |this, _, window, cx| {
+                                            .on_click(
+                                                cx.listener(move |this, _, window, cx| {
                                                     this.open_connect_view(
                                                         Prefill::Edit(edit.clone(), scope),
                                                         window,
                                                         cx,
                                                     )
-                                                },
-                                            )),
+                                                }),
+                                            ),
                                         )
                                     }),
                             ),
@@ -1682,9 +1698,11 @@ impl DatabasePanel {
                             )
                             .w(px(168.))
                             .justify_center()
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.open_connect_view(Prefill::New, window, cx)
-                            })),
+                            .on_click(cx.listener(
+                                |this, _, window, cx| {
+                                    this.open_connect_view(Prefill::New, window, cx)
+                                },
+                            )),
                         ),
                     ),
             )
@@ -1945,11 +1963,51 @@ pub(crate) fn section_label(text: &'static str) -> Label {
 }
 
 const SQL_KEYWORDS: &[&str] = &[
-    "add", "alter", "and", "as", "begin", "by", "case", "column", "commit", "concurrently",
-    "create", "delete", "desc", "distinct", "else", "end", "explain", "false", "filter", "from",
-    "group", "if", "index", "insert", "interval", "into", "is", "join", "left", "limit", "not",
-    "null", "on", "or", "order", "rollback", "select", "set", "table", "then", "true", "update",
-    "values", "when", "where",
+    "add",
+    "alter",
+    "and",
+    "as",
+    "begin",
+    "by",
+    "case",
+    "column",
+    "commit",
+    "concurrently",
+    "create",
+    "delete",
+    "desc",
+    "distinct",
+    "else",
+    "end",
+    "explain",
+    "false",
+    "filter",
+    "from",
+    "group",
+    "if",
+    "index",
+    "insert",
+    "interval",
+    "into",
+    "is",
+    "join",
+    "left",
+    "limit",
+    "not",
+    "null",
+    "on",
+    "or",
+    "order",
+    "rollback",
+    "select",
+    "set",
+    "table",
+    "then",
+    "true",
+    "update",
+    "values",
+    "when",
+    "where",
 ];
 
 /// One line of SQL colored like the editor, for the read-only SQL the boards show in cards and

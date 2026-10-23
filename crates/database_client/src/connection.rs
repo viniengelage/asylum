@@ -5,13 +5,13 @@
 use crate::session::ConnectTarget;
 use crate::tls::SslMode;
 use crate::tunnel::{self, SshTunnel};
-use std::net::{IpAddr, Ipv4Addr};
-use std::sync::Arc;
 use anyhow::Context as _;
 use db::kvp::KeyValueStore;
 use fs::Fs;
 use serde::{Deserialize, Serialize};
+use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 pub const PROJECT_FILE: &str = ".asylum/db/connections.json";
