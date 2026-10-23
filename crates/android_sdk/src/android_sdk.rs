@@ -26,7 +26,7 @@ use util::ResultExt as _;
 mod avds;
 mod catalog;
 
-pub use avds::{AndroidAvd, AvdSettings, InstalledSystemImage, Orientation};
+pub use avds::{AndroidAvd, AvdSettings, InstalledSystemImage, Orientation, available_disk_bytes};
 pub use catalog::{
     AndroidDeviceProfile, CatalogComponent, CatalogImage, DeviceCategory, ImageFlavor, SdkCatalog,
     SdkComponentKind, SystemImageId, version_key,

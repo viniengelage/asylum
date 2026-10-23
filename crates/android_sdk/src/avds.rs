@@ -486,7 +486,7 @@ pub(crate) fn allocated_bytes(path: &Path) -> u64 {
 }
 
 /// Free space on the volume holding `path`.
-pub(crate) fn available_disk_bytes(path: &Path) -> Option<u64> {
+pub fn available_disk_bytes(path: &Path) -> Option<u64> {
     use std::os::unix::ffi::OsStrExt as _;
     let mut existing = path;
     while !existing.exists() {

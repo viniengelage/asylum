@@ -9356,6 +9356,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "ios_simulator"
+version = "0.1.0"
+dependencies = [
+ "android_sdk",
+ "anyhow",
+ "futures 0.3.34",
+ "gpui",
+ "http_client",
+ "log",
+ "paths",
+ "plist",
+ "serde",
+ "serde_json",
+ "smol",
+ "util",
+]
+
+[[package]]
 name = "iovec"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -17211,6 +17229,7 @@ dependencies = [
  "gpui",
  "http_client",
  "image",
+ "ios_simulator",
  "itertools 0.14.0",
  "language",
  "language_model",
