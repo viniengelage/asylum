@@ -9,7 +9,9 @@ use anyhow::{Context as _, Result, anyhow};
 use async_compression::futures::bufread::GzipDecoder;
 use async_tar::Archive;
 use futures::channel::mpsc;
-use futures::{AsyncReadExt as _, AsyncWriteExt as _, SinkExt as _, StreamExt as _};
+use futures::{
+    AsyncReadExt as _, AsyncWriteExt as _, FutureExt as _, SinkExt as _, StreamExt as _,
+};
 use gpui::{
     App, AppContext as _, AsyncApp, Context, Keystroke, RenderImage, SharedString, Task, WeakEntity,
 };
@@ -18,8 +20,17 @@ use smol::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use util::ResultExt as _;
+
+mod avds;
+mod catalog;
+
+pub use avds::{AndroidAvd, AvdSettings, InstalledSystemImage, Orientation};
+pub use catalog::{
+    AndroidDeviceProfile, CatalogComponent, CatalogImage, DeviceCategory, ImageFlavor, SdkCatalog,
+    SdkComponentKind, SystemImageId, version_key,
+};
 
 const CMDLINE_TOOLS_URL: &str =
     "https://dl.google.com/android/repository/commandlinetools-mac-13114758_latest.zip";
@@ -28,6 +39,8 @@ const JDK_URL_AARCH64: &str = "https://github.com/adoptium/temurin21-binaries/re
 const JDK_URL_X64: &str = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.5%2B11/OpenJDK21U-jdk_x64_mac_hotspot_21.0.5_11.tar.gz";
 const API_LEVEL: &str = "android-35";
 const DEFAULT_AVD_DEVICE: &str = "pixel_7";
+pub const DEFAULT_RAM_MB: u32 = 4096;
+pub const DEFAULT_STORAGE_GB: u32 = 8;
 /// AVDs Zed creates are prefixed so they are recognisable in `avd_home`,
 /// which is Zed's own directory and holds nothing else.
 const AVD_NAME_PREFIX: &str = "zed-";
@@ -66,12 +79,14 @@ fn system_image_abi() -> &'static str {
     }
 }
 
-fn system_image_package() -> String {
-    format!(
-        "system-images;{API_LEVEL};google_apis;{}",
-        system_image_abi()
-    )
+/// The image the first installation creates its AVD from.
+fn default_system_image() -> SystemImageId {
+    SystemImageId::new("35", ImageFlavor::GoogleApis, system_image_abi())
 }
+
+/// How long a downloaded repository catalog is reused before it is fetched again.
+const CATALOG_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+const DOWNLOAD_POLL_INTERVAL: Duration = Duration::from_millis(500);
 
 #[derive(Clone)]
 struct AndroidPaths {
@@ -123,18 +138,21 @@ impl AndroidPaths {
         self.sdk_dir.join("platforms").join(API_LEVEL)
     }
 
-    fn system_image_dir(&self) -> PathBuf {
-        self.sdk_dir
-            .join("system-images")
-            .join(API_LEVEL)
-            .join("google_apis")
-            .join(system_image_abi())
+    fn system_image_dir(&self, image: &SystemImageId) -> PathBuf {
+        self.sdk_dir.join(image.relative_dir())
     }
 
-    fn avd_config_ini(&self, avd_name: &str) -> PathBuf {
-        self.avd_home
-            .join(format!("{avd_name}.avd"))
-            .join("config.ini")
+    fn cmdline_tools_dir(&self) -> PathBuf {
+        self.sdk_dir.join("cmdline-tools/latest")
+    }
+
+    fn catalog_dir(&self) -> PathBuf {
+        self.downloads_dir.join("catalog")
+    }
+
+    /// Where `sdkmanager` stages a package while downloading and unzipping it.
+    fn sdkmanager_temp_dir(&self) -> PathBuf {
+        self.sdk_dir.join(".temp")
     }
 }
 
@@ -166,35 +184,6 @@ impl InstallStep {
     }
 }
 
-/// A virtual device that exists under Zed's AVD home.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AndroidAvd {
-    /// Name the emulator is launched with, e.g. `zed-pixel_7`.
-    pub name: String,
-    /// `hw.device.name` from the AVD's config, e.g. `pixel_7`. Absent when the
-    /// config cannot be read, which only costs a nicer label.
-    pub device_profile: Option<String>,
-}
-
-impl AndroidAvd {
-    /// Label for the device picker: the device profile when it is known,
-    /// since the AVD name is derived from it and reads worse.
-    pub fn label(&self) -> String {
-        match &self.device_profile {
-            Some(profile) => humanize_device_profile_id(profile),
-            None => self.name.clone(),
-        }
-    }
-}
-
-/// A device definition `avdmanager` can create an AVD from.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AndroidDeviceProfile {
-    /// Identifier passed to `avdmanager create avd --device`.
-    pub id: String,
-    pub name: String,
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum AndroidSdkState {
     Unknown,
@@ -202,12 +191,113 @@ pub enum AndroidSdkState {
     Installing(InstallStep),
     /// SDK and emulator installed, but no AVD created yet.
     Installed,
+    /// Downloading a system image or SDK component, or creating or changing an AVD.
+    Preparing(PrepareJob),
     AvdReady,
     EmulatorBooting,
     EmulatorRunning {
         serial: String,
     },
     Failed(SharedString),
+}
+
+/// A download or AVD change in progress, as the devices dock shows it while it runs.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PrepareJob {
+    pub title: SharedString,
+    pub description: Option<SharedString>,
+    pub steps: Vec<PrepareStep>,
+    /// Index into `steps` of the step running now.
+    pub current: usize,
+    pub progress: Option<DownloadProgress>,
+    /// The SDK package being downloaded, shown under the progress bar.
+    pub package: Option<String>,
+    /// The device the job creates or changes and its Android version, which the device picker
+    /// shows while the job runs.
+    pub device: Option<(SharedString, SharedString)>,
+}
+
+impl PrepareJob {
+    fn step_index(&self, kind: PrepareStepKind) -> Option<usize> {
+        self.steps.iter().position(|step| step.kind == kind)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PrepareStep {
+    pub kind: PrepareStepKind,
+    pub label: SharedString,
+    pub detail: Option<SharedString>,
+}
+
+impl PrepareStep {
+    fn new(kind: PrepareStepKind, label: impl Into<SharedString>) -> Self {
+        Self {
+            kind,
+            label: label.into(),
+            detail: None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PrepareStepKind {
+    Licenses,
+    DiskSpace,
+    Download,
+    CreateAvd,
+    ApplySettings,
+    FirstBoot,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DownloadProgress {
+    pub downloaded: u64,
+    /// Zero when the catalog doesn't know the package's size.
+    pub total: u64,
+    pub remaining: Option<Duration>,
+    /// The download finished and `sdkmanager` is unzipping it.
+    pub installing: bool,
+}
+
+/// What the device manager asks [`AndroidSdkManager::prepare`] to do.
+#[derive(Clone, Debug, PartialEq)]
+pub enum PrepareRequest {
+    Create {
+        settings: AvdSettings,
+        boot_when_ready: bool,
+    },
+    /// Rewrites an existing AVD's settings. Pointing it at another system image also wipes its
+    /// data, which the old image's userdata would otherwise break.
+    Edit {
+        avd: String,
+        settings: AvdSettings,
+    },
+    DownloadImage(SystemImageId),
+    UpdateComponent(SdkComponentKind),
+}
+
+/// What the device manager's modal shows besides the AVDs: images, components and disk space.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AndroidInventory {
+    pub installed_images: Vec<InstalledSystemImage>,
+    pub component_versions: Vec<(SdkComponentKind, Option<String>)>,
+    /// What `~/Library/Android/zed` takes on disk.
+    pub used_bytes: u64,
+    pub available_bytes: Option<u64>,
+}
+
+impl AndroidInventory {
+    pub fn component_version(&self, kind: SdkComponentKind) -> Option<&str> {
+        self.component_versions
+            .iter()
+            .find(|(component, _)| *component == kind)
+            .and_then(|(_, version)| version.as_deref())
+    }
+
+    pub fn installed_image(&self, id: &SystemImageId) -> Option<&InstalledSystemImage> {
+        self.installed_images.iter().find(|image| &image.id == id)
+    }
 }
 
 pub struct AndroidSdkManager {
@@ -227,6 +317,15 @@ pub struct AndroidSdkManager {
     screen_stream_task: Option<Task<()>>,
     touch_sender: Option<mpsc::UnboundedSender<TouchMessage>>,
     key_sender: Option<mpsc::UnboundedSender<EmulatorKey>>,
+    catalog: Option<SdkCatalog>,
+    catalog_task: Option<Task<()>>,
+    inventory: AndroidInventory,
+    inventory_task: Option<Task<()>>,
+    /// The creation job whose last step is the first boot, kept while the emulator boots so the
+    /// dock goes on showing it.
+    first_boot_job: Option<PrepareJob>,
+    /// What the dock showed before a job started, restored when it ends or is cancelled.
+    state_before_prepare: Option<AndroidSdkState>,
 }
 
 /// What a disk scan found: which AVDs exist, and which one (if any) is
@@ -319,6 +418,12 @@ impl AndroidSdkManager {
             screen_stream_task: None,
             touch_sender: None,
             key_sender: None,
+            catalog: None,
+            catalog_task: None,
+            inventory: AndroidInventory::default(),
+            inventory_task: None,
+            first_boot_job: None,
+            state_before_prepare: None,
         };
         this.detect_state(cx);
         this
@@ -328,18 +433,29 @@ impl AndroidSdkManager {
         &self.state
     }
 
-    /// Virtual devices available to boot, in the order they should be listed.
     pub fn avds(&self) -> &[AndroidAvd] {
         &self.avds
     }
 
-    /// AVD the boot/stop controls act on.
+    pub fn avd(&self, name: &str) -> Option<&AndroidAvd> {
+        self.avds.iter().find(|avd| avd.name == name)
+    }
+
+    /// The AVD the UI acts on: the one being shown or about to be booted.
     pub fn selected_avd(&self) -> Option<&str> {
         self.selected_avd.as_deref()
     }
 
-    /// Device definitions a new AVD can be created from. Empty until
-    /// [`Self::refresh_device_profiles`] has run.
+    /// The AVD whose emulator is running or booting. Only one runs at a time.
+    pub fn running_avd(&self) -> Option<&str> {
+        match self.state {
+            AndroidSdkState::EmulatorRunning { .. } | AndroidSdkState::EmulatorBooting => {
+                self.selected_avd.as_deref()
+            }
+            _ => None,
+        }
+    }
+
     pub fn device_profiles(&self) -> &[AndroidDeviceProfile] {
         &self.device_profiles
     }
@@ -348,9 +464,41 @@ impl AndroidSdkManager {
         self.device_profiles_task.is_some()
     }
 
-    /// Switches the emulator to `name`. A different AVD cannot share the
-    /// running emulator, so the current one is shut down and the new one
-    /// booted in its place.
+    pub fn catalog(&self) -> Option<&SdkCatalog> {
+        self.catalog.as_ref()
+    }
+
+    pub fn is_loading_catalog(&self) -> bool {
+        self.catalog_task.is_some()
+    }
+
+    pub fn inventory(&self) -> &AndroidInventory {
+        &self.inventory
+    }
+
+    /// The job the dock shows: the one running, or the creation waiting on its first boot.
+    pub fn prepare_job(&self) -> Option<&PrepareJob> {
+        match &self.state {
+            AndroidSdkState::Preparing(job) => Some(job),
+            AndroidSdkState::EmulatorBooting => self.first_boot_job.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// Whether a download, installation or AVD change is running. Those share the SDK
+    /// directory, so only one runs at a time.
+    pub fn is_busy(&self) -> bool {
+        self.install_task.is_some()
+    }
+
+    pub fn android_dir(&self) -> PathBuf {
+        AndroidPaths::new().root
+    }
+
+    pub fn avd_dir(&self, name: &str) -> PathBuf {
+        avds::avd_dir(&AndroidPaths::new().avd_home, name)
+    }
+
     pub fn select_avd(&mut self, name: String, cx: &mut Context<Self>) {
         if self.selected_avd.as_deref() == Some(name.as_str()) {
             return;
@@ -372,8 +520,8 @@ impl AndroidSdkManager {
         }
     }
 
-    /// Reads the device definitions `avdmanager` knows about. Requires the
-    /// managed JDK, so it does nothing until the SDK is installed.
+    /// Reads the device definitions bundled with the command-line tools, falling back to
+    /// `avdmanager list device` (names only) when the jar can't be read.
     pub fn refresh_device_profiles(&mut self, cx: &mut Context<Self>) {
         if self.device_profiles_task.is_some() || !self.device_profiles.is_empty() {
             return;
@@ -382,10 +530,18 @@ impl AndroidSdkManager {
             let profiles = cx
                 .background_spawn(async {
                     let paths = AndroidPaths::new();
-                    let java_home = installed_java_home(&paths)
-                        .await
-                        .context("JDK gerenciado pelo Zed não encontrado")?;
-                    list_device_profiles(&paths, &java_home).await
+                    match catalog::read_device_definitions(&paths.cmdline_tools_dir()).await {
+                        Ok(profiles) => Ok(profiles),
+                        Err(error) => {
+                            log::warn!(
+                                "definições de dispositivo do sdklib indisponíveis, usando o avdmanager: {error:#}"
+                            );
+                            let java_home = installed_java_home(&paths)
+                                .await
+                                .context("JDK gerenciado pelo Zed não encontrado")?;
+                            list_device_profiles(&paths, &java_home).await
+                        }
+                    }
                 })
                 .await;
             this.update(cx, |this, cx| {
@@ -397,6 +553,77 @@ impl AndroidSdkManager {
                     }
                 }
                 cx.notify();
+            })
+            .ok();
+        }));
+    }
+
+    /// Fetches the system images and SDK components the repository offers, once per session
+    /// (the XML itself is cached for a day).
+    pub fn refresh_catalog(&mut self, cx: &mut Context<Self>) {
+        if self.catalog_task.is_some() || self.catalog.is_some() {
+            return;
+        }
+        let http_client = cx.http_client();
+        self.catalog_task = Some(cx.spawn(async move |this, cx| {
+            let catalog = cx
+                .background_spawn(async move {
+                    match fetch_catalog(http_client).await {
+                        Ok(catalog) => catalog,
+                        Err(error) => {
+                            log::warn!(
+                                "catálogo do repositório Android indisponível, usando o sdkmanager: {error:#}"
+                            );
+                            let images = list_available_images_with_sdkmanager()
+                                .await
+                                .context("sdkmanager --list")
+                                .log_err()
+                                .unwrap_or_default();
+                            SdkCatalog {
+                                images,
+                                components: Vec::new(),
+                            }
+                        }
+                    }
+                })
+                .await;
+            this.update(cx, |this, cx| {
+                this.catalog_task = None;
+                this.catalog = Some(catalog);
+                cx.notify();
+            })
+            .ok();
+        }));
+    }
+
+    /// Rescans the AVDs, the installed images, the SDK components and the disk.
+    pub fn refresh_inventory(&mut self, cx: &mut Context<Self>) {
+        self.inventory_task = Some(cx.spawn(async move |this, cx| {
+            let (avds, inventory) = cx
+                .background_spawn(async {
+                    let paths = AndroidPaths::new();
+                    let avds = avds::list_avds(&paths.avd_home, &paths.sdk_dir);
+                    let inventory = AndroidInventory {
+                        installed_images: avds::installed_system_images(&paths.sdk_dir, &avds),
+                        component_versions: SdkComponentKind::ALL
+                            .iter()
+                            .map(|kind| {
+                                (
+                                    *kind,
+                                    avds::installed_component_version(&paths.sdk_dir, *kind),
+                                )
+                            })
+                            .collect(),
+                        used_bytes: avds::allocated_bytes(&paths.root),
+                        available_bytes: avds::available_disk_bytes(&paths.root),
+                    };
+                    (avds, inventory)
+                })
+                .await;
+            this.update(cx, |this, cx| {
+                this.inventory_task = None;
+                this.inventory = inventory;
+                this.set_avds(avds, cx);
             })
             .ok();
         }));
@@ -418,6 +645,9 @@ impl AndroidSdkManager {
 
     fn set_state(&mut self, state: AndroidSdkState, cx: &mut Context<Self>) {
         self.state = state;
+        if !matches!(self.state, AndroidSdkState::EmulatorBooting) {
+            self.first_boot_job = None;
+        }
         match &self.state {
             AndroidSdkState::EmulatorRunning { serial } => {
                 let serial = serial.clone();
@@ -438,25 +668,28 @@ impl AndroidSdkManager {
     }
 
     fn detect_state(&mut self, cx: &mut Context<Self>) {
-        if matches!(
-            self.state,
-            AndroidSdkState::Installing(_) | AndroidSdkState::EmulatorBooting
-        ) {
+        if self.is_transitioning() {
             return;
         }
         cx.spawn(async move |this, cx| {
             let installation = cx.background_spawn(detect_installation_on_disk()).await;
             this.update(cx, |this, cx| {
-                if !matches!(
-                    this.state,
-                    AndroidSdkState::Installing(_) | AndroidSdkState::EmulatorBooting
-                ) {
+                if !this.is_transitioning() {
                     this.apply_installation(installation, cx);
                 }
             })
             .ok();
         })
         .detach();
+    }
+
+    fn is_transitioning(&self) -> bool {
+        matches!(
+            self.state,
+            AndroidSdkState::Installing(_)
+                | AndroidSdkState::Preparing(_)
+                | AndroidSdkState::EmulatorBooting
+        )
     }
 
     /// Adopts a disk scan, keeping the selection pointed at an AVD that still
@@ -473,9 +706,9 @@ impl AndroidSdkManager {
                 .filter(|running| self.avds.iter().any(|avd| &avd.name == running))
                 .or_else(|| self.avds.first().map(|avd| avd.name.clone()));
         }
-        // The device definitions come from `avdmanager`, which only exists
-        // once the SDK is installed; this is the first point where that is
-        // known, and the picker needs the list before the user opens it.
+        // The device definitions come from the command-line tools, which only
+        // exist once the SDK is installed; this is the first point where that
+        // is known, and the picker needs the list before the user opens it.
         if !matches!(
             installation.state,
             AndroidSdkState::Unknown | AndroidSdkState::NotInstalled
@@ -489,22 +722,34 @@ impl AndroidSdkManager {
     fn refresh_avds(&mut self, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
             let avds = cx
-                .background_spawn(async { list_avds(&AndroidPaths::new()).await })
+                .background_spawn(async {
+                    let paths = AndroidPaths::new();
+                    avds::list_avds(&paths.avd_home, &paths.sdk_dir)
+                })
                 .await;
-            this.update(cx, |this, cx| {
-                this.avds = avds;
-                let selection_is_gone = this
-                    .selected_avd
-                    .as_ref()
-                    .is_none_or(|selected| !this.avds.iter().any(|avd| &avd.name == selected));
-                if selection_is_gone {
-                    this.selected_avd = this.avds.first().map(|avd| avd.name.clone());
-                }
-                cx.notify();
-            })
-            .ok();
+            this.update(cx, |this, cx| this.set_avds(avds, cx)).ok();
         })
         .detach();
+    }
+
+    fn set_avds(&mut self, avds: Vec<AndroidAvd>, cx: &mut Context<Self>) {
+        self.avds = avds;
+        let selection_is_gone = self
+            .selected_avd
+            .as_ref()
+            .is_none_or(|selected| !self.avds.iter().any(|avd| &avd.name == selected));
+        if selection_is_gone {
+            self.selected_avd = self.avds.first().map(|avd| avd.name.clone());
+        }
+        match self.state {
+            AndroidSdkState::AvdReady if self.avds.is_empty() => {
+                self.set_state(AndroidSdkState::Installed, cx)
+            }
+            AndroidSdkState::Installed if !self.avds.is_empty() => {
+                self.set_state(AndroidSdkState::AvdReady, cx)
+            }
+            _ => cx.notify(),
+        }
     }
 
     pub fn install(&mut self, cx: &mut Context<Self>) {
@@ -534,112 +779,299 @@ impl AndroidSdkManager {
         }));
     }
 
-    /// Creates an AVD for the default device profile. Fallback used when the
-    /// SDK is installed but no AVD exists; `install()` chains this itself.
-    pub fn create_avd(&mut self, cx: &mut Context<Self>) {
-        self.create_avd_for_device(DEFAULT_AVD_DEVICE.to_string(), cx);
-    }
-
-    /// Creates an AVD for `device_profile` and makes it the selection. A
-    /// running emulator belongs to another AVD, so it is shut down first.
-    pub fn create_avd_for_device(&mut self, device_profile: String, cx: &mut Context<Self>) {
+    /// Downloads what `request` needs and then creates or changes the AVD, showing each step
+    /// in the dock. Does nothing while another job runs.
+    pub fn prepare(&mut self, request: PrepareRequest, cx: &mut Context<Self>) {
         if self.install_task.is_some() {
             return;
         }
-        // One AVD per profile: picking a device that already has one just
-        // switches to it, so the list never grows duplicates.
-        if let Some(existing) = self
-            .avds
-            .iter()
-            .find(|avd| avd.device_profile.as_deref() == Some(device_profile.as_str()))
-            .map(|avd| avd.name.clone())
-        {
-            self.select_avd(existing, cx);
-            return;
+        let paths = AndroidPaths::new();
+        let image_to_download = match &request {
+            PrepareRequest::Create { settings, .. } | PrepareRequest::Edit { settings, .. } => {
+                Some(&settings.image)
+            }
+            PrepareRequest::DownloadImage(image) => Some(image),
+            PrepareRequest::UpdateComponent(_) => None,
         }
-        if matches!(
-            self.state,
-            AndroidSdkState::EmulatorRunning { .. } | AndroidSdkState::EmulatorBooting
-        ) {
-            self.stop_emulator(cx);
+        .filter(|image| !avds::system_image_installed(&paths.sdk_dir, image))
+        .cloned();
+        let package = match &request {
+            PrepareRequest::UpdateComponent(kind) => Some(kind.package().to_string()),
+            _ => image_to_download.as_ref().map(SystemImageId::package),
+        };
+        let download_bytes = match &request {
+            PrepareRequest::UpdateComponent(kind) => self
+                .catalog
+                .as_ref()
+                .and_then(|catalog| catalog.component(*kind))
+                .map(|component| component.download_bytes),
+            _ => image_to_download.as_ref().and_then(|image| {
+                self.catalog
+                    .as_ref()
+                    .and_then(|catalog| catalog.image(image))
+                    .map(|image| image.download_bytes)
+            }),
         }
-        let avd_name = avd_name_for_device(&device_profile);
-        self.state = AndroidSdkState::Installing(InstallStep::new("Criando dispositivo virtual…"));
+        .unwrap_or(0);
+
+        // Licenses and disk space only matter when something is downloaded or created; saving
+        // an AVD's settings shouldn't wait on `sdkmanager`'s JVM.
+        let creating = matches!(request, PrepareRequest::Create { .. });
+        let mut steps = Vec::new();
+        if package.is_some() {
+            steps.push(PrepareStep::new(
+                PrepareStepKind::Licenses,
+                "Licenças do SDK aceitas",
+            ));
+        }
+        if package.is_some() || creating {
+            steps.push(PrepareStep::new(
+                PrepareStepKind::DiskSpace,
+                "Espaço em disco verificado",
+            ));
+        }
+        if package.is_some() {
+            let label = match &request {
+                PrepareRequest::UpdateComponent(kind) => format!("Baixando {}", kind.label()),
+                _ => "Baixando imagem do sistema".to_string(),
+            };
+            steps.push(PrepareStep::new(PrepareStepKind::Download, label));
+        }
+        let (title, description, required_bytes) = match &request {
+            PrepareRequest::Create {
+                settings,
+                boot_when_ready,
+            } => {
+                steps.push(PrepareStep::new(
+                    PrepareStepKind::CreateAvd,
+                    "Criando o dispositivo virtual",
+                ));
+                if *boot_when_ready {
+                    steps.push(PrepareStep::new(
+                        PrepareStepKind::FirstBoot,
+                        "Primeira inicialização",
+                    ));
+                }
+                let description = image_to_download.as_ref().map(|image| {
+                    format!(
+                        "A imagem do {} ainda não está no disco. Ela é baixada uma vez e fica disponível para outros dispositivos.",
+                        image.android_version()
+                    )
+                });
+                (
+                    format!("Criando {}", settings.display_name),
+                    description,
+                    download_bytes + u64::from(settings.storage_gb) * 1024 * 1024 * 1024,
+                )
+            }
+            PrepareRequest::Edit { avd, settings } => {
+                let image_changes = self
+                    .avd(avd)
+                    .is_some_and(|avd| avd.system_image.as_ref() != Some(&settings.image));
+                steps.push(PrepareStep::new(
+                    PrepareStepKind::ApplySettings,
+                    if image_changes {
+                        "Apagando os dados e aplicando os ajustes"
+                    } else {
+                        "Aplicando os ajustes"
+                    },
+                ));
+                let description = image_changes.then(|| {
+                    format!(
+                        "A versão do Android mudou para {}, então os dados do dispositivo voltam ao estado de fábrica.",
+                        settings.image.short_label()
+                    )
+                });
+                (
+                    format!("Atualizando {}", settings.display_name),
+                    description,
+                    download_bytes,
+                )
+            }
+            PrepareRequest::DownloadImage(image) => (
+                format!("Baixando {}", image.android_version()),
+                Some(format!(
+                    "{} · {}. A imagem fica disponível para qualquer dispositivo.",
+                    image
+                        .flavor()
+                        .map_or_else(|| image.tag.clone(), |flavor| flavor.label().to_string()),
+                    image.api_label()
+                )),
+                download_bytes,
+            ),
+            PrepareRequest::UpdateComponent(kind) => (
+                format!("Atualizando {}", kind.label()),
+                None,
+                download_bytes,
+            ),
+        };
+        let device = match &request {
+            PrepareRequest::Create { settings, .. } | PrepareRequest::Edit { settings, .. } => {
+                Some((
+                    settings.display_name.clone().into(),
+                    settings.image.short_label().into(),
+                ))
+            }
+            PrepareRequest::DownloadImage(_) | PrepareRequest::UpdateComponent(_) => None,
+        };
+        let job = PrepareJob {
+            device,
+            title: title.into(),
+            description: description.map(Into::into),
+            steps,
+            current: 0,
+            progress: None,
+            package: package.clone(),
+        };
+
+        if !matches!(self.state, AndroidSdkState::Preparing(_)) {
+            self.state_before_prepare = Some(self.state.clone());
+        }
+        self.state = AndroidSdkState::Preparing(job);
         cx.notify();
         self.install_task = Some(cx.spawn(async move |this, cx| {
-            let result = cx
-                .background_spawn({
-                    let avd_name = avd_name.clone();
-                    async move {
-                        let paths = AndroidPaths::new();
-                        let java_home = installed_java_home(&paths)
-                            .await
-                            .context("JDK gerenciado pelo Zed não encontrado")?;
-                        create_avd_on_disk(&paths, &java_home, &avd_name, &device_profile).await
-                    }
-                })
-                .await;
+            let result =
+                run_prepare(&this, request, package, download_bytes, required_bytes, cx).await;
             this.update(cx, |this, cx| {
                 this.install_task = None;
                 match result {
-                    Ok(()) => {
-                        this.selected_avd = Some(avd_name);
-                        this.state = AndroidSdkState::AvdReady;
+                    Ok(outcome) => this.finish_prepare(outcome, cx),
+                    Err(error) => {
+                        this.state_before_prepare = None;
+                        this.set_state(AndroidSdkState::Failed(format!("{error:#}").into()), cx);
                         this.refresh_avds(cx);
                     }
-                    Err(error) => {
-                        this.state = AndroidSdkState::Failed(
-                            format!("Não foi possível criar o dispositivo virtual: {error:#}")
-                                .into(),
-                        );
-                    }
                 }
-                cx.notify();
             })
             .ok();
         }));
     }
 
+    fn finish_prepare(&mut self, outcome: PrepareOutcome, cx: &mut Context<Self>) {
+        let job = match &self.state {
+            AndroidSdkState::Preparing(job) => Some(job.clone()),
+            _ => None,
+        };
+        let previous = self
+            .state_before_prepare
+            .take()
+            .unwrap_or(AndroidSdkState::AvdReady);
+        match outcome.avd {
+            Some(avd) if outcome.boot => {
+                if matches!(
+                    previous,
+                    AndroidSdkState::EmulatorRunning { .. } | AndroidSdkState::EmulatorBooting
+                ) {
+                    self.state = previous;
+                    self.stop_emulator(cx);
+                }
+                self.state = AndroidSdkState::AvdReady;
+                self.selected_avd = Some(avd);
+                self.boot_emulator(cx);
+                self.first_boot_job = job.map(|mut job| {
+                    if let Some(index) = job.step_index(PrepareStepKind::FirstBoot) {
+                        job.current = index;
+                    }
+                    job.progress = None;
+                    job
+                });
+                cx.notify();
+            }
+            avd => {
+                if let Some(avd) = avd
+                    && !matches!(
+                        previous,
+                        AndroidSdkState::EmulatorRunning { .. } | AndroidSdkState::EmulatorBooting
+                    )
+                {
+                    self.selected_avd = Some(avd);
+                }
+                self.set_state(previous, cx);
+            }
+        }
+        self.refresh_avds(cx);
+        self.refresh_inventory(cx);
+    }
+
+    /// Stops the running job. A half-downloaded package is removed, so the SDK never holds an
+    /// image `sdkmanager` didn't finish.
+    pub fn cancel_prepare(&mut self, cx: &mut Context<Self>) {
+        let AndroidSdkState::Preparing(job) = &self.state else {
+            return;
+        };
+        let partial_image = job
+            .package
+            .as_deref()
+            .and_then(SystemImageId::parse_package);
+        // Dropping the task kills `sdkmanager`, which runs with `kill_on_drop`.
+        self.install_task = None;
+        cx.background_spawn(async move {
+            let paths = AndroidPaths::new();
+            let temp_dir = paths.sdkmanager_temp_dir();
+            if temp_dir.exists() {
+                std::fs::remove_dir_all(&temp_dir)
+                    .with_context(|| format!("apagando {}", temp_dir.display()))
+                    .log_err();
+            }
+            if let Some(image) = partial_image
+                && !avds::system_image_installed(&paths.sdk_dir, &image)
+            {
+                let image_dir = paths.system_image_dir(&image);
+                if image_dir.exists() {
+                    std::fs::remove_dir_all(&image_dir)
+                        .with_context(|| format!("apagando {}", image_dir.display()))
+                        .log_err();
+                }
+            }
+        })
+        .detach();
+        let previous = self
+            .state_before_prepare
+            .take()
+            .unwrap_or(AndroidSdkState::AvdReady);
+        self.set_state(previous, cx);
+        self.refresh_avds(cx);
+    }
+
     pub fn boot_emulator(&mut self, cx: &mut Context<Self>) {
+        self.boot_emulator_with(false, cx);
+    }
+
+    /// Boots `name`, stopping the emulator of any other AVD first. A cold boot skips the
+    /// saved snapshot.
+    pub fn boot_avd(&mut self, name: String, cold: bool, cx: &mut Context<Self>) {
+        if self.running_avd() == Some(name.as_str()) {
+            return;
+        }
+        if self.running_avd().is_some() {
+            self.stop_emulator(cx);
+        }
+        self.selected_avd = Some(name);
+        self.boot_emulator_with(cold, cx);
+    }
+
+    fn boot_emulator_with(&mut self, cold: bool, cx: &mut Context<Self>) {
         if self.emulator_process.is_some() || matches!(self.state, AndroidSdkState::EmulatorBooting)
         {
             return;
         }
         let Some(avd_name) = self.selected_avd.clone() else {
-            self.state =
-                AndroidSdkState::Failed("Nenhum dispositivo virtual selecionado.".into());
+            self.state = AndroidSdkState::Failed("Nenhum dispositivo virtual selecionado.".into());
             cx.notify();
             return;
         };
-        // Marking the state before spawning keeps a second call from launching
-        // a second emulator while the config below is being repaired.
+        self.first_boot_job = None;
         self.state = AndroidSdkState::EmulatorBooting;
         cx.notify();
-        self.boot_task = Some(cx.spawn(async move |this, cx| {
-            // Repairs AVDs created before the hardware keyboard was enabled.
-            // Must happen before the emulator starts, which is the only time
-            // the setting is read.
-            cx.background_spawn({
-                let avd_name = avd_name.clone();
-                async move {
-                    enable_avd_hardware_keyboard(&AndroidPaths::new(), &avd_name)
-                        .await
-                        .context("não foi possível habilitar o teclado físico do AVD")
-                        .log_err();
-                }
-            })
-            .await;
-            this.update(cx, |this, cx| this.spawn_emulator_process(avd_name, cx))
-                .ok();
-        }));
+        self.spawn_emulator_process(avd_name, cold, cx);
     }
 
-    fn spawn_emulator_process(&mut self, avd_name: String, cx: &mut Context<Self>) {
+    fn spawn_emulator_process(&mut self, avd_name: String, cold: bool, cx: &mut Context<Self>) {
         let paths = AndroidPaths::new();
         let mut command = smol::process::Command::new(paths.emulator());
         // Headless: the emulator's screen is streamed into Zed's devices view
         // instead of opening the emulator's own window.
-        command.args(emulator_args(&avd_name, true));
+        command.args(emulator_args(&avd_name, true, cold));
         apply_env(&mut command, &paths, None);
         command
             .stdin(Stdio::null())
@@ -658,6 +1090,114 @@ impl AndroidSdkManager {
             }
         }
         cx.notify();
+    }
+
+    fn ensure_not_running(&self, name: &str) -> Result<()> {
+        anyhow::ensure!(
+            self.running_avd() != Some(name),
+            "Pare o dispositivo primeiro."
+        );
+        anyhow::ensure!(
+            self.install_task.is_none(),
+            "Espere a operação em andamento terminar."
+        );
+        Ok(())
+    }
+
+    /// Deletes an AVD and, when asked and nothing else uses it, its system image.
+    pub fn delete_avd(
+        &mut self,
+        name: String,
+        remove_image: bool,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<()>> {
+        if let Err(error) = self.ensure_not_running(&name) {
+            return Task::ready(Err(error));
+        }
+        let image = remove_image
+            .then(|| self.avd(&name).and_then(|avd| avd.system_image.clone()))
+            .flatten()
+            .filter(|image| !self.image_used_by_other_avd(image, &name));
+        self.run_disk_action(cx, async move {
+            let paths = AndroidPaths::new();
+            avds::delete_avd(&paths.avd_home, &name)?;
+            if let Some(image) = image {
+                uninstall_package(&paths, &image.package()).await?;
+            }
+            Ok(())
+        })
+    }
+
+    /// Whether an AVD other than `except` boots from `image`.
+    pub fn image_used_by_other_avd(&self, image: &SystemImageId, except: &str) -> bool {
+        self.avds
+            .iter()
+            .any(|avd| avd.name != except && avd.system_image.as_ref() == Some(image))
+    }
+
+    pub fn wipe_avd_data(&mut self, name: String, cx: &mut Context<Self>) -> Task<Result<()>> {
+        if let Err(error) = self.ensure_not_running(&name) {
+            return Task::ready(Err(error));
+        }
+        self.run_disk_action(cx, async move {
+            avds::wipe_avd_data(&AndroidPaths::new().avd_home, &name)
+        })
+    }
+
+    pub fn duplicate_avd(&mut self, name: String, cx: &mut Context<Self>) -> Task<Result<()>> {
+        if let Err(error) = self.ensure_not_running(&name) {
+            return Task::ready(Err(error));
+        }
+        let Some(label) = self.avd(&name).map(AndroidAvd::label) else {
+            return Task::ready(Err(anyhow!("Dispositivo {name} não encontrado.")));
+        };
+        let display_name = format!("{label} (cópia)");
+        let existing: Vec<String> = self.avds.iter().map(|avd| avd.name.clone()).collect();
+        let new_name = avds::avd_name_for_display_name(&display_name, &existing);
+        self.run_disk_action(cx, async move {
+            avds::duplicate_avd(
+                &AndroidPaths::new().avd_home,
+                &name,
+                &new_name,
+                &display_name,
+            )
+        })
+    }
+
+    /// Removes a system image no AVD uses.
+    pub fn uninstall_system_image(
+        &mut self,
+        image: SystemImageId,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<()>> {
+        if self.install_task.is_some() {
+            return Task::ready(Err(anyhow!("Espere a operação em andamento terminar.")));
+        }
+        if self.image_used_by_other_avd(&image, "") {
+            return Task::ready(Err(anyhow!(
+                "Algum dispositivo ainda usa {}.",
+                image.short_label()
+            )));
+        }
+        self.run_disk_action(cx, async move {
+            uninstall_package(&AndroidPaths::new(), &image.package()).await
+        })
+    }
+
+    fn run_disk_action(
+        &mut self,
+        cx: &mut Context<Self>,
+        action: impl Future<Output = Result<()>> + Send + 'static,
+    ) -> Task<Result<()>> {
+        cx.spawn(async move |this, cx| {
+            let result = cx.background_spawn(action).await;
+            this.update(cx, |this, cx| {
+                this.refresh_avds(cx);
+                this.refresh_inventory(cx);
+            })
+            .ok();
+            result
+        })
     }
 
     pub fn stop_emulator(&mut self, cx: &mut Context<Self>) {
@@ -1195,10 +1735,13 @@ impl AndroidSdkManager {
     }
 }
 
-fn emulator_args(avd_name: &str, headless: bool) -> Vec<String> {
+fn emulator_args(avd_name: &str, headless: bool, cold: bool) -> Vec<String> {
     let mut args = vec!["-avd".to_string(), avd_name.to_string()];
     if headless {
         args.push("-no-window".to_string());
+    }
+    if cold {
+        args.push("-no-snapshot-load".to_string());
     }
     // avdmanager creates AVDs with `hw.gpu.enabled = no`, which makes the
     // guest render in software (~12fps animations). `-gpu host` overrides the
@@ -1251,8 +1794,6 @@ async fn detect_installation_on_disk() -> AndroidInstallation {
         || !exists(&paths.sdkmanager()).await
         || !exists(&paths.adb()).await
         || !exists(&paths.emulator()).await
-        || !exists(&paths.platform_dir()).await
-        || !exists(&paths.system_image_dir()).await
     {
         return AndroidInstallation {
             state: AndroidSdkState::NotInstalled,
@@ -1261,7 +1802,7 @@ async fn detect_installation_on_disk() -> AndroidInstallation {
         };
     }
 
-    let avds = list_avds(&paths).await;
+    let avds = avds::list_avds(&paths.avd_home, &paths.sdk_dir);
     if avds.is_empty() {
         return AndroidInstallation {
             state: AndroidSdkState::Installed,
@@ -1292,49 +1833,6 @@ async fn detect_installation_on_disk() -> AndroidInstallation {
     }
 }
 
-/// Lists the AVDs under Zed's AVD home by reading the `<name>.ini` markers
-/// `avdmanager` writes, which is both faster and less fragile than parsing
-/// `avdmanager list avd` (and needs no JVM).
-async fn list_avds(paths: &AndroidPaths) -> Vec<AndroidAvd> {
-    let Ok(mut entries) = smol::fs::read_dir(&paths.avd_home).await else {
-        return Vec::new();
-    };
-    let mut avds = Vec::new();
-    while let Some(entry) = entries.next().await {
-        let Ok(entry) = entry else { continue };
-        let path = entry.path();
-        if path.extension().is_none_or(|extension| extension != "ini") {
-            continue;
-        }
-        let Some(name) = path.file_stem().and_then(|stem| stem.to_str()) else {
-            continue;
-        };
-        // `.ini` markers are only meaningful with their `.avd` payload; a
-        // half-deleted AVD would otherwise show up as bootable.
-        if !exists(&paths.avd_config_ini(name)).await {
-            continue;
-        }
-        avds.push(AndroidAvd {
-            name: name.to_string(),
-            device_profile: read_avd_device_profile(paths, name).await,
-        });
-    }
-    avds.sort_by_key(|avd| avd.label());
-    avds
-}
-
-async fn read_avd_device_profile(paths: &AndroidPaths, avd_name: &str) -> Option<String> {
-    let config = smol::fs::read_to_string(paths.avd_config_ini(avd_name))
-        .await
-        .ok()?;
-    config.lines().find_map(|line| {
-        let (key, value) = line.split_once('=')?;
-        (key.trim() == "hw.device.name").then(|| value.trim().to_string())
-    })
-}
-
-/// Asks the emulator console which AVD a running instance was launched with,
-/// so a pre-existing emulator can be matched to an entry in the device list.
 async fn adb_avd_name(paths: &AndroidPaths, serial: &str) -> Option<String> {
     let mut command = smol::process::Command::new(paths.adb());
     command.args(["-s", serial, "emu", "avd", "name"]);
@@ -1353,9 +1851,8 @@ async fn adb_avd_name(paths: &AndroidPaths, serial: &str) -> Option<String> {
 }
 
 /// Reads the device definitions `avdmanager` can create AVDs from, keeping
-/// only the handheld and tablet ones. The tagged definitions (Wear, TV,
-/// Automotive, Desktop, XR) need their own system images, and Zed only
-/// installs the `google_apis` phone image.
+/// only the handheld ones: without the `sdklib` definitions there is no way to
+/// tell a tablet or a foldable apart. Used only when those can't be read.
 async fn list_device_profiles(
     paths: &AndroidPaths,
     java_home: &Path,
@@ -1396,7 +1893,13 @@ fn parse_device_profiles(output: &str) -> Vec<AndroidDeviceProfile> {
             return;
         };
         if !*tagged {
-            profiles.push(AndroidDeviceProfile { id, name });
+            profiles.push(AndroidDeviceProfile {
+                id,
+                name,
+                category: DeviceCategory::Phone,
+                diagonal_inches: None,
+                resolution: None,
+            });
         }
         *tagged = false;
     };
@@ -1435,30 +1938,6 @@ fn avd_name_for_device(device_profile: &str) -> String {
         })
         .collect();
     format!("{AVD_NAME_PREFIX}{sanitized}")
-}
-
-/// Turns a device profile id such as `pixel_9_pro` into `Pixel 9 Pro`. The
-/// profile list carries proper names, but AVDs on disk only remember the id.
-fn humanize_device_profile_id(id: &str) -> String {
-    let mut label = String::with_capacity(id.len());
-    for word in id.split(['_', '-']).filter(|word| !word.is_empty()) {
-        if !label.is_empty() {
-            label.push(' ');
-        }
-        let mut characters = word.chars();
-        match characters.next() {
-            Some(first) => {
-                label.extend(first.to_uppercase());
-                label.push_str(characters.as_str());
-            }
-            None => {}
-        }
-    }
-    if label.is_empty() {
-        id.to_string()
-    } else {
-        label
-    }
 }
 
 fn set_step(
@@ -1551,28 +2030,42 @@ async fn run_install_pipeline(
         .context("Não foi possível instalar o platform-tools e o emulador")?;
     }
 
-    if !exists(&paths.system_image_dir()).await {
+    let image = default_system_image();
+    if !avds::system_image_installed(&paths.sdk_dir, &image) {
         set_step(this, cx, "Baixando imagem do sistema Android…")?;
         cx.background_spawn({
             let paths = paths.clone();
             let java_home = java_home.clone();
-            async move {
-                let package = system_image_package();
-                run_sdkmanager(&paths, &java_home, &[&package]).await
-            }
+            let package = image.package();
+            async move { run_sdkmanager(&paths, &java_home, &[&package]).await }
         })
         .await
         .context("Não foi possível baixar a imagem do sistema Android")?;
     }
 
-    if list_avds(&paths).await.is_empty() {
+    if avds::list_avds(&paths.avd_home, &paths.sdk_dir).is_empty() {
         set_step(this, cx, "Criando dispositivo virtual…")?;
         cx.background_spawn({
             let paths = paths.clone();
             let java_home = java_home.clone();
             async move {
                 let avd_name = avd_name_for_device(DEFAULT_AVD_DEVICE);
-                create_avd_on_disk(&paths, &java_home, &avd_name, DEFAULT_AVD_DEVICE).await
+                create_avd_on_disk(&paths, &java_home, &avd_name, DEFAULT_AVD_DEVICE, &image)
+                    .await?;
+                avds::write_avd_config(
+                    &paths.avd_home,
+                    &avd_name,
+                    &AvdSettings {
+                        display_name: avds::humanize_device_profile_id(DEFAULT_AVD_DEVICE),
+                        device_profile: DEFAULT_AVD_DEVICE.to_string(),
+                        image,
+                        ram_mb: DEFAULT_RAM_MB,
+                        storage_gb: DEFAULT_STORAGE_GB,
+                        orientation: Orientation::Portrait,
+                        hardware_keyboard: true,
+                    }
+                    .config_entries(),
+                )
             }
         })
         .await
@@ -1761,68 +2254,384 @@ async fn create_avd_on_disk(
     java_home: &Path,
     avd_name: &str,
     device_profile: &str,
+    image: &SystemImageId,
 ) -> Result<()> {
     smol::fs::create_dir_all(&paths.avd_home).await?;
     let mut command = smol::process::Command::new(paths.avdmanager());
     command.args(["create", "avd", "--name", avd_name, "--package"]);
-    command.arg(system_image_package());
-    command.args(["--device", device_profile, "--force"]);
+    command.arg(image.package());
+    command.args(["--device", device_profile]);
     apply_env(&mut command, paths, Some(java_home));
     // avdmanager asks whether to create a custom hardware profile.
     run_command_accepting_prompts(command, "no\n")
         .await
-        .context("avdmanager create avd")?;
-    enable_avd_hardware_keyboard(paths, avd_name).await
+        .context("avdmanager create avd")
 }
 
-/// avdmanager creates AVDs with `hw.keyboard = no`, which leaves the guest
-/// without a keyboard input device, so every key forwarded from the host is
-/// silently dropped and only the on-screen keyboard works. The emulator reads
-/// this only at boot and has no command line override (unlike `hw.gpu.enabled`,
-/// which `-gpu host` overrides), so the AVD config is rewritten in place.
-async fn enable_avd_hardware_keyboard(paths: &AndroidPaths, avd_name: &str) -> Result<()> {
-    const SETTING: &str = "hw.keyboard";
-
-    let config_path = paths.avd_config_ini(avd_name);
-    let config = match smol::fs::read_to_string(&config_path).await {
-        Ok(config) => config,
-        // The AVD has not been created yet; creating it sets the value.
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => {
-            return Err(error).with_context(|| format!("lendo {}", config_path.display()));
-        }
-    };
-
-    fn setting_value(line: &str) -> Option<&str> {
-        let (key, value) = line.split_once('=')?;
-        (key.trim() == SETTING).then(|| value.trim())
-    }
-
-    if config
-        .lines()
-        .any(|line| setting_value(line) == Some("yes"))
-    {
-        return Ok(());
-    }
-
-    let mut updated = String::with_capacity(config.len() + SETTING.len() + 8);
-    let mut replaced = false;
-    for line in config.lines() {
-        if setting_value(line).is_some() {
-            updated.push_str("hw.keyboard = yes");
-            replaced = true;
-        } else {
-            updated.push_str(line);
-        }
-        updated.push('\n');
-    }
-    if !replaced {
-        updated.push_str("hw.keyboard = yes\n");
-    }
-
-    smol::fs::write(&config_path, updated)
+async fn uninstall_package(paths: &AndroidPaths, package: &str) -> Result<()> {
+    let java_home = installed_java_home(paths)
         .await
-        .with_context(|| format!("gravando {}", config_path.display()))
+        .context("JDK gerenciado pelo Zed não encontrado")?;
+    run_sdkmanager(paths, &java_home, &["--uninstall", package]).await
+}
+
+/// What a finished [`PrepareRequest`] leaves to do on the foreground.
+struct PrepareOutcome {
+    /// The AVD it created or changed.
+    avd: Option<String>,
+    boot: bool,
+}
+
+fn update_prepare_job(
+    this: &WeakEntity<AndroidSdkManager>,
+    cx: &mut AsyncApp,
+    update: impl FnOnce(&mut PrepareJob),
+) -> Result<()> {
+    this.update(cx, |this, cx| {
+        if let AndroidSdkState::Preparing(job) = &mut this.state {
+            update(job);
+            cx.notify();
+        }
+    })
+}
+
+fn start_prepare_step(
+    this: &WeakEntity<AndroidSdkManager>,
+    cx: &mut AsyncApp,
+    kind: PrepareStepKind,
+) -> Result<()> {
+    update_prepare_job(this, cx, |job| {
+        if let Some(index) = job.step_index(kind) {
+            job.current = index;
+            job.progress = None;
+        }
+    })
+}
+
+async fn run_prepare(
+    this: &WeakEntity<AndroidSdkManager>,
+    request: PrepareRequest,
+    package: Option<String>,
+    download_bytes: u64,
+    required_bytes: u64,
+    cx: &mut AsyncApp,
+) -> Result<PrepareOutcome> {
+    let paths = AndroidPaths::new();
+    let java_home = installed_java_home(&paths)
+        .await
+        .context("JDK gerenciado pelo Zed não encontrado")?;
+
+    let creating = matches!(request, PrepareRequest::Create { .. });
+    if package.is_some() {
+        start_prepare_step(this, cx, PrepareStepKind::Licenses)?;
+        cx.background_spawn({
+            let paths = paths.clone();
+            let java_home = java_home.clone();
+            async move { run_sdkmanager(&paths, &java_home, &["--licenses"]).await }
+        })
+        .await
+        .context("Não foi possível aceitar as licenças do Android SDK")?;
+    }
+
+    let available = if package.is_some() || creating {
+        start_prepare_step(this, cx, PrepareStepKind::DiskSpace)?;
+        cx.background_spawn({
+            let root = paths.root.clone();
+            async move { avds::available_disk_bytes(&root) }
+        })
+        .await
+    } else {
+        None
+    };
+    if let Some(available) = available {
+        update_prepare_job(this, cx, |job| {
+            if let Some(step) = job
+                .steps
+                .iter_mut()
+                .find(|step| step.kind == PrepareStepKind::DiskSpace)
+            {
+                step.detail = Some(format!("{} livres", format_bytes(available)).into());
+            }
+        })?;
+        anyhow::ensure!(
+            available >= required_bytes,
+            "Espaço insuficiente: são necessários {} e há {} livres.",
+            format_bytes(required_bytes),
+            format_bytes(available)
+        );
+    }
+
+    if let Some(package) = &package {
+        start_prepare_step(this, cx, PrepareStepKind::Download)?;
+        download_package(this, cx, &paths, &java_home, package, download_bytes)
+            .await
+            .with_context(|| format!("Não foi possível baixar {package}"))?;
+    }
+
+    match request {
+        PrepareRequest::Create {
+            settings,
+            boot_when_ready,
+        } => {
+            start_prepare_step(this, cx, PrepareStepKind::CreateAvd)?;
+            let avd = cx
+                .background_spawn(async move {
+                    let existing: Vec<String> = avds::list_avds(&paths.avd_home, &paths.sdk_dir)
+                        .into_iter()
+                        .map(|avd| avd.name)
+                        .collect();
+                    let name = avds::avd_name_for_display_name(&settings.display_name, &existing);
+                    create_avd_on_disk(
+                        &paths,
+                        &java_home,
+                        &name,
+                        &settings.device_profile,
+                        &settings.image,
+                    )
+                    .await?;
+                    avds::write_avd_config(&paths.avd_home, &name, &settings.config_entries())?;
+                    anyhow::Ok(name)
+                })
+                .await
+                .context("Não foi possível criar o dispositivo virtual")?;
+            Ok(PrepareOutcome {
+                avd: Some(avd),
+                boot: boot_when_ready,
+            })
+        }
+        PrepareRequest::Edit { avd, settings } => {
+            start_prepare_step(this, cx, PrepareStepKind::ApplySettings)?;
+            cx.background_spawn({
+                let avd = avd.clone();
+                async move {
+                    let current = avds::list_avds(&paths.avd_home, &paths.sdk_dir)
+                        .into_iter()
+                        .find(|existing| existing.name == avd)
+                        .with_context(|| format!("dispositivo {avd} não encontrado"))?;
+                    let mut entries = settings.config_entries();
+                    if current.system_image.as_ref() != Some(&settings.image) {
+                        avds::wipe_avd_data(&paths.avd_home, &avd)?;
+                        entries.extend(settings.image_entries());
+                    }
+                    avds::write_avd_config(&paths.avd_home, &avd, &entries)
+                }
+            })
+            .await
+            .context("Não foi possível aplicar os ajustes")?;
+            Ok(PrepareOutcome {
+                avd: Some(avd),
+                boot: false,
+            })
+        }
+        PrepareRequest::DownloadImage(_) | PrepareRequest::UpdateComponent(_) => {
+            Ok(PrepareOutcome {
+                avd: None,
+                boot: false,
+            })
+        }
+    }
+}
+
+/// Installs `package` with `sdkmanager`, reporting the download as it grows on disk.
+/// `sdkmanager`'s own percentage covers the whole operation (repository fetch, download and
+/// unzip) and can't be turned into bytes, so the staged archive is measured instead.
+async fn download_package(
+    this: &WeakEntity<AndroidSdkManager>,
+    cx: &mut AsyncApp,
+    paths: &AndroidPaths,
+    java_home: &Path,
+    package: &str,
+    total: u64,
+) -> Result<()> {
+    let mut install = cx
+        .background_spawn({
+            let paths = paths.clone();
+            let java_home = java_home.to_path_buf();
+            let package = package.to_string();
+            async move { run_sdkmanager(&paths, &java_home, &[&package]).await }
+        })
+        .fuse();
+    let temp_dir = paths.sdkmanager_temp_dir();
+    let mut download_started: Option<Instant> = None;
+    loop {
+        let mut tick = cx
+            .background_executor()
+            .timer(DOWNLOAD_POLL_INTERVAL)
+            .fuse();
+        futures::select_biased! {
+            result = install => return result,
+            _ = tick => {}
+        }
+        let (downloaded, installing) = cx
+            .background_spawn({
+                let temp_dir = temp_dir.clone();
+                async move { staged_download_state(&temp_dir) }
+            })
+            .await;
+        if downloaded > 0 && download_started.is_none() {
+            download_started = Some(Instant::now());
+        }
+        let remaining = download_started
+            .filter(|_| !installing && total > downloaded && downloaded > 0)
+            .map(|started| {
+                started
+                    .elapsed()
+                    .mul_f64((total - downloaded) as f64 / downloaded as f64)
+            });
+        update_prepare_job(this, cx, |job| {
+            job.progress = Some(DownloadProgress {
+                downloaded,
+                total,
+                remaining,
+                installing,
+            });
+        })?;
+    }
+}
+
+/// How far `sdkmanager` got with the package it is staging: the bytes of the archive under
+/// `.temp/PackageOperation*/`, and whether it moved on to unzipping it.
+fn staged_download_state(temp_dir: &Path) -> (u64, bool) {
+    let mut downloaded = 0;
+    let mut installing = false;
+    let Ok(operations) = std::fs::read_dir(temp_dir) else {
+        return (0, false);
+    };
+    for operation in operations.filter_map(|entry| entry.ok()) {
+        let Ok(entries) = std::fs::read_dir(operation.path()) else {
+            continue;
+        };
+        for entry in entries.filter_map(|entry| entry.ok()) {
+            let path = entry.path();
+            if path.is_dir() {
+                installing |= entry.file_name() == "unzip";
+            } else if path.extension().is_some_and(|extension| extension == "zip") {
+                downloaded += entry.metadata().map_or(0, |metadata| metadata.len());
+            }
+        }
+    }
+    (downloaded, installing)
+}
+
+/// `1,4 GB`, `812 MB`: binary units, one decimal from a gigabyte up, with the decimal comma the
+/// rest of the UI uses.
+pub fn format_bytes(bytes: u64) -> String {
+    const MEGABYTE: f64 = 1024.0 * 1024.0;
+    const GIGABYTE: f64 = MEGABYTE * 1024.0;
+    let bytes = bytes as f64;
+    if bytes >= GIGABYTE {
+        let text = format!("{:.1}", bytes / GIGABYTE);
+        let text = text.strip_suffix(".0").unwrap_or(&text).replace('.', ",");
+        format!("{text} GB")
+    } else {
+        format!("{} MB", (bytes / MEGABYTE).round() as u64)
+    }
+}
+
+async fn fetch_catalog(http_client: Arc<dyn HttpClient>) -> Result<SdkCatalog> {
+    let paths = AndroidPaths::new();
+    let abi = system_image_abi();
+    let mut images = Vec::new();
+    for (flavor, url) in catalog::system_image_catalog_urls() {
+        let cache = paths
+            .catalog_dir()
+            .join(format!("sys-img-{}.xml", flavor.tag_id()));
+        let xml = cached_text_download(&http_client, &url, &cache).await?;
+        images.extend(catalog::parse_system_image_catalog(&xml, flavor, abi)?);
+    }
+    images.sort_by_key(|image| std::cmp::Reverse(image.id.api()));
+    let host_arch = if std::env::consts::ARCH == "aarch64" {
+        "aarch64"
+    } else {
+        "x64"
+    };
+    let repository = cached_text_download(
+        &http_client,
+        &catalog::repository_url(),
+        &paths.catalog_dir().join("repository.xml"),
+    )
+    .await?;
+    Ok(SdkCatalog {
+        images,
+        components: catalog::parse_component_catalog(&repository, host_arch)?,
+    })
+}
+
+async fn cached_text_download(
+    http_client: &Arc<dyn HttpClient>,
+    url: &str,
+    cache: &Path,
+) -> Result<String> {
+    let is_fresh = smol::fs::metadata(cache)
+        .await
+        .ok()
+        .and_then(|metadata| metadata.modified().ok())
+        .and_then(|modified| modified.elapsed().ok())
+        .is_some_and(|age| age < CATALOG_MAX_AGE);
+    if is_fresh && let Ok(text) = smol::fs::read_to_string(cache).await {
+        return Ok(text);
+    }
+    let mut response = http_client
+        .get(url, Default::default(), true)
+        .await
+        .with_context(|| format!("requisição para {url}"))?;
+    anyhow::ensure!(
+        response.status().is_success(),
+        "{url} respondeu {}",
+        response.status()
+    );
+    let mut text = String::new();
+    response
+        .body_mut()
+        .read_to_string(&mut text)
+        .await
+        .with_context(|| format!("lendo {url}"))?;
+    if let Some(parent) = cache.parent() {
+        smol::fs::create_dir_all(parent).await.log_err();
+    }
+    smol::fs::write(cache, &text).await.log_err();
+    Ok(text)
+}
+
+/// The released system images for this Mac, from `sdkmanager --list`, which knows no sizes.
+async fn list_available_images_with_sdkmanager() -> Result<Vec<CatalogImage>> {
+    let paths = AndroidPaths::new();
+    let java_home = installed_java_home(&paths)
+        .await
+        .context("JDK gerenciado pelo Zed não encontrado")?;
+    let mut command = smol::process::Command::new(paths.sdkmanager());
+    command.arg(format!("--sdk_root={}", paths.sdk_dir.display()));
+    command.arg("--list");
+    apply_env(&mut command, &paths, Some(&java_home));
+    command.stdin(Stdio::null());
+    let output = command.output().await?;
+    anyhow::ensure!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    let mut images: Vec<CatalogImage> = Vec::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let Some(id) = line
+            .split('|')
+            .next()
+            .and_then(|package| SystemImageId::parse_package(package.trim()))
+        else {
+            continue;
+        };
+        if id.abi == system_image_abi()
+            && id.flavor().is_some()
+            && id.api().is_some()
+            && !images.iter().any(|image| image.id == id)
+        {
+            images.push(CatalogImage {
+                id,
+                download_bytes: 0,
+            });
+        }
+    }
+    images.sort_by_key(|image| std::cmp::Reverse(image.id.api()));
+    Ok(images)
 }
 
 /// Runs a command writing `input` to its stdin to answer interactive prompts
@@ -2594,7 +3403,9 @@ fn clean_android_dir(
     for package in removed_packages {
         if paths.sdk_dir.join(&package).exists() {
             if !state.required_packages.contains(&package) {
-                log::info!("keeping Android SDK package {package}: it was reinstalled after cleanup");
+                log::info!(
+                    "keeping Android SDK package {package}: it was reinstalled after cleanup"
+                );
                 state.required_packages.push(package);
             }
         } else {
@@ -2624,7 +3435,10 @@ fn clean_android_dir(
 
     let running_avds = running_avd_names();
     for avd_dir in directory_entries(&paths.avd_home) {
-        if avd_dir.extension().is_none_or(|extension| extension != "avd") {
+        if avd_dir
+            .extension()
+            .is_none_or(|extension| extension != "avd")
+        {
             continue;
         }
         let Some(avd_name) = avd_dir.file_stem().and_then(|name| name.to_str()) else {
@@ -2702,7 +3516,10 @@ fn directory_entries(directory: &Path) -> Vec<PathBuf> {
 fn is_older_than(path: &Path, age: Duration, now: std::time::SystemTime) -> bool {
     std::fs::symlink_metadata(path)
         .and_then(|metadata| metadata.modified())
-        .is_ok_and(|modified| now.duration_since(modified).is_ok_and(|elapsed| elapsed >= age))
+        .is_ok_and(|modified| {
+            now.duration_since(modified)
+                .is_ok_and(|elapsed| elapsed >= age)
+        })
 }
 
 fn disk_usage(path: &Path) -> u64 {
@@ -2733,7 +3550,10 @@ fn remove_for_cleanup(path: &Path, report: &mut CleanupReport) -> bool {
             true
         }
         Err(error) => {
-            log::warn!("failed to remove {} during cleanup: {error:#}", path.display());
+            log::warn!(
+                "failed to remove {} during cleanup: {error:#}",
+                path.display()
+            );
             false
         }
     }
@@ -2769,6 +3589,16 @@ id: 60 or "wearos_square"
 ---------
 "#;
 
+    fn handheld(id: &str, name: &str) -> AndroidDeviceProfile {
+        AndroidDeviceProfile {
+            id: id.into(),
+            name: name.into(),
+            category: DeviceCategory::Phone,
+            diagonal_inches: None,
+            resolution: None,
+        }
+    }
+
     #[test]
     fn parses_handheld_device_profiles_and_skips_tagged_ones() {
         let profiles = parse_device_profiles(DEVICE_LIST);
@@ -2776,18 +3606,9 @@ id: 60 or "wearos_square"
         assert_eq!(
             profiles,
             vec![
-                AndroidDeviceProfile {
-                    id: "Galaxy Nexus".into(),
-                    name: "Galaxy Nexus".into(),
-                },
-                AndroidDeviceProfile {
-                    id: "pixel_7".into(),
-                    name: "Pixel 7".into(),
-                },
-                AndroidDeviceProfile {
-                    id: "pixel_tablet".into(),
-                    name: "Pixel Tablet".into(),
-                },
+                handheld("Galaxy Nexus", "Galaxy Nexus"),
+                handheld("pixel_7", "Pixel 7"),
+                handheld("pixel_tablet", "Pixel Tablet"),
             ]
         );
     }
@@ -2797,13 +3618,16 @@ id: 60 or "wearos_square"
         assert_eq!(avd_name_for_device("pixel_7"), "zed-pixel_7");
         // Profile ids are free-form enough to contain spaces and quotes.
         assert_eq!(avd_name_for_device("Galaxy Nexus"), "zed-Galaxy_Nexus");
-        assert_eq!(avd_name_for_device("7in WSVGA (Tablet)"), "zed-7in_WSVGA__Tablet_");
+        assert_eq!(
+            avd_name_for_device("7in WSVGA (Tablet)"),
+            "zed-7in_WSVGA__Tablet_"
+        );
     }
 
     #[test]
     fn only_the_newest_parseable_version_is_superseding() {
-        let versions = ["27.0.12077973", "27.1.12297006", "26.1.10909125", "canary"]
-            .map(String::from);
+        let versions =
+            ["27.0.12077973", "27.1.12297006", "26.1.10909125", "canary"].map(String::from);
         let mut superseded = superseded_versions(&versions);
         superseded.sort();
         assert_eq!(superseded, ["26.1.10909125", "27.0.12077973"]);
@@ -2826,16 +3650,24 @@ id: 60 or "wearos_square"
         ] {
             std::fs::create_dir_all(root.path().join(directory))?;
         }
-        std::fs::write(root.path().join("sdk/ndk/27.0.12077973/source.properties"), "x")?;
+        std::fs::write(
+            root.path().join("sdk/ndk/27.0.12077973/source.properties"),
+            "x",
+        )?;
         std::fs::write(root.path().join("downloads/jdk.tar.gz"), "x")?;
-        std::fs::write(root.path().join("user_home/cache/sdkbin-1_repository2-3_xml"), "x")?;
+        std::fs::write(
+            root.path()
+                .join("user_home/cache/sdkbin-1_repository2-3_xml"),
+            "x",
+        )?;
         std::fs::write(
             root.path()
                 .join("avd_home/zed-cleanup-test.avd/snapshots/default_boot/ram.bin"),
             "x",
         )?;
         std::fs::write(
-            root.path().join("avd_home/zed-cleanup-test.avd/userdata-qemu.img.qcow2"),
+            root.path()
+                .join("avd_home/zed-cleanup-test.avd/userdata-qemu.img.qcow2"),
             "x",
         )?;
 
@@ -2863,7 +3695,11 @@ id: 60 or "wearos_square"
         );
         assert_eq!(report.freed_bytes, 4);
         assert!(root.path().join("sdk/platforms/android-34").exists());
-        assert!(root.path().join("avd_home/zed-cleanup-test.avd/userdata-qemu.img.qcow2").exists());
+        assert!(
+            root.path()
+                .join("avd_home/zed-cleanup-test.avd/userdata-qemu.img.qcow2")
+                .exists()
+        );
         assert_eq!(state.removed_packages, ["ndk/27.0.12077973"]);
 
         std::fs::create_dir_all(root.path().join("sdk/ndk/27.0.12077973"))?;
@@ -2895,8 +3731,14 @@ id: 60 or "wearos_square"
 
     #[test]
     fn device_profile_ids_are_humanized_for_labels() {
-        assert_eq!(humanize_device_profile_id("pixel_9_pro"), "Pixel 9 Pro");
-        assert_eq!(humanize_device_profile_id("medium_tablet"), "Medium Tablet");
-        assert_eq!(humanize_device_profile_id("pixel"), "Pixel");
+        assert_eq!(
+            avds::humanize_device_profile_id("pixel_9_pro"),
+            "Pixel 9 Pro"
+        );
+        assert_eq!(
+            avds::humanize_device_profile_id("medium_tablet"),
+            "Medium Tablet"
+        );
+        assert_eq!(avds::humanize_device_profile_id("pixel"), "Pixel");
     }
 }
