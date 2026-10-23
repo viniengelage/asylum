@@ -247,6 +247,10 @@ fn android_unavailable_reason(state: &AndroidSdkState) -> Option<String> {
                 .to_string(),
         ),
         AndroidSdkState::Installing(_) => Some("o SDK Android ainda está sendo instalado".to_string()),
+        AndroidSdkState::Preparing(job) => Some(format!(
+            "o dock de Devices está ocupado ({}); espere terminar",
+            job.title
+        )),
         AndroidSdkState::Installed => Some(
             "nenhum dispositivo virtual criado; o usuário cria um na aba Android do dock de Devices"
                 .to_string(),
@@ -1409,6 +1413,7 @@ mod tests {
         android_sdk::AndroidAvd {
             name: name.to_string(),
             device_profile: Some(device_profile.to_string()),
+            ..Default::default()
         }
     }
 

@@ -1,5 +1,5 @@
 mod agents_section;
-mod android_device_modal;
+mod android_device_manager;
 mod device_location_modal;
 mod device_toolkit;
 mod flows_section;
@@ -29,8 +29,11 @@ use agent_ui::{
     ThreadTitleRegenerationResult, channels_with_threads, import_threads_from_other_channels,
 };
 use agent_ui::{MessageEditorEvent, StateChange, thread_worktree_archive};
-use android_device_modal::AndroidDeviceModal;
-use android_sdk::{AndroidSdkManager, AndroidSdkState, emulator_key_for_keystroke};
+use android_device_manager::{AndroidDeviceManagerModal, ManagerEntry};
+use android_sdk::{
+    AndroidSdkManager, AndroidSdkState, PrepareJob, PrepareRequest, emulator_key_for_keystroke,
+    format_bytes,
+};
 use anyhow::Context as _;
 use chrono::{DateTime, Utc};
 use editor::Editor;
@@ -78,7 +81,7 @@ use ui::{
     HeaderBar, HighlightedLabel, IconPosition, KeyBinding, PopoverMenu, PopoverMenuHandle,
     ProjectEmptyState, ScrollAxes, Scrollbars, TAB_STRIP_RADIUS, Tab, TabBar, TabPosition,
     TabStyle, ThreadItem, ThreadItemWorktreeInfo, TintColor, Tooltip, WithScrollbar, prelude::*,
-    render_modifiers, right_click_menu,
+    primary_button, progress_line, render_modifiers, right_click_menu, secondary_button,
 };
 use unicode_segmentation::UnicodeSegmentation as _;
 use util::ResultExt as _;
@@ -224,18 +227,24 @@ fn ios_runtime_version(runtime: &str) -> Option<String> {
 
 /// Where a device is in its lifecycle, as shown by the chip in the device picker.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum DeviceStatus {
+pub(crate) enum DeviceStatus {
     Running,
     Booting,
     Shutdown,
+    /// The AVD's system image isn't on disk.
+    ImageMissing,
+    /// A download or AVD change is running for it.
+    Preparing,
 }
 
 impl DeviceStatus {
     fn label(self) -> &'static str {
         match self {
-            DeviceStatus::Running => "Running",
-            DeviceStatus::Booting => "Booting",
-            DeviceStatus::Shutdown => "Shutdown",
+            DeviceStatus::Running => "Rodando",
+            DeviceStatus::Booting => "Iniciando",
+            DeviceStatus::Shutdown => "Desligado",
+            DeviceStatus::ImageMissing => "Imagem ausente",
+            DeviceStatus::Preparing => "Preparando",
         }
     }
 
@@ -244,6 +253,8 @@ impl DeviceStatus {
             DeviceStatus::Running => Color::Success,
             DeviceStatus::Booting => Color::Warning,
             DeviceStatus::Shutdown => Color::Muted,
+            DeviceStatus::ImageMissing => Color::Warning,
+            DeviceStatus::Preparing => Color::Info,
         }
     }
 }
@@ -371,7 +382,7 @@ fn control_cluster(cx: &App) -> Div {
         .bg(colors.elevated_surface_background)
 }
 
-fn render_device_status_chip(status: DeviceStatus, cx: &App) -> Div {
+pub(crate) fn render_device_status_chip(status: DeviceStatus, cx: &App) -> Div {
     let color = status.color();
     let tint = color.color(cx);
     h_flex()
@@ -9585,14 +9596,14 @@ impl Sidebar {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let manager = self.android_sdk_manager.clone()?;
-        let (state, avds, selected_avd, has_device_profiles, is_loading_device_profiles) = {
+        let (state, avds, selected_avd, running_avd, job_device) = {
             let manager = manager.read(cx);
             (
                 manager.state().clone(),
                 manager.avds().to_vec(),
                 manager.selected_avd().map(str::to_string),
-                !manager.device_profiles().is_empty(),
-                manager.is_loading_device_profiles(),
+                manager.running_avd().map(str::to_string),
+                manager.prepare_job().and_then(|job| job.device.clone()),
             )
         };
         if matches!(
@@ -9606,55 +9617,134 @@ impl Sidebar {
             state,
             AndroidSdkState::Installing(_) | AndroidSdkState::EmulatorBooting
         );
-        let status = match state {
-            AndroidSdkState::EmulatorRunning { .. } => Some(DeviceStatus::Running),
-            AndroidSdkState::EmulatorBooting => Some(DeviceStatus::Booting),
-            AndroidSdkState::Installing(_) => None,
-            _ => Some(DeviceStatus::Shutdown),
+        let booting = matches!(state, AndroidSdkState::EmulatorBooting);
+        let avd_status = |avd: &android_sdk::AndroidAvd| {
+            if running_avd.as_deref() == Some(avd.name.as_str()) {
+                if booting {
+                    DeviceStatus::Booting
+                } else {
+                    DeviceStatus::Running
+                }
+            } else if avd.image_missing() {
+                DeviceStatus::ImageMissing
+            } else {
+                DeviceStatus::Shutdown
+            }
         };
-        let selected_summary = selected_avd
-            .as_ref()
-            .and_then(|name| avds.iter().find(|avd| &avd.name == name))
-            .map(|avd| DevicePickerSummary {
-                name: avd.label().into(),
-                os_version: None,
-                status,
-            });
+        let selected_summary = match job_device {
+            Some((name, os_version)) => Some(DevicePickerSummary {
+                name,
+                os_version: Some(os_version),
+                status: Some(DeviceStatus::Preparing),
+            }),
+            None => selected_avd
+                .as_ref()
+                .and_then(|name| avds.iter().find(|avd| &avd.name == name))
+                .map(|avd| DevicePickerSummary {
+                    name: avd.label().into(),
+                    os_version: avd.os_label().map(Into::into),
+                    status: Some(if matches!(state, AndroidSdkState::Installing(_)) {
+                        DeviceStatus::Preparing
+                    } else {
+                        avd_status(avd)
+                    }),
+                }),
+        };
 
         let sidebar = cx.weak_entity();
-        let menu_avds = avds.clone();
+        let menu_avds: Vec<(android_sdk::AndroidAvd, DeviceStatus)> = avds
+            .iter()
+            .map(|avd| (avd.clone(), avd_status(avd)))
+            .collect();
         let menu_selection = selected_avd;
         let device_menu = ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
-            for avd in menu_avds {
+            menu = menu.header("DISPOSITIVOS");
+            for (avd, status) in menu_avds {
                 let is_selected = menu_selection.as_deref() == Some(avd.name.as_str());
                 let label = avd.label();
-                let name = avd.name;
+                let os_label = avd.os_label();
+                let name = avd.name.clone();
                 let sidebar = sidebar.clone();
-                menu = menu.toggleable_entry(
-                    label,
-                    is_selected,
-                    IconPosition::Start,
-                    None,
+                menu = menu.custom_entry(
+                    move |_window, cx| {
+                        h_flex()
+                            .w_full()
+                            .min_w(px(300.))
+                            .py_1()
+                            .gap_2p5()
+                            .child(div().w(px(14.)).flex_none().when(is_selected, |this| {
+                                this.child(
+                                    Icon::new(IconName::Check)
+                                        .size(IconSize::Small)
+                                        .color(Color::Accent),
+                                )
+                            }))
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(
+                                        Label::new(label.clone())
+                                            .weight(FontWeight::SEMIBOLD)
+                                            .truncate(),
+                                    )
+                                    .children(os_label.clone().map(|os_label| {
+                                        Label::new(os_label)
+                                            .size(LabelSize::XSmall)
+                                            .color(Color::Muted)
+                                    })),
+                            )
+                            .child(render_device_status_chip(status, cx))
+                            .into_any_element()
+                    },
                     move |_window, cx| {
                         let name = name.clone();
                         sidebar
-                            .update(cx, |this, cx| {
-                                this.with_android_sdk_manager(cx, move |manager, cx| {
-                                    manager.select_avd(name, cx);
-                                });
-                            })
+                            .update(cx, |this, cx| this.choose_android_avd(name, cx))
                             .log_err();
                     },
                 );
             }
-            menu
+            let action = |label: &'static str, icon: IconName, entry: Option<ManagerEntry>| {
+                let sidebar = sidebar.clone();
+                ContextMenuEntry::new(label)
+                    .icon(icon)
+                    .icon_size(IconSize::Small)
+                    .icon_color(Color::Muted)
+                    .handler(move |window, cx| {
+                        sidebar
+                            .update(cx, |this, cx| match entry {
+                                Some(ManagerEntry::Devices) => this.show_android_device_manager(
+                                    ManagerEntry::Devices,
+                                    window,
+                                    cx,
+                                ),
+                                Some(ManagerEntry::NewDevice) => this.show_android_device_manager(
+                                    ManagerEntry::NewDevice,
+                                    window,
+                                    cx,
+                                ),
+                                None => this.with_android_sdk_manager(cx, |manager, cx| {
+                                    manager.refresh(cx);
+                                    manager.refresh_inventory(cx);
+                                }),
+                            })
+                            .log_err();
+                    })
+            };
+            menu.separator()
+                .item(action(
+                    "Novo dispositivo…",
+                    IconName::Plus,
+                    Some(ManagerEntry::NewDevice),
+                ))
+                .item(action(
+                    "Gerenciar dispositivos…",
+                    IconName::Sliders,
+                    Some(ManagerEntry::Devices),
+                ))
+                .item(action("Atualizar lista", IconName::RotateCw, None))
         });
-
-        let add_device_tooltip = if is_loading_device_profiles {
-            "Carregando dispositivos disponíveis…"
-        } else {
-            "Adicionar dispositivo"
-        };
 
         Some(
             HeaderBar::new("android-device-header")
@@ -9664,64 +9754,236 @@ impl Sidebar {
                     selected_summary,
                     "Selecione um dispositivo virtual",
                     device_menu,
-                    is_busy || avds.is_empty(),
+                    is_busy,
                     cx,
                 ))
                 .end_child(
-                    IconButton::new("add-android-device", IconName::Plus)
+                    IconButton::new("manage-android-devices", IconName::Sliders)
                         .icon_size(IconSize::Small)
-                        .aria_label("Adicionar dispositivo")
-                        .tooltip(Tooltip::text(add_device_tooltip))
-                        .disabled(is_busy || !has_device_profiles)
+                        .aria_label("Gerenciar dispositivos")
+                        .tooltip(Tooltip::text("Gerenciar dispositivos"))
                         .on_click(cx.listener(|this, _, window, cx| {
-                            this.show_android_device_modal(window, cx);
-                        })),
-                )
-                .end_child(
-                    IconButton::new("refresh-android-devices", IconName::RotateCw)
-                        .icon_size(IconSize::Small)
-                        .aria_label("Atualizar dispositivos Android")
-                        .tooltip(Tooltip::text("Atualizar dispositivos Android"))
-                        .disabled(is_busy)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.with_android_sdk_manager(cx, |manager, cx| manager.refresh(cx));
+                            this.show_android_device_manager(ManagerEntry::Devices, window, cx);
                         })),
                 )
                 .into_any_element(),
         )
     }
 
-    fn show_android_device_modal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Picking a device whose system image is gone downloads the image instead of booting it.
+    fn choose_android_avd(&mut self, name: String, cx: &mut Context<Self>) {
+        self.with_android_sdk_manager(cx, |manager, cx| {
+            let missing_image = manager
+                .avd(&name)
+                .filter(|avd| avd.image_missing())
+                .and_then(|avd| avd.system_image.clone());
+            manager.select_avd(name, cx);
+            if let Some(image) = missing_image {
+                manager.prepare(PrepareRequest::DownloadImage(image), cx);
+            }
+        });
+    }
+
+    fn show_android_device_manager(
+        &mut self,
+        entry: ManagerEntry,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(workspace) = self.active_workspace(cx) else {
             return;
         };
-        let Some(manager) = self.android_sdk_manager.as_ref() else {
+        let Some(manager) = self.android_sdk_manager.clone() else {
             return;
         };
-        let profiles = manager.read(cx).device_profiles().to_vec();
-        if profiles.is_empty() {
-            return;
-        }
-
-        let this = cx.weak_entity();
+        let weak_workspace = workspace.downgrade();
         workspace.update(cx, |workspace, cx| {
-            workspace.toggle_modal(window, cx, |window, cx| {
-                let this = this.clone();
-                AndroidDeviceModal::new(
-                    profiles,
-                    move |profile, _window, cx| {
-                        this.update(cx, |this, cx| {
-                            this.with_android_sdk_manager(cx, |manager, cx| {
-                                manager.create_avd_for_device(profile.id, cx);
-                            });
-                        })
-                        .log_err();
-                    },
-                    window,
-                    cx,
-                )
+            workspace.toggle_modal(window, cx, move |window, cx| {
+                AndroidDeviceManagerModal::new(manager, weak_workspace, entry, window, cx)
             });
         });
+    }
+
+    /// Board F: the steps of a download or AVD change, with the download's progress.
+    fn render_android_prepare_job(&self, job: &PrepareJob, cx: &mut Context<Self>) -> Div {
+        let colors = cx.theme().colors().clone();
+        let success = Color::Success.color(cx);
+        let first_boot = job
+            .steps
+            .get(job.current)
+            .is_some_and(|step| step.kind == android_sdk::PrepareStepKind::FirstBoot);
+        let steps = job.steps.iter().enumerate().map(|(index, step)| {
+            let done = index < job.current;
+            let running = index == job.current;
+            let marker = div()
+                .size(px(16.))
+                .mt_0p5()
+                .flex()
+                .flex_none()
+                .items_center()
+                .justify_center()
+                .rounded_full()
+                .map(|this| {
+                    if done {
+                        this.bg(success.opacity(0.12)).child(
+                            Icon::new(IconName::Check)
+                                .size(IconSize::XSmall)
+                                .color(Color::Success),
+                        )
+                    } else if running {
+                        this.child(
+                            Icon::new(IconName::LoadCircle)
+                                .size(IconSize::Small)
+                                .color(Color::Accent)
+                                .with_rotate_animation(2),
+                        )
+                    } else {
+                        this.border(px(1.5)).border_color(colors.border_selected)
+                    }
+                });
+            let progress = running.then(|| job.progress).flatten();
+            let progress_text = progress.map(|progress| {
+                if progress.installing {
+                    "Descompactando e instalando…".to_string()
+                } else if progress.total > 0 {
+                    let mut text = format!(
+                        "{} de {}",
+                        format_bytes(progress.downloaded.min(progress.total)),
+                        format_bytes(progress.total)
+                    );
+                    if let Some(remaining) = progress.remaining {
+                        let minutes = remaining.as_secs().div_ceil(60).max(1);
+                        text.push_str(&format!(
+                            " · {minutes} {} restante{}",
+                            if minutes == 1 { "min" } else { "min" },
+                            if minutes == 1 { "" } else { "s" }
+                        ));
+                    }
+                    text
+                } else {
+                    format!("{} baixados", format_bytes(progress.downloaded))
+                }
+            });
+            let fraction = progress.map(|progress| {
+                if progress.installing {
+                    1.0
+                } else if progress.total > 0 {
+                    progress.downloaded as f32 / progress.total as f32
+                } else {
+                    0.0
+                }
+            });
+            h_flex()
+                .w_full()
+                .gap_2p5()
+                .items_start()
+                .child(marker)
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .gap_1p5()
+                        .child(
+                            Label::new(step.label.clone())
+                                .size(LabelSize::Small)
+                                .weight(if running {
+                                    FontWeight::SEMIBOLD
+                                } else {
+                                    FontWeight::NORMAL
+                                })
+                                .color(if done || running {
+                                    Color::Default
+                                } else {
+                                    Color::Placeholder
+                                }),
+                        )
+                        .when_some(fraction, |this, fraction| {
+                            this.child(progress_line(fraction, cx))
+                        })
+                        .when_some(progress_text, |this, text| {
+                            this.child(Label::new(text).size(LabelSize::XSmall).color(Color::Muted))
+                        })
+                        .when(
+                            running && step.kind == android_sdk::PrepareStepKind::Download,
+                            |this| {
+                                this.children(job.package.clone().map(|package| {
+                                    Label::new(package)
+                                        .size(LabelSize::XSmall)
+                                        .buffer_font(cx)
+                                        .color(Color::Placeholder)
+                                }))
+                            },
+                        )
+                        .when(!running, |this| {
+                            this.children(step.detail.clone().map(|detail| {
+                                Label::new(detail)
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted)
+                            }))
+                        }),
+                )
+        });
+        v_flex()
+            .flex_1()
+            .min_h_0()
+            .justify_center()
+            .px_5()
+            .py_6()
+            .gap_5()
+            .child(
+                v_flex()
+                    .w_full()
+                    .gap_1()
+                    .child(
+                        Label::new(job.title.clone())
+                            .size(LabelSize::Large)
+                            .weight(FontWeight::SEMIBOLD),
+                    )
+                    .children(job.description.clone().map(|description| {
+                        Label::new(description)
+                            .size(LabelSize::Small)
+                            .color(Color::Muted)
+                    })),
+            )
+            .child(
+                v_flex()
+                    .w_full()
+                    .gap(px(14.))
+                    .p_4()
+                    .rounded_lg()
+                    .bg(colors.elevated_surface_background)
+                    .border_1()
+                    .border_color(colors.border)
+                    .children(steps),
+            )
+            .child(
+                h_flex()
+                    .w_full()
+                    .gap_2()
+                    .child(
+                        div().flex_1().min_w_0().child(
+                            Label::new(if first_boot {
+                                "A primeira inicialização leva alguns minutos."
+                            } else {
+                                "Pode fechar o dock; o download continua."
+                            })
+                            .size(LabelSize::XSmall)
+                            .color(Color::Placeholder),
+                        ),
+                    )
+                    .child(
+                        secondary_button("cancel-android-prepare", None, "Cancelar", true, cx)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.with_android_sdk_manager(cx, |manager, cx| {
+                                    if first_boot {
+                                        manager.stop_emulator(cx);
+                                    } else {
+                                        manager.cancel_prepare(cx);
+                                    }
+                                });
+                            })),
+                    ),
+            )
     }
 
     fn render_android_devices(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -9739,11 +10001,14 @@ impl Sidebar {
     }
 
     fn render_android_devices_content(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let state = self
+        let (state, first_boot_job) = self
             .android_sdk_manager
             .as_ref()
-            .map(|manager| manager.read(cx).state().clone())
-            .unwrap_or(AndroidSdkState::Unknown);
+            .map(|manager| {
+                let manager = manager.read(cx);
+                (manager.state().clone(), manager.prepare_job().cloned())
+            })
+            .unwrap_or((AndroidSdkState::Unknown, None));
 
         let spinner = || {
             Icon::new(IconName::ArrowCircle)
@@ -9808,10 +10073,9 @@ impl Sidebar {
                         .color(Color::Muted),
                 )
                 .child(
-                    Button::new("create-android-avd", "Criar dispositivo virtual")
-                        .style(ButtonStyle::Filled)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.with_android_sdk_manager(cx, |manager, cx| manager.create_avd(cx));
+                    primary_button("create-android-avd", None, "Criar dispositivo virtual", None, cx)
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.show_android_device_manager(ManagerEntry::NewDevice, window, cx);
                         })),
                 ),
             AndroidSdkState::AvdReady => base
@@ -9826,6 +10090,13 @@ impl Sidebar {
                             });
                         })),
                 ),
+            AndroidSdkState::Preparing(job) => self.render_android_prepare_job(&job, cx),
+            AndroidSdkState::EmulatorBooting if first_boot_job.is_some() => {
+                match &first_boot_job {
+                    Some(job) => self.render_android_prepare_job(job, cx),
+                    None => base,
+                }
+            }
             AndroidSdkState::EmulatorBooting => base
                 .child(spinner())
                 .child(Label::new("Iniciando o emulador Android…"))
