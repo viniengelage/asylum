@@ -12,7 +12,7 @@ use gpui::{
     DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Subscription, Task, px,
 };
 use std::sync::Arc;
-use ui::{prelude::*, secondary_button};
+use ui::{modal_surface, prelude::*, secondary_button};
 use ui_input::{ErasedEditorEvent, InputField};
 use util::ResultExt as _;
 use workspace::ModalView;
@@ -379,18 +379,12 @@ impl Render for WriteGuard {
         } else {
             (None, Some(actions))
         };
-        v_flex()
+        modal_surface(cx)
             .key_context("DatabaseWriteGuard")
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::cancel))
             .on_action(cx.listener(Self::confirm))
             .w(px(520.))
-            .rounded_xl()
-            .border_1()
-            .border_color(colors.border_selected)
-            .bg(colors.elevated_surface_background)
-            .shadow_lg()
-            .overflow_hidden()
             .child(
                 v_flex()
                     .px_6()

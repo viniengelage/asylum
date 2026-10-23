@@ -145,13 +145,140 @@ pub fn radio_indicator(selected: bool, cx: &App) -> Div {
             colors.border
         })
         .when(selected, |this| {
-            this.child(
-                div()
-                    .size(px(8.))
-                    .rounded_full()
-                    .bg(colors.text_accent),
-            )
+            this.child(div().size(px(8.)).rounded_full().bg(colors.text_accent))
         })
+}
+
+/// A form's destructive action (Excluir), filled in the boards' dark rose: the theme's error
+/// color, darkened so white-ish text reads on it.
+pub fn destructive_button(
+    id: impl Into<gpui::ElementId>,
+    label: impl Into<SharedString>,
+    enabled: bool,
+    cx: &App,
+) -> Stateful<Div> {
+    let error = Color::Error.color(cx);
+    let fill = gpui::Hsla {
+        l: error.l * 0.5,
+        ..error
+    };
+    let text = gpui::Hsla { l: 0.95, ..error };
+    h_flex()
+        .id(id)
+        .h(px(30.))
+        .px_3()
+        .flex_none()
+        .rounded_md()
+        .bg(if enabled { fill } else { fill.opacity(0.4) })
+        .when(enabled, |this| {
+            this.cursor_pointer()
+                .hover(move |this| this.bg(fill.opacity(0.85)))
+        })
+        .child(
+            Label::new(label)
+                .size(LabelSize::Small)
+                .weight(FontWeight::SEMIBOLD)
+                .color(Color::Custom(if enabled {
+                    text
+                } else {
+                    text.opacity(0.6)
+                })),
+        )
+}
+
+/// The boards' on/off switch: a 30×18 track, accent when on, with a white knob.
+pub fn toggle_switch(
+    id: impl Into<gpui::ElementId>,
+    on: bool,
+    enabled: bool,
+    cx: &App,
+) -> Stateful<Div> {
+    let colors = cx.theme().colors();
+    h_flex()
+        .id(id)
+        .flex_none()
+        .w(px(30.))
+        .h(px(18.))
+        .p(px(2.))
+        .rounded_full()
+        .when(on, |this| this.justify_end())
+        .bg(if on {
+            colors.border_focused
+        } else {
+            colors.border_selected
+        })
+        .when(!enabled, |this| this.opacity(0.5))
+        .when(enabled, |this| this.cursor_pointer())
+        .child(div().size(px(14.)).rounded_full().bg(gpui::white()))
+}
+
+/// The boards' checkbox: filled with the accent and a white check when checked, a plain
+/// square otherwise. The row around it owns the click.
+pub fn checkbox_indicator(checked: bool, cx: &App) -> Div {
+    let colors = cx.theme().colors();
+    div()
+        .flex()
+        .flex_none()
+        .size(px(16.))
+        .items_center()
+        .justify_center()
+        .rounded(px(4.))
+        .map(|this| {
+            if checked {
+                this.bg(colors.border_focused).child(
+                    Icon::new(IconName::Check)
+                        .size(IconSize::XSmall)
+                        .color(Color::Custom(gpui::white())),
+                )
+            } else {
+                this.border(px(1.5)).border_color(colors.border_selected)
+            }
+        })
+}
+
+/// The boards' 4 px progress line, filled with the accent up to `fraction`.
+pub fn progress_line(fraction: f32, cx: &App) -> Div {
+    let colors = cx.theme().colors();
+    div()
+        .w_full()
+        .h(px(4.))
+        .rounded_full()
+        .bg(colors.element_selected)
+        .child(
+            div()
+                .h_full()
+                .rounded_full()
+                .bg(colors.border_focused)
+                .w(gpui::relative(fraction.clamp(0.0, 1.0))),
+        )
+}
+
+/// The surface of the boards' modals: 14 px corners, the strong border and a deep shadow. The
+/// caller sets the width.
+pub fn modal_surface(cx: &App) -> Div {
+    let colors = cx.theme().colors();
+    v_flex()
+        .rounded(px(14.))
+        .border_1()
+        .border_color(colors.border_selected)
+        .bg(colors.elevated_surface_background)
+        .shadow_lg()
+        .overflow_hidden()
+}
+
+/// The bar along a modal's bottom edge: a hint on the left, the actions on the right.
+pub fn modal_footer(cx: &App) -> Div {
+    let colors = cx.theme().colors();
+    h_flex()
+        .w_full()
+        .h(px(56.))
+        .flex_none()
+        .pl_6()
+        .pr_4()
+        .gap_2()
+        .border_t_1()
+        .border_color(colors.border)
+        .bg(colors.elevated_surface_background)
 }
 
 /// Lets any of the controls above open a [`crate::PopoverMenu`], which only takes clickable,
