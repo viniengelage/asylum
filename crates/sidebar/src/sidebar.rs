@@ -3,9 +3,12 @@ mod android_device_manager;
 mod device_location_modal;
 mod device_toolkit;
 mod flows_section;
+mod ios_device_manager;
 mod thread_switcher;
 
 use device_location_modal::{DeviceLocation, DeviceLocationModal};
+use ios_device_manager::{IosDeviceManagerModal, IosManagerEntry};
+use ios_simulator::{IosSimulatorEvent, IosSimulatorManager, XcodeStatus};
 
 use acp_thread::ThreadStatus;
 use action_log::DiffStats;
@@ -242,6 +245,8 @@ pub(crate) enum DeviceStatus {
     ImageMissing,
     /// A download or AVD change is running for it.
     Preparing,
+    /// The iOS runtime the simulator was created with was removed from the Mac.
+    RuntimeMissing,
 }
 
 impl DeviceStatus {
@@ -252,6 +257,7 @@ impl DeviceStatus {
             DeviceStatus::Shutdown => "Desligado",
             DeviceStatus::ImageMissing => "Imagem ausente",
             DeviceStatus::Preparing => "Preparando",
+            DeviceStatus::RuntimeMissing => "Runtime ausente",
         }
     }
 
@@ -262,6 +268,7 @@ impl DeviceStatus {
             DeviceStatus::Shutdown => Color::Muted,
             DeviceStatus::ImageMissing => Color::Warning,
             DeviceStatus::Preparing => Color::Info,
+            DeviceStatus::RuntimeMissing => Color::Warning,
         }
     }
 }
@@ -509,15 +516,6 @@ fn render_device_picker(
         }))
         .menu(move |_window, _cx| Some(menu.clone()))
         .trigger(trigger)
-}
-
-fn ios_simulator_label(device: &IosSimulatorDevice) -> String {
-    let state = match device.state.as_str() {
-        "Booted" => "Inicializado",
-        "Shutdown" => "Desligado",
-        state => state,
-    };
-    format!("{} ({state})", device.name)
 }
 
 #[derive(Clone, Copy)]
@@ -1259,6 +1257,11 @@ pub struct Sidebar {
     device_instance_split: bool,
     add_device_instance_menu_handle: PopoverMenuHandle<ContextMenu>,
     android_sdk_manager: Option<Entity<AndroidSdkManager>>,
+    /// Created the first time the iOS tab renders; owns simulator management (boards A–J),
+    /// while showing the simulator stays with this panel.
+    ios_simulator_manager: Option<Entity<IosSimulatorManager>>,
+    /// Kept apart from `_subscriptions`, which switching views clears.
+    ios_simulator_subscriptions: Vec<gpui::Subscription>,
     android_screen_bounds: Option<Bounds<Pixels>>,
     android_pointer_down: Option<AndroidPointerDown>,
     /// Focus for the emulator screen. Held separately from the sidebar's own
@@ -1472,6 +1475,8 @@ impl Sidebar {
             device_instance_split: false,
             add_device_instance_menu_handle: PopoverMenuHandle::default(),
             android_sdk_manager: None,
+            ios_simulator_manager: None,
+            ios_simulator_subscriptions: Vec::new(),
             android_screen_bounds: None,
             android_pointer_down: None,
             android_screen_focus: cx.focus_handle(),
@@ -9279,6 +9284,26 @@ impl Sidebar {
 
     #[cfg(target_os = "macos")]
     fn render_ios_simulator(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        if self.ios_simulator_manager.is_none() {
+            cx.defer_in(window, |this, window, cx| {
+                this.ensure_ios_simulator_manager(window, cx)
+            });
+        }
+        let (xcode, job, last_error) = self
+            .ios_simulator_manager
+            .as_ref()
+            .map(|manager| {
+                let manager = manager.read(cx);
+                (
+                    manager.xcode().cloned(),
+                    manager.prepare_job().cloned(),
+                    manager.last_error().cloned(),
+                )
+            })
+            .unwrap_or_default();
+        if let Some(xcode) = xcode.filter(|xcode| !xcode.is_ready()) {
+            return self.render_xcode_missing(&xcode, cx).into_any_element();
+        }
         if !self.ios_simulator_started {
             return v_flex()
                 .flex_1()
@@ -9307,77 +9332,32 @@ impl Sidebar {
         }
 
         let is_discovering_devices = self.ios_device_discovery_task.is_some();
-        let selected_summary = self
-            .selected_ios_device_udid
-            .as_ref()
-            .and_then(|udid| self.ios_device(udid))
-            .map(|device| DevicePickerSummary {
-                name: device.name.clone().into(),
-                os_version: device.os_version.clone().map(SharedString::from),
-                // A discovery pass boots the selected device when it is not up yet, so while
-                // one runs a device that is not booted is on its way there.
-                status: Some(if !device.is_booted() && is_discovering_devices {
-                    DeviceStatus::Booting
-                } else {
-                    device.status()
-                }),
-            });
-        let devices = self.ios_devices.clone();
-        let selected_udid = self.selected_ios_device_udid.clone();
-        let sidebar = cx.weak_entity();
-        let device_menu = ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
-            for device in devices {
-                let is_selected = selected_udid.as_deref() == Some(device.udid.as_str());
-                let label = ios_simulator_label(&device);
-                let udid = device.udid;
-                let sidebar = sidebar.clone();
-                menu = menu.toggleable_entry(
-                    label,
-                    is_selected,
-                    IconPosition::Start,
-                    None,
-                    move |window, cx| {
-                        sidebar
-                            .update(cx, |this, cx| {
-                                this.select_ios_device(udid.clone(), window, cx);
-                            })
-                            .log_err();
-                    },
-                );
+        let header = self.render_ios_device_selector(job.as_ref(), window, cx);
+        if let Some(job) = job {
+            // The simulator is a native child window above the panel; it has to step aside
+            // while the job takes its place.
+            if self.ios_native_subview_id.is_some() && !self.ios_native_subview_hidden {
+                cx.defer_in(window, |this, window, _| {
+                    this.hide_ios_simulator_view(window)
+                });
             }
-            menu
-        });
+            return v_flex()
+                .flex_1()
+                .min_h_0()
+                .child(header)
+                .child(self.render_prepare_job(&job, DevicePlatform::Ios, cx))
+                .into_any_element();
+        }
         let busy_message = self.ios_busy_message.clone();
         let has_devices = !self.ios_devices.is_empty();
-        let error = self.ios_simulator_error.clone();
+        let error = self.ios_simulator_error.clone().or(last_error);
         let selected_device = self.selected_ios_device_udid.clone();
         let sidebar = cx.weak_entity();
 
         v_flex()
             .flex_1()
             .min_h_0()
-            .child(
-                HeaderBar::new("ios-device-header")
-                    .child(render_device_picker(
-                        "ios-simulator-selector",
-                        "Simulador iOS",
-                        selected_summary,
-                        "Selecione um simulador iOS inicializado",
-                        device_menu,
-                        is_discovering_devices || !has_devices,
-                        cx,
-                    ))
-                    .end_child(
-                        IconButton::new("refresh-ios-simulators", IconName::RotateCw)
-                            .icon_size(IconSize::Small)
-                            .aria_label("Atualizar simuladores iOS")
-                            .tooltip(Tooltip::text("Atualizar simuladores iOS"))
-                            .disabled(is_discovering_devices)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.refresh_ios_devices(window, cx);
-                            })),
-                    ),
-            )
+            .child(header)
             .child(
                 div()
                     .relative()
@@ -9459,6 +9439,418 @@ impl Sidebar {
                     ),
             )
             .into_any_element()
+    }
+
+    /// Board A on iOS: the simulator picker with its status chips and the manager's actions.
+    #[cfg(target_os = "macos")]
+    fn render_ios_device_selector(
+        &self,
+        job: Option<&PrepareJob>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let is_discovering_devices = self.ios_device_discovery_task.is_some();
+        let selected_udid = self.selected_ios_device_udid.clone();
+        let managed_devices = self
+            .ios_simulator_manager
+            .as_ref()
+            .map(|manager| manager.read(cx).devices().to_vec())
+            .filter(|devices| !devices.is_empty());
+        // Until the manager has listed them, the picker falls back to the panel's own list.
+        let entries: Vec<(String, String, Option<String>, DeviceStatus)> = match managed_devices {
+            Some(devices) => devices
+                .iter()
+                .map(|device| {
+                    (
+                        device.udid.clone(),
+                        device.name.clone(),
+                        ios_device_manager::device_os_label(device),
+                        ios_device_manager::device_status(device),
+                    )
+                })
+                .collect(),
+            None => self
+                .ios_devices
+                .iter()
+                .map(|device| {
+                    (
+                        device.udid.clone(),
+                        device.name.clone(),
+                        device.os_version.clone(),
+                        device.status(),
+                    )
+                })
+                .collect(),
+        };
+        let entries: Vec<_> = entries
+            .into_iter()
+            .map(|(udid, name, os, status)| {
+                // A discovery pass boots the selected device when it is not up yet, so while one
+                // runs a device that is not booted is on its way there.
+                let status = if is_discovering_devices
+                    && selected_udid.as_deref() == Some(udid.as_str())
+                    && matches!(status, DeviceStatus::Shutdown)
+                {
+                    DeviceStatus::Booting
+                } else {
+                    status
+                };
+                (udid, name, os, status)
+            })
+            .collect();
+        let selected_summary = match job.and_then(|job| job.device.clone()) {
+            Some((name, os_version)) => Some(DevicePickerSummary {
+                name,
+                os_version: Some(os_version),
+                status: Some(DeviceStatus::Preparing),
+            }),
+            None => selected_udid.as_ref().and_then(|udid| {
+                entries
+                    .iter()
+                    .find(|(entry_udid, ..)| entry_udid == udid)
+                    .map(|(_, name, os, status)| DevicePickerSummary {
+                        name: name.clone().into(),
+                        os_version: os.clone().map(SharedString::from),
+                        status: Some(*status),
+                    })
+            }),
+        };
+        let has_entries = !entries.is_empty();
+        let sidebar = cx.weak_entity();
+        let menu_selection = selected_udid;
+        let device_menu = ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
+            menu = menu.header("SIMULADORES");
+            for (udid, name, os, status) in entries {
+                let is_selected = menu_selection.as_deref() == Some(udid.as_str());
+                let sidebar = sidebar.clone();
+                menu = menu.custom_entry(
+                    move |_window, cx| {
+                        h_flex()
+                            .w_full()
+                            .min_w(px(300.))
+                            .py_1()
+                            .gap_2p5()
+                            .child(div().w(px(14.)).flex_none().when(is_selected, |this| {
+                                this.child(
+                                    Icon::new(IconName::Check)
+                                        .size(IconSize::Small)
+                                        .color(Color::Accent),
+                                )
+                            }))
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(
+                                        Label::new(name.clone())
+                                            .weight(FontWeight::SEMIBOLD)
+                                            .truncate(),
+                                    )
+                                    .children(os.clone().map(|os| {
+                                        Label::new(os).size(LabelSize::XSmall).color(Color::Muted)
+                                    })),
+                            )
+                            .child(render_device_status_chip(status, cx))
+                            .into_any_element()
+                    },
+                    move |window, cx| {
+                        let udid = udid.clone();
+                        sidebar
+                            .update(cx, |this, cx| this.choose_ios_device(udid, window, cx))
+                            .log_err();
+                    },
+                );
+            }
+            let action = |label: &'static str, icon: IconName, entry: Option<IosManagerEntry>| {
+                let sidebar = sidebar.clone();
+                ContextMenuEntry::new(label)
+                    .icon(icon)
+                    .icon_size(IconSize::Small)
+                    .icon_color(Color::Muted)
+                    .handler(move |window, cx| {
+                        sidebar
+                            .update(cx, |this, cx| match entry {
+                                Some(IosManagerEntry::Simulators) => this.show_ios_device_manager(
+                                    IosManagerEntry::Simulators,
+                                    window,
+                                    cx,
+                                ),
+                                Some(IosManagerEntry::NewSimulator) => this
+                                    .show_ios_device_manager(
+                                        IosManagerEntry::NewSimulator,
+                                        window,
+                                        cx,
+                                    ),
+                                None => {
+                                    this.refresh_ios_devices(window, cx);
+                                    if let Some(manager) = this.ios_simulator_manager.clone() {
+                                        manager.update(cx, |manager, cx| manager.refresh(cx));
+                                    }
+                                }
+                            })
+                            .log_err();
+                    })
+            };
+            menu.separator()
+                .item(action(
+                    "Novo simulador…",
+                    IconName::Plus,
+                    Some(IosManagerEntry::NewSimulator),
+                ))
+                .item(action(
+                    "Gerenciar simuladores…",
+                    IconName::Sliders,
+                    Some(IosManagerEntry::Simulators),
+                ))
+                .item(action("Atualizar lista", IconName::RotateCw, None))
+        });
+
+        HeaderBar::new("ios-device-header")
+            .child(render_device_picker(
+                "ios-simulator-selector",
+                "Simulador iOS",
+                selected_summary,
+                "Selecione um simulador iOS",
+                device_menu,
+                is_discovering_devices && !has_entries,
+                cx,
+            ))
+            .end_child(
+                IconButton::new("manage-ios-simulators", IconName::Sliders)
+                    .icon_size(IconSize::Small)
+                    .aria_label("Gerenciar simuladores")
+                    .tooltip(Tooltip::text("Gerenciar simuladores"))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.show_ios_device_manager(IosManagerEntry::Simulators, window, cx);
+                    })),
+            )
+            .into_any_element()
+    }
+
+    /// Board J: what is missing before the iOS tab can manage simulators.
+    #[cfg(target_os = "macos")]
+    fn render_xcode_missing(&self, xcode: &XcodeStatus, cx: &mut Context<Self>) -> Div {
+        let colors = cx.theme().colors().clone();
+        let success = Color::Success.color(cx);
+        let warning = Color::Warning.color(cx);
+        let xcode_app = xcode.xcode_app.clone();
+        let app_path = xcode_app
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "/Applications/Xcode.app".to_string());
+        let select_command = format!("sudo xcode-select -s {app_path}");
+        let selected = xcode.xcode_version.is_some();
+
+        #[derive(Clone, Copy, PartialEq)]
+        enum Mark {
+            Done,
+            Problem,
+            Pending,
+        }
+        let steps: Vec<(Mark, String, Option<String>, Option<String>)> = vec![
+            (
+                if xcode.command_line_tools_found() {
+                    Mark::Done
+                } else {
+                    Mark::Pending
+                },
+                "Command Line Tools encontradas".to_string(),
+                None,
+                None,
+            ),
+            match &xcode_app {
+                Some(path) => (
+                    Mark::Done,
+                    "Xcode encontrado".to_string(),
+                    Some(path.display().to_string()),
+                    None,
+                ),
+                None => (
+                    Mark::Problem,
+                    "Xcode não encontrado".to_string(),
+                    Some("Procuramos em /Applications e pelo Spotlight.".to_string()),
+                    None,
+                ),
+            },
+            (
+                if selected { Mark::Done } else { Mark::Pending },
+                "Apontar o xcode-select para o Xcode".to_string(),
+                (!selected).then(|| {
+                    "Só se o Xcode não virar o padrão sozinho. Pede sua senha, então rode no terminal:"
+                        .to_string()
+                }),
+                (!selected).then(|| select_command.clone()),
+            ),
+            (
+                if xcode.license_accepted {
+                    Mark::Done
+                } else {
+                    Mark::Pending
+                },
+                "Aceitar a licença do Xcode".to_string(),
+                (selected && !xcode.license_accepted)
+                    .then(|| "Abrir o Xcode uma vez resolve.".to_string()),
+                None,
+            ),
+            (
+                Mark::Pending,
+                "Baixar o runtime do iOS pedido pelo Xcode".to_string(),
+                None,
+                None,
+            ),
+        ];
+        let rows = steps
+            .into_iter()
+            .enumerate()
+            .map(|(index, (mark, label, detail, command))| {
+                let marker = div()
+                    .size(px(16.))
+                    .mt_0p5()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .justify_center()
+                    .rounded_full()
+                    .map(|this| match mark {
+                        Mark::Done => this.bg(success.opacity(0.12)).child(
+                            Icon::new(IconName::Check)
+                                .size(IconSize::XSmall)
+                                .color(Color::Success),
+                        ),
+                        Mark::Problem => this.bg(warning.opacity(0.12)).child(
+                            Icon::new(IconName::Warning)
+                                .size(IconSize::XSmall)
+                                .color(Color::Warning),
+                        ),
+                        Mark::Pending => this.border(px(1.5)).border_color(colors.border_selected),
+                    });
+                h_flex()
+                    .w_full()
+                    .gap_2p5()
+                    .items_start()
+                    .child(marker)
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .gap_1p5()
+                            .child(
+                                Label::new(label)
+                                    .size(LabelSize::Small)
+                                    .weight(if command.is_some() {
+                                        FontWeight::SEMIBOLD
+                                    } else {
+                                        FontWeight::NORMAL
+                                    })
+                                    .color(if mark == Mark::Pending && command.is_none() {
+                                        Color::Placeholder
+                                    } else {
+                                        Color::Default
+                                    }),
+                            )
+                            .children(detail.map(|detail| {
+                                Label::new(detail)
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted)
+                            }))
+                            .children(command.map(|command| {
+                                let copied = command.clone();
+                                h_flex()
+                                    .gap_1()
+                                    .child(
+                                        Label::new(command)
+                                            .size(LabelSize::XSmall)
+                                            .buffer_font(cx)
+                                            .color(Color::Placeholder),
+                                    )
+                                    .child(
+                                        IconButton::new(
+                                            ("copy-xcode-command", index),
+                                            IconName::Copy,
+                                        )
+                                        .icon_size(IconSize::XSmall)
+                                        .tooltip(Tooltip::text("Copiar comando"))
+                                        .on_click(
+                                            move |_, _, cx| {
+                                                cx.write_to_clipboard(ClipboardItem::new_string(
+                                                    copied.clone(),
+                                                ))
+                                            },
+                                        ),
+                                    )
+                            })),
+                    )
+            });
+        let open_label = if xcode_app.is_some() {
+            "Abrir o Xcode"
+        } else {
+            "Abrir na App Store"
+        };
+        v_flex()
+            .flex_1()
+            .min_h_0()
+            .justify_center()
+            .px_5()
+            .py_6()
+            .gap_5()
+            .child(
+                v_flex()
+                    .w_full()
+                    .gap_1()
+                    .child(
+                        Label::new("O simulador iOS precisa do Xcode")
+                            .size(LabelSize::Large)
+                            .weight(FontWeight::SEMIBOLD),
+                    )
+                    .child(
+                        Label::new(
+                            "Os simuladores vêm com o Xcode, que só é instalado pela App Store. \
+                             Depois de instalar, abra o Xcode uma vez para aceitar a licença e \
+                             volte aqui.",
+                        )
+                        .size(LabelSize::Small)
+                        .color(Color::Muted),
+                    ),
+            )
+            .child(
+                v_flex()
+                    .w_full()
+                    .gap(px(14.))
+                    .p_4()
+                    .rounded_lg()
+                    .bg(colors.elevated_surface_background)
+                    .border_1()
+                    .border_color(colors.border)
+                    .children(rows),
+            )
+            .child(
+                h_flex()
+                    .w_full()
+                    .gap_2()
+                    .child(
+                        div().flex_1().min_w_0().child(
+                            Label::new("Verificamos de novo quando o Zed volta ao foco.")
+                                .size(LabelSize::XSmall)
+                                .color(Color::Placeholder),
+                        ),
+                    )
+                    .child(
+                        secondary_button("recheck-xcode", None, "Verificar de novo", true, cx)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                if let Some(manager) = this.ios_simulator_manager.clone() {
+                                    manager.update(cx, |manager, cx| manager.refresh(cx));
+                                }
+                            })),
+                    )
+                    .child(
+                        primary_button("open-xcode", None, open_label, None, cx).on_click(
+                            move |_, _, cx| match &xcode_app {
+                                Some(path) => cx.open_with_system(path),
+                                None => cx.open_url("macappstore://apps.apple.com/app/id497799835"),
+                            },
+                        ),
+                    ),
+            )
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -9935,6 +10327,119 @@ impl Sidebar {
         });
     }
 
+    fn ensure_ios_simulator_manager(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.ios_simulator_manager.is_some() {
+            return;
+        }
+        let manager = cx.new(IosSimulatorManager::new);
+        self.ios_simulator_subscriptions
+            .push(cx.observe(&manager, |_, _, cx| cx.notify()));
+        // Board J tells the user it checks again once they come back from installing Xcode.
+        self.ios_simulator_subscriptions
+            .push(cx.observe_window_activation(window, |this, window, cx| {
+                if !window.is_window_active() {
+                    return;
+                }
+                if let Some(manager) = this.ios_simulator_manager.clone()
+                    && manager
+                        .read(cx)
+                        .xcode()
+                        .is_some_and(|xcode| !xcode.is_ready())
+                {
+                    manager.update(cx, |manager, cx| manager.refresh(cx));
+                }
+            }));
+        self.ios_simulator_subscriptions.push(cx.subscribe_in(
+            &manager,
+            window,
+            |this, manager, event, window, cx| match event {
+                IosSimulatorEvent::OpenDevice(udid) => {
+                    this.open_device_for_agent(
+                        device_toolkit::AgentDevice::Ios { udid: udid.clone() },
+                        window,
+                        cx,
+                    );
+                }
+                IosSimulatorEvent::StopDevice(udid) => {
+                    if this.selected_ios_device_udid.as_deref() == Some(udid.as_str()) {
+                        this.shutdown_ios_simulator(window, cx);
+                    } else {
+                        manager
+                            .update(cx, |manager, cx| manager.shutdown_device(udid.clone(), cx))
+                            .detach_and_log_err(cx);
+                    }
+                }
+                IosSimulatorEvent::DevicesChanged => {
+                    if this.ios_simulator_started {
+                        this.refresh_ios_devices(window, cx);
+                    }
+                }
+            },
+        ));
+        self.ios_simulator_manager = Some(manager);
+    }
+
+    fn show_ios_device_manager(
+        &mut self,
+        entry: IosManagerEntry,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(workspace) = self.active_workspace(cx) else {
+            return;
+        };
+        let Some(manager) = self.ios_simulator_manager.clone() else {
+            return;
+        };
+        let weak_workspace = workspace.downgrade();
+        workspace.update(cx, |workspace, cx| {
+            workspace.toggle_modal(window, cx, move |window, cx| {
+                IosDeviceManagerModal::new(manager, weak_workspace, entry, window, cx)
+            });
+        });
+    }
+
+    /// Picking a simulator whose runtime is gone downloads the runtime instead of booting it,
+    /// or opens the manager when Apple no longer offers that version.
+    fn choose_ios_device(&mut self, udid: String, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(manager) = self.ios_simulator_manager.clone() else {
+            self.select_ios_device(udid, window, cx);
+            return;
+        };
+        let missing_version = manager
+            .read(cx)
+            .device(&udid)
+            .filter(|device| !device.is_available)
+            .and_then(|device| device.runtime_version());
+        let Some(version) = missing_version else {
+            self.select_ios_device(udid, window, cx);
+            return;
+        };
+        let runtime = manager.read(cx).catalog().and_then(|catalog| {
+            catalog
+                .runtimes
+                .iter()
+                .find(|runtime| {
+                    !runtime.prerelease
+                        && ios_simulator::compare_versions(&runtime.version, &version)
+                            == std::cmp::Ordering::Equal
+                })
+                .cloned()
+        });
+        match runtime {
+            Some(runtime) => manager.update(cx, |manager, cx| {
+                manager.prepare(
+                    ios_simulator::PrepareRequest::DownloadRuntime {
+                        version: runtime.version,
+                        build: runtime.build,
+                    },
+                    cx,
+                )
+            }),
+            None => self.show_ios_device_manager(IosManagerEntry::Simulators, window, cx),
+        }
+    }
+
     fn show_android_device_manager(
         &mut self,
         entry: ManagerEntry,
@@ -9955,8 +10460,14 @@ impl Sidebar {
         });
     }
 
-    /// Board F: the steps of a download or AVD change, with the download's progress.
-    fn render_android_prepare_job(&self, job: &PrepareJob, cx: &mut Context<Self>) -> Div {
+    /// Board F: the steps of a download or device change, with the download's progress. Both
+    /// platforms share it; only cancelling differs.
+    fn render_prepare_job(
+        &self,
+        job: &PrepareJob,
+        platform: DevicePlatform,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let colors = cx.theme().colors().clone();
         let success = Color::Success.color(cx);
         let first_boot = job
@@ -10124,14 +10635,22 @@ impl Sidebar {
                     )
                     .child(
                         secondary_button("cancel-android-prepare", None, "Cancelar", true, cx)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.with_android_sdk_manager(cx, |manager, cx| {
-                                    if first_boot {
-                                        manager.stop_emulator(cx);
-                                    } else {
-                                        manager.cancel_prepare(cx);
+                            .on_click(cx.listener(move |this, _, _, cx| match platform {
+                                DevicePlatform::Android => {
+                                    this.with_android_sdk_manager(cx, |manager, cx| {
+                                        if first_boot {
+                                            manager.stop_emulator(cx);
+                                        } else {
+                                            manager.cancel_prepare(cx);
+                                        }
+                                    })
+                                }
+                                DevicePlatform::Ios => {
+                                    if let Some(manager) = this.ios_simulator_manager.clone() {
+                                        manager
+                                            .update(cx, |manager, cx| manager.cancel_prepare(cx));
                                     }
-                                });
+                                }
                             })),
                     ),
             )
@@ -10241,10 +10760,12 @@ impl Sidebar {
                             });
                         })),
                 ),
-            AndroidSdkState::Preparing(job) => self.render_android_prepare_job(&job, cx),
+            AndroidSdkState::Preparing(job) => {
+                self.render_prepare_job(&job, DevicePlatform::Android, cx)
+            }
             AndroidSdkState::EmulatorBooting if first_boot_job.is_some() => {
                 match &first_boot_job {
-                    Some(job) => self.render_android_prepare_job(job, cx),
+                    Some(job) => self.render_prepare_job(job, DevicePlatform::Android, cx),
                     None => base,
                 }
             }
