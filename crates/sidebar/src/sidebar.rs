@@ -159,7 +159,7 @@ enum DevicePlatform {
 }
 
 /// What a devices instance shows: one of the tabs in its header.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 enum DeviceInstanceKind {
     Android,
     Ios,
@@ -177,6 +177,13 @@ impl DeviceInstanceKind {
 
     fn icon(self) -> IconName {
         IconName::Smartphone
+    }
+
+    fn platform(self) -> DevicePlatform {
+        match self {
+            Self::Android => DevicePlatform::Android,
+            Self::Ios => DevicePlatform::Ios,
+        }
     }
 }
 
@@ -368,18 +375,21 @@ fn primary_action_button(id: impl Into<ElementId>, enabled: bool, cx: &App) -> S
         })
 }
 
-/// A group of related secondary controls, set on a raised plate so the grouping reads without
-/// loose dividers.
-fn control_cluster(cx: &App) -> Div {
-    let colors = cx.theme().colors();
+/// A group of related secondary controls, set apart from the previous group by a thin divider
+/// rather than a raised plate, which made the bar read as a row of separate boxes.
+fn toolbar_group(cx: &App) -> Div {
     h_flex()
         .flex_none()
-        .p(DynamicSpacing::Base02.px(cx))
+        .items_center()
         .gap(DynamicSpacing::Base02.px(cx))
-        .rounded(TAB_STRIP_RADIUS)
-        .border_1()
-        .border_color(colors.border)
-        .bg(colors.elevated_surface_background)
+        .child(
+            div()
+                .flex_none()
+                .w_px()
+                .h(DynamicSpacing::Base16.px(cx))
+                .mr(DynamicSpacing::Base02.px(cx))
+                .bg(cx.theme().colors().border),
+        )
 }
 
 pub(crate) fn render_device_status_chip(status: DeviceStatus, cx: &App) -> Div {
@@ -535,6 +545,8 @@ struct SerializedSidebar {
     agents_section_collapsed: bool,
     #[serde(default)]
     flows_section_collapsed: bool,
+    #[serde(default)]
+    hidden_device_tabs: Vec<DeviceInstanceKind>,
 }
 
 #[derive(Debug, Default)]
@@ -1281,6 +1293,12 @@ pub struct Sidebar {
     device_location: Option<DeviceLocation>,
     /// Whether the device is currently forced to draw its own on-screen keyboard.
     device_software_keyboard_visible: bool,
+    /// Last appearance read from or applied to the device; reread whenever the settings menu
+    /// opens, since the device's own Settings app can change it too.
+    device_dark_appearance: bool,
+    /// Platform tabs removed from this instance's header. Never holds every kind, so the
+    /// header always keeps one tab.
+    hidden_device_tabs: Vec<DeviceInstanceKind>,
     restoring_tasks: HashMap<agent_ui::ThreadId, Task<()>>,
     recent_projects_popover_handle: PopoverMenuHandle<SidebarRecentProjects>,
     project_header_menu_handles: HashMap<usize, PopoverMenuHandle<ContextMenu>>,
@@ -1478,6 +1496,8 @@ impl Sidebar {
             device_settings_menu_handle: PopoverMenuHandle::default(),
             device_location: None,
             device_software_keyboard_visible: false,
+            device_dark_appearance: false,
+            hidden_device_tabs: Vec::new(),
             restoring_tasks: HashMap::new(),
             recent_projects_popover_handle: PopoverMenuHandle::default(),
             project_header_menu_handles: HashMap::new(),
@@ -8329,7 +8349,7 @@ impl Sidebar {
             }
         }));
 
-        // Power is destructive, so it stays out of the clusters, on the far side of the bar.
+        // Power is destructive, so it sits last, on the far side of the bar from Run.
         let power = device_toolbar_button(
             "device-power",
             IconName::Power,
@@ -8347,27 +8367,28 @@ impl Sidebar {
 
         HeaderBar::footer("device-toolbar")
             // The panel can be dragged down to `MIN_WIDTH`, which is narrower than the row of
-            // tools, so the row is allowed to wrap and the bar to grow with it.
+            // tools, so the row is allowed to wrap and the bar to grow with it. Each divider
+            // travels with the group after it, so a wrapped row never starts on a loose line.
             .wrapping(true)
             .child(
                 h_flex()
                     .py(DynamicSpacing::Base04.px(cx))
-                    .gap(DynamicSpacing::Base08.px(cx))
+                    .gap(DynamicSpacing::Base04.px(cx))
                     .flex_wrap()
                     .child(start_expo)
-                    .child(control_cluster(cx).child(build))
-                    .child(control_cluster(cx).child(home).child(screenshot))
+                    .child(toolbar_group(cx).child(build))
+                    .child(toolbar_group(cx).child(home).child(screenshot))
                     .child(
-                        control_cluster(cx)
+                        toolbar_group(cx)
                             .child(copy_identifier)
                             .child(open_installed_app),
                     ),
             )
             .end_child(
                 h_flex()
-                    .gap(DynamicSpacing::Base08.px(cx))
-                    .child(power)
-                    .child(self.render_device_settings_menu(device_ready, cx)),
+                    .gap(DynamicSpacing::Base02.px(cx))
+                    .child(self.render_device_settings_menu(device_ready, cx))
+                    .child(power),
             )
     }
 
@@ -8405,15 +8426,46 @@ impl Sidebar {
         device_ready: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let menu_builder = self.device_settings_menu_builder(cx);
+        let this = cx.weak_entity();
+        PopoverMenu::new("device-settings-menu")
+            .menu(move |window, cx| menu_builder(window, cx))
+            .on_open(Rc::new(move |window, cx| {
+                this.update(cx, |this, cx| this.refresh_device_appearance(window, cx))
+                    .log_err();
+            }))
+            .trigger_with_tooltip(
+                IconButton::new("device-settings", IconName::Settings)
+                    .icon_size(IconSize::Small)
+                    .size(ButtonSize::Medium)
+                    .width(ButtonSize::Medium.rems())
+                    // The popover toggles the button while its menu is open; this is what
+                    // makes the open state read as the active tool.
+                    .selected_style(ButtonStyle::Tinted(TintColor::Accent))
+                    .disabled(!device_ready),
+                Tooltip::text("Configurações do device"),
+            )
+            .anchor(gpui::Anchor::BottomRight)
+            .with_handle(self.device_settings_menu_handle.clone())
+    }
+
+    /// The menu captures the toggle states instead of reading the sidebar while it builds,
+    /// because a refresh rebuilds it from inside a sidebar update.
+    fn device_settings_menu_builder(
+        &self,
+        cx: &Context<Self>,
+    ) -> Rc<dyn Fn(&mut Window, &mut App) -> Option<Entity<ContextMenu>>> {
         let this = cx.weak_entity();
         let software_keyboard_visible = self.device_software_keyboard_visible;
-        PopoverMenu::new("device-settings-menu")
-            .menu(move |window, cx| {
-                let this = this.clone();
-                Some(ContextMenu::build(window, cx, move |menu, _window, _cx| {
-                    let location_owner = this.clone();
-                    let keyboard_owner = this;
-                    menu.item(
+        let dark_appearance = self.device_dark_appearance;
+        Rc::new(move |window, cx| {
+            let this = this.clone();
+            Some(ContextMenu::build(window, cx, move |menu, _window, _cx| {
+                let location_owner = this.clone();
+                let appearance_owner = this.clone();
+                let keyboard_owner = this;
+                menu.header("Simulação")
+                    .item(
                         ContextMenuEntry::new("Alterar localização do usuário")
                             .icon(IconName::LocationEdit)
                             .handler(move |window, cx| {
@@ -8424,6 +8476,20 @@ impl Sidebar {
                                     .log_err();
                             }),
                     )
+                    .item(
+                        ContextMenuEntry::new("Tema escuro")
+                            .icon(IconName::Moon)
+                            .toggleable(IconPosition::End, dark_appearance)
+                            .handler(move |_window, cx| {
+                                appearance_owner
+                                    .update(cx, |this, cx| {
+                                        this.toggle_device_dark_appearance(cx);
+                                    })
+                                    .log_err();
+                            }),
+                    )
+                    .separator()
+                    .header("Entrada")
                     .item(
                         ContextMenuEntry::new("Mostrar teclado do device")
                             .icon(IconName::Keyboard)
@@ -8436,21 +8502,8 @@ impl Sidebar {
                                     .log_err();
                             }),
                     )
-                }))
-            })
-            .trigger_with_tooltip(
-                IconButton::new("device-settings", IconName::Settings)
-                    .icon_size(IconSize::Medium)
-                    .size(ButtonSize::Medium)
-                    .width(ButtonSize::Medium.rems())
-                    // The popover toggles the button while its menu is open; this is what
-                    // makes the open state read as the active tool.
-                    .selected_style(ButtonStyle::Tinted(TintColor::Accent))
-                    .disabled(!device_ready),
-                Tooltip::text("Configurações do device"),
-            )
-            .anchor(gpui::Anchor::BottomRight)
-            .with_handle(self.device_settings_menu_handle.clone())
+            }))
+        })
     }
 
     fn show_device_location_modal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -8596,6 +8649,104 @@ impl Sidebar {
                     })
                     .log_err();
                     format!("Não foi possível alternar o teclado do device: {error:#}")
+                }
+            };
+            workspace
+                .update(cx, |workspace, cx| {
+                    show_device_toast(workspace, message, cx)
+                })
+                .log_err();
+        })
+        .detach();
+    }
+
+    fn device_dark_appearance_task(&self, cx: &App) -> Option<Task<anyhow::Result<bool>>> {
+        match self.device_platform {
+            DevicePlatform::Android => {
+                let manager = self.android_sdk_manager.as_ref()?;
+                Some(manager.read(cx).dark_appearance(cx))
+            }
+            DevicePlatform::Ios => {
+                let udid = self.selected_ios_device_udid.clone()?;
+                Some(cx.background_spawn(async move {
+                    let output = simctl_appearance(&udid, None).await?;
+                    Ok(output.trim() == "dark")
+                }))
+            }
+        }
+    }
+
+    fn refresh_device_appearance(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(task) = self.device_dark_appearance_task(cx) else {
+            return;
+        };
+        cx.spawn_in(window, async move |this, cx| {
+            let dark = task.await?;
+            let open_menu = this.update(cx, |this, cx| {
+                if this.device_dark_appearance == dark {
+                    return None;
+                }
+                this.device_dark_appearance = dark;
+                cx.notify();
+                this.device_settings_menu_handle.is_deployed().then(|| {
+                    (
+                        this.device_settings_menu_handle.clone(),
+                        this.device_settings_menu_builder(cx),
+                    )
+                })
+            })?;
+            // Rebuilding runs the menu's on-open hook, which updates the sidebar, so it has to
+            // happen outside the update above.
+            if let Some((handle, menu_builder)) = open_menu {
+                cx.update(|window, cx| handle.refresh_menu(window, cx, menu_builder))?;
+            }
+            anyhow::Ok(())
+        })
+        .detach_and_log_err(cx);
+    }
+
+    fn toggle_device_dark_appearance(&mut self, cx: &mut Context<Self>) {
+        let dark = !self.device_dark_appearance;
+        let Some(workspace) = self.active_workspace(cx) else {
+            return;
+        };
+
+        let task = match self.device_platform {
+            DevicePlatform::Android => {
+                let Some(manager) = self.android_sdk_manager.as_ref() else {
+                    return;
+                };
+                manager.read(cx).set_dark_appearance(dark, cx)
+            }
+            DevicePlatform::Ios => {
+                let Some(udid) = self.selected_ios_device_udid.clone() else {
+                    self.ios_simulator_error =
+                        Some("Selecione primeiro um simulador iOS inicializado.".into());
+                    cx.notify();
+                    return;
+                };
+                cx.background_spawn(async move {
+                    simctl_appearance(&udid, Some(if dark { "dark" } else { "light" })).await?;
+                    Ok(())
+                })
+            }
+        };
+
+        self.device_dark_appearance = dark;
+        cx.notify();
+
+        let workspace = workspace.downgrade();
+        cx.spawn(async move |this, cx| {
+            let message = match task.await {
+                Ok(()) if dark => "Tema escuro ativado".to_string(),
+                Ok(()) => "Tema claro ativado".to_string(),
+                Err(error) => {
+                    this.update(cx, |this, cx| {
+                        this.device_dark_appearance = !dark;
+                        cx.notify();
+                    })
+                    .log_err();
+                    format!("Não foi possível trocar o tema do device: {error:#}")
                 }
             };
             workspace
@@ -10151,6 +10302,43 @@ impl Sidebar {
         cx.notify();
     }
 
+    fn visible_device_tabs(&self) -> Vec<DeviceInstanceKind> {
+        DeviceInstanceKind::ALL
+            .into_iter()
+            .filter(|kind| !self.hidden_device_tabs.contains(kind))
+            .collect()
+    }
+
+    fn remove_device_tab(
+        &mut self,
+        kind: DeviceInstanceKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.hidden_device_tabs.contains(&kind) || self.visible_device_tabs().len() <= 1 {
+            return;
+        }
+        self.hidden_device_tabs.push(kind);
+        if self.device_instance_kind() == kind
+            && let Some(next) = self.visible_device_tabs().first().copied()
+        {
+            self.show_device_instance_kind(next, window, cx);
+        }
+        self.serialize(cx);
+        cx.notify();
+    }
+
+    fn add_device_tab(
+        &mut self,
+        kind: DeviceInstanceKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.hidden_device_tabs.retain(|hidden| *hidden != kind);
+        self.show_device_instance_kind(kind, window, cx);
+        self.serialize(cx);
+    }
+
     fn notify_device_instance_host(&self, cx: &mut Context<Self>) {
         cx.notify();
         if let Some(host) = &self.device_instance_host {
@@ -10395,11 +10583,37 @@ impl Sidebar {
                 let open_kinds = host
                     .read_with(cx, |host, cx| host.open_device_instance_kinds(cx))
                     .unwrap_or_default();
-                let suggested = DeviceInstanceKind::ALL
-                    .iter()
-                    .position(|kind| !open_kinds.contains(kind))
-                    .unwrap_or(0);
+                let hidden_tabs = this
+                    .read_with(cx, |this, _| this.hidden_device_tabs.clone())
+                    .unwrap_or_default();
+                // A removed tab is the likelier intent, so it wins the preselection.
+                let suggested = if hidden_tabs.is_empty() {
+                    DeviceInstanceKind::ALL
+                        .iter()
+                        .position(|kind| !open_kinds.contains(kind))
+                        .unwrap_or(0)
+                } else {
+                    0
+                };
                 let menu = ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
+                    if !hidden_tabs.is_empty() {
+                        menu = menu.header("Adicionar à dock");
+                        for kind in hidden_tabs.iter().copied() {
+                            let this = this.clone();
+                            menu = menu.item(
+                                ContextMenuEntry::new(kind.label())
+                                    .icon(kind.icon())
+                                    .description("Volta como aba desta instância")
+                                    .handler(move |window, cx| {
+                                        this.update(cx, |this, cx| {
+                                            this.add_device_tab(kind, window, cx);
+                                        })
+                                        .log_err();
+                                    }),
+                            );
+                        }
+                        menu = menu.separator();
+                    }
                     menu = menu.header("Nova instância à direita");
                     for kind in DeviceInstanceKind::ALL {
                         let description = if open_kinds.contains(&kind) {
@@ -10447,25 +10661,54 @@ impl Sidebar {
 
     fn render_devices_view(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let is_android = self.device_platform == DevicePlatform::Android;
-        let is_ios = self.device_platform == DevicePlatform::Ios;
+        let current_kind = self.device_instance_kind();
+        let visible_tabs = self.visible_device_tabs();
+        let removable = visible_tabs.len() > 1;
+        let last_index = visible_tabs.len().saturating_sub(1);
 
-        let platform_tab = |id: &'static str,
-                            label: &'static str,
-                            icon: IconName,
-                            position: TabPosition,
-                            selected: bool| {
-            Tab::new(id)
+        let tabs = visible_tabs.into_iter().enumerate().map(|(index, kind)| {
+            let selected = kind == current_kind;
+            let position = if index == 0 {
+                TabPosition::First
+            } else if index == last_index {
+                TabPosition::Last
+            } else {
+                TabPosition::Middle(std::cmp::Ordering::Equal)
+            };
+            let (tab_id, remove_id) = match kind {
+                DeviceInstanceKind::Android => ("device-tab-android", "remove-device-tab-android"),
+                DeviceInstanceKind::Ios => ("device-tab-ios", "remove-device-tab-ios"),
+            };
+            Tab::new(tab_id)
                 .style(TabStyle::Pill)
                 .position(position)
                 .full_width(true)
                 .toggle_state(selected)
-                .start_slot(Icon::new(icon).size(IconSize::Small).color(if selected {
-                    Color::Accent
-                } else {
-                    Color::Muted
-                }))
+                .start_slot(
+                    Icon::new(kind.icon())
+                        .size(IconSize::Small)
+                        .color(if selected {
+                            Color::Accent
+                        } else {
+                            Color::Muted
+                        }),
+                )
+                .when(removable, |tab| {
+                    // The pill keeps the selected tab's slot visible; removing is rarer than
+                    // switching, so the x waits for the pointer on every tab.
+                    tab.end_slot(
+                        div().visible_on_hover("").child(
+                            IconButton::new(remove_id, IconName::Close)
+                                .icon_size(IconSize::XSmall)
+                                .tooltip(Tooltip::text("Remover da dock"))
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.remove_device_tab(kind, window, cx);
+                                })),
+                        ),
+                    )
+                })
                 .child(
-                    Label::new(label)
+                    Label::new(kind.label())
                         .size(LabelSize::Small)
                         .weight(if selected {
                             FontWeight::SEMIBOLD
@@ -10474,7 +10717,10 @@ impl Sidebar {
                         })
                         .when(!selected, |label| label.color(Color::Muted)),
                 )
-        };
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.show_device_instance_kind(kind, window, cx);
+                }))
+        });
 
         v_flex()
             .flex_1()
@@ -10483,30 +10729,7 @@ impl Sidebar {
             .child(
                 TabBar::segmented("device-platform-tabs")
                     .style(TabStyle::Pill)
-                    .child(
-                        platform_tab(
-                            "device-tab-android",
-                            "Android",
-                            IconName::Smartphone,
-                            TabPosition::First,
-                            is_android,
-                        )
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.show_device_instance_kind(DeviceInstanceKind::Android, window, cx);
-                        })),
-                    )
-                    .child(
-                        platform_tab(
-                            "device-tab-ios",
-                            "iOS",
-                            IconName::Smartphone,
-                            TabPosition::Last,
-                            is_ios,
-                        )
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.show_device_instance_kind(DeviceInstanceKind::Ios, window, cx);
-                        })),
-                    )
+                    .children(tabs)
                     .end_child(self.render_add_device_instance_button(cx))
                     .when(self.device_instance_split, |this| {
                         this.end_child(
@@ -11294,6 +11517,24 @@ fn default_ios_device(devices: &[IosSimulatorDevice]) -> Option<&IosSimulatorDev
         .or_else(|| devices.first())
 }
 
+/// Reads the simulator's appearance when `appearance` is `None`, otherwise sets it to `light`
+/// or `dark`. Both only work on a booted device.
+async fn simctl_appearance(udid: &str, appearance: Option<&str>) -> anyhow::Result<String> {
+    let mut arguments = vec!["simctl", "ui", udid, "appearance"];
+    arguments.extend(appearance);
+    let output = smol::process::Command::new("xcrun")
+        .args(&arguments)
+        .output()
+        .await
+        .context("não foi possível executar xcrun simctl ui")?;
+    anyhow::ensure!(
+        output.status.success(),
+        "xcrun simctl ui falhou: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
 /// Boots `udid` and waits until the device finishes booting, so the caller can
 /// connect SimulatorKit to a display that is actually producing frames.
 async fn boot_ios_simulator(udid: &str) -> anyhow::Result<()> {
@@ -11378,7 +11619,7 @@ fn device_toolbar_button(
     device_ready: bool,
 ) -> IconButton {
     IconButton::new(id, icon)
-        .icon_size(IconSize::Medium)
+        .icon_size(IconSize::Small)
         .size(ButtonSize::Medium)
         .width(ButtonSize::Medium.rems())
         .aria_label(tooltip)
@@ -11642,6 +11883,7 @@ impl WorkspaceSidebar for Sidebar {
             pinned_agents: self.pinned_agents.clone(),
             agents_section_collapsed: self.agents_section_collapsed,
             flows_section_collapsed: self.flows_section_collapsed,
+            hidden_device_tabs: self.hidden_device_tabs.clone(),
         };
         serde_json::to_string(&serialized).ok()
     }
@@ -11664,6 +11906,18 @@ impl WorkspaceSidebar for Sidebar {
             self.pinned_agents = serialized.pinned_agents;
             self.agents_section_collapsed = serialized.agents_section_collapsed;
             self.flows_section_collapsed = serialized.flows_section_collapsed;
+            self.hidden_device_tabs = serialized.hidden_device_tabs;
+            self.hidden_device_tabs.dedup();
+            if self.hidden_device_tabs.len() >= DeviceInstanceKind::ALL.len() {
+                self.hidden_device_tabs.clear();
+            }
+            if let Some(kind) = self.visible_device_tabs().first().copied()
+                && self
+                    .hidden_device_tabs
+                    .contains(&self.device_instance_kind())
+            {
+                self.device_platform = kind.platform();
+            }
             match serialized.active_view {
                 SerializedSidebarView::History => {
                     cx.defer_in(window, |this, window, cx| {

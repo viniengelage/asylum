@@ -1971,11 +1971,7 @@ impl AndroidDeviceManagerModal {
                                 .weight(FontWeight::SEMIBOLD),
                             ),
                     )
-                    .child(
-                        Label::new(package)
-                            .size(LabelSize::XSmall)
-                            .buffer_font(cx),
-                    )
+                    .child(Label::new(package).size(LabelSize::XSmall).buffer_font(cx))
                     .child(
                         Label::new(format!(
                             "Apps, contas e arquivos voltam ao estado de fábrica.{}{}",

@@ -1252,6 +1252,7 @@ async fn test_restore_serialized_archive_view_does_not_panic(cx: &mut TestAppCon
         pinned_agents: Vec::new(),
         agents_section_collapsed: false,
         flows_section_collapsed: false,
+        hidden_device_tabs: Vec::new(),
     })
     .expect("serialization should succeed");
 
@@ -1267,6 +1268,48 @@ async fn test_restore_serialized_archive_view_does_not_panic(cx: &mut TestAppCon
         assert!(
             matches!(sidebar.view, SidebarView::Archive(_)),
             "expected sidebar view to be Archive after restore, got ThreadList"
+        );
+    });
+}
+
+#[gpui::test]
+async fn test_restore_hidden_device_tabs(cx: &mut TestAppContext) {
+    let project = init_test_project_with_agent_panel("/my-project", cx).await;
+    let (multi_workspace, cx) =
+        cx.add_window_view(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+    let (sidebar, _panel) = setup_sidebar_with_agent_panel(&multi_workspace, cx);
+
+    let serialized = |hidden_device_tabs| {
+        serde_json::to_string(&SerializedSidebar {
+            width: None,
+            width_set_by_user: false,
+            active_view: SerializedSidebarView::ThreadList,
+            pinned_agents: Vec::new(),
+            agents_section_collapsed: false,
+            flows_section_collapsed: false,
+            hidden_device_tabs,
+        })
+        .expect("serialization should succeed")
+    };
+
+    let hidden_android = serialized(vec![DeviceInstanceKind::Android]);
+    sidebar.update_in(cx, |sidebar, window, cx| {
+        sidebar.restore_serialized_state(&hidden_android, window, cx);
+    });
+    sidebar.read_with(cx, |sidebar, _cx| {
+        assert_eq!(sidebar.visible_device_tabs(), vec![DeviceInstanceKind::Ios]);
+        assert_eq!(sidebar.device_instance_kind(), DeviceInstanceKind::Ios);
+    });
+
+    // A state that hides every tab would leave an empty header, so it is ignored.
+    let hidden_all = serialized(DeviceInstanceKind::ALL.to_vec());
+    sidebar.update_in(cx, |sidebar, window, cx| {
+        sidebar.restore_serialized_state(&hidden_all, window, cx);
+    });
+    sidebar.read_with(cx, |sidebar, _cx| {
+        assert_eq!(
+            sidebar.visible_device_tabs(),
+            DeviceInstanceKind::ALL.to_vec()
         );
     });
 }

@@ -1477,6 +1477,36 @@ impl AndroidSdkManager {
         })
     }
 
+    pub fn dark_appearance(&self, cx: &App) -> Task<Result<bool>> {
+        let Some(serial) = self.running_serial().map(str::to_string) else {
+            return Task::ready(Err(anyhow!("nenhum emulador Android em execução")));
+        };
+        cx.background_spawn(async move {
+            let output = run_adb(&serial, &["shell", "cmd", "uimode", "night"]).await?;
+            parse_night_mode(&String::from_utf8_lossy(&output))
+        })
+    }
+
+    pub fn set_dark_appearance(&self, dark: bool, cx: &App) -> Task<Result<()>> {
+        let Some(serial) = self.running_serial().map(str::to_string) else {
+            return Task::ready(Err(anyhow!("nenhum emulador Android em execução")));
+        };
+        cx.background_spawn(async move {
+            run_adb(
+                &serial,
+                &[
+                    "shell",
+                    "cmd",
+                    "uimode",
+                    "night",
+                    if dark { "yes" } else { "no" },
+                ],
+            )
+            .await?;
+            Ok(())
+        })
+    }
+
     /// Types `text` into whatever the device has focused, which is what pasting into the
     /// device looks like from the host's side.
     pub fn paste_text(&mut self, text: &str, cx: &mut Context<Self>) {
@@ -3257,6 +3287,16 @@ async fn run_adb(serial: &str, arguments: &[&str]) -> Result<Vec<u8>> {
     Ok(output.stdout)
 }
 
+/// `cmd uimode night` answers `Night mode: yes`, `no`, or `auto`/`custom` when the device
+/// follows a schedule; those count as light because that is what the toggle would switch from.
+fn parse_night_mode(output: &str) -> Result<bool> {
+    let mode = output
+        .trim()
+        .strip_prefix("Night mode:")
+        .with_context(|| format!("resposta inesperada de cmd uimode night: {}", output.trim()))?;
+    Ok(mode.trim() == "yes")
+}
+
 async fn adb_devices(paths: &AndroidPaths) -> Result<Vec<String>> {
     let mut command = smol::process::Command::new(paths.adb());
     command.arg("devices");
@@ -3597,6 +3637,14 @@ id: 60 or "wearos_square"
             diagonal_inches: None,
             resolution: None,
         }
+    }
+
+    #[test]
+    fn parses_night_mode() {
+        assert!(parse_night_mode("Night mode: yes\n").unwrap());
+        assert!(!parse_night_mode("Night mode: no\n").unwrap());
+        assert!(!parse_night_mode("Night mode: auto\n").unwrap());
+        assert!(parse_night_mode("Unknown command").is_err());
     }
 
     #[test]
