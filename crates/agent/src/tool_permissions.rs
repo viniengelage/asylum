@@ -2476,7 +2476,10 @@ pub fn task_agent_permission_decision(
     // so flipping the fallback flips the result.
     if tool_rules.default.is_none()
         && with_allow == ToolPermissionDecision::Allow
-        && matches!(decide(ToolPermissionMode::Deny), ToolPermissionDecision::Deny(_))
+        && matches!(
+            decide(ToolPermissionMode::Deny),
+            ToolPermissionDecision::Deny(_)
+        )
     {
         return None;
     }
@@ -2493,7 +2496,11 @@ mod task_agent_permission_tests {
     use super::*;
     use task_agents::{PermissionMode, ToolPermissionRules};
 
-    fn rules(default: Option<PermissionMode>, allow: &[&str], deny: &[&str]) -> ToolPermissionRules {
+    fn rules(
+        default: Option<PermissionMode>,
+        allow: &[&str],
+        deny: &[&str],
+    ) -> ToolPermissionRules {
         ToolPermissionRules {
             default,
             allow: allow.iter().map(|pattern| pattern.to_string()).collect(),

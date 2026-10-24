@@ -2,10 +2,10 @@
 
 use crate::{
     SendRequest,
-    panel::{tinted_chip, variable_chip},
     collection::{Collection, Exchange},
     config::{self, BodyKind, CaptureRule, FormField, HeaderEntry, ParamEntry, RequestDraft},
     example,
+    panel::{tinted_chip, variable_chip},
     schema::Validation,
     send::{self, HeaderOrigin, REFRESH_TOKEN_VARIABLE, TOKEN_VARIABLE},
     spec::{Operation, ParameterLocation},
@@ -779,7 +779,11 @@ impl ApiRequestView {
             "api-send",
             Some(IconName::Send),
             if sending { "Enviando…" } else { "Enviar" },
-            Some(ui::KeyBinding::for_action_in(&SendRequest, &focus_handle, cx)),
+            Some(ui::KeyBinding::for_action_in(
+                &SendRequest,
+                &focus_handle,
+                cx,
+            )),
             cx,
         )
         .h(px(32.))
@@ -1030,20 +1034,22 @@ impl ApiRequestView {
                         |this, _| this.request_tab = RequestTab::Headers,
                         cx,
                     ))
-                    .child(self.render_tab_button(
-                        "api-tab-body",
-                        if operation
-                            .as_ref()
-                            .is_some_and(|operation| operation.request_body.is_some())
-                        {
-                            "Body".to_string()
-                        } else {
-                            "Body · nenhum".to_string()
-                        },
-                        tab == RequestTab::Body,
-                        |this, _| this.request_tab = RequestTab::Body,
-                        cx,
-                    ))
+                    .child(
+                        self.render_tab_button(
+                            "api-tab-body",
+                            if operation
+                                .as_ref()
+                                .is_some_and(|operation| operation.request_body.is_some())
+                            {
+                                "Body".to_string()
+                            } else {
+                                "Body · nenhum".to_string()
+                            },
+                            tab == RequestTab::Body,
+                            |this, _| this.request_tab = RequestTab::Body,
+                            cx,
+                        ),
+                    )
                     .child(self.render_tab_button(
                         "api-tab-auth",
                         auth_label,
@@ -1252,7 +1258,12 @@ impl ApiRequestView {
 
     /// Shows where an inherited header comes from: the spec at this operation, or the dock's
     /// collection settings.
-    fn open_header_origin(&mut self, origin: &HeaderOrigin, window: &mut Window, cx: &mut Context<Self>) {
+    fn open_header_origin(
+        &mut self,
+        origin: &HeaderOrigin,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if *origin == HeaderOrigin::Spec {
             self.open_in_spec(window, cx);
             return;
@@ -1878,7 +1889,11 @@ impl ApiRequestView {
             .into_any_element()
     }
 
-    fn render_capture_banner(&self, exchange: &Exchange, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn render_capture_banner(
+        &self,
+        exchange: &Exchange,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let pairs: Vec<(String, String)> = match &exchange.login_capture {
             Some(login) => std::iter::once((login.token_path.clone(), TOKEN_VARIABLE.to_string()))
                 .chain(
@@ -1887,9 +1902,13 @@ impl ApiRequestView {
                         .clone()
                         .map(|path| (path, REFRESH_TOKEN_VARIABLE.to_string())),
                 )
-                .chain(exchange.captures.iter().filter(|capture| capture.value.is_some()).map(
-                    |capture| (capture.path.clone(), capture.variable.clone()),
-                ))
+                .chain(
+                    exchange
+                        .captures
+                        .iter()
+                        .filter(|capture| capture.value.is_some())
+                        .map(|capture| (capture.path.clone(), capture.variable.clone())),
+                )
                 .collect(),
             None => exchange
                 .captures
@@ -1949,11 +1968,7 @@ impl ApiRequestView {
                     h_flex()
                         .flex_none()
                         .gap_1p5()
-                        .child(
-                            Label::new(path)
-                                .size(LabelSize::XSmall)
-                                .buffer_font(cx),
-                        )
+                        .child(Label::new(path).size(LabelSize::XSmall).buffer_font(cx))
                         .child(Label::new("→").size(LabelSize::XSmall).color(Color::Muted))
                         .child(variable_chip(format!("{{{{{variable}}}}}"), cx))
                 }))
@@ -2656,7 +2671,11 @@ fn render_validation(
     // The response side only knows the schema's name, the request side its whole `$ref`.
     let (schema, location) = match schema_reference {
         Some(reference) if reference.starts_with('#') => (
-            reference.rsplit('/').next().unwrap_or(reference).to_string(),
+            reference
+                .rsplit('/')
+                .next()
+                .unwrap_or(reference)
+                .to_string(),
             Some(reference.trim_start_matches("#/").to_string()),
         ),
         Some(name) => (name.to_string(), None),
@@ -2682,11 +2701,7 @@ fn render_validation(
                     .size(LabelSize::XSmall)
                     .color(Color::Muted),
             )
-            .child(
-                Label::new(schema)
-                    .size(LabelSize::XSmall)
-                    .buffer_font(cx),
-            )
+            .child(Label::new(schema).size(LabelSize::XSmall).buffer_font(cx))
             .when_some(location, |this, location| {
                 this.child(
                     Label::new(format!("· {location}"))

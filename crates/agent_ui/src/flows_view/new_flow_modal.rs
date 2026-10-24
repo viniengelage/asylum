@@ -2,7 +2,6 @@
 //! request), the request, its name and where it is saved.
 
 use super::FlowView;
-use ui::{primary_button, secondary_button, segment_option};
 use editor::Editor;
 use flows::{
     AgentStep, Criterion, Flow, FlowSource, FlowStep, GateStep, OnFail, RunStep, StepKind, Verifier,
@@ -13,6 +12,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use task_agents::TaskAgent;
 use ui::{KeyBinding, Tooltip, prelude::*};
+use ui::{primary_button, secondary_button, segment_option};
 use util::ResultExt as _;
 use workspace::{ModalView, Workspace};
 

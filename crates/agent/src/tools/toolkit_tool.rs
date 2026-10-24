@@ -134,18 +134,20 @@ impl AnyAgentTool for ToolkitToolAdapter {
             for content in &output.content {
                 match content {
                     ToolkitContent::Text(text) => {
-                        tool_call_content.push(acp::ToolCallContent::Content(Box::new(acp::Content::new(
-                            acp::ContentBlock::Text(acp::TextContent::new(text.clone())),
-                        ))));
+                        tool_call_content.push(acp::ToolCallContent::Content(Box::new(
+                            acp::Content::new(acp::ContentBlock::Text(acp::TextContent::new(
+                                text.clone(),
+                            ))),
+                        )));
                         llm_output.push(LanguageModelToolResultContent::Text(text.as_str().into()));
                     }
                     ToolkitContent::Image { base64_png } => {
-                        tool_call_content.push(acp::ToolCallContent::Content(Box::new(acp::Content::new(
-                            acp::ContentBlock::Image(acp::ImageContent::new(
+                        tool_call_content.push(acp::ToolCallContent::Content(Box::new(
+                            acp::Content::new(acp::ContentBlock::Image(acp::ImageContent::new(
                                 base64_png.clone(),
                                 "image/png",
-                            )),
-                        ))));
+                            ))),
+                        )));
                         let image = cx
                             .background_spawn({
                                 let base64_png = base64_png.clone();

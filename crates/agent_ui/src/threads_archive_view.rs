@@ -18,9 +18,9 @@ use editor::Editor;
 use fs::Fs;
 use fuzzy::{StringMatch, StringMatchCandidate};
 use gpui::{
-    AnyElement, App, Context, DismissEvent, Entity, EventEmitter, FocusHandle,
-    Focusable, ListState, Render, SharedString, Subscription, Task, TaskExt, WeakEntity, Window,
-    list, prelude::*, px,
+    AnyElement, App, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable,
+    ListState, Render, SharedString, Subscription, Task, TaskExt, WeakEntity, Window, list,
+    prelude::*, px,
 };
 use itertools::Itertools as _;
 use menu::{Confirm, SelectFirst, SelectLast, SelectNext, SelectPrevious};
@@ -871,32 +871,29 @@ impl ThreadsArchiveView {
             cx,
         );
 
-        v_flex()
-            .flex_none()
-            .children(window_controls)
-            .child(
-                HeaderBar::new("archive-search-header")
-                    .start_child(
-                        Icon::new(IconName::MagnifyingGlass)
-                            .size(IconSize::Small)
-                            .color(Color::Muted),
+        v_flex().flex_none().children(window_controls).child(
+            HeaderBar::new("archive-search-header")
+                .start_child(
+                    Icon::new(IconName::MagnifyingGlass)
+                        .size(IconSize::Small)
+                        .color(Color::Muted),
+                )
+                .child(self.filter_editor.clone())
+                .when(show_focus_keybinding, |this| {
+                    this.end_child(KeyBinding::for_action(&FocusSidebarFilter, cx))
+                })
+                .when(has_query, |this| {
+                    this.end_child(
+                        IconButton::new("clear-filter", IconName::Close)
+                            .icon_size(IconSize::Small)
+                            .tooltip(Tooltip::text("Clear Search"))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.reset_filter_editor_text(window, cx);
+                                this.update_items(cx);
+                            })),
                     )
-                    .child(self.filter_editor.clone())
-                    .when(show_focus_keybinding, |this| {
-                        this.end_child(KeyBinding::for_action(&FocusSidebarFilter, cx))
-                    })
-                    .when(has_query, |this| {
-                        this.end_child(
-                            IconButton::new("clear-filter", IconName::Close)
-                                .icon_size(IconSize::Small)
-                                .tooltip(Tooltip::text("Clear Search"))
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.reset_filter_editor_text(window, cx);
-                                    this.update_items(cx);
-                                })),
-                        )
-                    }),
-            )
+                }),
+        )
     }
 
     fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {

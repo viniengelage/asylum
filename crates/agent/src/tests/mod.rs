@@ -481,7 +481,9 @@ async fn test_terminal_tool_without_timeout_kills_idle_handle(cx: &mut TestAppCo
         "expected the terminal to be killed after its output stayed the same"
     );
 
-    let result = task.await.expect("terminal tool should return the captured output");
+    let result = task
+        .await
+        .expect("terminal tool should return the captured output");
     assert!(
         result.contains("stopped automatically") && result.contains("partial output"),
         "expected the automatic stop note and the output, got: {result}"
