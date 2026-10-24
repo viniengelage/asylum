@@ -14156,6 +14156,74 @@ impl ThreadView {
         )
     }
 
+    /// Tells the user that the task agent of this thread runs without toolkits it lists,
+    /// because the profile or the project turned them off.
+    fn render_disabled_toolkits_callout(&self, cx: &mut Context<Self>) -> Option<Callout> {
+        let thread = self.as_native_thread(cx)?;
+        let agent = thread.read(cx).task_agent()?.clone();
+        let project = self.project.upgrade()?;
+        let disabled = task_agents::disabled_toolkit_names(&project, cx);
+        let missing = agent
+            .toolkits
+            .iter()
+            .filter_map(|id| {
+                disabled
+                    .get(id.as_str())
+                    .map(|name| (SharedString::from(id.clone()), name.clone()))
+            })
+            .collect::<Vec<_>>();
+        if missing.is_empty() {
+            return None;
+        }
+        let names = missing
+            .iter()
+            .map(|(_, name)| name.as_ref())
+            .collect::<Vec<_>>()
+            .join(", ");
+        // A project's `.zed/settings.json` is what turned it off there; writing to the profile
+        // would not bring it back.
+        let off_in_profile = missing
+            .iter()
+            .filter(|(id, _)| task_agents::toolkit_project_override(id, &project, cx).is_none())
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>();
+        let description = if off_in_profile.len() == missing.len() {
+            "O agente roda sem as ferramentas e as menções desses toolkits. O perfil vence a lista de toolkits do agente."
+        } else {
+            "O agente roda sem as ferramentas e as menções desses toolkits. O .zed/settings.json deste projeto desliga pelo menos um deles."
+        };
+        Some(
+            Callout::new()
+                .severity(Severity::Warning)
+                .icon(IconName::Warning)
+                .title(format!(
+                    "/{} usa {names}, desligado neste perfil",
+                    agent.command
+                ))
+                .description(description)
+                .border_position(self.callout_border_position())
+                .when(!off_in_profile.is_empty(), |callout| {
+                    callout.actions_slot(
+                        Button::new("enable-task-agent-toolkits", "Ligar no perfil")
+                            .label_size(LabelSize::Small)
+                            .style(ButtonStyle::Filled)
+                            .on_click(move |_, _, cx| {
+                                let off_in_profile = off_in_profile.clone();
+                                let fs = project.read(cx).fs().clone();
+                                update_settings_file(fs, cx, move |settings, _| {
+                                    for id in &off_in_profile {
+                                        settings
+                                            .project
+                                            .agent_toolkits
+                                            .insert(id.as_ref().into(), true);
+                                    }
+                                });
+                            }),
+                    )
+                }),
+        )
+    }
+
     fn render_new_version_callout(&self, version: &SharedString, cx: &mut Context<Self>) -> Div {
         let server_view = self.server_view.clone();
         let has_version = !version.is_empty();
@@ -14869,6 +14937,7 @@ impl Render for ThreadView {
             )
             .child(conversation)
             .children(self.render_multi_root_callout(cx))
+            .children(self.render_disabled_toolkits_callout(cx))
             .children(activity_bar)
             .when_some(
                 self.render_recoverable_submissions(cx),

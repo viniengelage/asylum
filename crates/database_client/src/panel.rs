@@ -2187,6 +2187,10 @@ impl Focusable for DatabasePanel {
 impl EventEmitter<PanelEvent> for DatabasePanel {}
 
 impl Panel for DatabasePanel {
+    fn enabled(&self, cx: &App) -> bool {
+        task_agents::toolkit_enabled(task_agents::toolkit_ids::DATABASE, &self.project, cx)
+    }
+
     fn persistent_name() -> &'static str {
         "DatabasePanel"
     }

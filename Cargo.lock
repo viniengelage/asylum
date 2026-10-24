@@ -3188,6 +3188,7 @@ dependencies = [
  "schemars 1.0.4",
  "serde",
  "serde_json",
+ "settings",
  "task_agents",
  "thiserror 2.0.17",
  "ui",
@@ -7569,6 +7570,7 @@ dependencies = [
  "schemars 1.0.4",
  "serde",
  "serde_json",
+ "settings",
  "task_agents",
  "ui",
  "ui_input",
@@ -15721,6 +15723,7 @@ dependencies = [
  "schemars 1.0.4",
  "serde",
  "serde_json",
+ "settings",
  "task_agents",
  "thiserror 2.0.17",
  "ui",
@@ -18528,6 +18531,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "collections",
  "fs",
  "futures 0.3.34",
  "gpui",
@@ -18539,6 +18543,8 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml_ng",
+ "settings",
+ "util",
 ]
 
 [[package]]
@@ -23378,6 +23384,7 @@ dependencies = [
  "system_specs",
  "tab_switcher",
  "tabular_data_preview",
+ "task_agents",
  "tasks_ui",
  "telemetry",
  "telemetry_events",

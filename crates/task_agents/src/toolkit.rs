@@ -1,13 +1,115 @@
 use anyhow::Result;
 use base64::Engine as _;
+use collections::{HashMap, HashSet};
 use gpui::{App, Entity, Global, SharedString, Task, Window};
 use project::Project;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use settings::{RegisterSetting, Settings, SettingsLocation};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
+use util::rel_path::RelPath;
+
+/// The ids the toolkits register under, which `agent_toolkits` in the settings is keyed by.
+pub mod toolkit_ids {
+    pub const API: &str = "api";
+    pub const BROWSER: &str = "browser";
+    pub const CLICKUP: &str = "clickup";
+    pub const DATABASE: &str = "database";
+    pub const DEVICES: &str = "devices";
+    pub const ELASTIC: &str = "elastic";
+    pub const GITHUB_PROJECTS: &str = "github_projects";
+    pub const REPO: &str = "repo";
+}
+
+/// `agent_toolkits` from the settings: which toolkits are on.
+#[derive(Clone, Debug, Default, RegisterSetting)]
+pub struct AgentToolkitSettings {
+    toolkits: HashMap<Arc<str>, bool>,
+}
+
+impl Settings for AgentToolkitSettings {
+    fn from_settings(content: &settings::SettingsContent) -> Self {
+        Self {
+            toolkits: content.project.agent_toolkits.clone(),
+        }
+    }
+}
+
+impl AgentToolkitSettings {
+    pub fn is_enabled(&self, toolkit_id: &str) -> bool {
+        self.toolkits.get(toolkit_id).copied().unwrap_or(true)
+    }
+}
+
+/// Whether the toolkit is on in the profile's own settings, before any project weighs in.
+pub fn toolkit_enabled_in_profile(toolkit_id: &str, cx: &App) -> bool {
+    AgentToolkitSettings::get_global(cx).is_enabled(toolkit_id)
+}
+
+/// `Some` when a folder of `project` turns the toolkit on or off against the profile, through
+/// its `.zed/settings.json`. With several folders, the first one that disagrees wins.
+pub fn toolkit_project_override(
+    toolkit_id: &str,
+    project: &Entity<Project>,
+    cx: &App,
+) -> Option<bool> {
+    let in_profile = toolkit_enabled_in_profile(toolkit_id, cx);
+    project
+        .read(cx)
+        .visible_worktrees(cx)
+        .map(|worktree| {
+            let location = SettingsLocation {
+                worktree_id: worktree.read(cx).id(),
+                path: RelPath::empty(),
+            };
+            AgentToolkitSettings::get(Some(location), cx).is_enabled(toolkit_id)
+        })
+        .find(|enabled| *enabled != in_profile)
+}
+
+/// Whether the agent, the status bar and the docks of `project` get the toolkit.
+pub fn toolkit_enabled(toolkit_id: &str, project: &Entity<Project>, cx: &App) -> bool {
+    toolkit_project_override(toolkit_id, project, cx)
+        .unwrap_or_else(|| toolkit_enabled_in_profile(toolkit_id, cx))
+}
+
+/// The registered toolkits that are off for `project`.
+pub fn disabled_toolkit_ids(project: &Entity<Project>, cx: &App) -> HashSet<SharedString> {
+    toolkits(cx)
+        .into_iter()
+        .filter(|toolkit| !toolkit_enabled(&toolkit.id, project, cx))
+        .map(|toolkit| toolkit.id.clone())
+        .collect()
+}
+
+/// The registered toolkits that are off for `project`, by id, with their names.
+pub fn disabled_toolkit_names(
+    project: &Entity<Project>,
+    cx: &App,
+) -> HashMap<SharedString, SharedString> {
+    toolkits(cx)
+        .into_iter()
+        .filter(|toolkit| !toolkit_enabled(&toolkit.id, project, cx))
+        .map(|toolkit| (toolkit.id.clone(), toolkit.name.clone()))
+        .collect()
+}
+
+/// What to tell someone who reaches for a toolkit that is off, e.g. through its shortcut.
+pub fn toolkit_disabled_message(name: &str) -> String {
+    format!("{name} está desligado neste perfil. Ligue em Gerenciar perfis → Toolkit do agente.")
+}
+
+fn toolkit_disabled_error(toolkit_id: &str, cx: &App) -> anyhow::Error {
+    let name = toolkits(cx)
+        .into_iter()
+        .find(|toolkit| toolkit.id == toolkit_id)
+        .map(|toolkit| toolkit.name.to_string())
+        .unwrap_or_else(|| toolkit_id.to_string());
+    anyhow::anyhow!(toolkit_disabled_message(&name))
+}
 
 /// Whether a tool only looks at things or changes them. Acting tools go through the tool
 /// permission prompt; reading tools run without asking.
@@ -194,6 +296,8 @@ pub struct Toolkit {
     pub description: SharedString,
     /// An `IconName` in snake case, resolved by the UI.
     pub icon: SharedString,
+    /// The `@` mention the toolkit offers in the composer, e.g. "@PR", if any.
+    pub mention: Option<SharedString>,
     pub tools: Vec<ToolkitTool>,
 }
 
@@ -261,12 +365,18 @@ pub fn register_sql_editor_source(source: SqlEditorSource, cx: &mut App) {
 }
 
 pub fn sql_editor_tabs(project: &Entity<Project>, cx: &App) -> Vec<SqlEditorTab> {
+    if !toolkit_enabled(toolkit_ids::DATABASE, project, cx) {
+        return Vec::new();
+    }
     cx.try_global::<SqlEditorSource>()
         .map(|source| (source.list)(project, cx))
         .unwrap_or_default()
 }
 
 pub fn describe_sql_editor(project: &Entity<Project>, abs_path: &Path, cx: &App) -> Result<String> {
+    if !toolkit_enabled(toolkit_ids::DATABASE, project, cx) {
+        return Err(toolkit_disabled_error(toolkit_ids::DATABASE, cx));
+    }
     let source = cx
         .try_global::<SqlEditorSource>()
         .ok_or_else(|| anyhow::anyhow!("This build has no database client."))?;
@@ -340,6 +450,9 @@ pub fn register_log_source(source: LogSource, cx: &mut App) {
 }
 
 pub fn log_mentions(project: &Entity<Project>, cx: &App) -> Vec<LogMention> {
+    if !toolkit_enabled(toolkit_ids::ELASTIC, project, cx) {
+        return Vec::new();
+    }
     cx.try_global::<LogSource>()
         .map(|source| (source.list)(project, cx))
         .unwrap_or_default()
@@ -350,6 +463,9 @@ pub fn describe_log_mention(
     id: &str,
     cx: &mut App,
 ) -> Task<Result<String>> {
+    if !toolkit_enabled(toolkit_ids::ELASTIC, project, cx) {
+        return Task::ready(Err(toolkit_disabled_error(toolkit_ids::ELASTIC, cx)));
+    }
     match cx.try_global::<LogSource>() {
         Some(source) => {
             let describe = source.describe.clone();
@@ -566,6 +682,9 @@ pub fn register_pull_request_source(source: PullRequestSource, cx: &mut App) {
 }
 
 pub fn pull_requests(project: &Entity<Project>, cx: &App) -> Vec<PullRequestEntry> {
+    if !toolkit_enabled(toolkit_ids::REPO, project, cx) {
+        return Vec::new();
+    }
     cx.try_global::<PullRequestSource>()
         .map(|source| (source.list)(project, cx))
         .unwrap_or_default()
@@ -576,6 +695,9 @@ pub fn describe_pull_request(
     reference: PullRequestReference,
     cx: &mut App,
 ) -> Task<Result<String>> {
+    if !toolkit_enabled(toolkit_ids::REPO, project, cx) {
+        return Task::ready(Err(toolkit_disabled_error(toolkit_ids::REPO, cx)));
+    }
     match cx.try_global::<PullRequestSource>() {
         Some(source) => {
             let describe = source.describe.clone();
@@ -681,6 +803,9 @@ pub fn register_project_item_source(source: ProjectItemSource, cx: &mut App) {
 }
 
 pub fn project_items(project: &Entity<Project>, cx: &App) -> Vec<ProjectItemEntry> {
+    if !toolkit_enabled(toolkit_ids::GITHUB_PROJECTS, project, cx) {
+        return Vec::new();
+    }
     cx.try_global::<ProjectItemSource>()
         .map(|source| (source.list)(project, cx))
         .unwrap_or_default()
@@ -692,6 +817,12 @@ pub fn describe_project_item(
     item_id: String,
     cx: &mut App,
 ) -> Task<Result<String>> {
+    if !toolkit_enabled(toolkit_ids::GITHUB_PROJECTS, project, cx) {
+        return Task::ready(Err(toolkit_disabled_error(
+            toolkit_ids::GITHUB_PROJECTS,
+            cx,
+        )));
+    }
     match cx.try_global::<ProjectItemSource>() {
         Some(source) => {
             let describe = source.describe.clone();
@@ -797,6 +928,54 @@ pub fn run_github_step(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fs::FakeFs;
+    use gpui::{TestAppContext, UpdateGlobal as _};
+    use settings::SettingsStore;
+    use util::path;
+
+    #[gpui::test]
+    async fn test_project_settings_override_the_profile(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let settings_store = SettingsStore::test(cx);
+            cx.set_global(settings_store);
+        });
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree(
+            path!("/app"),
+            serde_json::json!({
+                ".zed": { "settings.json": r#"{ "agent_toolkits": { "elastic": true } }"# },
+                "main.rs": "",
+            }),
+        )
+        .await;
+        let project = Project::test(fs, [path!("/app").as_ref()], cx).await;
+        cx.run_until_parked();
+
+        cx.update(|cx| {
+            assert!(toolkit_enabled(toolkit_ids::CLICKUP, &project, cx));
+            assert_eq!(
+                toolkit_project_override(toolkit_ids::ELASTIC, &project, cx),
+                None
+            );
+
+            SettingsStore::update_global(cx, |store, cx| {
+                store.update_user_settings(cx, |content| {
+                    let toolkits = &mut content.project.agent_toolkits;
+                    toolkits.insert(toolkit_ids::CLICKUP.into(), false);
+                    toolkits.insert(toolkit_ids::ELASTIC.into(), false);
+                });
+            });
+
+            assert!(!toolkit_enabled_in_profile(toolkit_ids::CLICKUP, cx));
+            assert!(!toolkit_enabled(toolkit_ids::CLICKUP, &project, cx));
+            assert!(!toolkit_enabled_in_profile(toolkit_ids::ELASTIC, cx));
+            assert_eq!(
+                toolkit_project_override(toolkit_ids::ELASTIC, &project, cx),
+                Some(true)
+            );
+            assert!(toolkit_enabled(toolkit_ids::ELASTIC, &project, cx));
+        });
+    }
 
     #[test]
     fn test_screenshot_scale() {

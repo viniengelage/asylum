@@ -33,7 +33,8 @@ use std::any::TypeId;
 use ui::{Tooltip, prelude::*};
 use util::ResultExt as _;
 use workspace::{
-    HideStatusItem, ItemHandle, SaveIntent, StatusItemView, Workspace, dock::StatusBarButton,
+    HideStatusItem, ItemHandle, SaveIntent, StatusItemView, Toast, Workspace,
+    dock::StatusBarButton, notifications::NotificationId,
 };
 
 actions!(
@@ -195,6 +196,9 @@ pub fn init(cx: &mut App) {
             toggle_focus(workspace, window, cx);
         });
         workspace.register_action(|workspace, _: &NewQuery, window, cx| {
+            if !toolkit_allowed(workspace, cx) {
+                return;
+            }
             open(workspace, window, cx);
             if let Some(panel) = workspace.panel::<DatabasePanel>(cx) {
                 panel.update(cx, |panel, cx| panel.new_query(window, cx));
@@ -213,12 +217,18 @@ pub fn init(cx: &mut App) {
             let Some(path) = path else {
                 return;
             };
+            if !toolkit_allowed(workspace, cx) {
+                return;
+            }
             open(workspace, window, cx);
             if let Some(panel) = workspace.panel::<DatabasePanel>(cx) {
                 panel.update(cx, |panel, cx| panel.open_query(path, window, cx));
             }
         });
         workspace.register_action(|workspace, _: &NewConnection, window, cx| {
+            if !toolkit_allowed(workspace, cx) {
+                return;
+            }
             open(workspace, window, cx);
             if let Some(panel) = workspace.panel::<DatabasePanel>(cx) {
                 connect_view::open_in(workspace, panel, connect_view::Prefill::New, window, cx);
@@ -304,9 +314,28 @@ fn open_asylum_sql_as_query(
     });
 }
 
+/// Whether the Banco toolkit is on for this workspace's project; says so when it isn't.
+fn toolkit_allowed(workspace: &mut Workspace, cx: &mut Context<Workspace>) -> bool {
+    if task_agents::toolkit_enabled(task_agents::toolkit_ids::DATABASE, workspace.project(), cx) {
+        return true;
+    }
+    workspace.show_toast(
+        Toast::new(
+            NotificationId::unique::<DatabasePanel>(),
+            task_agents::toolkit_disabled_message("Banco"),
+        )
+        .autohide(),
+        cx,
+    );
+    false
+}
+
 /// Adds the panel the first time it is asked for, so projects without a database don't get a
 /// tab.
 pub fn open(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
+    if !toolkit_allowed(workspace, cx) {
+        return;
+    }
     if workspace.panel::<DatabasePanel>(cx).is_none() {
         let panel = cx.new(|cx| DatabasePanel::new(workspace, window, cx));
         workspace.add_panel(panel, window, cx);
@@ -315,6 +344,9 @@ pub fn open(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Wor
 }
 
 fn toggle_focus(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
+    if !toolkit_allowed(workspace, cx) {
+        return;
+    }
     if workspace.panel::<DatabasePanel>(cx).is_none() {
         open(workspace, window, cx);
         return;
@@ -377,6 +409,16 @@ impl Render for DatabaseToolkitButton {
 }
 
 impl StatusItemView for DatabaseToolkitButton {
+    fn is_hidden(&self, cx: &App) -> bool {
+        self.workspace.upgrade().is_some_and(|workspace| {
+            !task_agents::toolkit_enabled(
+                task_agents::toolkit_ids::DATABASE,
+                workspace.read(cx).project(),
+                cx,
+            )
+        })
+    }
+
     fn set_active_pane_item(
         &mut self,
         _active_pane_item: Option<&dyn ItemHandle>,

@@ -469,6 +469,19 @@ struct ProfileSummary {
     git_name: Option<String>,
     #[serde(default)]
     git_email: Option<String>,
+    #[serde(default)]
+    agent_toolkits: Vec<ToolkitSummary>,
+}
+
+/// A toolkit of the agent and whether the profile has it on, before any project weighs in.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+struct ToolkitSummary {
+    id: String,
+    name: String,
+    /// An `IconName` in snake case.
+    icon: String,
+    detail: String,
+    enabled: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -511,6 +524,29 @@ fn mcp_server_detail(settings: &ContextServerSettings) -> String {
         ContextServerSettings::Http { url, .. } => url.clone(),
         ContextServerSettings::Extension { .. } => "extensão".to_string(),
     }
+}
+
+fn toolkit_summaries(cx: &App) -> Vec<ToolkitSummary> {
+    task_agents::toolkits(cx)
+        .iter()
+        .map(|toolkit| {
+            let tool_count = toolkit.tools.len();
+            let mut detail = format!(
+                "{tool_count} ferramenta{}",
+                if tool_count == 1 { "" } else { "s" }
+            );
+            if let Some(mention) = &toolkit.mention {
+                detail.push_str(&format!(" · menção {mention}"));
+            }
+            ToolkitSummary {
+                id: toolkit.id.to_string(),
+                name: toolkit.name.to_string(),
+                icon: toolkit.icon.to_string(),
+                detail,
+                enabled: task_agents::toolkit_enabled_in_profile(&toolkit.id, cx),
+            }
+        })
+        .collect()
 }
 
 fn mcp_server_summaries(cx: &App) -> Vec<McpServerSummary> {
@@ -642,6 +678,7 @@ impl ProfileStore {
             git_committer: self.git_committer.clone(),
             git_name: self.git_identity.name.clone(),
             git_email: self.git_identity.email.clone(),
+            agent_toolkits: toolkit_summaries(cx),
         }
     }
 
@@ -1639,6 +1676,8 @@ impl ManageProfilesModal {
         });
         let subscriptions = vec![
             cx.observe(&store, |_, _, cx| cx.notify()),
+            // The toolkit switches write the settings; the card reads them back live.
+            cx.observe_global::<SettingsStore>(|_, cx| cx.notify()),
             cx.subscribe(&name_editor, |this, _, event: &EditorEvent, cx| {
                 if matches!(event, EditorEvent::Blurred) {
                     this.save_name(cx);
@@ -2496,6 +2535,133 @@ impl ManageProfilesModal {
         (!rows.is_empty()).then(|| Self::render_card("INTEGRAÇÕES", None, rows, None, cx))
     }
 
+    fn render_toolkits_card(
+        &self,
+        summary: &ProfileSummary,
+        is_active: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<impl IntoElement> {
+        if summary.agent_toolkits.is_empty() {
+            return None;
+        }
+        let project = is_active
+            .then(|| self.workspace.upgrade())
+            .flatten()
+            .map(|workspace| workspace.read(cx).project().clone());
+        let mut enabled_count = 0;
+        let mut rows: Vec<AnyElement> = summary
+            .agent_toolkits
+            .iter()
+            .enumerate()
+            .map(|(index, toolkit)| {
+                // In this window, a project's `.zed/settings.json` can disagree with the profile.
+                let project_override = project.as_ref().and_then(|project| {
+                    task_agents::toolkit_project_override(&toolkit.id, project, cx)
+                });
+                let enabled = project_override.unwrap_or(toolkit.enabled);
+                if enabled {
+                    enabled_count += 1;
+                }
+                let icon = toolkit
+                    .icon
+                    .parse::<IconName>()
+                    .unwrap_or(IconName::Wrench);
+                let detail: SharedString = match project_override {
+                    Some(enabled) => format!(
+                        "{} por .zed/settings.json deste projeto · perfil: {}",
+                        if enabled { "ligado" } else { "desligado" },
+                        if toolkit.enabled { "ligado" } else { "desligado" },
+                    )
+                    .into(),
+                    None if enabled => toolkit.detail.clone().into(),
+                    None => "fora do agente, da status bar e do @".into(),
+                };
+                let trailing = if is_active {
+                    let switch = Switch::new(
+                        ("toolkit-toggle", index),
+                        if enabled {
+                            ToggleState::Selected
+                        } else {
+                            ToggleState::Unselected
+                        },
+                    );
+                    let switch = if project_override.is_some() {
+                        // Switching the profile here would be undone by the project the moment
+                        // it is saved, so the switch takes the user to the file that decides.
+                        switch.on_click(|_, window, cx| {
+                            window.dispatch_action(Box::new(zed_actions::OpenProjectSettings), cx)
+                        })
+                    } else {
+                        let toolkit_id = toolkit.id.clone();
+                        switch.on_click(cx.listener(move |this, state: &ToggleState, _, cx| {
+                            this.set_toolkit_enabled(
+                                toolkit_id.clone(),
+                                *state == ToggleState::Selected,
+                                cx,
+                            )
+                        }))
+                    };
+                    h_flex()
+                        .gap_2()
+                        .when(project_override.is_some(), |this| {
+                            this.child(
+                                Label::new("projeto")
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Accent),
+                            )
+                        })
+                        .child(switch)
+                        .into_any_element()
+                } else {
+                    Self::render_status(if enabled { "ligado" } else { "desligado" }, enabled)
+                };
+                Self::render_row(
+                    icon,
+                    if enabled { Color::Default } else { Color::Muted },
+                    toolkit.name.clone(),
+                    Some(detail),
+                    Some(trailing),
+                    false,
+                    cx,
+                )
+            })
+            .collect();
+        rows.push(Self::render_row(
+            IconName::Info,
+            Color::Muted,
+            "Vale para todo projeto aberto neste perfil",
+            Some("Um projeto pode sobrescrever em .zed/settings.json".into()),
+            None,
+            false,
+            cx,
+        ));
+        let total = summary.agent_toolkits.len();
+        let count = Label::new(format!("{enabled_count} de {total} ligados"))
+            .size(LabelSize::XSmall)
+            .color(Color::Muted)
+            .into_any_element();
+        Some(Self::render_card(
+            "TOOLKIT DO AGENTE",
+            Some(count),
+            rows,
+            None,
+            cx,
+        ))
+    }
+
+    fn set_toolkit_enabled(&self, toolkit_id: String, enabled: bool, cx: &mut Context<Self>) {
+        let fs = <dyn Fs>::global(cx);
+        settings::update_settings_file(fs, cx, move |settings, _| {
+            let toolkits = &mut settings.project.agent_toolkits;
+            // Leaving the key out means on, so the file only names what was turned off.
+            if enabled {
+                toolkits.remove(toolkit_id.as_str());
+            } else {
+                toolkits.insert(toolkit_id.as_str().into(), false);
+            }
+        });
+    }
+
     fn render_folders_card(
         &self,
         profile: &AppProfile,
@@ -2676,6 +2842,7 @@ impl ManageProfilesModal {
                     .min_w_0()
                     .gap_3()
                     .child(self.render_mcp_card(summary, is_active, cx))
+                    .children(self.render_toolkits_card(summary, is_active, cx))
                     .children(self.render_integrations_card(summary, is_active, cx))
                     .child(self.render_folders_card(profile, cx))
                     .into_any_element(),

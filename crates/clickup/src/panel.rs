@@ -20,6 +20,7 @@ use ui::{
 };
 use ui_input::{ErasedEditorEvent, InputField};
 use util::ResultExt as _;
+use project::Project;
 use workspace::dock::{DockPosition, Panel, PanelEvent};
 use workspace::{OpenOptions, Workspace};
 
@@ -66,6 +67,9 @@ pub struct ClickUpPanel {
     open_task: Option<OpenTask>,
     /// Images attached to comments, keyed by URL, as downloaded to the local cache.
     comment_images: HashMap<String, CommentImage>,
+    /// Only for checking whether the ClickUp toolkit is on, which can't read the workspace while
+    /// the dock asks from inside a workspace update.
+    project: Entity<Project>,
     workspace: WeakEntity<Workspace>,
     _timer_tick: Task<()>,
     _subscriptions: Vec<Subscription>,
@@ -96,6 +100,7 @@ const DESCRIPTION_PREVIEW_CHARS: usize = 280;
 impl ClickUpPanel {
     pub(crate) fn new(
         store: Entity<ClickUpStore>,
+        project: Entity<Project>,
         workspace: WeakEntity<Workspace>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -149,6 +154,7 @@ impl ClickUpPanel {
             collapsed_groups: HashSet::default(),
             open_task: None,
             comment_images: HashMap::default(),
+            project,
             workspace,
             // Keeps the running timer's clock moving; nothing redraws while none is running.
             _timer_tick: cx.spawn(async move |this, cx| {
@@ -2335,6 +2341,10 @@ impl EventEmitter<PanelEvent> for ClickUpPanel {}
 impl Panel for ClickUpPanel {
     fn persistent_name() -> &'static str {
         "ClickUpPanel"
+    }
+
+    fn enabled(&self, cx: &App) -> bool {
+        task_agents::toolkit_enabled(task_agents::toolkit_ids::CLICKUP, &self.project, cx)
     }
 
     fn panel_key() -> &'static str {

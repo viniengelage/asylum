@@ -11,8 +11,8 @@ use collections::HashSet;
 use editor::Editor;
 use fs::Fs;
 use gpui::{
-    Action as _, AnyElement, Div, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
-    Pixels, Stateful, Subscription, Task, WeakEntity, px, uniform_list,
+    Action as _, AnyElement, Div, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Pixels,
+    Stateful, Subscription, Task, WeakEntity, px, uniform_list,
 };
 use project::Project;
 use std::{
@@ -148,9 +148,8 @@ impl ApiPanel {
             }
         }));
         if let Some(workspace_entity) = workspace.weak_handle().upgrade() {
-            subscriptions.push(cx.subscribe(
-                &workspace_entity,
-                |this, workspace, event, cx| {
+            subscriptions.push(
+                cx.subscribe(&workspace_entity, |this, workspace, event, cx| {
                     if matches!(event, workspace::Event::ActiveItemChanged) {
                         let active_request = workspace
                             .read(cx)
@@ -165,8 +164,8 @@ impl ApiPanel {
                             cx.notify();
                         }
                     }
-                },
-            ));
+                }),
+            );
         }
         let mut this = Self {
             workspace: workspace.weak_handle(),
@@ -604,7 +603,12 @@ impl ApiPanel {
                     .is_some_and(|(open, saved)| *open == key && saved.is_none());
                 mark(base, selected)
                     .pl(px(36.))
-                    .child(div().flex_none().w(px(44.)).child(method_label(&method, cx)))
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(44.))
+                            .child(method_label(&method, cx)),
+                    )
                     .child(
                         h_flex()
                             .flex_1()
@@ -661,7 +665,12 @@ impl ApiPanel {
                     .is_some_and(|(_, saved)| saved.as_deref() == Some(id.as_str()));
                 mark(base, selected)
                     .pl(px(36.))
-                    .child(div().flex_none().w(px(44.)).child(method_label(&method, cx)))
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(44.))
+                            .child(method_label(&method, cx)),
+                    )
                     .child(
                         div()
                             .flex_1()
@@ -1110,9 +1119,19 @@ impl ApiPanel {
         let row_count = rows.len();
         v_flex()
             .size_full()
-            .child(div().px_3().pt_3().child(self.render_header(collection, cx)))
+            .child(
+                div()
+                    .px_3()
+                    .pt_3()
+                    .child(self.render_header(collection, cx)),
+            )
             .child(div().px_3().pt_3().child(self.filter_input.clone()))
-            .child(div().px_3().pt_3().child(self.render_auth_card(collection, cx)))
+            .child(
+                div()
+                    .px_3()
+                    .pt_3()
+                    .child(self.render_auth_card(collection, cx)),
+            )
             .when_some(file_error.or(spec_error), |this, error| {
                 this.child(
                     h_flex()
@@ -1369,8 +1388,16 @@ impl ApiPanel {
                     v_flex()
                         .flex_1()
                         .min_w_0()
-                        .child(Label::new(title).size(LabelSize::Small).weight(FontWeight::MEDIUM))
-                        .child(Label::new(detail).size(LabelSize::XSmall).color(Color::Muted)),
+                        .child(
+                            Label::new(title)
+                                .size(LabelSize::Small)
+                                .weight(FontWeight::MEDIUM),
+                        )
+                        .child(
+                            Label::new(detail)
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted),
+                        ),
                 )
         };
         let link_label = match (&chosen, linking) {
@@ -1378,24 +1405,19 @@ impl ApiPanel {
             (Some(chosen), false) => format!("Vincular {}", chosen.title),
             (None, false) => "Vincular".to_string(),
         };
-        let link_button = ui::primary_button(
-            "api-link",
-            Some(IconName::Link),
-            link_label,
-            None,
-            cx,
-        )
-        .w_full()
-        .h(px(34.))
-        .justify_center()
-        .map(|this| {
-            if can_link && !linking {
-                this.on_click(cx.listener(|this, _, _, cx| this.link(cx)))
-                    .into_any_element()
-            } else {
-                this.opacity(0.5).cursor_default().into_any_element()
-            }
-        });
+        let link_button =
+            ui::primary_button("api-link", Some(IconName::Link), link_label, None, cx)
+                .w_full()
+                .h(px(34.))
+                .justify_center()
+                .map(|this| {
+                    if can_link && !linking {
+                        this.on_click(cx.listener(|this, _, _, cx| this.link(cx)))
+                            .into_any_element()
+                    } else {
+                        this.opacity(0.5).cursor_default().into_any_element()
+                    }
+                });
         let hover = colors.element_hover;
         v_flex()
             .size_full()
@@ -1996,12 +2018,9 @@ impl ApiPanel {
                                 cx: &mut Context<Self>| {
             let this = cx.weak_entity();
             let operations = post_operations.clone();
-            let chosen = current.as_ref().and_then(|current| {
-                operations
-                    .iter()
-                    .find(|(key, ..)| key == current)
-                    .cloned()
-            });
+            let chosen = current
+                .as_ref()
+                .and_then(|current| operations.iter().find(|(key, ..)| key == current).cloned());
             let hover = colors.element_hover;
             let trigger = field_box()
                 .id(SharedString::from(format!("{id}-button")))
@@ -2116,9 +2135,9 @@ impl ApiPanel {
             .unwrap_or_default();
         let has_bearer_login = form.login_operation.is_some()
             && spec.as_ref().is_some_and(|spec| {
-                spec.security_schemes
-                    .iter()
-                    .any(|scheme| matches!(scheme.kind, SchemeKind::Bearer { .. } | SchemeKind::OAuth2))
+                spec.security_schemes.iter().any(|scheme| {
+                    matches!(scheme.kind, SchemeKind::Bearer { .. } | SchemeKind::OAuth2)
+                })
             });
 
         let toggles = [
@@ -2147,7 +2166,11 @@ impl ApiPanel {
         let test_button = ui::primary_button(
             "api-test-login",
             Some(IconName::PlayFilled),
-            if logging_in { "Entrando…" } else { "Testar login" },
+            if logging_in {
+                "Entrando…"
+            } else {
+                "Testar login"
+            },
             None,
             cx,
         )
@@ -2157,8 +2180,10 @@ impl ApiPanel {
         .tooltip(Tooltip::text("Salva o formulário e faz o login"))
         .map(|this| {
             if can_test {
-                this.on_click(cx.listener(|this, _, window, cx| this.save_settings(true, window, cx)))
-                    .into_any_element()
+                this.on_click(
+                    cx.listener(|this, _, window, cx| this.save_settings(true, window, cx)),
+                )
+                .into_any_element()
             } else {
                 this.opacity(0.5).cursor_default().into_any_element()
             }
@@ -2189,7 +2214,11 @@ impl ApiPanel {
                         .size(IconSize::XSmall)
                         .color(Color::Accent),
                 )
-                .child(Label::new(label).size(LabelSize::Small).color(Color::Accent))
+                .child(
+                    Label::new(label)
+                        .size(LabelSize::Small)
+                        .color(Color::Accent),
+                )
         };
 
         let content = v_flex()
@@ -2613,7 +2642,9 @@ impl ApiPanel {
                     .child(div().flex_1())
                     .child(
                         ui::primary_button("api-settings-save", None, "Salvar", None, cx).on_click(
-                            cx.listener(|this, _, window, cx| this.save_settings(false, window, cx)),
+                            cx.listener(|this, _, window, cx| {
+                                this.save_settings(false, window, cx)
+                            }),
                         ),
                     ),
             )
@@ -2704,8 +2735,10 @@ struct CandidateSummary {
 }
 
 fn summarize(path: &Path, text: &str) -> Result<CandidateSummary, String> {
-    let spec = spec::load(path, text, &|path: &Path| Ok(std::fs::read_to_string(path)?))
-        .map_err(|error| format!("{error:#}"))?;
+    let spec = spec::load(path, text, &|path: &Path| {
+        Ok(std::fs::read_to_string(path)?)
+    })
+    .map_err(|error| format!("{error:#}"))?;
     let schema_count = ["/components/schemas", "/definitions"]
         .iter()
         .find_map(|pointer| spec.document.pointer(pointer))
@@ -2725,7 +2758,12 @@ fn summarize(path: &Path, text: &str) -> Result<CandidateSummary, String> {
         servers: spec
             .servers
             .iter()
-            .map(|server| server.description.clone().unwrap_or_else(|| server.url.clone()))
+            .map(|server| {
+                server
+                    .description
+                    .clone()
+                    .unwrap_or_else(|| server.url.clone())
+            })
             .collect(),
         schemes: spec
             .security_schemes
@@ -2775,6 +2813,10 @@ impl Focusable for ApiPanel {
 impl EventEmitter<PanelEvent> for ApiPanel {}
 
 impl Panel for ApiPanel {
+    fn enabled(&self, cx: &App) -> bool {
+        task_agents::toolkit_enabled(task_agents::toolkit_ids::API, &self.project, cx)
+    }
+
     fn persistent_name() -> &'static str {
         "ApiPanel"
     }

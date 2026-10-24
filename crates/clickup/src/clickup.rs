@@ -12,14 +12,19 @@ use anyhow::{Context as _, Result};
 use credentials_provider::CredentialsProvider;
 use gpui::{Entity, Global, Subscription, Task, WeakEntity, actions};
 use http_client::HttpClient;
+use settings::SettingsStore;
 use std::{
     any::TypeId,
     sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+use task_agents::toolkit_ids;
 use ui::{Tooltip, prelude::*};
 use util::ResultExt as _;
-use workspace::{HideStatusItem, ItemHandle, StatusItemView, Workspace, dock::StatusBarButton};
+use workspace::{
+    AppState, HideStatusItem, ItemHandle, StatusItemView, Toast, Workspace, dock::StatusBarButton,
+    notifications::NotificationId,
+};
 
 actions!(
     clickup,
@@ -63,16 +68,46 @@ pub fn init(cx: &mut App) {
 /// Adds the panel the first time it is asked for: someone who never uses ClickUp should not
 /// get a tab for it.
 pub fn open(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
+    if !toolkit_allowed(workspace, cx) {
+        return;
+    }
     if workspace.panel::<ClickUpPanel>(cx).is_none() {
         let store = ClickUpStore::global(cx);
+        let project = workspace.project().clone();
         let weak_workspace = workspace.weak_handle();
-        let panel = cx.new(|cx| ClickUpPanel::new(store, weak_workspace, window, cx));
+        let panel = cx.new(|cx| ClickUpPanel::new(store, project, weak_workspace, window, cx));
         workspace.add_panel(panel, window, cx);
     }
     workspace.focus_panel::<ClickUpPanel>(window, cx);
 }
 
+/// Whether the ClickUp toolkit is on for this workspace's project; says so when it isn't.
+fn toolkit_allowed(workspace: &mut Workspace, cx: &mut Context<Workspace>) -> bool {
+    if task_agents::toolkit_enabled(toolkit_ids::CLICKUP, workspace.project(), cx) {
+        return true;
+    }
+    workspace.show_toast(
+        Toast::new(
+            NotificationId::unique::<ClickUpPanel>(),
+            task_agents::toolkit_disabled_message("ClickUp"),
+        )
+        .autohide(),
+        cx,
+    );
+    false
+}
+
+/// The store is shared by every window, so it keeps syncing while any of them has ClickUp on.
+fn wanted_by_any_window(cx: &App) -> bool {
+    AppState::any_workspace(cx, |workspace, cx| {
+        task_agents::toolkit_enabled(toolkit_ids::CLICKUP, workspace.project(), cx)
+    })
+}
+
 fn toggle_focus(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
+    if !toolkit_allowed(workspace, cx) {
+        return;
+    }
     if workspace.panel::<ClickUpPanel>(cx).is_none() {
         open(workspace, window, cx);
         return;
@@ -133,6 +168,10 @@ pub struct ClickUpStore {
     running_timer: Option<api::RunningTimer>,
     load_task: Option<Task<()>>,
     sync_task: Option<Task<()>>,
+    /// Set when syncing stopped because no window has ClickUp on, so turning it back on
+    /// resumes it.
+    sync_paused: bool,
+    _settings_subscription: Subscription,
 }
 
 struct GlobalClickUpStore(Entity<ClickUpStore>);
@@ -156,6 +195,14 @@ impl ClickUpStore {
                 running_timer: None,
                 load_task: None,
                 sync_task: None,
+                sync_paused: false,
+                _settings_subscription: cx.observe_global::<SettingsStore>(
+                    |this: &mut Self, cx| {
+                        if this.sync_paused && wanted_by_any_window(cx) {
+                            this.sync(cx);
+                        }
+                    },
+                ),
             };
             store.load(cx);
             store
@@ -243,6 +290,7 @@ impl ClickUpStore {
         let Some(workspace_id) = self.selected_workspace_id.clone() else {
             return;
         };
+        self.sync_paused = false;
         let http_client = self.http_client.clone();
         let token = account.token.clone();
         let user_id = account.user.id;
@@ -288,7 +336,14 @@ impl ClickUpStore {
                     .await;
 
                 let keep_syncing = this
-                    .update(cx, |this, cx| this.finish_sync(result, cx))
+                    .update(cx, |this, cx| {
+                        let keep_syncing = this.finish_sync(result, cx);
+                        if keep_syncing && !wanted_by_any_window(cx) {
+                            this.sync_paused = true;
+                            return false;
+                        }
+                        keep_syncing
+                    })
                     .unwrap_or(false);
                 if !keep_syncing {
                     return;
@@ -537,6 +592,12 @@ impl StatusItemView for ClickUpToolkitButton {
     fn hide_setting(&self, _cx: &App) -> Option<HideStatusItem> {
         // The panel has no status bar button of its own, so this is the only visible way in.
         None
+    }
+
+    fn is_hidden(&self, cx: &App) -> bool {
+        self.workspace.upgrade().is_some_and(|workspace| {
+            !task_agents::toolkit_enabled(toolkit_ids::CLICKUP, workspace.read(cx).project(), cx)
+        })
     }
 }
 

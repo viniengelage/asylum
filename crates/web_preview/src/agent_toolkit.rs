@@ -797,10 +797,11 @@ pub fn register_toolkit(cx: &mut App) {
 
     task_agents::register_toolkit(
         Toolkit {
-            id: "browser".into(),
+            id: task_agents::toolkit_ids::BROWSER.into(),
             name: "Browser".into(),
             description: "O Chromium embutido (aba Browser e Devices)".into(),
             icon: "public".into(),
+            mention: None,
             tools,
         },
         cx,

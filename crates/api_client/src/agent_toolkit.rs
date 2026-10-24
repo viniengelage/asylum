@@ -63,8 +63,7 @@ async fn project_collections(
                     .and_then(|collections| collections.0.get(&file).cloned());
                 existing.unwrap_or_else(|| {
                     let fs = fs.clone();
-                    let entity =
-                        cx.new(|cx| Collection::new(root, file.clone(), fs, cx));
+                    let entity = cx.new(|cx| Collection::new(root, file.clone(), fs, cx));
                     cx.default_global::<AgentCollections>()
                         .0
                         .insert(file, entity.clone());
@@ -117,7 +116,11 @@ struct SendInput {
     body: Option<String>,
 }
 
-fn operations(project: Entity<Project>, input: OperationsInput, cx: &mut App) -> Task<Result<ToolkitOutput>> {
+fn operations(
+    project: Entity<Project>,
+    input: OperationsInput,
+    cx: &mut App,
+) -> Task<Result<ToolkitOutput>> {
     cx.spawn(async move |cx| {
         let collections = project_collections(&project, cx).await?;
         let filter = input.filter.map(|filter| filter.to_lowercase());
@@ -156,7 +159,10 @@ fn operations(project: Entity<Project>, input: OperationsInput, cx: &mut App) ->
                         operation.tags.join(" ")
                     )
                     .to_lowercase();
-                    if filter.as_ref().is_some_and(|filter| !haystack.contains(filter)) {
+                    if filter
+                        .as_ref()
+                        .is_some_and(|filter| !haystack.contains(filter))
+                    {
                         continue;
                     }
                     if listed == MAX_OPERATIONS_LISTED {
@@ -323,10 +329,11 @@ fn send(project: Entity<Project>, input: SendInput, cx: &mut App) -> Task<Result
 pub fn register_toolkit(cx: &mut App) {
     task_agents::register_toolkit(
         Toolkit {
-            id: "api".into(),
+            id: task_agents::toolkit_ids::API.into(),
             name: "API".into(),
             description: "Operações do OpenAPI do projeto, pelo painel API".into(),
             icon: "arrow_right_left".into(),
+            mention: None,
             tools: vec![
                 ToolkitTool::new(
                     "api_operations",

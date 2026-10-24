@@ -180,6 +180,16 @@ impl StatusItemView for WebPreviewToolkitButton {
     fn hide_setting(&self, _cx: &App) -> Option<workspace::HideStatusItem> {
         None
     }
+
+    fn is_hidden(&self, cx: &App) -> bool {
+        self.workspace
+            .upgrade()
+            .is_some_and(|workspace| !browser_enabled(workspace.read(cx).project(), cx))
+    }
+}
+
+fn browser_enabled(project: &Entity<project::Project>, cx: &App) -> bool {
+    task_agents::toolkit_enabled(task_agents::toolkit_ids::BROWSER, project, cx)
 }
 
 pub struct WebPreviewView {
@@ -228,6 +238,17 @@ impl WebPreviewView {
         window: &mut Window,
         cx: &mut Context<Workspace>,
     ) {
+        if !browser_enabled(workspace.project(), cx) {
+            workspace.show_toast(
+                workspace::Toast::new(
+                    workspace::notifications::NotificationId::unique::<Self>(),
+                    task_agents::toolkit_disabled_message("Browser"),
+                )
+                .autohide(),
+                cx,
+            );
+            return;
+        }
         let view = cx.new(|cx| Self::new(window, cx));
         Self::add_to_workspace(view, workspace, window, cx);
     }
@@ -239,6 +260,11 @@ impl WebPreviewView {
         cx: &mut Context<Workspace>,
     ) {
         let url = action.url.clone();
+        // With the embedded browser off, a link still has to go somewhere.
+        if !browser_enabled(workspace.project(), cx) {
+            cx.open_url(&url);
+            return;
+        }
         let view = cx.new(|cx| Self::new_with_url(url, window, cx));
         Self::add_to_workspace(view, workspace, window, cx);
     }

@@ -1142,6 +1142,10 @@ impl Focusable for TasksPanel {
 impl EventEmitter<PanelEvent> for TasksPanel {}
 
 impl Panel for TasksPanel {
+    fn enabled(&self, cx: &App) -> bool {
+        task_agents::toolkit_enabled(task_agents::toolkit_ids::GITHUB_PROJECTS, &self.project, cx)
+    }
+
     fn persistent_name() -> &'static str {
         "GitHubTasksPanel"
     }

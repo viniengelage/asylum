@@ -22,7 +22,10 @@ use project::Project;
 use std::{any::TypeId, collections::HashMap, sync::Arc};
 use ui::{Tooltip, prelude::*};
 use util::ResultExt as _;
-use workspace::{HideStatusItem, ItemHandle, StatusItemView, Workspace, dock::StatusBarButton};
+use workspace::{
+    HideStatusItem, ItemHandle, StatusItemView, Toast, Workspace, dock::StatusBarButton,
+    notifications::NotificationId,
+};
 
 actions!(
     repo_hosting,
@@ -97,9 +100,28 @@ pub fn init(cx: &mut App) {
     .detach();
 }
 
+/// Whether the Repo toolkit is on for this workspace's project; says so when it isn't.
+fn toolkit_allowed(workspace: &mut Workspace, cx: &mut Context<Workspace>) -> bool {
+    if task_agents::toolkit_enabled(task_agents::toolkit_ids::REPO, workspace.project(), cx) {
+        return true;
+    }
+    workspace.show_toast(
+        Toast::new(
+            NotificationId::unique::<RepoPanel>(),
+            task_agents::toolkit_disabled_message("Repo"),
+        )
+        .autohide(),
+        cx,
+    );
+    false
+}
+
 /// Adds the panel the first time it is asked for, so projects that never look at their pull
 /// requests don't get a tab for them.
 pub fn open(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
+    if !toolkit_allowed(workspace, cx) {
+        return;
+    }
     if workspace.panel::<RepoPanel>(cx).is_none() {
         let store = RepoStore::global(cx);
         let project = workspace.project().clone();
@@ -117,6 +139,9 @@ fn show_pull_request(
     window: &mut Window,
     cx: &mut Context<Workspace>,
 ) {
+    if !toolkit_allowed(workspace, cx) {
+        return;
+    }
     open(workspace, window, cx);
     if let Some(panel) = workspace.panel::<RepoPanel>(cx) {
         panel.update(cx, |panel, cx| {
@@ -126,6 +151,9 @@ fn show_pull_request(
 }
 
 fn toggle_focus(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
+    if !toolkit_allowed(workspace, cx) {
+        return;
+    }
     if workspace.panel::<RepoPanel>(cx).is_none() {
         open(workspace, window, cx);
         return;
@@ -589,6 +617,16 @@ impl Render for RepoToolkitButton {
 }
 
 impl StatusItemView for RepoToolkitButton {
+    fn is_hidden(&self, cx: &App) -> bool {
+        self.workspace.upgrade().is_some_and(|workspace| {
+            !task_agents::toolkit_enabled(
+                task_agents::toolkit_ids::REPO,
+                workspace.read(cx).project(),
+                cx,
+            )
+        })
+    }
+
     fn set_active_pane_item(
         &mut self,
         _active_pane_item: Option<&dyn ItemHandle>,

@@ -12673,7 +12673,11 @@ impl Panel for Sidebar {
     }
 
     fn enabled(&self, cx: &App) -> bool {
+        // The devices sidebar follows the window's active project, which can't be read while
+        // the dock asks from inside a workspace update, so it goes by the profile alone.
         AgentSettings::get_global(cx).enabled(cx)
+            && (!self.devices_only
+                || task_agents::toolkit_enabled_in_profile(task_agents::toolkit_ids::DEVICES, cx))
     }
 }
 

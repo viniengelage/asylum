@@ -691,10 +691,11 @@ fn open_mention(
 pub fn register_toolkit(cx: &mut App) {
     task_agents::register_toolkit(
         Toolkit {
-            id: "elastic".into(),
+            id: task_agents::toolkit_ids::ELASTIC.into(),
             name: "Elastic".into(),
             description: "Logs, traces e erros do Elasticsearch, só leitura".into(),
             icon: "cloud_pulse".into(),
+            mention: Some("@Logs".into()),
             tools: vec![
                 ToolkitTool::new(
                     "elastic_esql",

@@ -481,6 +481,12 @@ pub(crate) fn prefetch_pull_requests(project: Entity<Project>, cx: &mut App) {
     cx.spawn(async move |cx| {
         let mut hosted = false;
         for _ in 0..PREFETCH_ATTEMPTS {
+            let enabled = cx.update(|cx| {
+                task_agents::toolkit_enabled(task_agents::toolkit_ids::REPO, &project, cx)
+            });
+            if !enabled {
+                return;
+            }
             hosted = cx.update(|cx| matches!(detect_target(&project, cx).0, Target::Hosted { .. }));
             if hosted {
                 break;
@@ -846,11 +852,12 @@ pub fn register_toolkit(cx: &mut App) {
     );
     task_agents::register_toolkit(
         Toolkit {
-            id: "repo".into(),
+            id: task_agents::toolkit_ids::REPO.into(),
             name: "Repo".into(),
             description: "Pull requests e checks do Bitbucket ou GitHub conectado no dock Repo"
                 .into(),
             icon: "pull_request".into(),
+            mention: Some("@PR".into()),
             tools: vec![
                 ToolkitTool::new(
                     "repo_pull_requests",

@@ -1902,6 +1902,10 @@ impl Focusable for ElasticPanel {
 impl EventEmitter<PanelEvent> for ElasticPanel {}
 
 impl Panel for ElasticPanel {
+    fn enabled(&self, cx: &App) -> bool {
+        task_agents::toolkit_enabled(task_agents::toolkit_ids::ELASTIC, &self.project, cx)
+    }
+
     fn persistent_name() -> &'static str {
         "ElasticPanel"
     }

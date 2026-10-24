@@ -408,10 +408,11 @@ fn focus_sql_editor(
 pub fn register_toolkit(cx: &mut App) {
     task_agents::register_toolkit(
         Toolkit {
-            id: "database".into(),
+            id: task_agents::toolkit_ids::DATABASE.into(),
             name: "Banco".into(),
             description: "Consultas de leitura na conexão do painel Banco".into(),
             icon: "database".into(),
+            mention: Some("@SQL".into()),
             tools: vec![
                 ToolkitTool::new(
                     "database_query",

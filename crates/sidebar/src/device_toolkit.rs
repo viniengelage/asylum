@@ -1368,11 +1368,12 @@ pub fn register_toolkit(cx: &mut App) {
 
     task_agents::register_toolkit(
         Toolkit {
-            id: "devices".into(),
+            id: task_agents::toolkit_ids::DEVICES.into(),
             name: "Dispositivos".into(),
             description: "Abre e controla o simulador iOS e o emulador Android do dock de Devices"
                 .into(),
             icon: "smartphone".into(),
+            mention: None,
             tools,
         },
         cx,

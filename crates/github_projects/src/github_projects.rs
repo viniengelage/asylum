@@ -21,6 +21,7 @@ use repo_hosting::{
     api::{Hosting, RemoteRepository},
     github::Credentials,
 };
+use settings::SettingsStore;
 use std::{
     any::TypeId,
     collections::{HashMap, HashSet},
@@ -29,7 +30,10 @@ use std::{
 };
 use ui::{Tooltip, prelude::*};
 use util::ResultExt as _;
-use workspace::{HideStatusItem, ItemHandle, StatusItemView, Workspace, dock::StatusBarButton};
+use workspace::{
+    AppState, HideStatusItem, ItemHandle, StatusItemView, Toast, Workspace, dock::StatusBarButton,
+    notifications::NotificationId,
+};
 
 actions!(
     github_projects,
@@ -52,6 +56,9 @@ pub fn init(cx: &mut App) {
         agent_toolkit::prefetch(workspace.project().clone(), cx);
         workspace.register_action(
             |workspace, action: &zed_actions::github_projects::OpenProjectItem, window, cx| {
+                if !toolkit_allowed(workspace, cx) {
+                    return;
+                }
                 board::open(workspace, Some(action.item_id.clone()), window, cx);
             },
         );
@@ -61,6 +68,9 @@ pub fn init(cx: &mut App) {
             },
         );
         workspace.register_action(|workspace, _: &ToggleFocus, window, cx| {
+            if !toolkit_allowed(workspace, cx) {
+                return;
+            }
             if workspace.panel::<TasksPanel>(cx).is_none() {
                 open(workspace, window, cx);
             } else {
@@ -68,14 +78,40 @@ pub fn init(cx: &mut App) {
             }
         });
         workspace.register_action(|workspace, _: &OpenBoard, window, cx| {
+            if !toolkit_allowed(workspace, cx) {
+                return;
+            }
             board::open(workspace, None, window, cx);
         });
     })
     .detach();
 }
 
+/// Whether the GitHub Projects toolkit is on for this workspace's project; says so when it isn't.
+fn toolkit_allowed(workspace: &mut Workspace, cx: &mut Context<Workspace>) -> bool {
+    if task_agents::toolkit_enabled(
+        task_agents::toolkit_ids::GITHUB_PROJECTS,
+        workspace.project(),
+        cx,
+    ) {
+        return true;
+    }
+    workspace.show_toast(
+        Toast::new(
+            NotificationId::unique::<TasksPanel>(),
+            task_agents::toolkit_disabled_message("GitHub Projects"),
+        )
+        .autohide(),
+        cx,
+    );
+    false
+}
+
 /// Adds the dock the first time it is asked for.
 pub fn open(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
+    if !toolkit_allowed(workspace, cx) {
+        return;
+    }
     if workspace.panel::<TasksPanel>(cx).is_none() {
         let project = workspace.project().clone();
         let weak_workspace = workspace.weak_handle();
@@ -149,7 +185,11 @@ pub struct RepositoryProjects {
     /// Items whose change was sent and not confirmed by a sync yet.
     pending_items: HashSet<String>,
     sync_task: Option<Task<()>>,
+    /// Set when syncing stopped because no window of this repository has GitHub Projects on,
+    /// so turning it back on resumes it.
+    sync_paused: bool,
     _repo_store_subscription: Subscription,
+    _settings_subscription: Subscription,
 }
 
 impl RepositoryProjects {
@@ -184,7 +224,13 @@ impl RepositoryProjects {
             missing_scope: false,
             pending_items: HashSet::default(),
             sync_task: None,
+            sync_paused: false,
             _repo_store_subscription: subscription,
+            _settings_subscription: cx.observe_global::<SettingsStore>(|this: &mut Self, cx| {
+                if this.sync_paused && this.wanted_by_any_window(cx) {
+                    this.sync(cx);
+                }
+            }),
         };
         this.sync(cx);
         this
@@ -192,6 +238,17 @@ impl RepositoryProjects {
 
     pub fn repository(&self) -> &RemoteRepository {
         &self.repository
+    }
+
+    /// Shared by every window on the repository, so it keeps syncing while any of them has
+    /// GitHub Projects on.
+    fn wanted_by_any_window(&self, cx: &App) -> bool {
+        AppState::any_workspace(cx, |workspace, cx| {
+            let project = workspace.project();
+            task_agents::toolkit_enabled(task_agents::toolkit_ids::GITHUB_PROJECTS, project, cx)
+                && github_repository(project, cx)
+                    .is_some_and(|(repository, _, _)| repository == self.repository)
+        })
     }
 
     pub fn info(&self) -> Option<&api::Repository> {
@@ -265,6 +322,7 @@ impl RepositoryProjects {
             return;
         };
         let repository = self.repository.clone();
+        self.sync_paused = false;
         self.is_syncing = true;
         cx.notify();
         self.sync_task = Some(cx.spawn(async move |this, cx| {
@@ -310,7 +368,14 @@ impl RepositoryProjects {
                     })
                     .await;
                 let keep_syncing = this
-                    .update(cx, |this, cx| this.finish_sync(result, cx))
+                    .update(cx, |this, cx| {
+                        let keep_syncing = this.finish_sync(result, cx);
+                        if keep_syncing && !this.wanted_by_any_window(cx) {
+                            this.sync_paused = true;
+                            return false;
+                        }
+                        keep_syncing
+                    })
                     .unwrap_or(false);
                 if !keep_syncing {
                     return;
@@ -781,6 +846,16 @@ impl Render for ProjectsToolkitButton {
 }
 
 impl StatusItemView for ProjectsToolkitButton {
+    fn is_hidden(&self, cx: &App) -> bool {
+        self.workspace.upgrade().is_some_and(|workspace| {
+            !task_agents::toolkit_enabled(
+                task_agents::toolkit_ids::GITHUB_PROJECTS,
+                workspace.read(cx).project(),
+                cx,
+            )
+        })
+    }
+
     fn set_active_pane_item(
         &mut self,
         _active_pane_item: Option<&dyn ItemHandle>,

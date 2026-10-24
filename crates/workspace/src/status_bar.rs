@@ -3,7 +3,7 @@ use gpui::{
     AnyElement, AnyView, App, Context, Entity, FocusHandle, Focusable, FontWeight, IntoElement,
     ParentElement, Render, Role, SharedString, Styled, Subscription, WeakEntity, Window,
 };
-use settings::{SettingsContent, update_settings_file};
+use settings::{SettingsContent, SettingsStore, update_settings_file};
 use std::{any::TypeId, sync::Arc};
 use ui::{ContextMenu, IconPosition, prelude::*, right_click_menu};
 
@@ -52,6 +52,12 @@ pub trait StatusItemView: Render {
     /// that the status bar can show a "Hide Button" entry in its
     /// right-click menu.
     fn hide_setting(&self, cx: &App) -> Option<HideStatusItem>;
+
+    /// Whether to leave the item out of the status bar for now, e.g. a toolkit button whose
+    /// toolkit is turned off. Checked on every render and whenever the settings change.
+    fn is_hidden(&self, _cx: &App) -> bool {
+        false
+    }
 }
 
 trait StatusItemViewHandle: Send {
@@ -64,6 +70,7 @@ trait StatusItemViewHandle: Send {
     );
     fn item_type(&self) -> TypeId;
     fn hide_setting(&self, cx: &App) -> Option<HideStatusItem>;
+    fn is_hidden(&self, cx: &App) -> bool;
 }
 
 /// The groups the status bar is divided into, in the order they appear from left to right.
@@ -108,6 +115,7 @@ pub struct StatusBar {
     active_pane: Entity<Pane>,
     focus_handle: FocusHandle,
     _observe_active_pane: Subscription,
+    _observe_settings: Subscription,
 }
 
 impl Focusable for StatusBar {
@@ -234,6 +242,7 @@ impl StatusBar {
         } else {
             items.extend(right_items);
         }
+        items.retain(|item| !item.is_hidden(cx));
         items
     }
 }
@@ -338,6 +347,7 @@ impl StatusBar {
             _observe_active_pane: cx.observe_in(active_pane, window, |this, _, window, cx| {
                 this.update_active_pane_item(window, cx)
             }),
+            _observe_settings: cx.observe_global::<SettingsStore>(|_, cx| cx.notify()),
         };
         this.update_active_pane_item(window, cx);
         this
@@ -548,6 +558,10 @@ impl<T: StatusItemView> StatusItemViewHandle for Entity<T> {
 
     fn hide_setting(&self, cx: &App) -> Option<HideStatusItem> {
         self.read(cx).hide_setting(cx)
+    }
+
+    fn is_hidden(&self, cx: &App) -> bool {
+        self.read(cx).is_hidden(cx)
     }
 }
 

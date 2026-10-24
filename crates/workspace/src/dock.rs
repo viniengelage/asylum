@@ -438,7 +438,7 @@ pub struct PanelSizeState {
 struct PanelEntry {
     panel: Arc<dyn PanelHandle>,
     size_state: PanelSizeState,
-    _subscriptions: [Subscription; 4],
+    _subscriptions: [Subscription; 5],
 }
 
 #[derive(Clone)]
@@ -729,6 +729,21 @@ impl Dock {
     ) -> usize {
         let subscriptions = [
             cx.observe(&panel, |_, _, cx| cx.notify()),
+            // A panel can be turned off while it is showing, e.g. a toolkit dock switched off
+            // in the profile; it shouldn't stay on screen until the dock is toggled.
+            cx.observe_global_in::<SettingsStore>(window, {
+                let panel = panel.clone();
+                move |this, window, cx| {
+                    let panel_id = Entity::entity_id(&panel);
+                    let is_visible = this.is_open()
+                        && this
+                            .visible_panel()
+                            .is_some_and(|visible| visible.panel_id() == panel_id);
+                    if is_visible && !panel.read(cx).enabled(cx) {
+                        this.set_open(false, window, cx);
+                    }
+                }
+            }),
             cx.observe_global_in::<SettingsStore>(window, {
                 let workspace = workspace.clone();
                 let panel = panel.clone();

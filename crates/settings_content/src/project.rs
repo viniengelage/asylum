@@ -85,6 +85,14 @@ pub struct ProjectSettingsContent {
     ///
     /// Default: false
     pub disable_ai: Option<SaturatingBool>,
+
+    /// Which agent toolkits (`clickup`, `elastic`, `repo`, …) are on, by toolkit id. A toolkit
+    /// that is off gives the agent none of its tools or `@` mentions, and its status bar button
+    /// and dock go away. Toolkits missing from the map are on.
+    ///
+    /// Default: {}
+    #[serde(default)]
+    pub agent_toolkits: HashMap<Arc<str>, bool>,
 }
 
 crate::fallible_options::flattened_deserialize!(ProjectSettingsContent {
@@ -92,7 +100,7 @@ crate::fallible_options::flattened_deserialize!(ProjectSettingsContent {
     options: {
         terminal, context_server_timeout, load_direnv, git_hosting_providers, disable_ai,
     },
-    defaults: { lsp, dap, context_servers },
+    defaults: { lsp, dap, context_servers, agent_toolkits },
 });
 
 /// When to scan content of linked directories.

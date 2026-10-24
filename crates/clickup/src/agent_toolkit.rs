@@ -37,9 +37,9 @@ async fn clickup_context(project: &Entity<Project>, cx: &mut AsyncApp) -> Result
     }
     cx.update(|cx| {
         let store = store.read(cx);
-        let (client, token, workspace_id) = store.request_context().context(
-            "O ClickUp não está conectado. Peça para conectar no dock do ClickUp.",
-        )?;
+        let (client, token, workspace_id) = store
+            .request_context()
+            .context("O ClickUp não está conectado. Peça para conectar no dock do ClickUp.")?;
         let branch = project
             .read(cx)
             .active_repository(cx)
@@ -86,8 +86,9 @@ fn resolve_task_id(context: &ClickUpContext, task_id: Option<String>) -> Result<
     }) {
         return Ok(task.id.clone());
     }
-    custom_id_in_branch(branch)
-        .with_context(|| format!("Nenhuma tarefa ligada ao branch `{branch}`; diga o ID da tarefa."))
+    custom_id_in_branch(branch).with_context(|| {
+        format!("Nenhuma tarefa ligada ao branch `{branch}`; diga o ID da tarefa.")
+    })
 }
 
 fn format_duration(milliseconds: Option<i64>) -> Option<String> {
@@ -132,13 +133,21 @@ struct CreateInput {
     description: String,
 }
 
-fn get_task(project: Entity<Project>, input: TaskInput, cx: &mut App) -> Task<Result<ToolkitOutput>> {
+fn get_task(
+    project: Entity<Project>,
+    input: TaskInput,
+    cx: &mut App,
+) -> Task<Result<ToolkitOutput>> {
     cx.spawn(async move |cx| {
         let context = clickup_context(&project, cx).await?;
         let task_id = resolve_task_id(&context, input.task_id)?;
-        let detail =
-            api::get_task_by_any_id(&context.client, &context.token, &context.workspace_id, &task_id)
-                .await?;
+        let detail = api::get_task_by_any_id(
+            &context.client,
+            &context.token,
+            &context.workspace_id,
+            &task_id,
+        )
+        .await?;
         let comments = api::get_comments(&context.client, &context.token, &detail.task.id)
             .await
             .unwrap_or_default();
@@ -190,10 +199,17 @@ fn get_task(project: Entity<Project>, input: TaskInput, cx: &mut App) -> Task<Re
     })
 }
 
-fn my_tasks(project: Entity<Project>, _input: NoInput, cx: &mut App) -> Task<Result<ToolkitOutput>> {
+fn my_tasks(
+    project: Entity<Project>,
+    _input: NoInput,
+    cx: &mut App,
+) -> Task<Result<ToolkitOutput>> {
     cx.spawn(async move |cx| {
         let context = clickup_context(&project, cx).await?;
-        let mut text = format!("{} tarefa(s) aberta(s) atribuídas a você:\n", context.open_tasks.len());
+        let mut text = format!(
+            "{} tarefa(s) aberta(s) atribuídas a você:\n",
+            context.open_tasks.len()
+        );
         for task in &context.open_tasks {
             text.push_str(&format!(
                 "- {} · {} · {} · lista {}\n",
@@ -207,17 +223,31 @@ fn my_tasks(project: Entity<Project>, _input: NoInput, cx: &mut App) -> Task<Res
     })
 }
 
-fn comment(project: Entity<Project>, input: CommentInput, cx: &mut App) -> Task<Result<ToolkitOutput>> {
+fn comment(
+    project: Entity<Project>,
+    input: CommentInput,
+    cx: &mut App,
+) -> Task<Result<ToolkitOutput>> {
     cx.spawn(async move |cx| {
         if input.text.trim().is_empty() {
             return Err(anyhow!("O comentário está vazio."));
         }
         let context = clickup_context(&project, cx).await?;
         let task_id = resolve_task_id(&context, input.task_id)?;
-        let detail =
-            api::get_task_by_any_id(&context.client, &context.token, &context.workspace_id, &task_id)
-                .await?;
-        api::post_comment(&context.client, &context.token, &detail.task.id, &input.text).await?;
+        let detail = api::get_task_by_any_id(
+            &context.client,
+            &context.token,
+            &context.workspace_id,
+            &task_id,
+        )
+        .await?;
+        api::post_comment(
+            &context.client,
+            &context.token,
+            &detail.task.id,
+            &input.text,
+        )
+        .await?;
         Ok(ToolkitOutput::text(format!(
             "Comentário publicado em {}.",
             detail.task.display_id()
@@ -225,13 +255,21 @@ fn comment(project: Entity<Project>, input: CommentInput, cx: &mut App) -> Task<
     })
 }
 
-fn set_status(project: Entity<Project>, input: StatusInput, cx: &mut App) -> Task<Result<ToolkitOutput>> {
+fn set_status(
+    project: Entity<Project>,
+    input: StatusInput,
+    cx: &mut App,
+) -> Task<Result<ToolkitOutput>> {
     cx.spawn(async move |cx| {
         let context = clickup_context(&project, cx).await?;
         let task_id = resolve_task_id(&context, input.task_id)?;
-        let detail =
-            api::get_task_by_any_id(&context.client, &context.token, &context.workspace_id, &task_id)
-                .await?;
+        let detail = api::get_task_by_any_id(
+            &context.client,
+            &context.token,
+            &context.workspace_id,
+            &task_id,
+        )
+        .await?;
         let statuses =
             api::get_list_statuses(&context.client, &context.token, &detail.task.list.id).await?;
         let wanted = input.status.trim().to_lowercase();
@@ -249,8 +287,13 @@ fn set_status(project: Entity<Project>, input: StatusInput, cx: &mut App) -> Tas
                         .join(", ")
                 )
             })?;
-        api::set_task_status(&context.client, &context.token, &detail.task.id, &status.status)
-            .await?;
+        api::set_task_status(
+            &context.client,
+            &context.token,
+            &detail.task.id,
+            &status.status,
+        )
+        .await?;
         Ok(ToolkitOutput::text(format!(
             "{} agora está em `{}`.",
             detail.task.display_id(),
@@ -259,7 +302,11 @@ fn set_status(project: Entity<Project>, input: StatusInput, cx: &mut App) -> Tas
     })
 }
 
-fn create(project: Entity<Project>, input: CreateInput, cx: &mut App) -> Task<Result<ToolkitOutput>> {
+fn create(
+    project: Entity<Project>,
+    input: CreateInput,
+    cx: &mut App,
+) -> Task<Result<ToolkitOutput>> {
     cx.spawn(async move |cx| {
         let context = clickup_context(&project, cx).await?;
         let list_id = match input.list_id.filter(|list_id| !list_id.trim().is_empty()) {
@@ -295,10 +342,11 @@ fn create(project: Entity<Project>, input: CreateInput, cx: &mut App) -> Task<Re
 pub fn register_toolkit(cx: &mut App) {
     task_agents::register_toolkit(
         Toolkit {
-            id: "clickup".into(),
+            id: task_agents::toolkit_ids::CLICKUP.into(),
             name: "ClickUp".into(),
             description: "Tarefas do ClickUp conectado no dock".into(),
             icon: "list_todo".into(),
+            mention: None,
             tools: vec![
                 ToolkitTool::new(
                     "clickup_task",

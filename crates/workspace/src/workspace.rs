@@ -1466,6 +1466,22 @@ impl AppState {
         cx.try_global::<GlobalAppState>()
             .map(|state| state.0.clone())
     }
+
+    /// Whether any open workspace passes `predicate`. For app-wide stores that should only
+    /// keep working while some window still wants them.
+    pub fn any_workspace(cx: &App, predicate: impl Fn(&Workspace, &App) -> bool) -> bool {
+        Self::try_global(cx).is_some_and(|app_state| {
+            app_state
+                .workspace_store
+                .read(cx)
+                .workspaces()
+                .any(|workspace| {
+                    workspace
+                        .upgrade()
+                        .is_some_and(|workspace| predicate(workspace.read(cx), cx))
+                })
+        })
+    }
     pub fn set_global(state: Arc<AppState>, cx: &mut App) {
         cx.set_global(GlobalAppState(state));
     }

@@ -24,6 +24,7 @@ use project::{
     Project,
     git_store::{GitStoreEvent, Repository},
 };
+use settings::SettingsStore;
 use std::{collections::HashSet, future::Future, time::Duration, time::Instant};
 use ui::{
     Checkbox, CommonAnimationExt, ContextMenu, ContextMenuEntry, KeyBinding, PopoverMenu, Tab,
@@ -248,6 +249,9 @@ pub struct RepoPanel {
     branch: Option<String>,
     pull_requests: PullRequests,
     sync_task: Option<Task<()>>,
+    /// Set when syncing stopped because the Repo toolkit was turned off, so turning it back on
+    /// resumes it.
+    sync_paused: bool,
     filter_input: Entity<InputField>,
     collapsed_groups: HashSet<Group>,
     open_pull_request: Option<OpenPullRequest>,
@@ -311,6 +315,13 @@ impl RepoPanel {
             ));
         }
         subscriptions.push(cx.observe(&store, |this, _, cx| this.connection_changed(cx)));
+        subscriptions.push(cx.observe_global::<SettingsStore>(|this: &mut Self, cx| {
+            if this.sync_paused
+                && task_agents::toolkit_enabled(task_agents::toolkit_ids::REPO, &this.project, cx)
+            {
+                this.sync(cx);
+            }
+        }));
         let git_store = project.read(cx).git_store().clone();
         subscriptions.push(cx.subscribe(&git_store, |this, _, event, cx| match event {
             GitStoreEvent::ActiveRepositoryChanged(_)
@@ -337,6 +348,7 @@ impl RepoPanel {
             branch: None,
             pull_requests: PullRequests::default(),
             sync_task: None,
+            sync_paused: false,
             filter_input,
             collapsed_groups: HashSet::default(),
             open_pull_request: None,
@@ -539,6 +551,7 @@ impl RepoPanel {
             self.sync_task = None;
             return;
         };
+        self.sync_paused = false;
         self.pull_requests.is_syncing = true;
         cx.notify();
 
@@ -572,7 +585,20 @@ impl RepoPanel {
                     .await;
 
                 let keep_syncing = this
-                    .update(cx, |this, cx| this.finish_sync(result, cx))
+                    .update(cx, |this, cx| {
+                        let keep_syncing = this.finish_sync(result, cx);
+                        if keep_syncing
+                            && !task_agents::toolkit_enabled(
+                                task_agents::toolkit_ids::REPO,
+                                &this.project,
+                                cx,
+                            )
+                        {
+                            this.sync_paused = true;
+                            return false;
+                        }
+                        keep_syncing
+                    })
                     .unwrap_or(false);
                 if !keep_syncing {
                     return;
@@ -6829,6 +6855,10 @@ impl Focusable for RepoPanel {
 impl EventEmitter<PanelEvent> for RepoPanel {}
 
 impl Panel for RepoPanel {
+    fn enabled(&self, cx: &App) -> bool {
+        task_agents::toolkit_enabled(task_agents::toolkit_ids::REPO, &self.project, cx)
+    }
+
     fn persistent_name() -> &'static str {
         "RepoPanel"
     }

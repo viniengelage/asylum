@@ -4645,10 +4645,18 @@ impl Thread {
                     .collect::<Vec<_>>()
             })
             .collect::<HashMap<_, _>>();
+        // A toolkit turned off in the profile or the project stays off even for a task agent
+        // that lists it: the user asked for it to be out of the agent's reach.
+        let disabled_toolkits = task_agents::disabled_toolkit_ids(&self.project, cx);
         let mut tools = self
             .tools
             .iter()
             .filter(|(_, tool)| !is_restricted || tool.allow_in_restricted_mode())
+            .filter(|(tool_name, _)| {
+                toolkit_ids
+                    .get(tool_name.as_ref())
+                    .is_none_or(|toolkit_id| !disabled_toolkits.contains(toolkit_id))
+            })
             .filter_map(|(tool_name, tool)| {
                 let terminal_variant = matches!(
                     tool_name.as_ref(),

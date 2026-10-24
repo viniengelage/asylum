@@ -67,7 +67,7 @@ use project::{
 use prompt_store::{ProjectContext, RULES_FILE_NAMES, RulesFileContext, WorktreeContext};
 use rand::Rng as _;
 use serde::{Deserialize, Serialize};
-use settings::{LanguageModelSelection, Settings as _, update_settings_file};
+use settings::{LanguageModelSelection, Settings as _, SettingsStore, update_settings_file};
 use std::any::Any;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -834,6 +834,13 @@ impl NativeAgent {
                 // Flush thread content on quit so an in-flight async save
                 // can't leave a thread orphaned ("no thread found with ID").
                 cx.on_app_quit(Self::flush_threads_on_quit),
+                // Task agents say in the slash menu when a toolkit they need was turned off.
+                cx.observe_global::<SettingsStore>(|this, cx| {
+                    let project_ids = this.projects.keys().copied().collect::<Vec<_>>();
+                    for project_id in project_ids {
+                        this.update_available_commands_for_project(project_id, cx);
+                    }
+                }),
             ];
 
             if !cx.has_global::<SkillIndex>() {
@@ -2025,12 +2032,22 @@ impl NativeAgent {
             Some(command)
         });
 
+        let disabled_toolkits = task_agents::disabled_toolkit_names(&state.project, cx);
         let task_agent_commands = state.task_agents.iter().map(|agent| {
-            let description = if agent.description.is_empty() {
+            let mut description = if agent.description.is_empty() {
                 agent.name.clone()
             } else {
                 format!("{} — {}", agent.name, agent.description)
             };
+            let missing = agent
+                .toolkits
+                .iter()
+                .filter_map(|id| disabled_toolkits.get(id.as_str()))
+                .map(|name| name.as_ref())
+                .collect::<Vec<_>>();
+            if !missing.is_empty() {
+                description.push_str(&format!(" · {} desligado neste perfil", missing.join(", ")));
+            }
             acp_v2::AvailableCommand::new(agent.command.clone(), description)
                 .meta(acp_thread::meta_with_command_category(
                     acp_thread::CommandCategory::TaskAgent,
@@ -6530,6 +6547,7 @@ mod internal_tests {
                     name: "Dispositivos".into(),
                     description: "test".into(),
                     icon: "smartphone".into(),
+                    mention: None,
                     tools: vec![task_agents::ToolkitTool::new(
                         "device_tap",
                         "Tocou",
@@ -6604,6 +6622,100 @@ mod internal_tests {
         assert!(tool_names.contains(&"device_tap"), "{tool_names:?}");
         assert!(!tool_names.contains(&"grep"), "{tool_names:?}");
         assert!(tool_names.contains(&"read_file"), "{tool_names:?}");
+    }
+
+    #[gpui::test]
+    async fn test_disabled_toolkit_stays_out_of_task_agent(cx: &mut TestAppContext) {
+        let fake = init_test(cx);
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree(
+            path!("/app"),
+            json!({
+                ".asylum": { "agents": {
+                    "qa.md": "---\nname: QA do app\ncommand: qa\ntoolkits: [devices]\n---\nTeste o fluxo.",
+                }},
+            }),
+        )
+        .await;
+        cx.update(|cx| {
+            task_agents::register_toolkit(
+                task_agents::Toolkit {
+                    id: "devices".into(),
+                    name: "Dispositivos".into(),
+                    description: "test".into(),
+                    icon: "smartphone".into(),
+                    mention: None,
+                    tools: vec![task_agents::ToolkitTool::new(
+                        "device_tap",
+                        "Tocou",
+                        "Taps the screen.",
+                        task_agents::ToolAccess::Act,
+                        |_project, _input: serde_json::Value, _cx| {
+                            Task::ready(Ok(task_agents::ToolkitOutput::text("ok")))
+                        },
+                    )],
+                },
+                cx,
+            );
+            <SettingsStore as gpui::UpdateGlobal>::update_global(cx, |store, cx| {
+                store.update_user_settings(cx, |content| {
+                    content
+                        .project
+                        .agent_toolkits
+                        .insert("devices".into(), false);
+                });
+            });
+        });
+        let project = Project::test(fs.clone(), [path!("/app").as_ref()], cx).await;
+        let thread_store = cx.new(|cx| ThreadStore::new(cx));
+        let agent =
+            cx.update(|cx| NativeAgent::new(thread_store, Templates::new(), fs.clone(), cx));
+        let connection = Rc::new(NativeAgentConnection(agent.clone()));
+        let acp_thread = cx
+            .update(|cx| {
+                connection.clone().new_session(
+                    project.clone(),
+                    PathList::new(&[Path::new(path!("/app"))]),
+                    cx,
+                )
+            })
+            .await
+            .unwrap();
+        cx.run_until_parked();
+
+        cx.update(|cx| {
+            let commands = acp_thread.read(cx).available_commands();
+            let command = commands
+                .iter()
+                .find(|command| command.name == "qa")
+                .expect("the agent's command should still be offered");
+            assert!(
+                command
+                    .description
+                    .contains("Dispositivos desligado neste perfil"),
+                "{}",
+                command.description
+            );
+        });
+
+        let session_id = cx.update(|cx| acp_thread.read(cx).session_id().clone());
+        let thread = cx.update(|cx| native_thread_for_session(&agent, &session_id, cx));
+        thread.update(cx, |thread, cx| thread.set_model(fake.model("fake"), cx));
+        let _send = acp_thread.update(cx, |thread, cx| {
+            thread.send(vec!["/qa testar o login".into()], cx)
+        });
+        cx.run_until_parked();
+
+        let request = fake
+            .pending_completions()
+            .pop()
+            .expect("a completion request");
+        let tool_names = request
+            .tools
+            .iter()
+            .map(|tool| tool.name.as_str())
+            .collect::<Vec<_>>();
+        assert!(!tool_names.contains(&"device_tap"), "{tool_names:?}");
     }
 
     #[gpui::test]

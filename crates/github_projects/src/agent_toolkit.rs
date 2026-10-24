@@ -630,6 +630,16 @@ fn comment(
 pub(crate) fn prefetch(project: Entity<Project>, cx: &mut App) {
     cx.spawn(async move |cx| {
         for _ in 0..30 {
+            let enabled = cx.update(|cx| {
+                task_agents::toolkit_enabled(
+                    task_agents::toolkit_ids::GITHUB_PROJECTS,
+                    &project,
+                    cx,
+                )
+            });
+            if !enabled {
+                return;
+            }
             let repository = cx.update(|cx| github_repository(&project, cx));
             if let Some((repository, _, _)) = repository {
                 cx.update(|cx| repository_projects(&repository, cx));
@@ -651,10 +661,11 @@ pub fn register_toolkit(cx: &mut App) {
     );
     task_agents::register_toolkit(
         Toolkit {
-            id: "github_projects".into(),
+            id: task_agents::toolkit_ids::GITHUB_PROJECTS.into(),
             name: "GitHub Projects".into(),
             description: "Itens do projeto do GitHub no dock Tarefas".into(),
             icon: "blocks".into(),
+            mention: Some("@Item".into()),
             tools: vec![
                 ToolkitTool::new(
                     PROJECT_ITEMS_TOOL,
