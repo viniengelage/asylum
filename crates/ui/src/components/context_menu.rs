@@ -287,6 +287,9 @@ pub struct ContextMenu {
     /// Always true when accessibility support is disabled.
     suppress_focus_selection: bool,
     keyboard_hints: bool,
+    /// The design system's menu of titled sections: wider rows, spaced section titles and the
+    /// checked row filled in.
+    sectioned: bool,
     /// What the user has typed while the menu is open. Non-empty hides every entry whose label
     /// doesn't fuzzy-match it, along with headers and separators.
     filter_query: String,
@@ -417,6 +420,7 @@ impl ContextMenu {
                     ignore_blur_until: None,
                     suppress_focus_selection: !window.is_a11y_enabled(),
                     keyboard_hints: false,
+                    sectioned: false,
                     filter_query: String::new(),
                 },
                 window,
@@ -490,6 +494,7 @@ impl ContextMenu {
                 ignore_blur_until: None,
                 suppress_focus_selection: !window.is_a11y_enabled(),
                 keyboard_hints: false,
+                sectioned: false,
                 filter_query: String::new(),
             },
             window,
@@ -931,6 +936,16 @@ impl ContextMenu {
     /// that the menu can be driven without the pointer.
     pub fn keyboard_hints(mut self) -> Self {
         self.keyboard_hints = true;
+        self
+    }
+
+    /// Lays the menu out as the design system's menu of titled sections (the device settings
+    /// menu in Pencil): 276px wide, 32px rows, spaced section titles and the checked row filled.
+    pub fn sectioned(mut self) -> Self {
+        self.sectioned = true;
+        if self.fixed_width.is_none() {
+            self.fixed_width = Some(px(276.).into());
+        }
         self
     }
 
@@ -1432,6 +1447,7 @@ impl ContextMenu {
                 ignore_blur_until: None,
                 suppress_focus_selection: !window.is_a11y_enabled(),
                 keyboard_hints: false,
+                sectioned: false,
                 filter_query: String::new(),
             };
 
@@ -1571,6 +1587,17 @@ impl ContextMenu {
         let is_active_descendant = |selectable: bool| selectable && Some(ix) == self.selected_index;
         match item {
             ContextMenuItem::Separator => ListSeparator.into_any_element(),
+            ContextMenuItem::Header(header) if self.sectioned => div()
+                .px(px(10.))
+                .pt(px(6.))
+                .pb(px(4.))
+                .child(
+                    Label::new(header.to_uppercase())
+                        .size(LabelSize::XSmall)
+                        .weight(gpui::FontWeight::SEMIBOLD)
+                        .color(Color::Muted),
+                )
+                .into_any_element(),
             ContextMenuItem::Header(header) => ListSubHeader::new(header.to_uppercase())
                 .inset(true)
                 .into_any_element(),
@@ -2094,7 +2121,13 @@ impl ContextMenu {
         };
         let label_element = h_flex()
             .min_w_0()
-            .gap_1p5()
+            .map(|this| {
+                if self.sectioned {
+                    this.gap_2p5()
+                } else {
+                    this.gap_1p5()
+                }
+            })
             .children(start_icon)
             .when(reserves_start_column, |this| {
                 this.child(div().flex_none().size(icon_size.rems()))
@@ -2119,8 +2152,13 @@ impl ContextMenu {
 
         let aside_trigger_bounds = self.aside_trigger_bounds.clone();
 
+        let filled = self.sectioned && matches!(toggle, Some((_, true)));
         div()
             .id(("context-menu-child", ix))
+            .when(filled, |this| {
+                this.rounded(px(6.))
+                    .bg(cx.theme().colors().ghost_element_hover)
+            })
             .when_some(documentation_aside.clone(), |this, documentation_aside| {
                 this.occlude()
                     .on_hover(cx.listener(move |menu, hovered, _, cx| {
@@ -2154,6 +2192,7 @@ impl ContextMenu {
                     .group_name("label_container")
                     .inset(true)
                     .spacing(self.spacing)
+                    .when(self.sectioned, |item| item.height(px(32.)))
                     .disabled(*disabled)
                     .aria_role(if toggle.is_some() {
                         Role::MenuItemCheckBox
@@ -2427,6 +2466,7 @@ impl ContextMenu {
             ignore_blur_until: None,
             suppress_focus_selection: !window.is_a11y_enabled(),
             keyboard_hints: false,
+            sectioned: false,
             filter_query: String::new(),
         }
     }
@@ -2536,12 +2576,14 @@ impl Render for ContextMenu {
                 .font_family(ui_font_family.clone())
                 .line_height(line_height)
                 .elevation_2(cx)
+                .when(self.sectioned, |this| this.rounded(px(10.)))
                 .flex()
                 .flex_row()
                 .flex_shrink_0()
                 .child(
                     v_flex()
                         .id("context-menu")
+                        .when(self.sectioned, |this| this.px(px(6.)).py(px(2.)))
                         .role(Role::Menu)
                         .max_h(vh(0.75, window))
                         .flex_shrink_0()

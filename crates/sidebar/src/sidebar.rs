@@ -8526,7 +8526,8 @@ impl Sidebar {
                 let location_owner = this.clone();
                 let appearance_owner = this.clone();
                 let keyboard_owner = this;
-                menu.header("Simulação")
+                menu.sectioned()
+                    .header("Simulação")
                     .item(
                         ContextMenuEntry::new("Alterar localização do usuário")
                             .icon(IconName::LocationEdit)
