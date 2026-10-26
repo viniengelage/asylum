@@ -10,10 +10,9 @@ target_dir="release"
 open_result=false
 local_install=false
 can_code_sign=false
-
-# This must match the team in the provisioning profile.
-IDENTITY="Zed Industries, Inc."
-APPLE_NOTARIZATION_TEAM="MQ55VZLNZQ"
+can_notarize=false
+# Set from the imported certificate below.
+IDENTITY=""
 
 # Function for displaying help info
 help_info() {
@@ -128,8 +127,17 @@ else
     echo "cargo::warning=Missing ${document_icon_source}; macOS document icons may not appear in Finder."
 fi
 
-if [[ -n "${MACOS_CERTIFICATE:-}" && -n "${MACOS_CERTIFICATE_PASSWORD:-}" && -n "${APPLE_NOTARIZATION_KEY:-}" && -n "${APPLE_NOTARIZATION_KEY_ID:-}" && -n "${APPLE_NOTARIZATION_ISSUER_ID:-}" ]]; then
+# Any code signing certificate works here: a Developer ID one, or a self-signed one. Signing
+# with the same certificate on every release keeps the app's designated requirement stable,
+# which is what lets keychain items and privacy permissions granted to one version carry over
+# to the next. Ad-hoc signatures pin the requirement to the binary's hash instead, so every
+# update asks for the keychain password again. Notarization additionally needs a Developer ID
+# certificate and the App Store Connect API key.
+if [[ -n "${MACOS_CERTIFICATE:-}" && -n "${MACOS_CERTIFICATE_PASSWORD:-}" ]]; then
     can_code_sign=true
+    if [[ -n "${APPLE_NOTARIZATION_KEY:-}" && -n "${APPLE_NOTARIZATION_KEY_ID:-}" && -n "${APPLE_NOTARIZATION_ISSUER_ID:-}" ]]; then
+        can_notarize=true
+    fi
 
     echo "Setting up keychain for code signing..."
     security create-keychain -p "$MACOS_CERTIFICATE_PASSWORD" zed.keychain || echo ""
@@ -141,6 +149,15 @@ if [[ -n "${MACOS_CERTIFICATE:-}" && -n "${MACOS_CERTIFICATE_PASSWORD:-}" && -n 
     security import /tmp/zed-certificate.p12 -k zed.keychain -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
     rm /tmp/zed-certificate.p12
     security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$MACOS_CERTIFICATE_PASSWORD" zed.keychain
+
+    # Picked by hash rather than by name: a self-signed certificate is untrusted, so `-v`
+    # would hide it, and a name could match another identity on a developer's machine.
+    IDENTITY=$(security find-identity -p codesigning zed.keychain | awk '/^ *1\)/ { print $2; exit }')
+    if [[ -z "$IDENTITY" ]]; then
+        echo "MACOS_CERTIFICATE holds no code signing identity"
+        exit 1
+    fi
+    echo "Signing with $(security find-identity -p codesigning zed.keychain | awk '/^ *1\)/ { $1 = ""; $2 = ""; print; exit }')"
 
     function cleanup() {
         echo "Cleaning up keychain"
@@ -281,23 +298,27 @@ function sign_app_binaries() {
     download_git "${target_triple}" "${app_path}/Contents/MacOS/git"
 
     if [[ $can_code_sign = true ]]; then
-        # The profiles belong to Zed Industries' team and bundle identifiers; Asylum's local,
-        # ad-hoc signed bundles use a different identifier, so they must not carry them.
-        # Note: The app identifier for our development builds is the same as the app identifier for nightly.
-        cp crates/zed/contents/$channel/embedded.provisionprofile "${app_path}/Contents/"
+        # Zed's provisioning profiles belong to Zed Industries' team and bundle identifiers, so
+        # Asylum doesn't embed them; none of its entitlements need a profile.
+        # Apple's timestamp service is only needed for notarization, and a self-signed
+        # signature has no use for it.
+        local timestamp_flag="--timestamp=none"
+        if [[ $can_notarize = true ]]; then
+            timestamp_flag="--timestamp"
+        fi
 
         echo "Code signing binaries"
         # sequence of codesign commands modeled after this example: https://developer.apple.com/forums/thread/701514
         local helper_app
         for helper_app in ${web_preview_helper_apps[@]+"${web_preview_helper_apps[@]}"}; do
-            /usr/bin/codesign --force --timestamp --options runtime --entitlements crates/zed/resources/web_preview_helper.entitlements --sign "$IDENTITY" "${helper_app}" -v
+            /usr/bin/codesign --force $timestamp_flag --options runtime --entitlements crates/zed/resources/web_preview_helper.entitlements --sign "$IDENTITY" "${helper_app}" -v
         done
-        /usr/bin/codesign --deep --force --timestamp --options runtime --sign "$IDENTITY" "${app_path}/Contents/MacOS/cli" -v
-        /usr/bin/codesign --deep --force --timestamp --options runtime --sign "$IDENTITY" "${app_path}/Contents/MacOS/git" -v
-        /usr/bin/codesign --deep --force --timestamp --options runtime --entitlements crates/zed/resources/zed.entitlements --sign "$IDENTITY" "${app_path}/Contents/MacOS/zed" -v
-        /usr/bin/codesign --force --timestamp --options runtime --entitlements crates/zed/resources/zed.entitlements --sign "$IDENTITY" "${app_path}" -v
+        /usr/bin/codesign --deep --force $timestamp_flag --options runtime --sign "$IDENTITY" "${app_path}/Contents/MacOS/cli" -v
+        /usr/bin/codesign --deep --force $timestamp_flag --options runtime --sign "$IDENTITY" "${app_path}/Contents/MacOS/git" -v
+        /usr/bin/codesign --deep --force $timestamp_flag --options runtime --entitlements crates/zed/resources/zed.entitlements --sign "$IDENTITY" "${app_path}/Contents/MacOS/zed" -v
+        /usr/bin/codesign --force $timestamp_flag --options runtime --entitlements crates/zed/resources/zed.entitlements --sign "$IDENTITY" "${app_path}" -v
     else
-        echo "One or more of the following variables are missing: MACOS_CERTIFICATE, MACOS_CERTIFICATE_PASSWORD, APPLE_NOTARIZATION_KEY, APPLE_NOTARIZATION_KEY_ID, APPLE_NOTARIZATION_ISSUER_ID"
+        echo "One or more of the following variables are missing: MACOS_CERTIFICATE, MACOS_CERTIFICATE_PASSWORD"
 
         echo "====== WARNING ======"
         echo "This bundle is being signed without all entitlements, some features (e.g. universal links) will not work"
@@ -363,7 +384,9 @@ function sign_app_binaries() {
         npm install --global dmg-license minimist
         dmg-license script/terms/terms.json "${dmg_file_path}"
 
-        if [[ $can_code_sign = true ]]; then
+        if [[ $can_code_sign = true && $can_notarize = false ]]; then
+            /usr/bin/codesign --force --timestamp=none --sign "$IDENTITY" "$(pwd)/${dmg_file_path}" -v
+        elif [[ $can_notarize = true ]]; then
             echo "Notarizing DMG with Apple"
             /usr/bin/codesign --deep --force --timestamp --options runtime --sign "$IDENTITY" "$(pwd)/${dmg_file_path}" -v
             echo "$APPLE_NOTARIZATION_KEY" > "$notarization_key_file"
@@ -383,7 +406,11 @@ function sign_binary() {
 
     if [[ $can_code_sign = true ]]; then
         echo "Code signing executable $binary_path"
-        /usr/bin/codesign --deep --force --timestamp --options runtime --entitlements crates/zed/resources/zed.entitlements --sign "$IDENTITY" "${binary_path}" -v
+        local timestamp_flag="--timestamp=none"
+        if [[ $can_notarize = true ]]; then
+            timestamp_flag="--timestamp"
+        fi
+        /usr/bin/codesign --deep --force $timestamp_flag --options runtime --entitlements crates/zed/resources/zed.entitlements --sign "$IDENTITY" "${binary_path}" -v
     fi
 }
 
