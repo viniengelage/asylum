@@ -467,7 +467,6 @@ fn directory_entries(directory: &Path) -> Vec<PathBuf> {
 
 /// Disk space a path takes, by allocated blocks: AVD disk images are sparse.
 pub(crate) fn allocated_bytes(path: &Path) -> u64 {
-    use std::os::unix::fs::MetadataExt as _;
     let Ok(metadata) = std::fs::symlink_metadata(path) else {
         return 0;
     };
@@ -481,11 +480,23 @@ pub(crate) fn allocated_bytes(path: &Path) -> u64 {
             })
             .unwrap_or(0)
     } else {
-        metadata.blocks() * 512
+        file_allocated_bytes(&metadata)
     }
 }
 
+#[cfg(unix)]
+fn file_allocated_bytes(metadata: &std::fs::Metadata) -> u64 {
+    use std::os::unix::fs::MetadataExt as _;
+    metadata.blocks() * 512
+}
+
+#[cfg(not(unix))]
+fn file_allocated_bytes(metadata: &std::fs::Metadata) -> u64 {
+    metadata.len()
+}
+
 /// Free space on the volume holding `path`.
+#[cfg(unix)]
 pub fn available_disk_bytes(path: &Path) -> Option<u64> {
     use std::os::unix::ffi::OsStrExt as _;
     let mut existing = path;
@@ -503,6 +514,11 @@ pub fn available_disk_bytes(path: &Path) -> Option<u64> {
         stats.assume_init()
     };
     Some((stats.f_bavail as u64).saturating_mul(stats.f_frsize as u64))
+}
+
+#[cfg(not(unix))]
+pub fn available_disk_bytes(_path: &Path) -> Option<u64> {
+    None
 }
 
 /// Turns a device profile id such as `pixel_9_pro` into `Pixel 9 Pro`. The profile list carries
