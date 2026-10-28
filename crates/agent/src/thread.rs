@@ -962,7 +962,6 @@ pub enum ThreadEvent {
         outcome: acp_thread::SelectedPermissionOutcome,
     },
     Elicitation(ElicitationRequest),
-    SubagentSpawned(acp_v2::SessionId),
     Retry(acp_thread::RetryStatus),
     ContextCompaction(acp_thread::ContextCompaction),
     ContextCompactionUpdate(acp_thread::ContextCompactionUpdate),
@@ -3008,7 +3007,7 @@ impl Thread {
 
     pub(crate) fn prepare_local_turn(&mut self, cx: &mut Context<Self>) {
         // Freeze the old partial before inserting a successor's user message,
-        // and fence detached cleanup while its checkpoint or command is prepared.
+        // and fence detached cleanup while its command is prepared.
         self.flush_pending_message(cx);
         self.advance_prompt_id();
     }
@@ -6345,13 +6344,6 @@ impl ToolCallEventStream {
                 }
                 .into(),
             )))
-            .ok();
-    }
-
-    pub fn subagent_spawned(&self, id: acp_v2::SessionId) {
-        self.stream
-            .sender
-            .unbounded_send(Ok(ThreadEvent::SubagentSpawned(id)))
             .ok();
     }
 

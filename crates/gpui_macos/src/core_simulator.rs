@@ -1,57 +1,57 @@
 use crate::ns_string;
 use anyhow::{Context as _, Result};
-use cocoa::base::{id, nil};
-use objc::{
+use objc2::{
     class, msg_send,
-    runtime::{BOOL, Class, NO, YES},
-    sel, sel_impl,
+    runtime::{AnyClass, AnyObject, Bool},
 };
+use std::ptr;
 
 const CORE_SIMULATOR_PATH: &str = "/Library/Developer/PrivateFrameworks/CoreSimulator.framework";
 /// The layout CoreSimulator reports for the attached keyboard, in `LMGetKbdType` terms;
 /// 40 is the ANSI layout every current Apple keyboard reports.
 const ANSI_KEYBOARD_TYPE: u8 = 40;
 
-pub(crate) fn sim_device_for_udid(udid: &str) -> Result<id> {
+pub(crate) fn sim_device_for_udid(udid: &str) -> Result<*mut AnyObject> {
     unsafe {
         load_framework(CORE_SIMULATOR_PATH)?;
 
-        let service_context_class = Class::get("SimServiceContext")
+        let service_context_class = AnyClass::get(c"SimServiceContext")
             .context("CoreSimulator did not register SimServiceContext")?;
-        let mut error: id = nil;
-        let service_context: id = msg_send![
+        let mut error: *mut AnyObject = ptr::null_mut();
+        let service_context: *mut AnyObject = msg_send![
             service_context_class,
-            sharedServiceContextForDeveloperDir: nil
-            error: &mut error
+            sharedServiceContextForDeveloperDir: ptr::null_mut::<AnyObject>(),
+            error: &mut error,
         ];
         anyhow::ensure!(
-            service_context != nil,
+            !service_context.is_null(),
             "CoreSimulator could not create a shared service context"
         );
 
-        let device_set: id = msg_send![service_context, defaultDeviceSetWithError: &mut error];
+        let device_set: *mut AnyObject =
+            msg_send![service_context, defaultDeviceSetWithError: &mut error];
         anyhow::ensure!(
-            device_set != nil,
+            !device_set.is_null(),
             "CoreSimulator could not load the default device set"
         );
 
-        let devices_by_udid: id = msg_send![device_set, devicesByUDID];
-        let device: id = msg_send![devices_by_udid, objectForKey: ns_string(udid)];
-        if device != nil {
+        let devices_by_udid: *mut AnyObject = msg_send![device_set, devicesByUDID];
+        let device: *mut AnyObject = msg_send![devices_by_udid, objectForKey: ns_string(udid)];
+        if !device.is_null() {
             return Ok(device);
         }
 
         // `devicesByUDID` is private and its key type has changed across Xcode releases.
         // Match the documented runtime property on each device instead of assuming NSString keys.
-        let devices: id = msg_send![devices_by_udid, allValues];
+        let devices: *mut AnyObject = msg_send![devices_by_udid, allValues];
         let device_count: usize = msg_send![devices, count];
         for device_index in 0..device_count {
-            let device: id = msg_send![devices, objectAtIndex: device_index];
-            let device_udid: id = msg_send![device, UDID];
-            let device_udid_description: id = msg_send![device_udid, description];
-            let matches: BOOL =
+            let device: *mut AnyObject = msg_send![devices, objectAtIndex: device_index];
+            let device_udid: *mut AnyObject = msg_send![device, UDID];
+            let device_udid_description: *mut AnyObject = msg_send![device_udid, description];
+            let matches: Bool =
                 msg_send![device_udid_description, isEqualToString: ns_string(udid)];
-            if matches != NO {
+            if matches.as_bool() {
                 return Ok(device);
             }
         }
@@ -68,15 +68,15 @@ pub(crate) fn sim_device_for_udid(udid: &str) -> Result<id> {
 pub(crate) fn set_hardware_keyboard_enabled(udid: &str, enabled: bool) -> Result<()> {
     unsafe {
         let device = sim_device_for_udid(udid)?;
-        let mut error: id = nil;
-        let changed: BOOL = msg_send![
+        let mut error: *mut AnyObject = ptr::null_mut();
+        let changed: Bool = msg_send![
             device,
-            setHardwareKeyboardEnabled: if enabled { YES } else { NO }
-            keyboardType: ANSI_KEYBOARD_TYPE
-            error: &mut error
+            setHardwareKeyboardEnabled: Bool::new(enabled),
+            keyboardType: ANSI_KEYBOARD_TYPE,
+            error: &mut error,
         ];
         anyhow::ensure!(
-            changed != NO,
+            changed.as_bool(),
             "CoreSimulator could not {} the hardware keyboard of {udid}: {}",
             if enabled { "attach" } else { "detach" },
             describe_error(error)
@@ -85,30 +85,32 @@ pub(crate) fn set_hardware_keyboard_enabled(udid: &str, enabled: bool) -> Result
     }
 }
 
-unsafe fn describe_error(error: id) -> String {
+unsafe fn describe_error(error: *mut AnyObject) -> String {
     unsafe {
-        if error == nil {
+        if error.is_null() {
             return "no error reported".to_string();
         }
-        let description: id = msg_send![error, localizedDescription];
-        if description == nil {
+        let description: *mut AnyObject = msg_send![error, localizedDescription];
+        if description.is_null() {
             return "no error reported".to_string();
         }
         let utf8: *const std::os::raw::c_char = msg_send![description, UTF8String];
         if utf8.is_null() {
             return "no error reported".to_string();
         }
-        std::ffi::CStr::from_ptr(utf8).to_string_lossy().into_owned()
+        std::ffi::CStr::from_ptr(utf8)
+            .to_string_lossy()
+            .into_owned()
     }
 }
 
 unsafe fn load_framework(path: &str) -> Result<()> {
     unsafe {
-        let bundle: id = msg_send![class!(NSBundle), bundleWithPath: ns_string(path)];
-        anyhow::ensure!(bundle != nil, "CoreSimulator was not found at {path}");
+        let bundle: *mut AnyObject = msg_send![class!(NSBundle), bundleWithPath: ns_string(path)];
+        anyhow::ensure!(!bundle.is_null(), "CoreSimulator was not found at {path}");
 
-        let loaded: BOOL = msg_send![bundle, load];
-        anyhow::ensure!(loaded != NO, "CoreSimulator could not be loaded");
+        let loaded: Bool = msg_send![bundle, load];
+        anyhow::ensure!(loaded.as_bool(), "CoreSimulator could not be loaded");
         Ok(())
     }
 }

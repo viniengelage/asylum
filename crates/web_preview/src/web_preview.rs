@@ -16,12 +16,12 @@ use editor::Editor;
 use gpui::{
     App, Bounds, Context, CursorStyle, Entity, EventEmitter, FocusHandle, Focusable,
     InteractiveElement, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, ParentElement, Pixels, Render, ScrollWheelEvent, SharedString, Styled,
-    Subscription, Task, Window, actions, canvas, div, px,
+    MouseUpEvent, ParentElement, Pixels, Render, ScrollEvent, SharedString, Styled, Subscription,
+    Task, Window, actions, canvas, div, px,
 };
 use ui::{
-    h_flex, prelude::*, v_flex, Color, HeaderBar, HeaderBarLevel, Icon, IconButton, IconName,
-    IconSize, Label, Tooltip,
+    Color, HeaderBar, HeaderBarLevel, Icon, IconButton, IconName, IconSize, Label, Tooltip, h_flex,
+    prelude::*, v_flex,
 };
 use workspace::{
     StatusItemView, Workspace,
@@ -324,8 +324,11 @@ impl WebPreviewView {
             editor
         });
 
-        let submit_subscription = cx.subscribe_in(&url_editor, window, |_this, _editor, _event: &editor::EditorEvent, _window, _cx| {
-        });
+        let submit_subscription = cx.subscribe_in(
+            &url_editor,
+            window,
+            |_this, _editor, _event: &editor::EditorEvent, _window, _cx| {},
+        );
 
         // The pane focuses the item's own handle, which is the outer container. Send that on
         // to the page so the keyboard works the moment the tab is activated, instead of only
@@ -431,7 +434,8 @@ impl WebPreviewView {
                                     this.target_id.as_deref(),
                                 );
                                 cx.notify();
-                            }).ok();
+                            })
+                            .ok();
                         }
                     }
                 }
@@ -462,7 +466,10 @@ impl WebPreviewView {
                         cef_browser::force_software_paint();
                         channel = None;
                         browser_started_at = None;
-                        if this.update(cx, |this, cx| this.restart_browser(cx)).is_err() {
+                        if this
+                            .update(cx, |this, cx| this.restart_browser(cx))
+                            .is_err()
+                        {
                             break;
                         }
                         continue;
@@ -524,7 +531,8 @@ impl WebPreviewView {
         #[cfg(target_os = "macos")]
         let cef_installer = cef_install::CefInstaller::global(cx);
         #[cfg(target_os = "macos")]
-        let installer_subscription = cx.observe(&cef_installer, |_this, _installer, cx| cx.notify());
+        let installer_subscription =
+            cx.observe(&cef_installer, |_this, _installer, cx| cx.notify());
 
         Self {
             focus_handle,
@@ -652,10 +660,7 @@ impl WebPreviewView {
                 )
             })
             .when(
-                matches!(
-                    state,
-                    CefInstallState::Missing | CefInstallState::Failed(_)
-                ),
+                matches!(state, CefInstallState::Missing | CefInstallState::Failed(_)),
                 |this| {
                     this.child(
                         ui::Button::new(
@@ -844,8 +849,7 @@ impl WebPreviewView {
 
     #[cfg(target_os = "macos")]
     fn holds(&self, button: MouseButton) -> bool {
-        cef_mouse_button(button)
-            .is_some_and(|(_, held_flag)| self.pressed_buttons & held_flag != 0)
+        cef_mouse_button(button).is_some_and(|(_, held_flag)| self.pressed_buttons & held_flag != 0)
     }
 
     #[cfg(target_os = "macos")]
@@ -857,8 +861,12 @@ impl WebPreviewView {
         click_count: usize,
         window: &Window,
     ) {
-        let Some((cef_button, held_flag)) = cef_mouse_button(button) else { return };
-        let Some((x, y)) = self.browser_point(position) else { return };
+        let Some((cef_button, held_flag)) = cef_mouse_button(button) else {
+            return;
+        };
+        let Some((x, y)) = self.browser_point(position) else {
+            return;
+        };
 
         // Set before building the flags: Chromium expects the button bit on its own down event.
         self.pressed_buttons |= held_flag;
@@ -886,8 +894,12 @@ impl WebPreviewView {
         click_count: usize,
         window: &Window,
     ) {
-        let Some((cef_button, held_flag)) = cef_mouse_button(button) else { return };
-        let Some((x, y)) = self.browser_point(position) else { return };
+        let Some((cef_button, held_flag)) = cef_mouse_button(button) else {
+            return;
+        };
+        let Some((x, y)) = self.browser_point(position) else {
+            return;
+        };
 
         let modifiers =
             gpui_modifiers_to_cef(modifiers, window.capslock().on, self.pressed_buttons);
@@ -913,7 +925,9 @@ impl WebPreviewView {
         mouse_leave: bool,
         window: &Window,
     ) {
-        let Some((x, y)) = self.browser_point(position) else { return };
+        let Some((x, y)) = self.browser_point(position) else {
+            return;
+        };
         let modifiers =
             gpui_modifiers_to_cef(modifiers, window.capslock().on, self.pressed_buttons);
 
@@ -1032,10 +1046,15 @@ impl WebPreviewView {
         use cef_browser::event_flags as flag;
 
         let Some(browser) = &self.browser else { return };
-        let Some(key) = KeyCodes::for_key(&keystroke.key) else { return };
+        let Some(key) = KeyCodes::for_key(&keystroke.key) else {
+            return;
+        };
 
-        let mut modifiers =
-            gpui_modifiers_to_cef(&keystroke.modifiers, window.capslock().on, self.pressed_buttons);
+        let mut modifiers = gpui_modifiers_to_cef(
+            &keystroke.modifiers,
+            window.capslock().on,
+            self.pressed_buttons,
+        );
         // `parse_keystroke` folds shift into the key name for uppercase letters and for
         // shifted punctuation, clearing the modifier; put it back or the page sees ":" typed
         // with no shift held.
@@ -1126,7 +1145,9 @@ impl WebPreviewView {
             if was_down == is_down {
                 continue;
             }
-            let Some(key) = KeyCodes::for_key(name) else { continue };
+            let Some(key) = KeyCodes::for_key(name) else {
+                continue;
+            };
             browser.send_key(cef::KeyEvent {
                 type_: if is_down {
                     cef::KeyEventType::RAWKEYDOWN
@@ -1210,7 +1231,6 @@ impl WebPreviewView {
         }
         cx.notify();
     }
-
 }
 
 impl EventEmitter<ItemEvent> for WebPreviewView {}
@@ -1228,8 +1248,8 @@ impl Render for WebPreviewView {
         let loading = self.loading;
 
         #[cfg(target_os = "macos")]
-        let install_prompt = (!self.cef_installer.read(cx).is_installed())
-            .then(|| self.render_cef_install(cx));
+        let install_prompt =
+            (!self.cef_installer.read(cx).is_installed()).then(|| self.render_cef_install(cx));
         #[cfg(not(target_os = "macos"))]
         let install_prompt: Option<gpui::AnyElement> = None;
 
@@ -1289,7 +1309,9 @@ impl Render for WebPreviewView {
                     .border_1()
                     .border_color(cx.theme().colors().border_variant)
                     .when(
-                        self.url_editor.focus_handle(cx).contains_focused(window, cx),
+                        self.url_editor
+                            .focus_handle(cx)
+                            .contains_focused(window, cx),
                         |this| this.border_color(cx.theme().colors().border_focused),
                     )
                     .on_action(cx.listener(|this, _: &menu::Confirm, window, cx| {
@@ -1382,7 +1404,9 @@ impl Render for WebPreviewView {
                     let frame_element: Option<gpui::AnyElement> = None;
 
                     #[cfg(target_os = "macos")]
-                    let browser_cursor = self.browser.as_ref()
+                    let browser_cursor = self
+                        .browser
+                        .as_ref()
                         .and_then(|browser| browser.current_cursor())
                         .unwrap_or(CursorStyle::Arrow);
                     #[cfg(not(target_os = "macos"))]
@@ -1494,19 +1518,17 @@ impl Render for WebPreviewView {
                         // paint, because `Interactivity::on_mouse_up` only fires while the
                         // hitbox is hovered — releasing outside the page would otherwise leave
                         // the renderer believing the button is still down.
-                        .on_mouse_move(
-                            cx.listener(|this, event: &MouseMoveEvent, window, _cx| {
-                                #[cfg(target_os = "macos")]
-                                this.forward_mouse_move(
-                                    event.position,
-                                    &event.modifiers,
-                                    false,
-                                    window,
-                                );
-                            }),
-                        )
-                        .on_mouse_exit(
-                            cx.listener(|this, event: &gpui::MouseExitEvent, window, _cx| {
+                        .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, _cx| {
+                            #[cfg(target_os = "macos")]
+                            this.forward_mouse_move(
+                                event.position,
+                                &event.modifiers,
+                                false,
+                                window,
+                            );
+                        }))
+                        .on_mouse_exit(cx.listener(
+                            |this, event: &gpui::MouseExitEvent, window, _cx| {
                                 #[cfg(target_os = "macos")]
                                 // Mid-drag the pointer is still "in" the page as far as the
                                 // renderer is concerned; telling it otherwise cancels the drag.
@@ -1518,43 +1540,37 @@ impl Render for WebPreviewView {
                                         window,
                                     );
                                 }
-                            }),
-                        )
-                        .on_scroll_wheel(
-                            cx.listener(|this, event: &ScrollWheelEvent, window, _cx| {
-                                #[cfg(target_os = "macos")]
-                                if let (Some(browser), Some((x, y))) =
-                                    (&this.browser, this.browser_point(event.position))
-                                {
-                                    let delta_x = f32::from(event.delta.pixel_delta(px(20.0)).x) as i32;
-                                    let delta_y = f32::from(event.delta.pixel_delta(px(20.0)).y) as i32;
-                                    let mut modifiers = gpui_modifiers_to_cef(
-                                        &event.modifiers,
-                                        window.capslock().on,
-                                        this.pressed_buttons,
-                                    );
-                                    // Trackpads report pixel deltas; without this Chromium
-                                    // steps by lines and the scroll feels notched.
-                                    if matches!(event.delta, gpui::ScrollDelta::Pixels(_)) {
-                                        modifiers |=
-                                            cef_browser::event_flags::PRECISION_SCROLLING_DELTA;
-                                    }
-                                    browser.send_mouse_wheel(x, y, delta_x, delta_y, modifiers);
+                            },
+                        ))
+                        .on_scroll(cx.listener(|this, event: &ScrollEvent, window, _cx| {
+                            #[cfg(target_os = "macos")]
+                            if let (Some(browser), Some((x, y))) =
+                                (&this.browser, this.browser_point(event.position))
+                            {
+                                let delta_x = f32::from(event.delta.pixel_delta(px(20.0)).x) as i32;
+                                let delta_y = f32::from(event.delta.pixel_delta(px(20.0)).y) as i32;
+                                let mut modifiers = gpui_modifiers_to_cef(
+                                    &event.modifiers,
+                                    window.capslock().on,
+                                    this.pressed_buttons,
+                                );
+                                // Trackpads report pixel deltas; without this Chromium
+                                // steps by lines and the scroll feels notched.
+                                if matches!(event.delta, gpui::ScrollDelta::Pixels(_)) {
+                                    modifiers |=
+                                        cef_browser::event_flags::PRECISION_SCROLLING_DELTA;
                                 }
-                            }),
-                        )
+                                browser.send_mouse_wheel(x, y, delta_x, delta_y, modifiers);
+                            }
+                        }))
                         .when_some(frame_element, |this, element| this.child(element))
                         .when(frame.is_none() && self.error.is_none(), |this| {
                             this.child(
-                                div()
-                                    .size_full()
-                                    .items_center()
-                                    .justify_center()
-                                    .child(
-                                        Label::new("Waiting for browser...")
-                                            .size(ui::LabelSize::Small)
-                                            .color(Color::Muted),
-                                    ),
+                                div().size_full().items_center().justify_center().child(
+                                    Label::new("Waiting for browser...")
+                                        .size(ui::LabelSize::Small)
+                                        .color(Color::Muted),
+                                ),
                             )
                         })
                         .into_any_element()
@@ -1618,11 +1634,21 @@ fn gpui_modifiers_to_cef(modifiers: &gpui::Modifiers, capslock: bool, pressed_bu
     use cef_browser::event_flags as flag;
 
     let mut flags = pressed_buttons;
-    if modifiers.shift { flags |= flag::SHIFT_DOWN; }
-    if modifiers.control { flags |= flag::CONTROL_DOWN; }
-    if modifiers.alt { flags |= flag::ALT_DOWN; }
-    if modifiers.platform { flags |= flag::COMMAND_DOWN; }
-    if capslock { flags |= flag::CAPS_LOCK_ON; }
+    if modifiers.shift {
+        flags |= flag::SHIFT_DOWN;
+    }
+    if modifiers.control {
+        flags |= flag::CONTROL_DOWN;
+    }
+    if modifiers.alt {
+        flags |= flag::ALT_DOWN;
+    }
+    if modifiers.platform {
+        flags |= flag::COMMAND_DOWN;
+    }
+    if capslock {
+        flags |= flag::CAPS_LOCK_ON;
+    }
     flags
 }
 
@@ -1671,7 +1697,8 @@ impl WebPreviewInputHandler {
     }
 
     fn state(&self, cx: &mut App) -> Option<cef_browser::BrowserState> {
-        self.with_browser(cx, |browser| browser.current_state()).flatten()
+        self.with_browser(cx, |browser| browser.current_state())
+            .flatten()
     }
 }
 
@@ -1689,7 +1716,10 @@ impl gpui::InputHandler for WebPreviewInputHandler {
             .state(cx)
             .and_then(|state| state.selected_range)
             .unwrap_or(0..0);
-        Some(gpui::UTF16Selection { range, reversed: false })
+        Some(gpui::UTF16Selection {
+            range,
+            reversed: false,
+        })
     }
 
     fn marked_text_range(
@@ -1809,37 +1839,87 @@ struct KeyCodes {
 #[cfg(target_os = "macos")]
 impl KeyCodes {
     fn new(windows: i32, native: i32) -> Self {
-        Self { windows, native, implies_shift: false, is_keypad: false, character: None }
+        Self {
+            windows,
+            native,
+            implies_shift: false,
+            is_keypad: false,
+            character: None,
+        }
     }
 
     fn shifted(windows: i32, native: i32) -> Self {
-        Self { implies_shift: true, ..Self::new(windows, native) }
+        Self {
+            implies_shift: true,
+            ..Self::new(windows, native)
+        }
     }
 
     fn keypad(windows: i32, native: i32) -> Self {
-        Self { is_keypad: true, ..Self::new(windows, native) }
+        Self {
+            is_keypad: true,
+            ..Self::new(windows, native)
+        }
     }
 
     fn with_char(windows: i32, native: i32, character: u16) -> Self {
-        Self { character: Some(character), ..Self::new(windows, native) }
+        Self {
+            character: Some(character),
+            ..Self::new(windows, native)
+        }
     }
 
     fn for_key(key: &str) -> Option<Self> {
         // Native keycodes for the US layout, keyed by the unshifted character.
         fn native_for(ch: char) -> Option<i32> {
             Some(match ch {
-                'a' => 0x00, 's' => 0x01, 'd' => 0x02, 'f' => 0x03,
-                'h' => 0x04, 'g' => 0x05, 'z' => 0x06, 'x' => 0x07,
-                'c' => 0x08, 'v' => 0x09, 'b' => 0x0B, 'q' => 0x0C,
-                'w' => 0x0D, 'e' => 0x0E, 'r' => 0x0F, 'y' => 0x10,
-                't' => 0x11, '1' => 0x12, '2' => 0x13, '3' => 0x14,
-                '4' => 0x15, '6' => 0x16, '5' => 0x17, '=' => 0x18,
-                '9' => 0x19, '7' => 0x1A, '-' => 0x1B, '8' => 0x1C,
-                '0' => 0x1D, ']' => 0x1E, 'o' => 0x1F, 'u' => 0x20,
-                '[' => 0x21, 'i' => 0x22, 'p' => 0x23, 'l' => 0x25,
-                'j' => 0x26, '\'' => 0x27, 'k' => 0x28, ';' => 0x29,
-                '\\' => 0x2A, ',' => 0x2B, '/' => 0x2C, 'n' => 0x2D,
-                'm' => 0x2E, '.' => 0x2F, '`' => 0x32,
+                'a' => 0x00,
+                's' => 0x01,
+                'd' => 0x02,
+                'f' => 0x03,
+                'h' => 0x04,
+                'g' => 0x05,
+                'z' => 0x06,
+                'x' => 0x07,
+                'c' => 0x08,
+                'v' => 0x09,
+                'b' => 0x0B,
+                'q' => 0x0C,
+                'w' => 0x0D,
+                'e' => 0x0E,
+                'r' => 0x0F,
+                'y' => 0x10,
+                't' => 0x11,
+                '1' => 0x12,
+                '2' => 0x13,
+                '3' => 0x14,
+                '4' => 0x15,
+                '6' => 0x16,
+                '5' => 0x17,
+                '=' => 0x18,
+                '9' => 0x19,
+                '7' => 0x1A,
+                '-' => 0x1B,
+                '8' => 0x1C,
+                '0' => 0x1D,
+                ']' => 0x1E,
+                'o' => 0x1F,
+                'u' => 0x20,
+                '[' => 0x21,
+                'i' => 0x22,
+                'p' => 0x23,
+                'l' => 0x25,
+                'j' => 0x26,
+                '\'' => 0x27,
+                'k' => 0x28,
+                ';' => 0x29,
+                '\\' => 0x2A,
+                ',' => 0x2B,
+                '/' => 0x2C,
+                'n' => 0x2D,
+                'm' => 0x2E,
+                '.' => 0x2F,
+                '`' => 0x32,
                 _ => return None,
             })
         }
@@ -1849,19 +1929,19 @@ impl KeyCodes {
             && (1..=20).contains(&number)
         {
             const NATIVE: [i32; 20] = [
-                0x7A, 0x78, 0x63, 0x76, 0x60, 0x61, 0x62, 0x64, 0x65, 0x6D,
-                0x67, 0x6F, 0x69, 0x6B, 0x71, 0x6A, 0x40, 0x4F, 0x50, 0x5A,
+                0x7A, 0x78, 0x63, 0x76, 0x60, 0x61, 0x62, 0x64, 0x65, 0x6D, 0x67, 0x6F, 0x69, 0x6B,
+                0x71, 0x6A, 0x40, 0x4F, 0x50, 0x5A,
             ];
             let native = *NATIVE.get(number as usize - 1)?;
             return Some(Self::new(0x70 + number as i32 - 1, native));
         }
 
-        if let Some(digit) = key.strip_prefix("numpad").and_then(|n| n.parse::<u32>().ok())
+        if let Some(digit) = key
+            .strip_prefix("numpad")
+            .and_then(|n| n.parse::<u32>().ok())
             && digit <= 9
         {
-            const NATIVE: [i32; 10] = [
-                0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5B, 0x5C,
-            ];
+            const NATIVE: [i32; 10] = [0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5B, 0x5C];
             let native = *NATIVE.get(digit as usize)?;
             return Some(Self::keypad(0x60 + digit as i32, native));
         }

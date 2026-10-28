@@ -1,23 +1,19 @@
 use crate::ns_string;
 use anyhow::{Context as _, Result};
-use cocoa::{
-    base::{id, nil},
-    foundation::{NSPoint, NSRect, NSSize},
-};
 use gpui::{Pixels, Size};
-use objc::{
-    class,
-    declare::ClassDecl,
-    msg_send,
-    runtime::{BOOL, Class, NO, Object, Sel, YES},
-    sel, sel_impl,
+use objc2::{
+    class, msg_send,
+    runtime::{AnyClass, AnyObject, Bool, ClassBuilder, Sel},
+    sel,
 };
 use objc2_app_kit::{
     NSWorkspaceApplicationKey, NSWorkspaceDidActivateApplicationNotification,
     NSWorkspaceDidLaunchApplicationNotification, NSWorkspaceDidUnhideApplicationNotification,
 };
+use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 use std::{
     ffi::{CStr, c_void},
+    ptr,
     sync::Once,
 };
 
@@ -37,9 +33,9 @@ const DEVICE_HUB_BUNDLE_IDENTIFIERS: [&[u8]; 2] =
 
 unsafe extern "C" {
     fn objc_setAssociatedObject(
-        object: *mut Object,
+        object: *mut AnyObject,
         key: *const c_void,
-        value: *mut Object,
+        value: *mut AnyObject,
         policy: usize,
     );
 
@@ -48,27 +44,31 @@ unsafe extern "C" {
     fn zed_simulator_kit_set_show_device_chrome(display_view: *mut c_void, show: bool);
 }
 
-pub(crate) fn sim_display_view_class() -> Result<&'static Class> {
+pub(crate) fn sim_display_view_class() -> Result<&'static AnyClass> {
     unsafe {
-        let bundle: id = msg_send![class!(NSBundle), bundleWithPath: ns_string(SIMULATOR_KIT_PATH)];
+        let bundle: *mut AnyObject =
+            msg_send![class!(NSBundle), bundleWithPath: ns_string(SIMULATOR_KIT_PATH)];
         anyhow::ensure!(
-            bundle != nil,
+            !bundle.is_null(),
             "SimulatorKit was not found at {SIMULATOR_KIT_PATH}"
         );
 
-        let loaded: BOOL = msg_send![bundle, load];
-        anyhow::ensure!(loaded != NO, "SimulatorKit could not be loaded");
+        let loaded: Bool = msg_send![bundle, load];
+        anyhow::ensure!(loaded.as_bool(), "SimulatorKit could not be loaded");
 
-        Class::get("SimulatorKit.SimDisplayView")
+        AnyClass::get(c"SimulatorKit.SimDisplayView")
             .context("SimulatorKit did not register SimulatorKit.SimDisplayView")
     }
 }
 
-pub(crate) fn create_sim_display_view(device: id, size: Size<Pixels>) -> Result<id> {
+pub(crate) fn create_sim_display_view(
+    device: *mut AnyObject,
+    size: Size<Pixels>,
+) -> Result<*mut AnyObject> {
     unsafe {
         let display_view_class = sim_display_view_class()?;
-        let display_view: id = msg_send![display_view_class, alloc];
-        let display_view: id = msg_send![
+        let display_view: *mut AnyObject = msg_send![display_view_class, alloc];
+        let display_view: *mut AnyObject = msg_send![
             display_view,
             initWithFrame: NSRect::new(
                 NSPoint::new(0., 0.),
@@ -76,20 +76,20 @@ pub(crate) fn create_sim_display_view(device: id, size: Size<Pixels>) -> Result<
             )
         ];
         anyhow::ensure!(
-            display_view != nil,
+            !display_view.is_null(),
             "SimulatorKit could not create SimDisplayView"
         );
-        let device_screen_class = Class::get("SimulatorKit.SimDeviceScreen")
+        let device_screen_class = AnyClass::get(c"SimulatorKit.SimDeviceScreen")
             .context("SimulatorKit did not register SimulatorKit.SimDeviceScreen")?;
-        let device_screen: id = msg_send![device_screen_class, alloc];
+        let device_screen: *mut AnyObject = msg_send![device_screen_class, alloc];
         // CoreSimulator reserves screen ID 0; the integrated device display is ID 1.
-        let device_screen: id = msg_send![
+        let device_screen: *mut AnyObject = msg_send![
             device_screen,
-            initWithDevice: device
-            screenID: MAIN_DEVICE_SCREEN_ID
+            initWithDevice: device,
+            screenID: MAIN_DEVICE_SCREEN_ID,
         ];
         anyhow::ensure!(
-            device_screen != nil,
+            !device_screen.is_null(),
             "SimulatorKit could not create SimDeviceScreen"
         );
 
@@ -120,11 +120,12 @@ fn hide_device_hub_while_embedded() {
     install_device_hub_observer();
     // DeviceHub may already be on screen from a run that happened before this device was embedded.
     unsafe {
-        let workspace: id = msg_send![class!(NSWorkspace), sharedWorkspace];
-        let applications: id = msg_send![workspace, runningApplications];
+        let workspace: *mut AnyObject = msg_send![class!(NSWorkspace), sharedWorkspace];
+        let applications: *mut AnyObject = msg_send![workspace, runningApplications];
         let application_count: usize = msg_send![applications, count];
         for application_index in 0..application_count {
-            let application: id = msg_send![applications, objectAtIndex: application_index];
+            let application: *mut AnyObject =
+                msg_send![applications, objectAtIndex: application_index];
             if is_device_hub(application) {
                 hide_device_hub(application);
             }
@@ -135,20 +136,20 @@ fn hide_device_hub_while_embedded() {
 fn install_device_hub_observer() {
     static INSTALL: Once = Once::new();
     INSTALL.call_once(|| unsafe {
-        let Some(mut decl) = ClassDecl::new("GPUIDeviceHubObserver", class!(NSObject)) else {
+        let Some(mut decl) = ClassBuilder::new(c"GPUIDeviceHubObserver", class!(NSObject)) else {
             log::error!("could not declare the DeviceHub observer class");
             return;
         };
         decl.add_method(
             sel!(applicationDidChange:),
-            hide_embedded_device_hub as extern "C" fn(&Object, Sel, id),
+            hide_embedded_device_hub as extern "C" fn(_, Sel, *mut AnyObject),
         );
         let observer_class = decl.register();
         // Lives as long as the process, like the notification registrations pointing at it.
-        let observer: id = msg_send![observer_class, new];
+        let observer: *mut AnyObject = msg_send![observer_class, new];
 
-        let workspace: id = msg_send![class!(NSWorkspace), sharedWorkspace];
-        let center: id = msg_send![workspace, notificationCenter];
+        let workspace: *mut AnyObject = msg_send![class!(NSWorkspace), sharedWorkspace];
+        let center: *mut AnyObject = msg_send![workspace, notificationCenter];
         // DeviceHub unhides itself without becoming active when it handles the `devices://`
         // URL that follows its launch, so hiding on launch alone is undone half a second later.
         for name in [
@@ -156,46 +157,45 @@ fn install_device_hub_observer() {
             NSWorkspaceDidActivateApplicationNotification,
             NSWorkspaceDidUnhideApplicationNotification,
         ] {
-            let name: *const objc2_foundation::NSString = name;
             let _: () = msg_send![
                 center,
-                addObserver: observer
-                selector: sel!(applicationDidChange:)
-                name: name as id
-                object: nil
+                addObserver: observer,
+                selector: sel!(applicationDidChange:),
+                name: name,
+                object: ptr::null_mut::<AnyObject>(),
             ];
         }
     });
 }
 
-extern "C" fn hide_embedded_device_hub(_: &Object, _: Sel, notification: id) {
+extern "C" fn hide_embedded_device_hub(_: &AnyObject, _: Sel, notification: *mut AnyObject) {
     unsafe {
-        let user_info: id = msg_send![notification, userInfo];
-        let application_key: *const objc2_foundation::NSString = NSWorkspaceApplicationKey;
-        let application: id = msg_send![user_info, objectForKey: application_key as id];
-        if application == nil || !is_device_hub(application) || !has_embedded_simulator() {
+        let user_info: *mut AnyObject = msg_send![notification, userInfo];
+        let application_key: &NSString = NSWorkspaceApplicationKey;
+        let application: *mut AnyObject = msg_send![user_info, objectForKey: application_key];
+        if application.is_null() || !is_device_hub(application) || !has_embedded_simulator() {
             return;
         }
         hide_device_hub(application);
     }
 }
 
-unsafe fn hide_device_hub(application: id) {
+unsafe fn hide_device_hub(application: *mut AnyObject) {
     unsafe {
-        let was_active: BOOL = msg_send![application, isActive];
-        let _: BOOL = msg_send![application, hide];
+        let was_active: Bool = msg_send![application, isActive];
+        let _: Bool = msg_send![application, hide];
         // Hiding the frontmost app does not hand focus back to the workspace it covered.
-        if was_active != NO {
-            let app: id = msg_send![class!(NSApplication), sharedApplication];
-            let _: () = msg_send![app, activateIgnoringOtherApps: YES];
+        if was_active.as_bool() {
+            let app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
+            let _: () = msg_send![app, activateIgnoringOtherApps: Bool::YES];
         }
     }
 }
 
-unsafe fn is_device_hub(application: id) -> bool {
+unsafe fn is_device_hub(application: *mut AnyObject) -> bool {
     unsafe {
-        let bundle_identifier: id = msg_send![application, bundleIdentifier];
-        if bundle_identifier == nil {
+        let bundle_identifier: *mut AnyObject = msg_send![application, bundleIdentifier];
+        if bundle_identifier.is_null() {
             return false;
         }
         let utf8: *const std::os::raw::c_char = msg_send![bundle_identifier, UTF8String];
@@ -211,30 +211,30 @@ unsafe fn is_device_hub(application: id) -> bool {
 /// DeviceHub coming forward would only cover the workspace.
 unsafe fn has_embedded_simulator() -> bool {
     unsafe {
-        let Some(display_view_class) = Class::get("SimulatorKit.SimDisplayView") else {
+        let Some(display_view_class) = AnyClass::get(c"SimulatorKit.SimDisplayView") else {
             return false;
         };
-        let app: id = msg_send![class!(NSApplication), sharedApplication];
-        let windows: id = msg_send![app, windows];
+        let app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
+        let windows: *mut AnyObject = msg_send![app, windows];
         let window_count: usize = msg_send![windows, count];
         (0..window_count).any(|window_index| {
-            let window: id = msg_send![windows, objectAtIndex: window_index];
-            let content_view: id = msg_send![window, contentView];
-            if content_view == nil {
+            let window: *mut AnyObject = msg_send![windows, objectAtIndex: window_index];
+            let content_view: *mut AnyObject = msg_send![window, contentView];
+            if content_view.is_null() {
                 return false;
             }
-            let subviews: id = msg_send![content_view, subviews];
+            let subviews: *mut AnyObject = msg_send![content_view, subviews];
             let subview_count: usize = msg_send![subviews, count];
             (0..subview_count).any(|subview_index| {
-                let subview: id = msg_send![subviews, objectAtIndex: subview_index];
-                let is_display_view: BOOL = msg_send![subview, isKindOfClass: display_view_class];
-                is_display_view != NO
+                let subview: *mut AnyObject = msg_send![subviews, objectAtIndex: subview_index];
+                let is_display_view: Bool = msg_send![subview, isKindOfClass: display_view_class];
+                is_display_view.as_bool()
             })
         })
     }
 }
 
-pub(crate) fn resize_sim_display_view(display_view: id, size: Size<Pixels>) {
+pub(crate) fn resize_sim_display_view(display_view: *mut AnyObject, size: Size<Pixels>) {
     let status = unsafe {
         zed_simulator_kit_resize(
             display_view.cast(),
@@ -258,7 +258,7 @@ pub(crate) fn resize_sim_display_view(display_view: id, size: Size<Pixels>) {
 
 /// Centers the display view inside its host container of `container_size`,
 /// preserving the size SimulatorKit computed for the current display frame.
-pub(crate) fn fit_sim_display_view(display_view: id, container_size: Size<Pixels>) {
+pub(crate) fn fit_sim_display_view(display_view: *mut AnyObject, container_size: Size<Pixels>) {
     unsafe {
         let intrinsic_size: NSSize = msg_send![display_view, intrinsicContentSize];
         if intrinsic_size.width <= 0. || intrinsic_size.height <= 0. {
@@ -276,7 +276,10 @@ pub(crate) fn fit_sim_display_view(display_view: id, container_size: Size<Pixels
     }
 }
 
-unsafe fn connect_sim_display_view(display_view: id, device_screen: id) -> Result<()> {
+unsafe fn connect_sim_display_view(
+    display_view: *mut AnyObject,
+    device_screen: *mut AnyObject,
+) -> Result<()> {
     unsafe {
         match zed_simulator_kit_connect(display_view.cast(), device_screen.cast()) {
             CONNECTED => Ok(()),
@@ -304,12 +307,15 @@ const NS_EVENT_MODIFIER_FLAG_COMMAND: u64 = 1 << 20;
 /// Builds an `NSEvent` in the display view's window and hands it to the view's own handlers.
 /// SimDisplayView turns mouse events into touches and key events into HID keys, which is the
 /// same path a real click or keystroke on the simulator takes.
-pub(crate) fn send_sim_display_input(display_view: id, input: gpui::SimulatorInput) -> Result<()> {
+pub(crate) fn send_sim_display_input(
+    display_view: *mut AnyObject,
+    input: gpui::SimulatorInput,
+) -> Result<()> {
     unsafe {
-        let window: id = msg_send![display_view, window];
-        anyhow::ensure!(window != nil, "the simulator display has no window");
+        let window: *mut AnyObject = msg_send![display_view, window];
+        anyhow::ensure!(!window.is_null(), "the simulator display has no window");
         let window_number: isize = msg_send![window, windowNumber];
-        let process_info: id = msg_send![class!(NSProcessInfo), processInfo];
+        let process_info: *mut AnyObject = msg_send![class!(NSProcessInfo), processInfo];
         let timestamp: f64 = msg_send![process_info, systemUptime];
         let bounds: NSRect = msg_send![display_view, bounds];
         anyhow::ensure!(
@@ -319,37 +325,37 @@ pub(crate) fn send_sim_display_input(display_view: id, input: gpui::SimulatorInp
 
         match input {
             gpui::SimulatorInput::Pointer { x, y, phase } => {
-                let flipped: BOOL = msg_send![display_view, isFlipped];
+                let flipped: Bool = msg_send![display_view, isFlipped];
                 let local_x = bounds.origin.x + x.clamp(0., 1.) * bounds.size.width;
                 let from_top = y.clamp(0., 1.) * bounds.size.height;
-                let local_y = if flipped != NO {
+                let local_y = if flipped.as_bool() {
                     bounds.origin.y + from_top
                 } else {
                     bounds.origin.y + bounds.size.height - from_top
                 };
                 let location: NSPoint = msg_send![
                     display_view,
-                    convertPoint: NSPoint::new(local_x, local_y)
-                    toView: nil
+                    convertPoint: NSPoint::new(local_x, local_y),
+                    toView: ptr::null_mut::<AnyObject>(),
                 ];
                 let (event_type, pressure) = match phase {
                     gpui::SimulatorPointerPhase::Down => (NS_EVENT_TYPE_LEFT_MOUSE_DOWN, 1.0f32),
                     gpui::SimulatorPointerPhase::Drag => (NS_EVENT_TYPE_LEFT_MOUSE_DRAGGED, 1.0f32),
                     gpui::SimulatorPointerPhase::Up => (NS_EVENT_TYPE_LEFT_MOUSE_UP, 0.0f32),
                 };
-                let event: id = msg_send![
+                let event: *mut AnyObject = msg_send![
                     class!(NSEvent),
-                    mouseEventWithType: event_type
-                    location: location
-                    modifierFlags: 0u64
-                    timestamp: timestamp
-                    windowNumber: window_number
-                    context: nil
-                    eventNumber: 0isize
-                    clickCount: 1isize
-                    pressure: pressure
+                    mouseEventWithType: event_type,
+                    location: location,
+                    modifierFlags: 0u64,
+                    timestamp: timestamp,
+                    windowNumber: window_number,
+                    context: ptr::null_mut::<AnyObject>(),
+                    eventNumber: 0isize,
+                    clickCount: 1isize,
+                    pressure: pressure,
                 ];
-                anyhow::ensure!(event != nil, "could not create the pointer event");
+                anyhow::ensure!(!event.is_null(), "could not create the pointer event");
                 match phase {
                     gpui::SimulatorPointerPhase::Down => {
                         let _: () = msg_send![display_view, mouseDown: event];
@@ -377,20 +383,25 @@ pub(crate) fn send_sim_display_input(display_view: id, input: gpui::SimulatorInp
                     flags |= NS_EVENT_MODIFIER_FLAG_COMMAND;
                 }
                 let characters = ns_string(&characters);
-                let event: id = msg_send![
+                let event_type = if down {
+                    NS_EVENT_TYPE_KEY_DOWN
+                } else {
+                    NS_EVENT_TYPE_KEY_UP
+                };
+                let event: *mut AnyObject = msg_send![
                     class!(NSEvent),
-                    keyEventWithType: if down { NS_EVENT_TYPE_KEY_DOWN } else { NS_EVENT_TYPE_KEY_UP }
-                    location: NSPoint::new(0., 0.)
-                    modifierFlags: flags
-                    timestamp: timestamp
-                    windowNumber: window_number
-                    context: nil
-                    characters: characters
-                    charactersIgnoringModifiers: characters
-                    isARepeat: NO
-                    keyCode: key_code
+                    keyEventWithType: event_type,
+                    location: NSPoint::new(0., 0.),
+                    modifierFlags: flags,
+                    timestamp: timestamp,
+                    windowNumber: window_number,
+                    context: ptr::null_mut::<AnyObject>(),
+                    characters: characters,
+                    charactersIgnoringModifiers: characters,
+                    isARepeat: Bool::NO,
+                    keyCode: key_code,
                 ];
-                anyhow::ensure!(event != nil, "could not create the key event");
+                anyhow::ensure!(!event.is_null(), "could not create the key event");
                 if down {
                     let _: () = msg_send![display_view, keyDown: event];
                 } else {

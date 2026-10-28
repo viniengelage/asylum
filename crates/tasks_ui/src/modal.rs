@@ -699,16 +699,16 @@ impl PickerDelegate for TasksModalDelegate {
                         // will actually press rather than the alt-enter chord.
                         let action = if current_modifiers.alt {
                             picker::ConfirmInput {
-                                secondary: current_modifiers.secondary(),
+                                secondary: current_modifiers.secondary(cx),
                             }
                             .boxed_clone()
-                        } else if current_modifiers.secondary() {
+                        } else if current_modifiers.secondary(cx) {
                             menu::SecondaryConfirm.boxed_clone()
                         } else {
                             menu::Confirm.boxed_clone()
                         };
                         this.child({
-                            let spawn_oneshot_label = if current_modifiers.secondary() {
+                            let spawn_oneshot_label = if current_modifiers.secondary(cx) {
                                 "Spawn Oneshot Without History"
                             } else {
                                 "Spawn Oneshot"
@@ -720,7 +720,7 @@ impl PickerDelegate for TasksModalDelegate {
                                     window.dispatch_action(action.boxed_clone(), cx)
                                 })
                         })
-                    } else if current_modifiers.secondary() {
+                    } else if current_modifiers.secondary(cx) {
                         this.child({
                             let label = if is_recent_selected {
                                 "Rerun Without History"
