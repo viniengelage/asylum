@@ -46,6 +46,9 @@ pub struct ProjectContext {
     // fields in sync.
     pub(crate) skills: Vec<SkillSummary>,
     pub(crate) has_skills: bool,
+    // Same pattern as `skills`: set only through `with_learnings`.
+    pub(crate) learnings: Vec<LearningContext>,
+    pub(crate) has_learnings: bool,
 }
 
 impl ProjectContext {
@@ -62,6 +65,8 @@ impl ProjectContext {
                 .to_string(),
             skills: Vec::new(),
             has_skills: false,
+            learnings: Vec::new(),
+            has_learnings: false,
         }
     }
 
@@ -82,6 +87,28 @@ impl ProjectContext {
     pub fn has_skills(&self) -> bool {
         self.has_skills
     }
+
+    pub fn with_learnings(mut self, learnings: Vec<LearningContext>) -> Self {
+        self.has_learnings = !learnings.is_empty();
+        self.learnings = learnings;
+        self
+    }
+
+    pub fn learnings(&self) -> &[LearningContext] {
+        &self.learnings
+    }
+}
+
+/// A note saved by the agent or the user under `.zed/learnings/` (or the
+/// personal learnings directory) that is shown to the model in every thread.
+#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
+pub struct LearningContext {
+    /// Where the learning lives, as shown to the model so it can read or
+    /// update the file.
+    pub location: String,
+    /// `None` when the learning didn't fit the prompt budget; the model only
+    /// sees its location.
+    pub text: Option<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize)]

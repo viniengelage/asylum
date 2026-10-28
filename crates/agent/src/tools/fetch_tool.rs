@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use ui::SharedString;
 use util::markdown::{MarkdownEscaped, MarkdownInlineCode};
 
+use super::json_compaction;
 use crate::sandboxing::{NetworkRequest, SandboxRequest};
 use crate::{AgentTool, ToolCallEventStream, ToolInput};
 
@@ -33,7 +34,8 @@ enum FetchStep {
     /// be authorized before the redirect is followed.
     Redirect(String),
     /// A terminal response was received and converted to Markdown.
-    Complete(String),
+    /// `saved_bytes` is how much compacting a JSON response removed.
+    Complete { text: String, saved_bytes: usize },
 }
 
 /// Prepends `https://` when the URL has no explicit HTTP(S) scheme, matching the
@@ -157,12 +159,27 @@ impl FetchTool {
             ContentType::Plaintext => std::str::from_utf8(&body)?.to_owned(),
             ContentType::Json => {
                 let json: serde_json::Value = serde_json::from_slice(&body)?;
+                let pretty = serde_json::to_string_pretty(&json)?;
 
-                format!("```json\n{}\n```", serde_json::to_string_pretty(&json)?)
+                match json_compaction::compact_json(&pretty) {
+                    Some(compacted) => {
+                        let text = format!("```json\n{}\n```", compacted.text);
+                        let saved_bytes = pretty.len().saturating_sub(text.len());
+                        let text = match compacted.note() {
+                            Some(note) => format!("{text}\n\n{note}"),
+                            None => text,
+                        };
+                        return Ok(FetchStep::Complete { text, saved_bytes });
+                    }
+                    None => format!("```json\n{pretty}\n```"),
+                }
             }
         };
 
-        Ok(FetchStep::Complete(text))
+        Ok(FetchStep::Complete {
+            text,
+            saved_bytes: 0,
+        })
     }
 }
 
@@ -350,7 +367,10 @@ impl AgentTool for FetchTool {
                 };
 
                 match step {
-                    FetchStep::Complete(text) => break text,
+                    FetchStep::Complete { text, saved_bytes } => {
+                        event_stream.record_compacted_output(saved_bytes, cx);
+                        break text;
+                    }
                     FetchStep::Redirect(target) => {
                         redirects += 1;
                         if redirects > MAX_REDIRECTS {

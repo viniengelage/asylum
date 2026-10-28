@@ -17,16 +17,20 @@ mod find_references_tool;
 mod get_code_actions_tool;
 mod go_to_definition_tool;
 mod grep_tool;
+mod json_compaction;
 mod list_agents_and_models_tool;
 mod list_directory_tool;
 mod move_path_tool;
 mod read_file_tool;
 mod rename_tool;
+mod repo_map_tool;
+mod save_learning_tool;
 mod skill_tool;
 mod spawn_agent_tool;
 mod submit_plan_tool;
 mod submit_step_tool;
 mod symbol_locator;
+mod terminal_output;
 mod terminal_tool;
 mod tool_permissions;
 mod toolkit_tool;
@@ -96,6 +100,8 @@ pub use list_directory_tool::*;
 pub use move_path_tool::*;
 pub use read_file_tool::*;
 pub use rename_tool::*;
+pub use repo_map_tool::*;
+pub use save_learning_tool::*;
 pub use skill_tool::*;
 pub use spawn_agent_tool::*;
 pub use submit_plan_tool::*;
@@ -227,6 +233,8 @@ tools! {
     MovePathTool,
     ReadFileTool,
     RenameTool,
+    RepoMapTool,
+    SaveLearningTool,
     SkillTool,
     SpawnAgentTool,
     SubmitPlanTool,

@@ -6713,6 +6713,11 @@ impl ThreadView {
             .unwrap_or((usage.max_tokens, 0));
         let input_max_label = crate::humanize_token_count(max_input_tokens);
         let output_max_label = crate::humanize_token_count(max_output_tokens);
+        let compacted_output_label = self
+            .as_native_thread(cx)
+            .map(|thread| thread.read(cx).compacted_output_tokens())
+            .filter(|tokens| *tokens > 0)
+            .map(|tokens| format!("~{} tokens", crate::humanize_token_count(tokens)));
 
         let build_tooltip = {
             move |_window: &mut Window, cx: &mut App| {
@@ -6726,6 +6731,7 @@ impl ThreadView {
                 let project_entry_ids = project_entry_ids.clone();
                 let workspace = workspace.clone();
                 let cost_label = cost_label.clone();
+                let compacted_output_label = compacted_output_label.clone();
                 cx.new(move |_cx| TokenUsageTooltip {
                     percentage,
                     used,
@@ -6736,6 +6742,7 @@ impl ThreadView {
                     output_max: output_max_label,
                     show_split,
                     cost_label,
+                    compacted_output_label,
                     separator_color: tooltip_separator_color,
                     global_agents_md_loaded,
                     project_rules_count,
@@ -7811,6 +7818,7 @@ struct TokenUsageTooltip {
     output_max: String,
     show_split: bool,
     cost_label: Option<String>,
+    compacted_output_label: Option<String>,
     separator_color: Color,
     global_agents_md_loaded: bool,
     project_rules_count: usize,
@@ -7830,6 +7838,7 @@ impl Render for TokenUsageTooltip {
         let output_max = self.output_max.clone();
         let show_split = self.show_split;
         let cost_label = self.cost_label.clone();
+        let compacted_output_label = self.compacted_output_label.clone();
         let global_agents_md_loaded = self.global_agents_md_loaded;
         let project_rules_count = self.project_rules_count;
         let project_entry_ids = self.project_entry_ids.clone();
@@ -7890,6 +7899,22 @@ impl Render for TokenUsageTooltip {
                                     .size(LabelSize::Small),
                             )
                             .child(Label::new(cost_label)),
+                    )
+                })
+                .when_some(compacted_output_label, |this, compacted_output_label| {
+                    this.child(
+                        v_flex()
+                            .mt_1p5()
+                            .pt_1p5()
+                            .gap_0p5()
+                            .border_t_1()
+                            .border_color(cx.theme().colors().border_variant)
+                            .child(
+                                Label::new("Saved by Output Compaction")
+                                    .color(Color::Muted)
+                                    .size(LabelSize::Small),
+                            )
+                            .child(Label::new(compacted_output_label)),
                     )
                 })
                 .when(

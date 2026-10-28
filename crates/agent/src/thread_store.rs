@@ -172,6 +172,7 @@ mod tests {
             sandboxed_terminal_temp_dir: None,
             sandbox_grants: Default::default(),
             task_agent: None,
+            compacted_output_tokens: 0,
         }
     }
 

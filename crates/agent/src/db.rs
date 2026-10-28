@@ -88,6 +88,8 @@ pub struct DbThread {
     pub sandbox_grants: DbSandboxGrants,
     #[serde(default)]
     pub task_agent: Option<task_agents::TaskAgent>,
+    #[serde(default)]
+    pub compacted_output_tokens: u64,
 }
 
 /// Serialized form of the sandbox permissions the user granted "for the rest of
@@ -172,6 +174,7 @@ impl SharedThread {
             sandboxed_terminal_temp_dir: None,
             sandbox_grants: DbSandboxGrants::default(),
             task_agent: None,
+            compacted_output_tokens: 0,
         }
     }
 
@@ -359,6 +362,7 @@ impl DbThread {
             sandboxed_terminal_temp_dir: None,
             sandbox_grants: DbSandboxGrants::default(),
             task_agent: None,
+            compacted_output_tokens: 0,
         })
     }
 }
@@ -949,6 +953,7 @@ mod tests {
             sandboxed_terminal_temp_dir: None,
             sandbox_grants: DbSandboxGrants::default(),
             task_agent: None,
+            compacted_output_tokens: 0,
         }
     }
 

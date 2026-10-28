@@ -1,4 +1,5 @@
 mod db;
+mod learnings;
 mod legacy_thread;
 mod native_agent_server;
 pub mod outline;
@@ -1481,7 +1482,7 @@ impl NativeAgent {
         // worktrees pick up their skills without restarting.
         let trusted_worktrees = TrustedWorktrees::try_get_global(cx);
         let worktree_store = project.read(cx).worktree_store();
-        let project_skills_task = {
+        let (project_skills_task, learning_worktrees) = {
             let project = project.clone();
             let trusted_worktrees = worktrees
                 .iter()
@@ -1509,8 +1510,14 @@ impl NativeAgent {
                     ))
                 })
                 .collect::<Vec<_>>();
+            let learning_worktrees = trusted_worktrees
+                .iter()
+                .map(|(worktree, worktree_id, worktree_root_name, _)| {
+                    (worktree.clone(), *worktree_id, worktree_root_name.clone())
+                })
+                .collect::<Vec<_>>();
 
-            cx.spawn(async move |cx| {
+            let task = cx.spawn(async move |cx| {
                 let mut project_skills_results = Vec::new();
                 for (worktree, worktree_id, worktree_root_name, scan_complete) in trusted_worktrees
                 {
@@ -1623,9 +1630,21 @@ impl NativeAgent {
                     project_skills_results.push(worktree_results);
                 }
                 project_skills_results
+            });
+            (task, learning_worktrees)
+        };
+        let personal_learnings_task = {
+            let fs = fs.clone();
+            cx.background_spawn(async move {
+                learnings::load_personal_learnings(
+                    fs.as_ref(),
+                    &learnings::personal_learnings_dir(),
+                )
+                .await
             })
         };
-        cx.spawn(async move |_cx| {
+        let project = project.clone();
+        cx.spawn(async move |cx| {
             let worktrees = future::join_all(worktree_tasks).await;
 
             let worktrees = worktrees
@@ -1674,7 +1693,18 @@ impl NativeAgent {
             let (catalog_skills, budget_issues) = select_catalog_skills(&overridden);
             skill_issues.extend(budget_issues);
 
-            let project_context = ProjectContext::new(worktrees).with_skills(catalog_skills);
+            // Runs after the skills task, which waited for the trusted
+            // worktrees' initial scan.
+            let project_learnings =
+                learnings::load_project_learnings(&project, &learning_worktrees, cx).await;
+            let learnings = learnings::select_prompt_learnings(
+                personal_learnings_task.await,
+                project_learnings,
+            );
+
+            let project_context = ProjectContext::new(worktrees)
+                .with_skills(catalog_skills)
+                .with_learnings(learnings);
             (project_context, skills, skill_issues)
         })
     }
@@ -1833,6 +1863,9 @@ impl NativeAgent {
                         || TASK_AGENT_PREFIXES
                             .iter()
                             .any(|prefix| path_ref.starts_with(prefix))
+                        || learnings::PROJECT_LEARNINGS_PREFIX
+                            .as_ref()
+                            .is_some_and(|prefix| path_ref.starts_with(prefix))
                 }) {
                     state.project_context_needs_refresh.send(()).ok();
                 }
@@ -7955,6 +7988,27 @@ mod internal_tests {
             assert_eq!(
                 thread.read(cx).project_context().read(cx).worktrees,
                 expected_worktrees
+            );
+        });
+
+        // Markdown files under `/a/.zed/learnings` become learnings.
+        fs.insert_tree(
+            "/a/.zed/learnings",
+            json!({
+                "build.md": "# Build\n\nUse the script.\n",
+                "notes.txt": "not a learning",
+            }),
+        )
+        .await;
+        cx.run_until_parked();
+        agent.read_with(cx, |agent, cx| {
+            let state = agent.projects.get(&project.entity_id()).unwrap();
+            assert_eq!(
+                state.project_context.read(cx).learnings(),
+                &[prompt_store::LearningContext {
+                    location: "a/.zed/learnings/build.md".into(),
+                    text: Some("# Build\n\nUse the script.".into()),
+                }]
             );
         });
     }

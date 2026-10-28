@@ -1,3 +1,4 @@
+use super::json_compaction;
 use crate::{AgentToolOutput, AnyAgentTool, ToolCallEventStream, ToolInput};
 use agent_client_protocol::schema::v2 as acp;
 use anyhow::Result;
@@ -406,7 +407,10 @@ impl AnyAgentTool for ContextServerTool {
                         tool_call_content.push(acp::ToolCallContent::from(
                             acp::ContentBlock::Text(acp::TextContent::new(text.clone())),
                         ));
-                        llm_output.push(LanguageModelToolResultContent::Text(text.into()));
+                        // The user sees the full text in the tool call; only
+                        // the model's copy is compacted.
+                        let model_text = json_compaction::model_text(&text, &event_stream, cx);
+                        llm_output.push(LanguageModelToolResultContent::Text(model_text.into()));
                     }
                     context_server::types::ToolResponseContent::Image { data, mime_type } => {
                         tool_call_content.push(acp::ToolCallContent::from(

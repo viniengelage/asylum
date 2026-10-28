@@ -3,10 +3,10 @@ use crate::{
     CreateDirectoryTool, CreateThreadTool, DatabaseSchemaTool, DbLanguageModel, DbThread,
     DeletePathTool, DiagnosticsTool, EditFileTool, FetchTool, FindPathTool, FindReferencesTool,
     GetCodeActionsTool, GoToDefinitionTool, GrepTool, ListAgentsAndModelsTool, ListDirectoryTool,
-    MovePathTool, ProjectSnapshot, ReadFileTool, RenameTool, SandboxedTerminalTool, SpawnAgentTool,
-    SubmitPlanTool, SubmitStepTool, SystemPromptTemplate, Template, Templates, TerminalTool,
-    ToolPermissionDecision, UpdatePlanTool, WebSearchTool, WriteFileTool,
-    decide_permission_from_settings,
+    MovePathTool, ProjectSnapshot, ReadFileTool, RenameTool, RepoMapTool, SandboxedTerminalTool,
+    SaveLearningTool, SpawnAgentTool, SubmitPlanTool, SubmitStepTool, SystemPromptTemplate,
+    Template, Templates, TerminalTool, ToolPermissionDecision, UpdatePlanTool, WebSearchTool,
+    WriteFileTool, decide_permission_from_settings,
 };
 use acp_thread::{AgentModelId, ClientUserMessageId, MentionUri, ProcessOutput};
 use action_log::ActionLog;
@@ -77,6 +77,9 @@ const TOOL_CALL_INTERRUPTED_BY_FOLLOW_UP_MESSAGE: &str =
 pub(crate) const FOLLOW_UP_PERMISSION_DENIED_OPTION_ID: &str = "follow_up_permission_denied";
 pub const MAX_TOOL_NAME_LENGTH: usize = 64;
 pub const MAX_SUBAGENT_DEPTH: u8 = 1;
+/// Rough bytes-per-token ratio used to estimate tokens saved by compacting
+/// tool output. It is only shown to the user, so precision is not important.
+const BYTES_PER_ESTIMATED_TOKEN: usize = 4;
 
 pub(crate) fn provider_compatible_tool_name(tool_name: &str) -> String {
     let mut sanitized = String::new();
@@ -986,6 +989,9 @@ pub enum ToolPermissionScope {
     ToolInput,
     SymlinkTarget,
     AgentSkills,
+    /// For prompts that are always shown, where an "always allow" choice
+    /// would never be consulted.
+    OnceOnly,
 }
 
 impl ToolPermissionContext {
@@ -1007,6 +1013,11 @@ impl ToolPermissionContext {
 
     pub fn for_agent_skills(mut self) -> Self {
         self.scope = ToolPermissionScope::AgentSkills;
+        self
+    }
+
+    pub fn once_only(mut self) -> Self {
+        self.scope = ToolPermissionScope::OnceOnly;
         self
     }
 
@@ -1056,7 +1067,10 @@ impl ToolPermissionContext {
         }
 
         // Skills always prompt, so offer only once-only allow/deny.
-        if self.scope == ToolPermissionScope::AgentSkills {
+        if matches!(
+            self.scope,
+            ToolPermissionScope::AgentSkills | ToolPermissionScope::OnceOnly
+        ) {
             return acp_thread::PermissionOptions::Flat(vec![
                 acp_v2::PermissionOption::new(
                     acp_v2::PermissionOptionId::new("allow"),
@@ -1365,6 +1379,9 @@ pub struct Thread {
     /// `cumulative_token_usage` for the in-flight completion request. Reset at
     /// the start of each request.
     current_request_token_usage: TokenUsage,
+    /// Estimated tokens kept out of the model's context by compacting tool
+    /// output (see `tools::terminal_output`).
+    compacted_output_tokens: u64,
     pending_compaction_telemetry: Option<CompactionTelemetry>,
     #[allow(unused)]
     initial_project_snapshot: Shared<Task<Option<Arc<ProjectSnapshot>>>>,
@@ -1534,6 +1551,7 @@ impl Thread {
             request_token_usage: HashMap::default(),
             cumulative_token_usage: TokenUsage::default(),
             current_request_token_usage: TokenUsage::default(),
+            compacted_output_tokens: 0,
             pending_compaction_telemetry: None,
             initial_project_snapshot: {
                 let project_snapshot = Self::project_snapshot(project.clone(), cx);
@@ -1917,6 +1935,7 @@ impl Thread {
             request_token_usage: db_thread.request_token_usage.clone(),
             cumulative_token_usage: db_thread.cumulative_token_usage,
             current_request_token_usage: TokenUsage::default(),
+            compacted_output_tokens: db_thread.compacted_output_tokens,
             pending_compaction_telemetry: None,
             initial_project_snapshot: Task::ready(db_thread.initial_project_snapshot).shared(),
             context_server_registry,
@@ -2060,6 +2079,7 @@ impl Thread {
             sandboxed_terminal_temp_dir: self.sandboxed_terminal_temp_dir.clone(),
             sandbox_grants: self.sandbox_grants.borrow().to_db(),
             task_agent: self.task_agent.as_deref().cloned(),
+            compacted_output_tokens: self.compacted_output_tokens,
         };
 
         cx.background_spawn(async move {
@@ -2337,6 +2357,8 @@ impl Thread {
         self.add_tool(FindPathTool::new(self.project.clone()));
         self.add_tool(GrepTool::new(self.project.clone()));
         self.add_tool(ListDirectoryTool::new(self.project.clone()));
+        self.add_tool(RepoMapTool::new(self.project.clone()));
+        self.add_tool(SaveLearningTool::new(self.project.clone()));
         self.add_tool(MovePathTool::new(self.project.clone()));
         self.add_tool(ReadFileTool::new(
             self.project.clone(),
@@ -2698,6 +2720,10 @@ impl Thread {
 
     pub fn cumulative_token_usage(&self) -> language_model::TokenUsage {
         self.cumulative_token_usage
+    }
+
+    pub fn compacted_output_tokens(&self) -> u64 {
+        self.compacted_output_tokens
     }
 
     /// Maximum input after reserving the selected model's output allowance.
@@ -6242,6 +6268,24 @@ impl ToolCallEventStream {
         let Some(thread) = thread else { return };
         cx.update(|cx| {
             thread.update(cx, |_thread, cx| cx.notify()).ok();
+        });
+    }
+
+    /// Records that a tool kept `saved_bytes` of its output out of the
+    /// model's context, so the UI can show how much compaction saved.
+    pub fn record_compacted_output(&self, saved_bytes: usize, cx: &AsyncApp) {
+        let Some(thread) = &self.thread else { return };
+        if saved_bytes == 0 {
+            return;
+        }
+        let saved_tokens = (saved_bytes / BYTES_PER_ESTIMATED_TOKEN) as u64;
+        cx.update(|cx| {
+            thread
+                .update(cx, |thread, cx| {
+                    thread.compacted_output_tokens += saved_tokens;
+                    cx.notify();
+                })
+                .ok();
         });
     }
 

@@ -1,3 +1,4 @@
+use super::json_compaction;
 use crate::{AgentToolOutput, AnyAgentTool, ToolCallEventStream, ToolInput, ToolPermissionContext};
 use agent_client_protocol::schema::v2 as acp;
 use anyhow::{Result, anyhow};
@@ -139,7 +140,8 @@ impl AnyAgentTool for ToolkitToolAdapter {
                                 text.clone(),
                             ))),
                         )));
-                        llm_output.push(LanguageModelToolResultContent::Text(text.as_str().into()));
+                        let model_text = json_compaction::model_text(text, &event_stream, cx);
+                        llm_output.push(LanguageModelToolResultContent::Text(model_text.into()));
                     }
                     ToolkitContent::Image { base64_png } => {
                         tool_call_content.push(acp::ToolCallContent::Content(Box::new(

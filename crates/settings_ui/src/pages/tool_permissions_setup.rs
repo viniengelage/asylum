@@ -1420,6 +1420,9 @@ mod tests {
             "open",
             "read_file",
             "rename_symbol",
+            "repo_map",
+            // Always asks the user: learnings end up in every future system prompt.
+            "save_learning",
             // Only presents a plan in the conversation; executing it is a user click.
             "submit_plan",
             // Only records a flow step's delivery; the flow decides what runs next.

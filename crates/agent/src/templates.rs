@@ -165,6 +165,71 @@ mod tests {
     }
 
     #[test]
+    fn test_system_prompt_renders_learnings() {
+        let project = prompt_store::ProjectContext::default().with_learnings(vec![
+            prompt_store::LearningContext {
+                location: "app/.zed/learnings/run-tests.md".to_string(),
+                text: Some("# Run tests\n\nUse the script.".to_string()),
+            },
+            prompt_store::LearningContext {
+                location: "app/.zed/learnings/too-big.md".to_string(),
+                text: None,
+            },
+        ]);
+        let render = |available_tools: Vec<SharedString>| {
+            SystemPromptTemplate {
+                project: &project,
+                available_tools,
+                model_name: None,
+                date: "2026-01-01".to_string(),
+                user_agents_md: None,
+                task_agent: None,
+                sandboxing: false,
+                is_linux: false,
+                is_windows: false,
+            }
+            .render(&Templates::new())
+            .unwrap()
+        };
+
+        let rendered = render(vec!["save_learning".into()]);
+        assert!(rendered.contains("## Learnings"), "{rendered}");
+        assert!(
+            rendered.contains(
+                "`app/.zed/learnings/run-tests.md`:\n``````\n# Run tests\n\nUse the script.\n``````"
+            ),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("`app/.zed/learnings/too-big.md` (not included to save context"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("save it with `save_learning`"),
+            "{rendered}"
+        );
+
+        let rendered = render(Vec::new());
+        assert!(!rendered.contains("save_learning"), "{rendered}");
+
+        let empty = prompt_store::ProjectContext::default();
+        let rendered = SystemPromptTemplate {
+            project: &empty,
+            available_tools: Vec::new(),
+            model_name: None,
+            date: "2026-01-01".to_string(),
+            user_agents_md: None,
+            task_agent: None,
+            sandboxing: false,
+            is_linux: false,
+            is_windows: false,
+        }
+        .render(&Templates::new())
+        .unwrap();
+        assert!(!rendered.contains("## Learnings"), "{rendered}");
+    }
+
+    #[test]
     fn test_system_prompt_renders_user_agents_md_before_project_rules() {
         use prompt_store::{ProjectContext, RulesFileContext, WorktreeContext};
         use util::rel_path::RelPath;

@@ -14,6 +14,7 @@ use std::{
     time::Duration,
 };
 
+use super::terminal_output;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 use crate::SandboxFallbackDecision;
 use crate::sandboxing::{
@@ -22,7 +23,7 @@ use crate::sandboxing::{
 };
 use crate::{AgentTool, ThreadEnvironment, ToolCallEventStream, ToolInput};
 
-const COMMAND_OUTPUT_LIMIT: u64 = 16 * 1024;
+const COMMAND_OUTPUT_LIMIT: usize = 16 * 1024;
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const IDLE_TIMEOUT: Duration = Duration::from_secs(2 * 60);
 const IDLE_POLL_INTERVAL: Duration = Duration::from_secs(1);
@@ -68,6 +69,9 @@ pub struct TerminalToolInput {
     /// Return only the last N lines of terminal output to the model after the command finishes. Do not pipe output to `tail`; use this parameter instead so the user can still see live output. Avoid requesting too many lines, or the response may waste tokens or exceed the context window.
     #[serde(default)]
     pub tail_lines: Option<usize>,
+    /// Set to `true` to receive the output exactly as printed. By default, lines without information (build progress, passing tests, git hints, repeated lines) are omitted from what is sent back to you; only use this when you need one of those lines.
+    #[serde(default)]
+    pub raw_output: Option<bool>,
 }
 
 /// Executes a shell one-liner and returns the combined output.
@@ -110,6 +114,9 @@ pub struct SandboxedTerminalToolInput {
     /// Return only the last N lines of terminal output to the model after the command finishes. Do not pipe output to `tail`; use this parameter instead so the user can still see live output. Avoid requesting too many lines, or the response may waste tokens or exceed the context window.
     #[serde(default)]
     pub tail_lines: Option<usize>,
+    /// Set to `true` to receive the output exactly as printed. By default, lines without information (build progress, passing tests, git hints, repeated lines) are omitted from what is sent back to you; only use this when you need one of those lines.
+    #[serde(default)]
+    pub raw_output: Option<bool>,
     /// Hosts the command needs outbound network access to.
     ///
     /// Sandboxed commands cannot reach the network by default. List the hosts
@@ -239,6 +246,7 @@ impl From<TerminalToolInput> for TerminalToolRequest {
             selection: TerminalOutputSelection {
                 head_lines: input.head_lines,
                 tail_lines: input.tail_lines,
+                raw: input.raw_output.unwrap_or(false),
             },
             sandbox: None,
         }
@@ -254,6 +262,7 @@ impl From<SandboxedTerminalToolInput> for TerminalToolRequest {
             selection: TerminalOutputSelection {
                 head_lines: input.head_lines,
                 tail_lines: input.tail_lines,
+                raw: input.raw_output.unwrap_or(false),
             },
             sandbox: Some(TerminalSandboxInput {
                 allow_hosts: input.allow_hosts,
@@ -846,11 +855,11 @@ async fn run_terminal_tool(
         None
     };
 
-    let output_byte_limit = if selection.is_enabled() {
-        None
-    } else {
-        Some(COMMAND_OUTPUT_LIMIT)
-    };
+    // The model-facing output is compacted and then truncated to
+    // `COMMAND_OUTPUT_LIMIT` in `process_content`, which keeps the end of the
+    // output where errors usually are. A byte limit here would keep only the
+    // beginning, before any compaction.
+    let output_byte_limit = None;
 
     // Create the terminal. On Windows the WSL sandbox can only report whether
     // it set up the environment once `wsl.exe` actually runs (its probe is
@@ -1062,8 +1071,12 @@ async fn run_terminal_tool(
     let user_stopped = user_stopped_via_signal || user_stopped_via_terminal;
 
     let output = terminal.current_output(cx).map_err(|e| e.to_string())?;
+    let raw_output_len = output.output.trim().len();
 
     let result = process_content(output, &input.command, timed_out, user_stopped, selection);
+    if !selection.is_enabled() && !selection.raw {
+        event_stream.record_compacted_output(raw_output_len.saturating_sub(result.len()), cx);
+    }
     let automatic_stop_note = (timed_out && input.timeout_ms.is_none()).then(|| {
         let reason = if stopped_while_idle {
             format!(
@@ -1253,6 +1266,7 @@ fn build_network_request(sandbox: &TerminalSandboxInput) -> Result<NetworkReques
 struct TerminalOutputSelection {
     head_lines: Option<usize>,
     tail_lines: Option<usize>,
+    raw: bool,
 }
 
 impl TerminalOutputSelection {
@@ -1315,7 +1329,20 @@ fn process_content(
     selection: TerminalOutputSelection,
 ) -> String {
     let content = output.output.trim();
-    let content = select_terminal_output_lines(content, selection);
+    let (content, omitted_lines) = if selection.is_enabled() || selection.raw {
+        (select_terminal_output_lines(content, selection), 0)
+    } else {
+        let compacted = terminal_output::compact_output(command, content);
+        (compacted.text, compacted.omitted_lines)
+    };
+    let full_len = content.len();
+    let middle_truncated = if selection.is_enabled() {
+        None
+    } else {
+        terminal_output::truncate_middle(&content, COMMAND_OUTPUT_LIMIT)
+    };
+    let was_middle_truncated = middle_truncated.is_some();
+    let content = middle_truncated.unwrap_or(content);
     let is_empty = content.is_empty();
 
     // On Windows, recognize the kernel-style diagnostics WSL prints when a
@@ -1328,10 +1355,22 @@ fn process_content(
     let interop_blocked = false;
 
     let content = format!("```\n{content}\n```");
-    let content = if output.truncated {
+    let content = if was_middle_truncated {
+        format!(
+            "Command output too long ({full_len} bytes). Showing the beginning and the end:\n\n{content}"
+        )
+    } else if output.truncated {
         format!(
             "Command output too long. The first {} bytes:\n\n{content}",
             content.len(),
+        )
+    } else {
+        content
+    };
+    let content = if omitted_lines > 0 {
+        format!(
+            "{content}\n\n({omitted_lines} lines without information, such as build progress, \
+             passing tests or repeated lines, were omitted. Set `raw_output: true` if you need them.)"
         )
     } else {
         content
@@ -1628,6 +1667,73 @@ mod tests {
     }
 
     #[test]
+    fn test_process_content_compacts_output_and_explains_omission() {
+        let output = ProcessOutput::new(
+            "   Compiling foo v0.1.0\n    Finished `dev` profile\nerror: oops".to_string(),
+            false,
+        )
+        .exit_status(acp_v2::TerminalExitStatus::new().exit_code(101));
+
+        let result = process_content(
+            output,
+            "cargo build",
+            false,
+            false,
+            TerminalOutputSelection::default(),
+        );
+
+        assert_eq!(
+            result,
+            "Command \"cargo build\" failed with exit code 101.\n\n\
+             ```\n    Finished `dev` profile\nerror: oops\n```\n\n\
+             (1 lines without information, such as build progress, passing tests or repeated \
+             lines, were omitted. Set `raw_output: true` if you need them.)"
+        );
+    }
+
+    #[test]
+    fn test_process_content_raw_output_skips_compaction() {
+        let output = ProcessOutput::new("Compiling foo v0.1.0\nerror: oops".to_string(), false)
+            .exit_status(acp_v2::TerminalExitStatus::new().exit_code(0));
+
+        let result = process_content(
+            output,
+            "cargo build",
+            false,
+            false,
+            TerminalOutputSelection {
+                raw: true,
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(result, "```\nCompiling foo v0.1.0\nerror: oops\n```");
+    }
+
+    #[test]
+    fn test_process_content_keeps_the_end_of_long_output() {
+        let long_output = (0..5000)
+            .map(|index| format!("line {index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let output = ProcessOutput::new(long_output, false)
+            .exit_status(acp_v2::TerminalExitStatus::new().exit_code(1));
+
+        let result = process_content(
+            output,
+            "some-command",
+            false,
+            false,
+            TerminalOutputSelection::default(),
+        );
+
+        assert!(result.contains("Showing the beginning and the end"));
+        assert!(result.contains("\nline 0\n"));
+        assert!(result.contains("\nline 4999\n```"));
+        assert!(result.len() < COMMAND_OUTPUT_LIMIT + 1024);
+    }
+
+    #[test]
     fn test_process_content_user_stopped() {
         let output = ProcessOutput::new("partial output".to_string(), false);
 
@@ -1765,6 +1871,7 @@ mod tests {
             TerminalOutputSelection {
                 head_lines: Some(2),
                 tail_lines: None,
+                raw: false,
             },
         );
 
@@ -1779,6 +1886,7 @@ mod tests {
             TerminalOutputSelection {
                 head_lines: None,
                 tail_lines: Some(2),
+                raw: false,
             },
         );
 
@@ -1793,6 +1901,7 @@ mod tests {
             TerminalOutputSelection {
                 head_lines: Some(2),
                 tail_lines: Some(2),
+                raw: false,
             },
         );
 
@@ -1807,6 +1916,7 @@ mod tests {
             TerminalOutputSelection {
                 head_lines: Some(2),
                 tail_lines: Some(2),
+                raw: false,
             },
         );
 
@@ -1823,6 +1933,7 @@ mod tests {
                 TerminalOutputSelection {
                     head_lines: Some(0),
                     tail_lines: None,
+                    raw: false,
                 },
             ),
             ""
@@ -1833,6 +1944,7 @@ mod tests {
                 TerminalOutputSelection {
                     head_lines: None,
                     tail_lines: Some(0),
+                    raw: false,
                 },
             ),
             ""
@@ -1843,6 +1955,7 @@ mod tests {
                 TerminalOutputSelection {
                     head_lines: Some(0),
                     tail_lines: Some(0),
+                    raw: false,
                 },
             ),
             "\n\n"
@@ -1857,6 +1970,7 @@ mod tests {
             TerminalOutputSelection {
                 head_lines: None,
                 tail_lines: Some(2),
+                raw: false,
             },
         );
 
@@ -1876,6 +1990,7 @@ mod tests {
             TerminalOutputSelection {
                 head_lines: Some(1),
                 tail_lines: Some(1),
+                raw: false,
             },
         );
 
@@ -1895,6 +2010,7 @@ mod tests {
             TerminalOutputSelection {
                 head_lines: None,
                 tail_lines: Some(1),
+                raw: false,
             },
         );
 
@@ -1916,6 +2032,7 @@ mod tests {
             TerminalOutputSelection {
                 head_lines: Some(1),
                 tail_lines: None,
+                raw: false,
             },
         );
 
@@ -1937,6 +2054,7 @@ mod tests {
             TerminalOutputSelection {
                 head_lines: None,
                 tail_lines: Some(1),
+                raw: false,
             },
         );
 
@@ -1960,6 +2078,7 @@ mod tests {
             TerminalOutputSelection {
                 head_lines: Some(1),
                 tail_lines: Some(1),
+                raw: false,
             },
         );
 
@@ -2490,6 +2609,7 @@ mod tests {
                     timeout_ms: None,
                     head_lines: Some(1),
                     tail_lines: Some(1),
+                    raw_output: None,
                 }),
                 event_stream,
                 cx,
@@ -2512,7 +2632,7 @@ mod tests {
     }
 
     #[gpui::test]
-    async fn test_run_uses_byte_limit_when_head_and_tail_are_not_set(
+    async fn test_run_requests_untruncated_output_when_head_and_tail_are_not_set(
         cx: &mut gpui::TestAppContext,
     ) {
         crate::tests::init_test(cx);
@@ -2557,10 +2677,7 @@ mod tests {
         rx.expect_update_fields().await;
         let result = task.await.expect("terminal command should succeed");
         assert_eq!(result, "```\ncommand output\n```");
-        assert_eq!(
-            environment.terminal_output_limits(),
-            vec![Some(COMMAND_OUTPUT_LIMIT)]
-        );
+        assert_eq!(environment.terminal_output_limits(), vec![None]);
     }
 
     #[gpui::test]
