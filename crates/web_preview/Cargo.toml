@@ -47,11 +47,16 @@ futures.workspace = true
 http_client.workspace = true
 libc.workspace = true
 smol.workspace = true
-core-foundation.workspace = true
-core-video.workspace = true
 objc2 = "0.6"
-objc2-core-foundation.workspace = true
-objc2-core-video = { workspace = true, features = ["CVPixelBuffer"] }
+objc2-core-foundation = { workspace = true, features = ["CFDictionary", "CFNumber", "CFString"] }
+objc2-core-video = { workspace = true, features = [
+    "CVBase",
+    "CVPixelBuffer",
+    "CVPixelBufferIOSurface",
+    "CVReturn",
+    "objc2-io-surface",
+] }
+objc2-io-surface = { version = "=0.3.2", default-features = false, features = ["std", "IOSurfaceRef", "objc2-core-foundation"] }
 objc2-app-kit = { version = "0.3", default-features = false, features = [
     "NSView",
     "NSWindow",

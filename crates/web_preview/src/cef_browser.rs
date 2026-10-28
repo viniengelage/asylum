@@ -1,20 +1,18 @@
+use crate::cef_paths;
 use anyhow::{Context, Result, anyhow};
 use cef::*;
-use core_foundation::base::{TCFType, kCFAllocatorDefault};
-use core_foundation::boolean::CFBoolean;
-use core_foundation::dictionary::CFDictionary;
-use core_foundation::number::CFNumber;
-use core_foundation::string::CFString;
-use core_video::pixel_buffer::{
-    CVPixelBuffer, CVPixelBufferRef, kCVPixelFormatType_32BGRA,
-    kCVPixelBufferIOSurfacePropertiesKey, kCVPixelBufferMetalCompatibilityKey,
-};
-use core_video::pixel_buffer_io_surface::CVPixelBufferCreateWithIOSurface;
-use core_video::r#return::kCVReturnSuccess;
 use gpui::{Bounds, Pixels};
-use crate::cef_paths;
+use objc2_core_foundation::{CFBoolean, CFDictionary, CFRetained, CFString, CFType};
+use objc2_core_video::{
+    CVPixelBuffer, CVPixelBufferCreate, CVPixelBufferCreateWithIOSurface,
+    CVPixelBufferGetBaseAddress, CVPixelBufferGetBytesPerRow, CVPixelBufferLockBaseAddress,
+    CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress, kCVPixelBufferIOSurfacePropertiesKey,
+    kCVPixelBufferMetalCompatibilityKey, kCVPixelFormatType_32BGRA, kCVReturnSuccess,
+};
+use objc2_io_surface::IOSurfaceRef;
 use std::ffi::c_void;
 use std::path::PathBuf;
+use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -68,18 +66,11 @@ unsafe fn install_cef_app_protocol_methods() {
             fn class_getInstanceMethod(cls: *mut c_void, sel: *mut c_void) -> *mut c_void;
         }
 
-        extern "C" fn is_handling_send_event(
-            _self: *mut c_void,
-            _cmd: *mut c_void,
-        ) -> bool {
+        extern "C" fn is_handling_send_event(_self: *mut c_void, _cmd: *mut c_void) -> bool {
             HANDLING_SEND_EVENT.load(Ordering::Relaxed)
         }
 
-        extern "C" fn set_handling_send_event(
-            _self: *mut c_void,
-            _cmd: *mut c_void,
-            value: bool,
-        ) {
+        extern "C" fn set_handling_send_event(_self: *mut c_void, _cmd: *mut c_void, value: bool) {
             HANDLING_SEND_EVENT.store(value, Ordering::Relaxed);
         }
 
@@ -219,7 +210,6 @@ fn ensure_cef_initialized() -> Result<()> {
     }
 }
 
-
 fn try_init_cef() -> Result<()> {
     // Patch GPUIApplication with CrAppProtocol methods before CEF touches it
     unsafe { install_cef_app_protocol_methods() };
@@ -237,15 +227,15 @@ fn try_init_cef() -> Result<()> {
     );
 
     let exe_path = std::env::current_exe().context("Failed to get current executable path")?;
-    let exe_dir = exe_path.parent().context("Failed to get executable directory")?;
+    let exe_dir = exe_path
+        .parent()
+        .context("Failed to get executable directory")?;
 
     // CEF looks for libGLESv2.dylib and libEGL.dylib next to the executable for
     // ANGLE/SwiftShader rendering. Inside an `.app` the executable's directory is sealed by
     // the code signature, so there they have to be found through `framework_dir_path`.
     if !cef_paths::running_from_bundle() {
-        let libraries_dir = cef_dir
-            .join(cef_paths::FRAMEWORK_NAME)
-            .join("Libraries");
+        let libraries_dir = cef_dir.join(cef_paths::FRAMEWORK_NAME).join("Libraries");
         for lib_name in ["libGLESv2.dylib", "libEGL.dylib", "vk_swiftshader_icd.json"] {
             let target = exe_dir.join(lib_name);
             if !target.exists() {
@@ -338,18 +328,10 @@ fn try_init_cef() -> Result<()> {
         browser_subprocess_path: CefString::from(
             helper_path.to_str().unwrap_or("web_preview_helper"),
         ),
-        framework_dir_path: CefString::from(
-            framework_path.to_str().unwrap_or(""),
-        ),
-        main_bundle_path: CefString::from(
-            main_bundle_path.to_str().unwrap_or(""),
-        ),
-        resources_dir_path: CefString::from(
-            resources_path.to_str().unwrap_or(""),
-        ),
-        locales_dir_path: CefString::from(
-            locales_path.to_str().unwrap_or(""),
-        ),
+        framework_dir_path: CefString::from(framework_path.to_str().unwrap_or("")),
+        main_bundle_path: CefString::from(main_bundle_path.to_str().unwrap_or("")),
+        resources_dir_path: CefString::from(resources_path.to_str().unwrap_or("")),
+        locales_dir_path: CefString::from(locales_path.to_str().unwrap_or("")),
         ..Default::default()
     };
 
@@ -563,8 +545,12 @@ fn cef_cursor_to_gpui(cursor_type: CursorType) -> gpui::CursorStyle {
         CursorType::SOUTHRESIZE => CursorStyle::ResizeDown,
         CursorType::NORTHSOUTHRESIZE => CursorStyle::ResizeUpDown,
         CursorType::EASTWESTRESIZE => CursorStyle::ResizeLeftRight,
-        CursorType::NORTHEASTRESIZE | CursorType::SOUTHWESTRESIZE => CursorStyle::ResizeUpRightDownLeft,
-        CursorType::NORTHWESTRESIZE | CursorType::SOUTHEASTRESIZE => CursorStyle::ResizeUpLeftDownRight,
+        CursorType::NORTHEASTRESIZE | CursorType::SOUTHWESTRESIZE => {
+            CursorStyle::ResizeUpRightDownLeft
+        }
+        CursorType::NORTHWESTRESIZE | CursorType::SOUTHEASTRESIZE => {
+            CursorStyle::ResizeUpLeftDownRight
+        }
         CursorType::NORTHEASTSOUTHWESTRESIZE => CursorStyle::ResizeUpRightDownLeft,
         CursorType::NORTHWESTSOUTHEASTRESIZE => CursorStyle::ResizeUpLeftDownRight,
         CursorType::COLUMNRESIZE => CursorStyle::ResizeColumn,
@@ -581,7 +567,7 @@ fn cef_cursor_to_gpui(cursor_type: CursorType) -> gpui::CursorStyle {
 /// upload stands between CEF and the screen.
 #[derive(Clone)]
 pub struct BrowserFrame {
-    pub pixel_buffer: CVPixelBuffer,
+    pub pixel_buffer: CFRetained<CVPixelBuffer>,
     /// Size of the page content within `pixel_buffer`. The compositor pads its textures
     /// to its own alignment, so the surface can be larger than what was painted.
     pub content_width: u32,
@@ -600,7 +586,7 @@ unsafe impl Send for BrowserFrame {}
 /// stream of frames costs one memcpy each instead of an allocation and a GPU upload.
 #[derive(Default)]
 struct SurfacePool {
-    surfaces: Vec<CVPixelBuffer>,
+    surfaces: Vec<CFRetained<CVPixelBuffer>>,
     next: usize,
     width: u32,
     height: u32,
@@ -612,7 +598,7 @@ unsafe impl Send for SurfacePool {}
 impl SurfacePool {
     /// Returns the next surface to paint into, rebuilding the ring when the page size
     /// changed.
-    fn next_surface(&mut self, width: u32, height: u32) -> Option<CVPixelBuffer> {
+    fn next_surface(&mut self, width: u32, height: u32) -> Option<CFRetained<CVPixelBuffer>> {
         if self.width != width || self.height != height || self.surfaces.is_empty() {
             self.surfaces.clear();
             self.next = 0;
@@ -637,39 +623,55 @@ impl SurfacePool {
     }
 }
 
-fn create_bgra_surface(width: u32, height: u32) -> Result<CVPixelBuffer> {
-    let attributes = CFDictionary::from_CFType_pairs(&[
+fn create_bgra_surface(width: u32, height: u32) -> Result<CFRetained<CVPixelBuffer>> {
+    // An empty properties dictionary is what asks for IOSurface backing; without it the
+    // pixels live in ordinary memory the GPU cannot address.
+    let io_surface_properties = CFDictionary::<CFString, CFType>::empty();
+    // SAFETY: both keys are CoreVideo constants that live for the whole process.
+    let (metal_compatibility_key, io_surface_properties_key) = unsafe {
         (
-            unsafe { CFString::wrap_under_get_rule(kCVPixelBufferMetalCompatibilityKey) },
-            CFBoolean::true_value().as_CFType(),
-        ),
-        (
-            // An empty properties dictionary is what asks for IOSurface backing; without
-            // it the pixels live in ordinary memory the GPU cannot address.
-            unsafe { CFString::wrap_under_get_rule(kCVPixelBufferIOSurfacePropertiesKey) },
-            CFDictionary::<CFString, CFNumber>::from_CFType_pairs(&[]).as_CFType(),
-        ),
-    ]);
+            kCVPixelBufferMetalCompatibilityKey,
+            kCVPixelBufferIOSurfacePropertiesKey,
+        )
+    };
+    let attributes = CFDictionary::<CFString, CFType>::from_slices(
+        &[metal_compatibility_key, io_surface_properties_key],
+        &[CFBoolean::new(true), &io_surface_properties],
+    );
 
-    CVPixelBuffer::new(
-        kCVPixelFormatType_32BGRA,
-        width as usize,
-        height as usize,
-        Some(&attributes),
-    )
-    .map_err(|status| anyhow!("CVPixelBufferCreate failed with status {status}"))
+    let mut pixel_buffer: *mut CVPixelBuffer = std::ptr::null_mut();
+    // SAFETY: the attributes map CFString keys to CF values, as CoreVideo expects, and the
+    // output pointer is writable.
+    let status = unsafe {
+        CVPixelBufferCreate(
+            None,
+            width as usize,
+            height as usize,
+            kCVPixelFormatType_32BGRA,
+            Some(attributes.as_opaque()),
+            NonNull::from(&mut pixel_buffer),
+        )
+    };
+    let pixel_buffer = NonNull::new(pixel_buffer)
+        .filter(|_| status == kCVReturnSuccess)
+        .ok_or_else(|| anyhow!("CVPixelBufferCreate failed with status {status}"))?;
+    // SAFETY: a successful create call transfers ownership of the buffer.
+    Ok(unsafe { CFRetained::from_raw(pixel_buffer) })
 }
 
 /// Copies tightly packed BGRA pixels into a surface, whose rows the system pads to its
 /// own alignment.
 fn copy_pixels_into_surface(surface: &CVPixelBuffer, source: &[u8], width: u32, height: u32) {
-    if surface.lock_base_address(0) != kCVReturnSuccess {
+    // SAFETY: the surface is a live pixel buffer; locking only pins its base address.
+    if unsafe { CVPixelBufferLockBaseAddress(surface, CVPixelBufferLockFlags::empty()) }
+        != kCVReturnSuccess
+    {
         log::error!("web_preview: could not lock paint surface");
         return;
     }
 
-    let destination = unsafe { surface.get_base_address() };
-    let destination_stride = surface.get_bytes_per_row();
+    let destination = CVPixelBufferGetBaseAddress(surface);
+    let destination_stride = CVPixelBufferGetBytesPerRow(surface);
     let source_stride = width as usize * 4;
 
     if !destination.is_null() && destination_stride >= source_stride {
@@ -688,29 +690,29 @@ fn copy_pixels_into_surface(surface: &CVPixelBuffer, source: &[u8], width: u32, 
         }
     }
 
-    if surface.unlock_base_address(0) != kCVReturnSuccess {
+    // SAFETY: balances the lock above.
+    if unsafe { CVPixelBufferUnlockBaseAddress(surface, CVPixelBufferLockFlags::empty()) }
+        != kCVReturnSuccess
+    {
         log::error!("web_preview: could not unlock paint surface");
     }
 }
 
-fn surface_from_io_surface(handle: *mut c_void) -> Option<CVPixelBuffer> {
-    if handle.is_null() {
-        return None;
-    }
-    let mut pixel_buffer: CVPixelBufferRef = std::ptr::null_mut();
+fn surface_from_io_surface(handle: *mut c_void) -> Option<CFRetained<CVPixelBuffer>> {
+    // SAFETY: CEF hands over a live IOSurfaceRef for the duration of the paint callback.
+    let io_surface = unsafe { handle.cast::<IOSurfaceRef>().as_ref() }?;
+    let mut pixel_buffer: *mut CVPixelBuffer = std::ptr::null_mut();
+    // SAFETY: the surface is live and the output pointer is writable.
     let status = unsafe {
-        CVPixelBufferCreateWithIOSurface(
-            kCFAllocatorDefault,
-            handle as *const _,
-            std::ptr::null(),
-            &mut pixel_buffer,
-        )
+        CVPixelBufferCreateWithIOSurface(None, io_surface, None, NonNull::from(&mut pixel_buffer))
     };
-    if status != kCVReturnSuccess || pixel_buffer.is_null() {
+    let Some(pixel_buffer) = NonNull::new(pixel_buffer).filter(|_| status == kCVReturnSuccess)
+    else {
         log::error!("web_preview: CVPixelBufferCreateWithIOSurface failed with status {status}");
         return None;
-    }
-    Some(unsafe { CVPixelBuffer::wrap_under_create_rule(pixel_buffer) })
+    };
+    // SAFETY: a successful create call transfers ownership of the buffer.
+    Some(unsafe { CFRetained::from_raw(pixel_buffer) })
 }
 
 pub(crate) struct WebPreviewHandler {
@@ -757,10 +759,7 @@ impl WebPreviewHandler {
 
     /// Applies a CEF state change. The closure reports whether anything actually moved,
     /// so state CEF re-reports unchanged does not cost the view a redraw.
-    fn update_state(
-        handler: &Arc<Mutex<Self>>,
-        update: impl FnOnce(&mut BrowserState) -> bool,
-    ) {
+    fn update_state(handler: &Arc<Mutex<Self>>, update: impl FnOnce(&mut BrowserState) -> bool) {
         let Ok(inner) = handler.lock() else {
             return;
         };
@@ -1168,15 +1167,40 @@ pub enum FrameCommand {
 }
 
 pub(crate) enum QueuedInput {
-    MouseClick { x: i32, y: i32, button: MouseButtonType, mouse_up: bool, click_count: i32, modifiers: u32 },
-    MouseMove { x: i32, y: i32, modifiers: u32, mouse_leave: bool },
-    MouseWheel { x: i32, y: i32, delta_x: i32, delta_y: i32, modifiers: u32 },
+    MouseClick {
+        x: i32,
+        y: i32,
+        button: MouseButtonType,
+        mouse_up: bool,
+        click_count: i32,
+        modifiers: u32,
+    },
+    MouseMove {
+        x: i32,
+        y: i32,
+        modifiers: u32,
+        mouse_leave: bool,
+    },
+    MouseWheel {
+        x: i32,
+        y: i32,
+        delta_x: i32,
+        delta_y: i32,
+        modifiers: u32,
+    },
     Key(KeyEvent),
     Focus(bool),
     CaptureLost,
     Frame(FrameCommand),
-    ImeCommitText { text: String, relative_cursor_pos: i32 },
-    ImeSetComposition { text: String, selection_start: u32, selection_end: u32 },
+    ImeCommitText {
+        text: String,
+        relative_cursor_pos: i32,
+    },
+    ImeSetComposition {
+        text: String,
+        selection_start: u32,
+        selection_end: u32,
+    },
     ImeCancelComposition,
 }
 
@@ -1313,18 +1337,28 @@ impl CefBrowserInstance {
         // `state` / `frame` / `pending_url`, never `browser`.
         let browser = {
             let browser_arc = {
-                let Ok(inner) = handler.lock() else { return false };
+                let Ok(inner) = handler.lock() else {
+                    return false;
+                };
                 inner.browser.clone()
             };
-            let Ok(browser_guard) = browser_arc.lock() else { return false };
-            let Some(browser) = browser_guard.as_ref() else { return false };
+            let Ok(browser_guard) = browser_arc.lock() else {
+                return false;
+            };
+            let Some(browser) = browser_guard.as_ref() else {
+                return false;
+            };
             browser.clone()
         };
-        let Some(host) = browser.host() else { return false };
+        let Some(host) = browser.host() else {
+            return false;
+        };
         let frame = browser.main_frame();
 
         let events: Vec<QueuedInput> = {
-            let Ok(mut queue) = input_queue.lock() else { return false };
+            let Ok(mut queue) = input_queue.lock() else {
+                return false;
+            };
             std::mem::take(&mut *queue)
         };
 
@@ -1334,16 +1368,51 @@ impl CefBrowserInstance {
 
         for input in &events {
             match input {
-                QueuedInput::MouseClick { x, y, button, mouse_up, click_count, modifiers } => {
-                    let event = MouseEvent { x: *x, y: *y, modifiers: *modifiers };
-                    host.send_mouse_click_event(Some(&event), *button, *mouse_up as i32, *click_count);
+                QueuedInput::MouseClick {
+                    x,
+                    y,
+                    button,
+                    mouse_up,
+                    click_count,
+                    modifiers,
+                } => {
+                    let event = MouseEvent {
+                        x: *x,
+                        y: *y,
+                        modifiers: *modifiers,
+                    };
+                    host.send_mouse_click_event(
+                        Some(&event),
+                        *button,
+                        *mouse_up as i32,
+                        *click_count,
+                    );
                 }
-                QueuedInput::MouseMove { x, y, modifiers, mouse_leave } => {
-                    let event = MouseEvent { x: *x, y: *y, modifiers: *modifiers };
+                QueuedInput::MouseMove {
+                    x,
+                    y,
+                    modifiers,
+                    mouse_leave,
+                } => {
+                    let event = MouseEvent {
+                        x: *x,
+                        y: *y,
+                        modifiers: *modifiers,
+                    };
                     host.send_mouse_move_event(Some(&event), *mouse_leave as i32);
                 }
-                QueuedInput::MouseWheel { x, y, delta_x, delta_y, modifiers } => {
-                    let event = MouseEvent { x: *x, y: *y, modifiers: *modifiers };
+                QueuedInput::MouseWheel {
+                    x,
+                    y,
+                    delta_x,
+                    delta_y,
+                    modifiers,
+                } => {
+                    let event = MouseEvent {
+                        x: *x,
+                        y: *y,
+                        modifiers: *modifiers,
+                    };
                     host.send_mouse_wheel_event(Some(&event), *delta_x, *delta_y);
                 }
                 QueuedInput::Key(key_event) => {
@@ -1369,15 +1438,25 @@ impl CefBrowserInstance {
                         log::warn!("web_preview: dropping {command:?}, no main frame");
                     }
                 }
-                QueuedInput::ImeCommitText { text, relative_cursor_pos } => {
+                QueuedInput::ImeCommitText {
+                    text,
+                    relative_cursor_pos,
+                } => {
                     host.ime_commit_text(
                         Some(&CefString::from(text.as_str())),
                         None,
                         *relative_cursor_pos,
                     );
                 }
-                QueuedInput::ImeSetComposition { text, selection_start, selection_end } => {
-                    let selection = Range { from: *selection_start, to: *selection_end };
+                QueuedInput::ImeSetComposition {
+                    text,
+                    selection_start,
+                    selection_end,
+                } => {
+                    let selection = Range {
+                        from: *selection_start,
+                        to: *selection_end,
+                    };
                     host.ime_set_composition(
                         Some(&CefString::from(text.as_str())),
                         None,
@@ -1566,15 +1645,33 @@ impl CefBrowserInstance {
         click_count: i32,
         modifiers: u32,
     ) {
-        self.queue(QueuedInput::MouseClick { x, y, button, mouse_up, click_count, modifiers });
+        self.queue(QueuedInput::MouseClick {
+            x,
+            y,
+            button,
+            mouse_up,
+            click_count,
+            modifiers,
+        });
     }
 
     pub fn send_mouse_move(&self, x: i32, y: i32, modifiers: u32, mouse_leave: bool) {
-        self.queue(QueuedInput::MouseMove { x, y, modifiers, mouse_leave });
+        self.queue(QueuedInput::MouseMove {
+            x,
+            y,
+            modifiers,
+            mouse_leave,
+        });
     }
 
     pub fn send_mouse_wheel(&self, x: i32, y: i32, delta_x: i32, delta_y: i32, modifiers: u32) {
-        self.queue(QueuedInput::MouseWheel { x, y, delta_x, delta_y, modifiers });
+        self.queue(QueuedInput::MouseWheel {
+            x,
+            y,
+            delta_x,
+            delta_y,
+            modifiers,
+        });
     }
 
     pub fn send_key(&self, key_event: KeyEvent) {
@@ -1598,18 +1695,24 @@ impl CefBrowserInstance {
     /// Inserts finished text, i.e. what the macOS input system hands over once any dead-key
     /// or IME composition has resolved.
     pub fn ime_commit_text(&self, text: String, relative_cursor_pos: i32) {
-        self.queue(QueuedInput::ImeCommitText { text, relative_cursor_pos });
+        self.queue(QueuedInput::ImeCommitText {
+            text,
+            relative_cursor_pos,
+        });
     }
 
     /// Shows in-progress composition text (the underlined pending accent or candidate).
     pub fn ime_set_composition(&self, text: String, selection_start: u32, selection_end: u32) {
-        self.queue(QueuedInput::ImeSetComposition { text, selection_start, selection_end });
+        self.queue(QueuedInput::ImeSetComposition {
+            text,
+            selection_start,
+            selection_end,
+        });
     }
 
     pub fn ime_cancel_composition(&self) {
         self.queue(QueuedInput::ImeCancelComposition);
     }
-
 
     pub fn open_devtools(&self) {
         self.with_browser(|browser| {
