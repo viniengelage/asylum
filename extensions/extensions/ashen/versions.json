@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Adhi Thirumala <me@adhithirumala.com>"
+   ],
+   "description": "A dark, warm, muted color scheme. Now on Zed!",
+   "download_count": 0,
+   "id": "ashen",
+   "name": "Ashen",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:12:34Z",
+   "repository": "https://github.com/adhi-thirumala/ashen.zed",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

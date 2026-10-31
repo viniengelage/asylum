@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "L\u00e9o Fernandes <leo@lfsoftwares.com>"
+   ],
+   "description": "\ud83c\udf18 A polished collection of balanced dark and light themes for Zed.",
+   "download_count": 0,
+   "id": "astral-theme",
+   "name": "Astral Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:12:43Z",
+   "repository": "https://github.com/leofernandesbh/astral-zed-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

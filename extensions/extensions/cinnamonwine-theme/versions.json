@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "shoenot"
+   ],
+   "description": "A cinnamon-y, fall-inspired color scheme. Tries to harken back to the DEC VT320 aesthetic. Based on cinnamonwine.nvim",
+   "download_count": 0,
+   "id": "cinnamonwine-theme",
+   "name": "cinnamon wine",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:17:27Z",
+   "repository": "https://github.com/shoenot/cinnamonwine.zed",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

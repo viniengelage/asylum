@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Zhouyuxiang <1521350289@qq.com>"
+   ],
+   "description": "A detailed and accurate Atom One Dark theme",
+   "download_count": 0,
+   "id": "atomize",
+   "name": "Atomize",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:12:49Z",
+   "repository": "https://github.com/zhouyuxiang0/atomize.zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

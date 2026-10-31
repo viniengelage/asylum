@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "hexqnt <hexqntlab@gmail.com>"
+   ],
+   "description": "A cool-toned, muted, and restrained theme inspired by the Monokai Pro color scheme",
+   "download_count": 0,
+   "id": "arctikai-theme",
+   "name": "Arctikai",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:11:58Z",
+   "repository": "https://github.com/hexqnt/arctikai-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

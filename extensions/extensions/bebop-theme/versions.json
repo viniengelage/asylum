@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Anthony <twantempleton11@gmail.com>"
+   ],
+   "description": "A Cowboy Bebop inspired colorscheme with three dark variants: Bebop (warm rust), Spike (cool blue), and Faye (purple/amber)",
+   "download_count": 0,
+   "id": "bebop-theme",
+   "name": "Bebop",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:14:43Z",
+   "repository": "https://github.com/ATTron/zed-bebop-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

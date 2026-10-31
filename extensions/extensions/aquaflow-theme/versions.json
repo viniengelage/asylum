@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Prajwal Zore"
+   ],
+   "description": "A calm, ocean-inspired greenish theme for Zed. Soft gradients and highly readable colors.",
+   "download_count": 0,
+   "id": "aquaflow-theme",
+   "name": "Aquaflow Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:11:53Z",
+   "repository": "https://github.com/Whitfrost21/zed-Aquaflow",
+   "schema_version": 1,
+   "version": "1.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

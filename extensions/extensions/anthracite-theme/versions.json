@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "boycsuk"
+   ],
+   "description": "Anthracite theme for Zed Editor.",
+   "download_count": 0,
+   "id": "anthracite-theme",
+   "name": "Anthracite",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:11:34Z",
+   "repository": "https://github.com/boycsuk/anthracite-theme",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Pedro Braga <mrhenribraga@gmail.com>"
+   ],
+   "description": "Bend support.",
+   "download_count": 0,
+   "id": "bend",
+   "name": "Bend",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-10-31T23:14:44Z",
+   "repository": "https://github.com/your-name/my-zed-extension",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

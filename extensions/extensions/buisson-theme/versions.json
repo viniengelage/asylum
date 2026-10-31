@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Adrius <me@adrius.blog>"
+   ],
+   "description": "An inky botanical color scheme \u2014 Evergarden soul, Flexoki accessibility",
+   "download_count": 0,
+   "id": "buisson-theme",
+   "name": "Buisson",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:15:47Z",
+   "repository": "https://github.com/Adriusops/buisson-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

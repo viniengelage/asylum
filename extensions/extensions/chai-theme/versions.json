@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Rushabh Patil <rushabhpatil.dev@gmail.com>"
+   ],
+   "description": "Chai Theme for Zed",
+   "download_count": 0,
+   "id": "chai-theme",
+   "name": "Chai Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:17:15Z",
+   "repository": "https://github.com/rushabhcodes/zed-chai-theme",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

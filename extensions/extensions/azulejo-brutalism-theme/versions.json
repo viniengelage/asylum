@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "\u0141ukasz Stachnik"
+   ],
+   "description": "Theme inspired by love for Brtualism and Azulejo tilework",
+   "download_count": 0,
+   "id": "azulejo-brutalism-theme",
+   "name": "Azulejo Brutalism",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:13:21Z",
+   "repository": "https://github.com/VerticalHeretic/AzulejoBrutalism",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

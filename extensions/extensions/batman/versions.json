@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Hassan Zaidi <devzaidi@gmail.com>"
+   ],
+   "description": "The Batman theme for Zed",
+   "download_count": 0,
+   "id": "batman",
+   "name": "The Batman",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:14:32Z",
+   "repository": "https://github.com/devzaidi/batman-theme-zed",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

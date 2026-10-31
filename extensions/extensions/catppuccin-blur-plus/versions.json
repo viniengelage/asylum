@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Kieran Klukas <me@dunkirk.sh>"
+   ],
+   "description": "Catppuccin themes with blur, a blue accent color, and strong definition between panes.",
+   "download_count": 0,
+   "id": "catppuccin-blur-plus",
+   "name": "Catppuccin Theme (Blue Blur+)",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:16:36Z",
+   "repository": "https://github.com/taciturnaxolotl/catppuccin-blur-zed",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

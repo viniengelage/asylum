@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Sanjeev Shrestha <sethstha@gmail.com>"
+   ],
+   "description": "Bearded icon theme for Zed with over 1000+ icons",
+   "download_count": 0,
+   "id": "bearded-icon-theme",
+   "name": "Bearded Icon Theme",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-10-31T23:14:40Z",
+   "repository": "https://github.com/sethstha/bearded-icons-theme",
+   "schema_version": 1,
+   "version": "0.4.0",
+   "wasm_api_version": null
+  }
+ ]
+}

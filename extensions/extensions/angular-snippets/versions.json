@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "hudson-newey",
+    "johnpapa"
+   ],
+   "description": "(Unofficial) Angular 21 TypeScript snippets",
+   "download_count": 0,
+   "id": "angular-snippets",
+   "name": "Angular TypeScript Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-10-31T23:11:26Z",
+   "repository": "https://github.com/hudson-newey/angular-snippets-for-zed",
+   "schema_version": 1,
+   "version": "21.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

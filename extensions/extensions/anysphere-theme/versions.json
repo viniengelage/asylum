@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "stpn48 <stepanbroz789@gmail.com>"
+   ],
+   "description": "Unofficial Anysphere theme based on the theme from Cursor editor.",
+   "download_count": 0,
+   "id": "anysphere-theme",
+   "name": "Anysphere Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:11:36Z",
+   "repository": "https://github.com/stpn48/anysphere-zed-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

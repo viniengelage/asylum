@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "leisure462"
+   ],
+   "description": "Warm Claude-inspired light and dark themes for Zed.",
+   "download_count": 0,
+   "id": "claude-vellum-theme",
+   "name": "Claude Vellum Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:17:34Z",
+   "repository": "https://github.com/leisure462/zed-claude-themes",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

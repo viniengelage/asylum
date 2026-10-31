@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Filip <filip@0x96f.dev>"
+   ],
+   "description": "A simple and pleasant dark theme for Zed",
+   "download_count": 0,
+   "id": "0x96f",
+   "name": "0x96f Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:09:42Z",
+   "repository": "https://github.com/0x96f-org/0x96f-zed-theme",
+   "schema_version": 1,
+   "version": "1.4.0",
+   "wasm_api_version": null
+  }
+ ]
+}

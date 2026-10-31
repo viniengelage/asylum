@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Szymon Kabelis"
+   ],
+   "description": "A port of A Touch of Lilac VS Code theme by alexnho. Dark theme with lilac/purple accents.",
+   "download_count": 0,
+   "id": "a-touch-of-lilac-theme",
+   "name": "A Touch of Lilac",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:09:45Z",
+   "repository": "https://github.com/szymkab/a-touch-of-lilac-theme",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

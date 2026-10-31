@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "AdventureX <dev@adventurex.co>"
+   ],
+   "description": "A dark theme inspired by the AdventureX design system. Three accent variants with italic and no-italic options.",
+   "download_count": 0,
+   "id": "adventurex-theme",
+   "name": "AdventureX Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:10:11Z",
+   "repository": "https://github.com/AdventureX-RGE/zed-adventurex-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

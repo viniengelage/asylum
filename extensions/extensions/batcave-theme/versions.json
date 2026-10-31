@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Mert Deveci <83559696+mertdeveci5@users.noreply.github.com>"
+   ],
+   "description": "Deep cave darkness with the Batcomputer's cyan glow.",
+   "download_count": 0,
+   "id": "batcave-theme",
+   "name": "Batcave Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:14:31Z",
+   "repository": "https://github.com/mertdeveci5/batcave-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

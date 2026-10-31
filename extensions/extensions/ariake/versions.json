@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Arti Villa <studio@artivilla.com>"
+   ],
+   "description": "An Ariake theme inspired by Japanese traditional colors for Zed",
+   "download_count": 0,
+   "id": "ariake",
+   "name": "Ariake",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:12:00Z",
+   "repository": "https://github.com/artivilla/zed-ariake-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

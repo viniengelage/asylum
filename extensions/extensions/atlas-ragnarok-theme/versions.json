@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Atlas Kaisar <atlas.kaisar@icloud.com>"
+   ],
+   "description": "Tech-blue thunder above, crimson fire below, pure black through the middle.",
+   "download_count": 0,
+   "id": "atlas-ragnarok-theme",
+   "name": "Atlas Ragnarok",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:12:46Z",
+   "repository": "https://github.com/AyoubTadlaoui/atlas-ragnarok",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

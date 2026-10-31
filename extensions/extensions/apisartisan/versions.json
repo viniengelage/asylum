@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "TCeason <taichong357@gmail.com>"
+   ],
+   "description": "Dark themes for Zed: ApisArtisan and Hiberbee fans, an unofficial adaptation of the JetBrains Hiberbee theme",
+   "download_count": 0,
+   "id": "apisartisan",
+   "name": "ApisArtisan",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:11:40Z",
+   "repository": "https://github.com/TCeason/zed-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

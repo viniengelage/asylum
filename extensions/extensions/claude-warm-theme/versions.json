@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Inderjeet Singh <inderjeet.singh@fujitsu.com>"
+   ],
+   "description": "A warm, amber-tinted dark and light theme inspired by Claude Code's terminal aesthetic",
+   "download_count": 0,
+   "id": "claude-warm-theme",
+   "name": "Claude Warm Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:17:34Z",
+   "repository": "https://github.com/intherejeet/claude-warm-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

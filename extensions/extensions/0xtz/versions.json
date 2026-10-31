@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ziani Taha <0xtz.me>"
+   ],
+   "description": "A top-tier theme for Zed text editor, meticulously crafted by 0xtz and an AI assistant, inspired by the Andromeda VS Code theme.",
+   "download_count": 0,
+   "id": "0xtz",
+   "name": "0xtz Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:09:42Z",
+   "repository": "https://github.com/0xtz/0xtz-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

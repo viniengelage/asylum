@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Aryan Kathawale <kathawalearyan9@gmail.com>"
+   ],
+   "description": "An Elegant and Minimalist Theme for Zed.",
+   "download_count": 0,
+   "id": "blank-theme",
+   "name": "Blank Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:15:08Z",
+   "repository": "https://github.com/kiritocode1/Blank-Theme",
+   "schema_version": 1,
+   "version": "1.0.5",
+   "wasm_api_version": null
+  }
+ ]
+}

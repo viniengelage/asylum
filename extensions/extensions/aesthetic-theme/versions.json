@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Manoj Joshi"
+   ],
+   "description": "A soft, eye-comforting bluish dark theme for Zed. made with love \ud83d\udc9d",
+   "download_count": 0,
+   "id": "aesthetic-theme",
+   "name": "Aesthetic Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:10:13Z",
+   "repository": "https://github.com/mnojz/Aesthetic-zed-theme",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

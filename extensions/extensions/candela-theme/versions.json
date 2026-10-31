@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Salvador Hern\u00e1ndez Galindo <mexboomer@gmail.com>"
+   ],
+   "description": "Warm, low-fatigue theme (dark + light) with OKLCH-uniform accents, verified WCAG AAA body / AA+ accents, and colorblind-aware role mapping.",
+   "download_count": 0,
+   "id": "candela-theme",
+   "name": "Candela",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:15:56Z",
+   "repository": "https://github.com/xXCHAVOTAXx/candela-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

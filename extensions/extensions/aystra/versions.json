@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Vitaly Domnikov <oss@vitaly.codes>"
+   ],
+   "description": "Theme for Zed. Based on 'One Dark Pro' and 'Jane Two' themes.",
+   "download_count": 0,
+   "id": "aystra",
+   "name": "Aystra",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:13:19Z",
+   "repository": "https://github.com/dotcypress/aystra",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

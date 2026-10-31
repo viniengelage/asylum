@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "David Worms <david@adaltas.com>"
+   ],
+   "description": "Elegantly designed dark theme with sharp contrast colors.",
+   "download_count": 0,
+   "id": "adaltas-theme",
+   "name": "Adaltas Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:10:08Z",
+   "repository": "https://github.com/adaltas/zed-adaltas-theme",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

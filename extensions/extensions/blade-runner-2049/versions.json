@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "David C Cavalcante <davcavalcante@proton.me>",
+    "Takk\u2122 Innovate Studio <say@takk.ag>"
+   ],
+   "description": "\ud83d\udcfa A cyberpunk aesthetic theme based on the command line interface of Blade Runner 2049, inspired by the film's dystopian and high-tech visual style",
+   "download_count": 0,
+   "id": "blade-runner-2049",
+   "name": "Blade Runner 2049 Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:15:07Z",
+   "repository": "https://github.com/takk8is/blade-runner-2049-theme-for-zed",
+   "schema_version": 1,
+   "version": "1.0.4",
+   "wasm_api_version": null
+  }
+ ]
+}

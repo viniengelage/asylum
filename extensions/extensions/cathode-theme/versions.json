@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "devidb"
+   ],
+   "description": "A terminal-centered, minimal dark theme: an opaque black terminal at the center of a translucent, blurred sheet of frosted glass, with a neon syntax palette. Ships Ultraviolet and Phosphor variants.",
+   "download_count": 0,
+   "id": "cathode-theme",
+   "name": "Cathode",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:16:32Z",
+   "repository": "https://github.com/devidb/cathode-zed-theme",
+   "schema_version": 1,
+   "version": "1.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Adib Hanna<adibhanna@gmail.com>"
+   ],
+   "description": "Gruvbox-inspired theme for Zed",
+   "download_count": 0,
+   "id": "catbox",
+   "name": "Catbox theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:16:31Z",
+   "repository": "https://github.com/adibhanna/catbox",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

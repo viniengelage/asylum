@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Rohit Kumar"
+   ],
+   "description": "A warm, light theme ported from the Breadog terminal color scheme.",
+   "download_count": 0,
+   "id": "breadog-theme",
+   "name": "Breadog Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:15:26Z",
+   "repository": "https://github.com/RibbtDev/breadog-zed",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

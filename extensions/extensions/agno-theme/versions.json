@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "devalexandre"
+   ],
+   "description": "Themes inspired by Agno colors: graphite, light neutrals, orange accents and soft gray text.",
+   "download_count": 0,
+   "id": "agno-theme",
+   "name": "Agno Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:10:20Z",
+   "repository": "https://github.com/devalexandre/agno-theme",
+   "schema_version": 1,
+   "version": "0.0.4",
+   "wasm_api_version": null
+  }
+ ]
+}

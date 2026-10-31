@@ -1,0 +1,23 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Dunya Kirkali <dunyakirkali@gmail.com>"
+   ],
+   "description": "Support for AsciiDoc syntax",
+   "download_count": 0,
+   "id": "asciidoc",
+   "name": "AsciiDoc",
+   "provides": [
+    "languages",
+    "grammars",
+    "snippets"
+   ],
+   "published_at": "2026-10-31T23:12:34Z",
+   "repository": "https://github.com/dunyakirkali/zed-asciidoc",
+   "schema_version": 1,
+   "version": "0.5.10",
+   "wasm_api_version": null
+  }
+ ]
+}

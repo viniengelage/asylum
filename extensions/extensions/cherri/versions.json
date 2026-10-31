@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "videah <me@videah.net>"
+   ],
+   "description": "A Zed extension that adds basic support for the Apple Shortcut programming language Cherri.",
+   "download_count": 0,
+   "id": "cherri",
+   "name": "Cherri",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-10-31T23:17:24Z",
+   "repository": "https://github.com/videah/zed-cherri",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

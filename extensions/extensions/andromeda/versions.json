@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "ChocolateNao <andrey12q112@gmail.com>"
+   ],
+   "description": "\ud83c\udf12 A popular VScode theme brought to Zed",
+   "download_count": 0,
+   "id": "andromeda",
+   "name": "Andromeda",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:11:24Z",
+   "repository": "https://github.com/ChocolateNao/andromeda-zed",
+   "schema_version": 1,
+   "version": "0.1.2",
+   "wasm_api_version": null
+  }
+ ]
+}

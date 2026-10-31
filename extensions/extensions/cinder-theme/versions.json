@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Duc Nguyen <nguyenhaiduc06@gmail.com>"
+   ],
+   "description": "A terminal-native dark theme. Near-black surfaces, hairline rules, one ember accent, syntax that stays quiet.",
+   "download_count": 0,
+   "id": "cinder-theme",
+   "name": "Cinder",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:17:27Z",
+   "repository": "https://github.com/nguyenhaiduc06/cinder",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,354 @@
+{
+ "actionscript": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/actionscript/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/actionscript` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.1.1"
+ },
+ "ada": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/ada/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/ada` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.4.0"
+ },
+ "agda": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/agda/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/agda` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.2.1"
+ },
+ "agnix": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/agnix/editors/zed/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/agnix/editors/zed` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.58.0"
+ },
+ "aiken": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/aiken/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/aiken` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "1.0.0"
+ },
+ "al-business-central": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/al-business-central/crates/extension/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/al-business-central/crates/extension` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.1.0"
+ },
+ "amber": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/amber/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/amber` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.3.2"
+ },
+ "amber-monochrome-monitor-crt-phosphor": {
+  "error": "Error: Theme \"Amber Monochrome Monitor CRT Phosphor Dark I\" is using a deprecated style property: scrollbar_thumb.background. Use `scrollbar.thumb.background` instead.\n",
+  "version": "0.1.3"
+ },
+ "angular": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/angular/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/angular` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.0.7"
+ },
+ "ansible": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/ansible/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/ansible` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "1.0.0"
+ },
+ "aptos-move": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/aptos-move/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/aptos-move` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.0.2"
+ },
+ "arch-mcp": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/arch-mcp/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/arch-mcp` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "1.0.0"
+ },
+ "arduino": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/arduino/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/arduino` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.1.0"
+ },
+ "arity-language-server": {
+  "error": "6-10-13)\n       info: downloading component rust-std\n        Downloading crates ...\n         Downloaded auditable-serde v0.8.0\n         Downloaded displaydoc v0.2.7\n         Downloaded crc32fast v1.5.1\n         Downloaded zerofrom-derive v0.1.7\n         Downloaded icu_provider v2.3.1\n         Downloaded potential_utf v0.1.6\n         Downloaded idna_adapter v1.2.2\n         Downloaded wit-bindgen-rust-macro v0.41.0\n         Downloaded zerofrom v0.1.8\n         Downloaded wit-bindgen-rt v0.41.0\n         Downloaded slab v0.4.12\n         Downloaded topological-sort v0.2.2\n         Downloaded wit-bindgen v0.41.0\n         Downloaded pin-project-lite v0.2.17\n         Downloaded simd-adler32 v0.3.10\n         Downloaded zerovec-derive v0.11.6\n         Downloaded wit-bindgen-core v0.41.0\n         Downloaded zed_extension_api v0.6.0\n         Downloaded wasm-metadata v0.227.1\n         Downloaded litemap v0.8.3\n         Downloaded smallvec v1.15.2\n         Downloaded flate2 v1.1.9\n         Downloaded log v0.4.34\n         Downloaded wit-bindgen-rust v0.41.0\n         Downloaded prettyplease v0.2.37\n         Downloaded url v2.5.8\n         Downloaded wasm-encoder v0.227.1\n         Downloaded wit-parser v0.227.1\n         Downloaded wit-component v0.227.1\n         Downloaded wasmparser v0.227.1\n         Downloaded syn v3.0.4\n          Compiling proc-macro2 v1.0.107\n          Compiling unicode-ident v1.0.24\n          Compiling quote v1.0.47\n          Compiling stable_deref_trait v1.2.1\n          Compiling serde_core v1.0.229\n          Compiling zmij v1.0.23\n          Compiling writeable v0.6.4\n          Compiling serde_json v1.0.151\n          Compiling litemap v0.8.3\n          Compiling utf8_iter v1.0.4\n          Compiling icu_properties_data v2.3.0\n          Compiling icu_normalizer_data v2.3.0\n          Compiling hashbrown v0.17.1\n          Compiling equivalent v1.0.2\n          Compiling foldhash v0.1.5\n          Compiling smallvec v1.15.2\n          Compiling serde v1.0.229\n          Compiling wasmparser v0.227.1\n          Compiling syn v3.0.4\n          Compiling syn v2.0.119\n          Compiling hashbrown v0.15.5\n          Compiling semver v1.0.28\n          Compiling indexmap v2.14.0\n          Compiling anyhow v1.0.104\n          Compiling itoa v1.0.18\n          Compiling memchr v2.8.3\n          Compiling bitflags v2.13.1\n          Compiling synstructure v0.13.2\n          Compiling crc32fast v1.5.1\n          Compiling simd-adler32 v0.3.10\n          Compiling adler2 v2.0.1\n          Compiling zerovec-derive v0.11.6\n          Compiling displaydoc v0.2.7\n          Compiling zerofrom-derive v0.1.7\n          Compiling yoke-derive v0.8.2\n          Compiling serde_derive v1.0.229\n          Compiling zerofrom v0.1.8\n          Compiling wasm-encoder v0.227.1\n          Compiling yoke v0.8.3\n          Compiling cfg-if v1.0.4\n          Compiling zerovec v0.11.8\n          Compiling zerotrie v0.2.5\n          Compiling percent-encoding v2.3.2\n          Compiling prettyplease v0.2.37\n          Compiling form_urlencoded v1.2.2\n          Compiling tinystr v0.8.4\n          Compiling potential_utf v0.1.6\n          Compiling icu_collections v2.3.0\n          Compiling icu_locale_core v2.3.0\n          Compiling miniz_oxide v0.8.9\n          Compiling icu_provider v2.3.1\n          Compiling unicode-xid v0.2.6\n          Compiling log v0.4.34\n          Compiling icu_properties v2.3.0\n          Compiling icu_normalizer v2.3.0\n          Compiling futures-sink v0.3.34\n       error[E0463]: can't find crate for `core`\n         |\n         = note: the `wasm32-wasip2` target may not be installed\n         = help: consider downloading the target with `rustup target add wasm32-wasip2`\n       \n       For more information about this error, try `rustc --explain E0463`.\n       error: could not compile `memchr` (lib) due to 1 previous error\n       warning: build failed, waiting for other jobs to finish...\n       error: could not compile `futures-sink` (lib) due to 1 previous error\n       \n",
+  "version": "0.1.0"
+ },
+ "arkts": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/arkts/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/arkts` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.3.0"
+ },
+ "arturo": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/arturo/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/arturo` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "1.0.3"
+ },
+ "ask-starknet-mcp": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/ask-starknet-mcp/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/ask-starknet-mcp` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.0.1"
+ },
+ "asn1": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/asn1/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/asn1` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.0.1"
+ },
+ "asp-classic": {
+  "error": "Error: 'snippets.json' is not a supported file in a language directory and should be removed\n",
+  "version": "0.1.0"
+ },
+ "assembly": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/assembly/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/assembly` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.1.0"
+ },
+ "ast-grep": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/ast-grep/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/ast-grep` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.1.1"
+ },
+ "asteroid": {
+  "error": "Error: Theme \"Asteroid\" is using a deprecated style property: scrollbar_thumb.background. Use `scrollbar.thumb.background` instead.\n",
+  "version": "0.0.1"
+ },
+ "astro": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/astro/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/astro` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.2.2"
+ },
+ "aura-theme": {
+  "error": "Error: Theme \"Aura Soft Dark\" is using a deprecated style property: scrollbar_thumb.background. Use `scrollbar.thumb.background` instead.\n",
+  "version": "1.0.0"
+ },
+ "authzed": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/authzed/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/authzed` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.0.2"
+ },
+ "auto-file-header": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/auto-file-header/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/auto-file-header` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.3.0"
+ },
+ "autocorrect": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/autocorrect/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/autocorrect` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.2.2"
+ },
+ "autohotkey": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/autohotkey/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/autohotkey` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "2.0.1"
+ },
+ "autoit": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/autoit/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/autoit` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.5.0"
+ },
+ "awsum": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension info: syncing channel updates for 1.93.1-x86_64-unknown-linux-gnu\n       info: latest update on 2026-02-12 for version 1.93.1 (01f6ddf75 2026-02-11)\n       info: downloading 6 components\n       warn: the missing active toolchain `1.93.1-x86_64-unknown-linux-gnu` has been auto-installed\n       warn: this might cause rustup commands to take longer time to finish than expected\n       info: you may opt out with `RUSTUP_AUTO_INSTALL=0` or `rustup set auto-install disable`\n       error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/awsum/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/awsum` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.0.7"
+ },
+ "ayla": {
+  "error": "Error: Query error at 6:2. Invalid node type \"keyword\"\n",
+  "version": "0.0.1"
+ },
+ "azure-context-server": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/azure-context-server/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/azure-context-server` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "1.0.0"
+ },
+ "azure-mcp": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/azure-mcp/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/azure-mcp` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.1.1"
+ },
+ "babel-lsp": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/babel-lsp/editors/zed/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/babel-lsp/editors/zed` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.1.1"
+ },
+ "basher": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/basher/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/basher` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.0.5"
+ },
+ "batsignal-theme": {
+  "error": "Error: extension manifest must specify a description\n",
+  "version": "0.0.1"
+ },
+ "beancount": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/beancount/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/beancount` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.1.2"
+ },
+ "beast": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/beast/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/beast` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.3.2"
+ },
+ "bicep": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension info: syncing channel updates for stable-x86_64-unknown-linux-gnu\n       info: latest update on 2026-10-15 for version 1.99.1 (58cf8f9c3 2026-10-13)\n       info: component clippy is up to date\n       info: component rustfmt is up to date\n       info: downloading component rust-std\n       error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/bicep/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/bicep` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "1.4.0"
+ },
+ "binary-preview-lsp": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/binary-preview-lsp/zed-extension/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/binary-preview-lsp/zed-extension` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.1.0"
+ },
+ "biome": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/biome/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/biome` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.3.1"
+ },
+ "bison": {
+  "error": "Error: extension manifest description must be more expressive than the name\n",
+  "version": "0.1.0"
+ },
+ "bitbake": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/bitbake/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/bitbake` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.0.4"
+ },
+ "blackula": {
+  "error": "Error: Theme \"Blackula\" is using a deprecated style property: scrollbar_thumb.background. Use `scrollbar.thumb.background` instead.\n",
+  "version": "0.1.1"
+ },
+ "blade": {
+  "error": "Error: query tags.scm is not supported by Zed and should be removed\n",
+  "version": "0.2.8"
+ },
+ "bloc": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/bloc/extensions/zed/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/bloc/extensions/zed` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.1.0"
+ },
+ "blueberry-night-theme": {
+  "error": "Error: extension manifest description must be more expressive than the name\n",
+  "version": "1.0.0"
+ },
+ "blueprint": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/blueprint/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/blueprint` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.5.0"
+ },
+ "blueprint-dark-theme": {
+  "error": "Error: extension manifest description must be more expressive than the name\n",
+  "version": "0.1.4"
+ },
+ "bluespec-systemverilog": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/bluespec-systemverilog/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/bluespec-systemverilog` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.1.0"
+ },
+ "bookmark": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/bookmark/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/bookmark` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.1.0"
+ },
+ "bqn": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/bqn/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/bqn` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.0.1"
+ },
+ "brogrammer-theme": {
+  "error": "Error: extension manifest description must be more expressive than the name\n",
+  "version": "0.0.1"
+ },
+ "browser-tools-context-server": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/browser-tools-context-server/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/browser-tools-context-server` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.1.0"
+ },
+ "bruno": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/bruno/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/bruno` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.0.1"
+ },
+ "bsl": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/bsl/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/bsl` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.0.2"
+ },
+ "bubble-lsp": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/bubble-lsp/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/bubble-lsp` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.0.1"
+ },
+ "bugstalker-dap": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension info: syncing channel updates for 1.89-x86_64-unknown-linux-gnu\n       info: latest update on 2025-08-07 for version 1.89.0 (29483883e 2025-08-04)\n       info: downloading 5 components\n       warn: the missing active toolchain `1.89-x86_64-unknown-linux-gnu` has been auto-installed\n       warn: this might cause rustup commands to take longer time to finish than expected\n       info: you may opt out with `RUSTUP_AUTO_INSTALL=0` or `rustup set auto-install disable`\n       error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/bugstalker-dap/extension/zed/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/bugstalker-dap/extension/zed` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.1.0"
+ },
+ "bun-docs-mcp": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/bun-docs-mcp/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/bun-docs-mcp` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "1.0.0"
+ },
+ "bylaws-lsp": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/bylaws-lsp/Editors/Zed/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/bylaws-lsp/Editors/Zed` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.1.0"
+ },
+ "c3": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/c3/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/c3` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.0.2"
+ },
+ "caddyfile": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/caddyfile/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/caddyfile` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.0.7"
+ },
+ "cadence": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/cadence/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/cadence` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.0.2"
+ },
+ "cairo": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/cairo/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/cairo` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.1.1"
+ },
+ "call-trans-opt-received": {
+  "error": "Error: Theme \"Call trans opt: received. 2-19-98 13:24:18 REC:Log>\" is using a deprecated style property: scrollbar_thumb.background. Use `scrollbar.thumb.background` instead.\n",
+  "version": "0.1.1"
+ },
+ "canipls-lint": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/canipls-lint/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/canipls-lint` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.0.1"
+ },
+ "capnp": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/capnp/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/capnp` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.0.1"
+ },
+ "cargo-appraiser": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/cargo-appraiser/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/cargo-appraiser` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.2.1"
+ },
+ "cargo-tom": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/cargo-tom/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/cargo-tom` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.4.1"
+ },
+ "carve": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/carve/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/carve` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.1.7"
+ },
+ "cds-lsp": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/cds-lsp/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/cds-lsp` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.0.2"
+ },
+ "cem": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/cem/extensions/zed/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/cem/extensions/zed` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.11.0"
+ },
+ "chalk-lsp": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/chalk-lsp/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/chalk-lsp` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.1.1"
+ },
+ "chatgpt": {
+  "error": "Error: Theme \"ChatGPT (Playground)\" is using a deprecated style property: scrollbar_thumb.background. Use `scrollbar.thumb.background` instead.\n",
+  "version": "0.1.3"
+ },
+ "chrome-devtools-mcp": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/chrome-devtools-mcp/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/chrome-devtools-mcp` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "1.0.2"
+ },
+ "circom": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/circom/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/circom` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.1.0"
+ },
+ "cisco-theme": {
+  "error": "Error: Theme \"Cisco Dark\" is using a deprecated style property: scrollbar_thumb.background. Use `scrollbar.thumb.background` instead.\n",
+  "version": "1.0.0"
+ },
+ "civet": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/civet/lsp/zed/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/civet/lsp/zed` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.0.1"
+ },
+ "clarity": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/clarity/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/clarity` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.1.0"
+ },
+ "clice": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/clice/editors/zed/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/clice/editors/zed` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.1.2"
+ },
+ "clojure": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/clojure/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/clojure` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.2.2"
+ },
+ "cloudformation-language-server": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/cloudformation-language-server/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/cloudformation-language-server` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.1.0"
+ },
+ "cobalt2": {
+  "error": "Error: missing field `themes` at line 292 column 1\n",
+  "version": "0.1.0"
+ },
+ "cobol": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/cobol/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/cobol` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.0.5"
+ },
+ "code-stats": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/code-stats/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/code-stats` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.3.1"
+ },
+ "codebook": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/codebook/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/codebook` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.2.14"
+ },
+ "codeowners": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/codeowners/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/codeowners` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.1.0"
+ },
+ "codeql": {
+  "error": "Error: failed to compile extension\n\nCaused by:\n    0: compiling Rust extension\n    1: failed to build extension error: current package believes it's in a workspace when it's not:\n       current:   /home/runner/work/asylum/asylum/upstream-extensions/extensions/codeql/Cargo.toml\n       workspace: /home/runner/work/asylum/asylum/Cargo.toml\n       \n       this may be fixable by adding `upstream-extensions/extensions/codeql` to the `workspace.members` array of the manifest located at: /home/runner/work/asylum/asylum/Cargo.toml\n       Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.\n       \n",
+  "version": "0.1.1"
+ }
+}

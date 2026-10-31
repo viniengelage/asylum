@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Paulo-Camacho <paulocamachoengineer@gmail.com>"
+   ],
+   "description": "A Zed theme inspired by the 8008 style keycap set.",
+   "download_count": 0,
+   "id": "8008-theme",
+   "name": "8008 Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:09:44Z",
+   "repository": "https://github.com/Paulo-Camacho/zed-8008",
+   "schema_version": 1,
+   "version": "0.0.5",
+   "wasm_api_version": null
+  }
+ ]
+}

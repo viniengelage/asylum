@@ -1,0 +1,23 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Jonathan Zrake <jonathan.zrake@gmail.com>"
+   ],
+   "description": "Cartan language support: syntax highlighting for .cart documents and ```cart fences in Markdown, and the cartan language server.",
+   "download_count": 0,
+   "id": "cartan",
+   "name": "Cartan",
+   "provides": [
+    "languages",
+    "grammars",
+    "language-servers"
+   ],
+   "published_at": "2026-10-31T23:16:28Z",
+   "repository": "https://github.com/cartan-lang/zed-cartan",
+   "schema_version": 1,
+   "version": "0.11.1",
+   "wasm_api_version": "0.7.0"
+  }
+ ]
+}

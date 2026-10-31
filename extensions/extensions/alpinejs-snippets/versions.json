@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Assem Alwaseai <assemcc2022@gmail.com>"
+   ],
+   "description": "Comprehensive Alpine.js v3+ code snippets for faster development",
+   "download_count": 0,
+   "id": "alpinejs-snippets",
+   "name": "Alpine.js Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-10-31T23:11:22Z",
+   "repository": "https://github.com/a909m/zed-alpinejs-snippets",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

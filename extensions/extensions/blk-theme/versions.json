@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "David Lee <leetdavidu@gmail.com>"
+   ],
+   "description": "A sleed, black theme for Zed.",
+   "download_count": 0,
+   "id": "blk-theme",
+   "name": "BLK. Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:15:12Z",
+   "repository": "https://github.com/leetdavid/blk-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

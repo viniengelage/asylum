@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Zied Yousfi <zied.essaber@gmail.com>"
+   ],
+   "description": "Minimalist, high-contrast black background with a soft pink accent. Companion to the blacknpink design system.",
+   "download_count": 0,
+   "id": "blacknpink-theme",
+   "name": "Black & Pink",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:14:56Z",
+   "repository": "https://github.com/blacknpink/zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

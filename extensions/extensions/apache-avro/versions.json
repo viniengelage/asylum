@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Victor Quiroz <git@victorhqc.com>"
+   ],
+   "description": "Apache Avro support for the IDL Language",
+   "download_count": 0,
+   "id": "apache-avro",
+   "name": "Apache Avro",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-10-31T23:11:38Z",
+   "repository": "https://github.com/victorhqc/zed-apache-avro",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

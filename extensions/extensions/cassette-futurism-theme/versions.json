@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "taotao7 <moca_tao7@foxmail.com>"
+   ],
+   "description": "Analog Dream themes with CRT amber, phosphor green, and vintage beige variants.",
+   "download_count": 0,
+   "id": "cassette-futurism-theme",
+   "name": "Cassette Futurism Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:16:30Z",
+   "repository": "https://github.com/taotao7/cassette-futurism-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

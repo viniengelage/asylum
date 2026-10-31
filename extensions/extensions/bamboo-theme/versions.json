@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Jeffrey Guenther <guenther.jeffrey@gmail.com>",
+    "Riley Bruins <ribru17@gmail.com>"
+   ],
+   "description": "Warm green theme for Zed",
+   "download_count": 0,
+   "id": "bamboo-theme",
+   "name": "Bamboo",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:14:04Z",
+   "repository": "https://github.com/LoamStudios/zed-bamboo-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

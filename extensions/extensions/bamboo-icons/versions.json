@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Chris Drackett"
+   ],
+   "description": "Icons with color and body for Zed.",
+   "download_count": 0,
+   "id": "bamboo-icons",
+   "name": "Bamboo Icons",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-10-31T23:14:02Z",
+   "repository": "https://github.com/chrisdrackett/bamboo-icon-theme-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Franz Gollhammer"
+   ],
+   "description": "Zed port of JetBrains Air \u2014 calm dark + light theme. Lavender keywords, pink strings, amber numbers, green types. Includes italic variants.",
+   "download_count": 0,
+   "id": "air-theme",
+   "name": "Air Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:11:16Z",
+   "repository": "https://github.com/franzgollhammer/air-theme-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

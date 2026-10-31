@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Giossue"
+   ],
+   "description": "A mostly black carbon theme family with muted steel blue and oxide red variants.",
+   "download_count": 0,
+   "id": "carbon-theme",
+   "name": "Carbon Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:15:59Z",
+   "repository": "https://github.com/giossue/carbon-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

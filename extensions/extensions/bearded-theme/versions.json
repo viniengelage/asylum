@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "BeardedBear <beardedbearbear@gmail.com>"
+   ],
+   "description": "The theme with a long beard.",
+   "download_count": 0,
+   "id": "bearded-theme",
+   "name": "Bearded Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:14:41Z",
+   "repository": "https://github.com/BeardedBear/bearded-theme",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

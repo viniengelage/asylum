@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ole Herman S. Elgesem <ole@cfengine.com>"
+   ],
+   "description": "Syntax highlighting support for CFEngine policy language",
+   "download_count": 0,
+   "id": "cfengine",
+   "name": "CFEngine",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-10-31T23:16:47Z",
+   "repository": "https://github.com/olehermanse/zed-cfengine",
+   "schema_version": 1,
+   "version": "1.0.5",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Catppuccin <releases@catppuccin.com>"
+   ],
+   "description": "\ud83e\udd80 Soothing pastel theme for Zed",
+   "download_count": 0,
+   "id": "catppuccin",
+   "name": "Catppuccin",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:16:33Z",
+   "repository": "https://github.com/catppuccin/zed",
+   "schema_version": 1,
+   "version": "0.2.27",
+   "wasm_api_version": null
+  }
+ ]
+}

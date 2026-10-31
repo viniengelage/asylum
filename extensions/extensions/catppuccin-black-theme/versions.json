@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Egor Kuznetsov <ek2kke@gmail.com>"
+   ],
+   "description": "True black Catppuccin theme for Zed (finally!)",
+   "download_count": 0,
+   "id": "catppuccin-black-theme",
+   "name": "Catppuccin Black Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:16:34Z",
+   "repository": "https://github.com/ek2kk/catppuccin-black-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

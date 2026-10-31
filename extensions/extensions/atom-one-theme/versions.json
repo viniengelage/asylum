@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Stelath"
+   ],
+   "description": "A port of the Atom One Dark theme (originally from the Atom text editor) to Zed",
+   "download_count": 0,
+   "id": "atom-one-theme",
+   "name": "Atom One Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:12:47Z",
+   "repository": "https://github.com/stelath/zed-theme-onedark",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "kagulion"
+   ],
+   "description": "Comprehensive, modern Astro snippets for Zed IDE with Astro 7+ support",
+   "download_count": 0,
+   "id": "astro-snippets",
+   "name": "Astro Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-10-31T23:12:45Z",
+   "repository": "https://github.com/kagulion/astro-snippets",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

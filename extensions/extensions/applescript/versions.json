@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Helge Sverre <helge.sverre@gmail.com>"
+   ],
+   "description": "AppleScript language support for Zed",
+   "download_count": 0,
+   "id": "applescript",
+   "name": "AppleScript",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-10-31T23:11:51Z",
+   "repository": "https://github.com/HelgeSverre/zed-applescript",
+   "schema_version": 1,
+   "version": "1.9.1",
+   "wasm_api_version": null
+  }
+ ]
+}

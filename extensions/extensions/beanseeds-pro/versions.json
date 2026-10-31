@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Daniil Shilo [tokiory] <tokiory.work@gmail.com>"
+   ],
+   "description": "Beanseeds Pro is a refined adaptation of the classic Jellybeans theme, specifically designed for the Zed editor",
+   "download_count": 0,
+   "id": "beanseeds-pro",
+   "name": "Beanseeds Pro Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:14:39Z",
+   "repository": "https://github.com/tokiory/beanseeds-pro",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

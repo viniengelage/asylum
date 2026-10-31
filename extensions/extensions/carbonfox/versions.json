@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Harrison Black <dev@harrison.black>"
+   ],
+   "description": "Zed implementation of EdenEasts carbonfox Theme",
+   "download_count": 0,
+   "id": "carbonfox",
+   "name": "Carbonfox",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:16:01Z",
+   "repository": "https://github.com/harrisonablack/carbonfox",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

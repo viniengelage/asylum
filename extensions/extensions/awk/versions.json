@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Dang Huynh"
+   ],
+   "description": "AWK syntax for Zed",
+   "download_count": 0,
+   "id": "awk",
+   "name": "AWK",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-10-31T23:13:01Z",
+   "repository": "https://github.com/dangh/zed-awk",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

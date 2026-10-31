@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Sacha Korban <z@sachk.com>"
+   ],
+   "description": "ActivityWatch watcher support",
+   "download_count": 0,
+   "id": "activitywatch",
+   "name": "activitywatch",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-10-31T23:10:07Z",
+   "repository": "https://github.com/sachk/aw-watcher-zed",
+   "schema_version": 1,
+   "version": "0.1.2",
+   "wasm_api_version": "0.0.6"
+  }
+ ]
+}

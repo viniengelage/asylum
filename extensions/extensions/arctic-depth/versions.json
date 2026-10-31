@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Marvellinus Vincent <vmarvellinus@gmail.com>"
+   ],
+   "description": "A sleek, high-contrast dark blue theme for Zed",
+   "download_count": 0,
+   "id": "arctic-depth",
+   "name": "Arctic Depth",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:11:57Z",
+   "repository": "https://github.com/MarvellinusVincent/Arctic-Depth-Zed",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

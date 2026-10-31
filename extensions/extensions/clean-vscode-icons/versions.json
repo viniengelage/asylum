@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Jacobtread <jacobtread@gmail.com>",
+    "Mhammed Talhaouy (talhaouycoding@gmail.com)"
+   ],
+   "description": "Icon theme for Zed packed with icons for many extensions and folders",
+   "download_count": 0,
+   "id": "clean-vscode-icons",
+   "name": "Clean VSCode Icons Theme",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-10-31T23:17:35Z",
+   "repository": "https://github.com/jacobtread/clean-vscode-icons",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,23 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Boundary <contact@boundaryml.com>"
+   ],
+   "description": "BAML v0 \u2014 Zed extension",
+   "download_count": 0,
+   "id": "baml",
+   "name": "BAML v0",
+   "provides": [
+    "languages",
+    "grammars",
+    "language-servers"
+   ],
+   "published_at": "2026-10-31T23:14:27Z",
+   "repository": "https://github.com/BoundaryML/zed-baml",
+   "schema_version": 1,
+   "version": "0.226.3",
+   "wasm_api_version": "0.7.0"
+  }
+ ]
+}

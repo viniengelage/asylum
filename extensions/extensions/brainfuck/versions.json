@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Joseph Lyons <JosephTLyons@gmail.com>"
+   ],
+   "description": "Brainfuck language support for Zed",
+   "download_count": 0,
+   "id": "brainfuck",
+   "name": "Brainfuck",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-10-31T23:15:25Z",
+   "repository": "https://github.com/JosephTLyons/zed-brainfuck",
+   "schema_version": 1,
+   "version": "0.0.4",
+   "wasm_api_version": null
+  }
+ ]
+}

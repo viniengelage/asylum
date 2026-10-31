@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Taras Woronjanski <tarasworonjanski@gmail.com>"
+   ],
+   "description": "Zed Theme with Chaos-Theory colour palette",
+   "download_count": 0,
+   "id": "chaos-theory-theme",
+   "name": "Chaos-Theory Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:17:18Z",
+   "repository": "https://github.com/FeurJak/Chaos-Theory-Zed",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

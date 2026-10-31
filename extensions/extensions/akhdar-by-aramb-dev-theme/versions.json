@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Abdur-Rahman A. Bilal <aramb@aramservices.com>"
+   ],
+   "description": "A green-accented dark and light theme for Zed, built around the aramb-dev brand green.",
+   "download_count": 0,
+   "id": "akhdar-by-aramb-dev-theme",
+   "name": "Akhdar by aramb-dev",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:11:17Z",
+   "repository": "https://github.com/aramb-dev/akhdar-by-aramb-dev-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

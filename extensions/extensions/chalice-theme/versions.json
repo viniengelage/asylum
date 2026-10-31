@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "huangkairan <https://github.com/huangkairan>"
+   ],
+   "description": "Minimalistic Chalice color themes for Zed, ported from Artem Laman's VSCode theme.",
+   "download_count": 0,
+   "id": "chalice-theme",
+   "name": "Chalice",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:17:16Z",
+   "repository": "https://github.com/huangkairan/chalice-theme-zed",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

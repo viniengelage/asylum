@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Eric Buess"
+   ],
+   "description": "A dark theme for Zed inspired by Claude and Anthropic's brand colors with semi-transparent backgrounds.",
+   "download_count": 0,
+   "id": "claude-code-inspired-dark",
+   "name": "Claude Code Inspired Dark",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:17:33Z",
+   "repository": "https://github.com/ericbuess/claude-code-inspired-dark",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

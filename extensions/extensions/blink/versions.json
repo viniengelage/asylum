@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "okhalri"
+   ],
+   "description": "Syntax highlighting for the Blink IDL (.blink files).",
+   "download_count": 0,
+   "id": "blink",
+   "name": "Blink",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-10-31T23:15:11Z",
+   "repository": "https://github.com/okhalri/zed-blink",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,24 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Fyelne",
+    "EliverLara",
+    "cange",
+    "ChocolateNao"
+   ],
+   "description": "CarbonFox - Andromeda",
+   "download_count": 0,
+   "id": "carbonmeda-theme",
+   "name": "CarbonMeda",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:16:02Z",
+   "repository": "https://github.com/fyelne/carbonfox-andromeda",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

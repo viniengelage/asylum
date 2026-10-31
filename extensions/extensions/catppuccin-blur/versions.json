@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Jens Lystad <jens@lystad.io>"
+   ],
+   "description": "Catppuccin themes with blur",
+   "download_count": 0,
+   "id": "catppuccin-blur",
+   "name": "Catppuccin Blur",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:16:36Z",
+   "repository": "https://github.com/jenslys/zed-catppuccin-blur",
+   "schema_version": 1,
+   "version": "0.4.0",
+   "wasm_api_version": null
+  }
+ ]
+}

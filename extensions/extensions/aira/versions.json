@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "talison-cardoso"
+   ],
+   "description": "A calm green theme for Zed, crafted to enhance focus and visual comfort.",
+   "download_count": 0,
+   "id": "aira",
+   "name": "Aira Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:11:16Z",
+   "repository": "https://github.com/talison-cardoso/aira-zed",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

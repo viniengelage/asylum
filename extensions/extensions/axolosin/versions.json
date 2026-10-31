@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Alok Meshram <alok.m.prgm@protonmail.com>"
+   ],
+   "description": "An Axolotl-inspired theme for Zed",
+   "download_count": 0,
+   "id": "axolosin",
+   "name": "Axolosin Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:13:12Z",
+   "repository": "https://github.com/LightTreasure/zed-axolosin-theme",
+   "schema_version": 1,
+   "version": "1.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

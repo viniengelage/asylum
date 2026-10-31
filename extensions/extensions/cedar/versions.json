@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Chris Norman <17420369+chrnorm@users.noreply.github.com>"
+   ],
+   "description": "Cedar language support.",
+   "download_count": 0,
+   "id": "cedar",
+   "name": "Cedar",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-10-31T23:16:42Z",
+   "repository": "https://github.com/chrnorm/zed-cedar",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

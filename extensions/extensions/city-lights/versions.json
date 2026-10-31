@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "David Pait <davidjpait@gmail.com>"
+   ],
+   "description": "A take on Yummygum's City Lights Dark Theme",
+   "download_count": 0,
+   "id": "city-lights",
+   "name": "City Lights",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:17:29Z",
+   "repository": "https://github.com/DP19/zed-theme-city-lights",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Erik Praznovsk\u00fd <erik@virtualsoaring.eu>"
+   ],
+   "description": "Dark theme for Zed editor - Neon/Pastel variants.",
+   "download_count": 0,
+   "id": "blackout-engine-theme",
+   "name": "Blackout Engine",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:14:57Z",
+   "repository": "https://github.com/erik-praznovsky/zed-blackout-engine",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

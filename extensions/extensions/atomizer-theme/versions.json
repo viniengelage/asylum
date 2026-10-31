@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Aris Ripandi"
+   ],
+   "description": "Atomizer theme for Zed.",
+   "download_count": 0,
+   "id": "atomizer-theme",
+   "name": "Atomizer Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:12:50Z",
+   "repository": "https://github.com/riipandi/zed-atomizer-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

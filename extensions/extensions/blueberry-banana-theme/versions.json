@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "srijonp4"
+   ],
+   "description": "A dark purple and yellow theme for Zed, inspired by the Blueberry Banana VSCode theme by PeterShershov.",
+   "download_count": 0,
+   "id": "blueberry-banana-theme",
+   "name": "Blueberry Banana Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:15:15Z",
+   "repository": "https://github.com/srijonp4/blueberry-banana-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

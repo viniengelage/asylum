@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ayu Theme contributors",
+    "shamsghi"
+   ],
+   "description": "Faithful Ayu dark, mirage, OLED, and light theme variants for Zed",
+   "download_count": 0,
+   "id": "ayu-theme",
+   "name": "Ayu Classic",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:13:19Z",
+   "repository": "https://github.com/shamsghi/Ayu-in-Zed",
+   "schema_version": 1,
+   "version": "1.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

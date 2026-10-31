@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "GOI17 <olivasgilberto@gmail.com>"
+   ],
+   "description": "A Codely-inspirared theme for Zed",
+   "download_count": 0,
+   "id": "codely-theme",
+   "name": "Codely Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:18:22Z",
+   "repository": "https://github.com/GOI17/codely-theme-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

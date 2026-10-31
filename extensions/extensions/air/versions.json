@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Posit Software, PBC"
+   ],
+   "description": "Air extension for Zed",
+   "download_count": 0,
+   "id": "air",
+   "name": "Air",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-10-31T23:11:14Z",
+   "repository": "https://github.com/posit-dev/air",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": "0.2.0"
+  }
+ ]
+}

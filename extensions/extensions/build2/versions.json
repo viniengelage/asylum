@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Will Reed <wreed@disroot.org>"
+   ],
+   "description": "Build2 support.",
+   "download_count": 0,
+   "id": "build2",
+   "name": "Build2",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-10-31T23:15:45Z",
+   "repository": "https://codeberg.org/wreedb/zed-build2",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Catppuccin <releases@catppuccin.com>"
+   ],
+   "description": "\ud83e\udd8a Soothing pastel icons for Zed",
+   "download_count": 0,
+   "id": "catppuccin-icons",
+   "name": "Catppuccin Icons",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-10-31T23:16:39Z",
+   "repository": "https://github.com/catppuccin/zed-icons",
+   "schema_version": 1,
+   "version": "1.24.0",
+   "wasm_api_version": null
+  }
+ ]
+}

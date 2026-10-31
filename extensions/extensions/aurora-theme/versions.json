@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Raj Joshi <raj@example.com>"
+   ],
+   "description": "A dark theme with blue, green, and cyan tones inspired by the northern lights",
+   "download_count": 0,
+   "id": "aurora-theme",
+   "name": "Aurora",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:12:52Z",
+   "repository": "https://github.com/iamrajjoshi/aurora",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Chawye Hsu <su+zed@chawyehsu.com>"
+   ],
+   "description": "\ud83c\udf47 vscode-icons theme for Zed",
+   "download_count": 0,
+   "id": "chawyehsu-vscode-icons",
+   "name": "VSCode Icons",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-10-31T23:17:23Z",
+   "repository": "https://github.com/chawyehsu/zed-vscode-icons-theme",
+   "schema_version": 1,
+   "version": "0.5.0",
+   "wasm_api_version": null
+  }
+ ]
+}

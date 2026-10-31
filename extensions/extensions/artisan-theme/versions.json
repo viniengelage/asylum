@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "VheissuLabs"
+   ],
+   "description": "A clean light color theme inspired by Laravel's branding.",
+   "download_count": 0,
+   "id": "artisan-theme",
+   "name": "Artisan Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:12:25Z",
+   "repository": "https://github.com/VheissuLabs/artisan-theme",
+   "schema_version": 1,
+   "version": "0.4.0",
+   "wasm_api_version": null
+  }
+ ]
+}

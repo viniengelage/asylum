@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "\ud83d\udc64 codebabel <codebabel.dev.contact@gmail.com>"
+   ],
+   "description": "Description: \ud83c\udfa1 codebabel ztheme dark and mirage themes.",
+   "download_count": 0,
+   "id": "codebabel-ztheme-dark",
+   "name": "codebabel ztheme dark \ud83d\udd31",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:18:21Z",
+   "repository": "https://github.com/codebabel-appbag/codebabel-ztheme-dark/",
+   "schema_version": 1,
+   "version": "0.0.5",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "koalefant"
+   ],
+   "description": "A low-contrast dark theme with pastel colors.",
+   "download_count": 0,
+   "id": "bubblegum",
+   "name": "Bubblegum",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:15:31Z",
+   "repository": "https://github.com/koalefant/zed-bubblegum",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Lilyyy411"
+   ],
+   "description": "Feel immersed in the Martian landscape with this festive pink and orange dark Zed theme",
+   "download_count": 0,
+   "id": "autumnal-marscape",
+   "name": "Autumnal Marscape",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:12:58Z",
+   "repository": "https://github.com/lilyyy411/autumnal-marscape",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Cooper Maruyama <me@cooperm.com>"
+   ],
+   "description": "A dark, low-contrast theme family with muted purple undertones for reduced eye strain. Includes Apathy, Apathetic Ocean, and Minted variants.",
+   "download_count": 0,
+   "id": "apathy-theme",
+   "name": "Apathy Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:11:39Z",
+   "repository": "https://github.com/coopmoney/apathy-theme",
+   "schema_version": 1,
+   "version": "3.15.2",
+   "wasm_api_version": null
+  }
+ ]
+}

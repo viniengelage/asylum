@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Tobias Geibinger <tobias.geibinger@tlyphed.net>"
+   ],
+   "description": "Answer Set Programming (ASP) support using the clingo grammar",
+   "download_count": 0,
+   "id": "answer-set-programming",
+   "name": "Answer Set Programming",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-10-31T23:11:33Z",
+   "repository": "https://github.com/tlyphed/zed-answer-set-programming",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

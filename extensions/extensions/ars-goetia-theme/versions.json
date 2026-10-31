@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "rvdeguzman"
+   ],
+   "description": "Dark, transparent themes with blur for Zed. Five color palettes \u2014 Kimaris (purple+gold), Barbatos (red+rust), Gusion (green+plague), Vidar (blue+ice), Bael (monochrome) \u2014 each with a frosted glass variant. Colors sourced from black-metal-theme-neovim.",
+   "download_count": 0,
+   "id": "ars-goetia-theme",
+   "name": "Ars Goetia Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:12:24Z",
+   "repository": "https://github.com/rvdeguzman/ars-goetia-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

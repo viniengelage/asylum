@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Muchui William <juanmilkah@proton.me>"
+   ],
+   "description": "An opinionated dark theme based off of vim's industry colorscheme",
+   "download_count": 0,
+   "id": "anticuus",
+   "name": "Anticuus",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:11:35Z",
+   "repository": "https://codeberg.org/juanmilkah/anticuus",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

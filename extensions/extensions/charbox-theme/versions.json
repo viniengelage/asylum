@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "MONARCH"
+   ],
+   "description": "A high-contrast, Gruvbox-inspired Zed theme.",
+   "download_count": 0,
+   "id": "charbox-theme",
+   "name": "Charbox Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:17:19Z",
+   "repository": "https://github.com/monarcode/charbox-zed",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

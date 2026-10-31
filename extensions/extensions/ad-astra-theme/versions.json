@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "ugi-dev <hello@ugi.dev>"
+   ],
+   "description": "Dark and light themes for Zed with vibrant cyan and pink accents",
+   "download_count": 0,
+   "id": "ad-astra-theme",
+   "name": "Ad Astra",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:10:07Z",
+   "repository": "https://github.com/ugi-dev/ad-astra-zed",
+   "schema_version": 1,
+   "version": "1.1.2",
+   "wasm_api_version": null
+  }
+ ]
+}

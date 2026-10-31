@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ryan Eno"
+   ],
+   "description": "An Elastic-inspired Borealis theme for Zed",
+   "download_count": 0,
+   "id": "borealis-theme",
+   "name": "Borealis",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:15:22Z",
+   "repository": "https://github.com/VimCommando/zed-theme-borealis",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

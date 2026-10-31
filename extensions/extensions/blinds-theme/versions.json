@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Orbulant <tankashing@icloud.com>"
+   ],
+   "description": "Aesthetically pleasing minimal dark theme with colourblind support for Zed.",
+   "download_count": 0,
+   "id": "blinds-theme",
+   "name": "Blinds Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:15:10Z",
+   "repository": "https://github.com/orbulant/zed-blinds-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

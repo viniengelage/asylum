@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Blankeos <carloantonioct@gmail.com>"
+   ],
+   "description": "A bluer, minimal, dark, and frameless theme for Zed. Based on poimandres.",
+   "download_count": 0,
+   "id": "blankeos-zen",
+   "name": "Blankeos Zen",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:15:10Z",
+   "repository": "https://github.com/blankeos/zen.zed",
+   "schema_version": 1,
+   "version": "0.0.6",
+   "wasm_api_version": null
+  }
+ ]
+}

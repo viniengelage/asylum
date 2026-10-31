@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "littensy",
+    "jmesrje"
+   ],
+   "description": "A charming icon theme for Zed",
+   "download_count": 0,
+   "id": "charmed-icons",
+   "name": "Charmed Icons",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-10-31T23:17:20Z",
+   "repository": "https://github.com/jmesrje/zed-charmed-icons",
+   "schema_version": 1,
+   "version": "0.10.0",
+   "wasm_api_version": null
+  }
+ ]
+}

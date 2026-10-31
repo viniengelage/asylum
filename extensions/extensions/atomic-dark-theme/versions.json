@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "thekodeking"
+   ],
+   "description": "The darkest take on your favorite themes Atom, Catppuccin, Material, Afterglow, Ros\u00e9 Pine, and Vague, re-imagined for OLED screens with WCAG-tested contrast.",
+   "download_count": 0,
+   "id": "atomic-dark-theme",
+   "name": "Atomic Dark",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:12:48Z",
+   "repository": "https://github.com/atomic-dark/zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

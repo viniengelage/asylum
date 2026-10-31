@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ignasius"
+   ],
+   "description": "A sleek, dark theme for those who always keep their screen brightness very low",
+   "download_count": 0,
+   "id": "charcoal-theme",
+   "name": "Charcoal Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:17:19Z",
+   "repository": "https://github.com/ignasius-j-s/charcoal-theme",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

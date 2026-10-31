@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "blaqat <blaqat.ag@gmail.com>"
+   ],
+   "description": "A port of a port of Aylin: a modern and minimal dark theme with bright colors for Zed",
+   "download_count": 0,
+   "id": "aylin-theme",
+   "name": "Aylin Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:13:18Z",
+   "repository": "https://github.com/biaqat/aylin-theme-zed",
+   "schema_version": 1,
+   "version": "0.6.1",
+   "wasm_api_version": null
+  }
+ ]
+}

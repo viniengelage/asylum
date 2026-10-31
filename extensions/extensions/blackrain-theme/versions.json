@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "kurokirasama <kurokirasama@gmail.com>"
+   ],
+   "description": "A dark theme for Zed inspired by Sublime Text's Black Rain theme",
+   "download_count": 0,
+   "id": "blackrain-theme",
+   "name": "Blackrain Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:14:57Z",
+   "repository": "https://github.com/kurokirasama/zed_blackrain_theme",
+   "schema_version": 1,
+   "version": "0.1.3",
+   "wasm_api_version": null
+  }
+ ]
+}

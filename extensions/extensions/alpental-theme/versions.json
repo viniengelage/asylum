@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Andrew Carter <ascarter>"
+   ],
+   "description": "Minimal typography-focused theme for Zed editor.",
+   "download_count": 0,
+   "id": "alpental-theme",
+   "name": "Alpental Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:11:21Z",
+   "repository": "https://github.com/ascarter/zed-alpental-theme",
+   "schema_version": 1,
+   "version": "0.0.9",
+   "wasm_api_version": null
+  }
+ ]
+}

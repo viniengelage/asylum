@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Liffindra Angga Zaaldian <lzaaldian@gmail.com>"
+   ],
+   "description": "Dark version of Alabaster theme",
+   "download_count": 0,
+   "id": "alabaster-dark",
+   "name": "Alabaster Dark",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:11:19Z",
+   "repository": "https://github.com/findrakecil/alabaster-dark-zed-theme",
+   "schema_version": 1,
+   "version": "2.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

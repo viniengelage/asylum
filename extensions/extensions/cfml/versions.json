@@ -1,0 +1,23 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Gareth Edwards <ghedwards@gmail.com>"
+   ],
+   "description": "CFML support.",
+   "download_count": 0,
+   "id": "cfml",
+   "name": "CFML",
+   "provides": [
+    "languages",
+    "grammars",
+    "language-servers"
+   ],
+   "published_at": "2026-10-31T23:17:15Z",
+   "repository": "https://github.com/cfmleditor/zed-cfml",
+   "schema_version": 1,
+   "version": "0.2.35",
+   "wasm_api_version": "0.7.0"
+  }
+ ]
+}

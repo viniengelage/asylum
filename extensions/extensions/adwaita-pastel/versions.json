@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Benjamin Davies <bentendavies@gmail.com>"
+   ],
+   "description": "Adwaita (GNOME) theme for Zed with bold syntax highlighting borrowed from Catppuccin",
+   "download_count": 0,
+   "id": "adwaita-pastel",
+   "name": "Adwaita Pastel Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:10:12Z",
+   "repository": "https://github.com/Benjamin-Davies/zed-theme-adwaita",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

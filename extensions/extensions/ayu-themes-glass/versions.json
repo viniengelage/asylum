@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "jansol"
+   ],
+   "description": "Zed's Ayu themes, but with a touch of frosted glass",
+   "download_count": 0,
+   "id": "ayu-themes-glass",
+   "name": "Ayu Glass",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:13:20Z",
+   "repository": "https://github.com/jansol/zed-ayu-glass",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

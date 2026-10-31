@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Mat\u011bj \u010cern\u00fd <https://github.com/matejcerny>"
+   ],
+   "description": "\ud83e\udd8a Theme for Zed inspired by Intellij Idea",
+   "download_count": 0,
+   "id": "blackfox",
+   "name": "BlackFox Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:14:55Z",
+   "repository": "https://github.com/matejcerny/BlackFoxZed",
+   "schema_version": 1,
+   "version": "0.4.0",
+   "wasm_api_version": null
+  }
+ ]
+}

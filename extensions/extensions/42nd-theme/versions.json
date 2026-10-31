@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "fawkes42"
+   ],
+   "description": "Dark, quiet themes: 42nd and 42nd Ember.",
+   "download_count": 0,
+   "id": "42nd-theme",
+   "name": "42nd",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:09:43Z",
+   "repository": "https://github.com/fawkes42/42nd",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

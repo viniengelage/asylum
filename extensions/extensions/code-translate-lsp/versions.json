@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "nazzeDe"
+   ],
+   "description": "Offline identifier translation for Zed",
+   "download_count": 0,
+   "id": "code-translate-lsp",
+   "name": "Code Translate",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-10-31T23:18:21Z",
+   "repository": "https://github.com/nazzeDe/code-translate",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": "0.7.0"
+  }
+ ]
+}

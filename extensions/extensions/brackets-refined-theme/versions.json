@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "NeroWolfe75"
+   ],
+   "description": "A refined dark theme for Zed with a neutral interface and carefully balanced syntax colors.",
+   "download_count": 0,
+   "id": "brackets-refined-theme",
+   "name": "Brackets Refined",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:15:23Z",
+   "repository": "https://github.com/NeroWolfe75/brackets-refined-zed",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

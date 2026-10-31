@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Will Cygan <wcygan.io@gmail.com>"
+   ],
+   "description": "Arc Dark theme for Zed based on the popular Arc Dark color scheme",
+   "download_count": 0,
+   "id": "arc-dark-theme",
+   "name": "Arc Dark Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:11:55Z",
+   "repository": "https://github.com/wcygan/zed-arc-dark-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

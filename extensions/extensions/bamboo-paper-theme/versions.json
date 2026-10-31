@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Chris Drackett <chris@drackett.com>"
+   ],
+   "description": "A light UI/Syntax theme with a dark terminal for Zed.",
+   "download_count": 0,
+   "id": "bamboo-paper-theme",
+   "name": "Bamboo Paper",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-10-31T23:14:03Z",
+   "repository": "https://github.com/chrisdrackett/bamboo-theme-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}
