@@ -37,6 +37,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # script/build-extension-registry needs tomllib (Python 3.11+); ubuntu-22.04 ships 3.10.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Install the Rust toolchain from rust-toolchain.toml
         run: rustup toolchain install
 

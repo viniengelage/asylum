@@ -191,8 +191,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install musl
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      # .cargo/config.toml links aarch64-unknown-linux-musl with `-fuse-ld=lld`.
+      - name: Install musl and lld
+        run: sudo apt-get update && sudo apt-get install -y musl-tools lld
 
       - name: Install the Rust toolchain from rust-toolchain.toml
         run: |
