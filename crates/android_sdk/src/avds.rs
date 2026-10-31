@@ -108,14 +108,12 @@ impl AvdSettings {
 
     /// The entries that point an existing AVD at another system image.
     pub(crate) fn image_entries(&self) -> Vec<(&'static str, String)> {
-        let mut sysdir = self.image.relative_dir().to_string_lossy().into_owned();
-        sysdir.push('/');
         let play_store = self
             .image
             .flavor()
             .is_some_and(|flavor| flavor.has_play_store());
         vec![
-            ("image.sysdir.1", sysdir),
+            ("image.sysdir.1", self.image.sysdir()),
             ("tag.id", self.image.tag.clone()),
             ("tag.ids", self.image.tag.clone()),
             ("abi.type", self.image.abi.clone()),

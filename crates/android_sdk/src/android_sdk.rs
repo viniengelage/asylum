@@ -25,18 +25,16 @@ use util::ResultExt as _;
 
 mod avds;
 mod catalog;
+mod host_platform;
 
 pub use avds::{AndroidAvd, AvdSettings, InstalledSystemImage, Orientation, available_disk_bytes};
 pub use catalog::{
     AndroidDeviceProfile, CatalogComponent, CatalogImage, DeviceCategory, ImageFlavor, SdkCatalog,
     SdkComponentKind, SystemImageId, version_key,
 };
+pub use host_platform::{ArchiveFormat, HostArch, HostOs, HostPlatform};
 
-const CMDLINE_TOOLS_URL: &str =
-    "https://dl.google.com/android/repository/commandlinetools-mac-13114758_latest.zip";
 const JDK_VERSION: &str = "21.0.5+11";
-const JDK_URL_AARCH64: &str = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.5%2B11/OpenJDK21U-jdk_aarch64_mac_hotspot_21.0.5_11.tar.gz";
-const JDK_URL_X64: &str = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.5%2B11/OpenJDK21U-jdk_x64_mac_hotspot_21.0.5_11.tar.gz";
 const API_LEVEL: &str = "android-35";
 const DEFAULT_AVD_DEVICE: &str = "pixel_7";
 pub const DEFAULT_RAM_MB: u32 = 4096;
@@ -63,25 +61,24 @@ const GRPC_STREAM_MAX_FAILURES: u32 = 3;
 pub const KEYCODE_HOME: u32 = 3;
 const KEYCODE_COPY: u32 = 278;
 
-fn jdk_url() -> &'static str {
-    if std::env::consts::ARCH == "aarch64" {
-        JDK_URL_AARCH64
-    } else {
-        JDK_URL_X64
-    }
-}
-
-fn system_image_abi() -> &'static str {
-    if std::env::consts::ARCH == "aarch64" {
-        "arm64-v8a"
-    } else {
-        "x86_64"
-    }
-}
-
 /// The image the first installation creates its AVD from.
-fn default_system_image() -> SystemImageId {
-    SystemImageId::new("35", ImageFlavor::GoogleApis, system_image_abi())
+fn default_system_image(platform: HostPlatform) -> SystemImageId {
+    SystemImageId::new("35", ImageFlavor::GoogleApis, platform.system_image_abi())
+}
+
+/// Windows would otherwise open a console window for every `adb` and `sdkmanager` run.
+#[cfg(windows)]
+fn new_command(program: impl AsRef<std::ffi::OsStr>) -> smol::process::Command {
+    use smol::process::windows::CommandExt as _;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let mut command = smol::process::Command::new(program);
+    command.creation_flags(CREATE_NO_WINDOW);
+    command
+}
+
+#[cfg(not(windows))]
+fn new_command(program: impl AsRef<std::ffi::OsStr>) -> smol::process::Command {
+    smol::process::Command::new(program)
 }
 
 /// How long a downloaded repository catalog is reused before it is fetched again.
@@ -90,6 +87,7 @@ const DOWNLOAD_POLL_INTERVAL: Duration = Duration::from_millis(500);
 
 #[derive(Clone)]
 struct AndroidPaths {
+    platform: HostPlatform,
     root: PathBuf,
     jdk_dir: PathBuf,
     sdk_dir: PathBuf,
@@ -100,11 +98,12 @@ struct AndroidPaths {
 
 impl AndroidPaths {
     fn new() -> Self {
-        Self::at(paths::android_dir().clone())
+        Self::at(paths::android_dir().clone(), HostPlatform::current())
     }
 
-    fn at(root: PathBuf) -> Self {
+    fn at(root: PathBuf, platform: HostPlatform) -> Self {
         Self {
+            platform,
             jdk_dir: root.join("jdk"),
             sdk_dir: root.join("sdk"),
             avd_home: root.join("avd_home"),
@@ -119,19 +118,27 @@ impl AndroidPaths {
     }
 
     fn sdkmanager(&self) -> PathBuf {
-        self.sdk_dir.join("cmdline-tools/latest/bin/sdkmanager")
+        self.cmdline_tools_dir()
+            .join("bin")
+            .join(self.platform.script_name("sdkmanager"))
     }
 
     fn avdmanager(&self) -> PathBuf {
-        self.sdk_dir.join("cmdline-tools/latest/bin/avdmanager")
+        self.cmdline_tools_dir()
+            .join("bin")
+            .join(self.platform.script_name("avdmanager"))
     }
 
     fn adb(&self) -> PathBuf {
-        self.sdk_dir.join("platform-tools/adb")
+        self.sdk_dir
+            .join("platform-tools")
+            .join(self.platform.executable_name("adb"))
     }
 
     fn emulator(&self) -> PathBuf {
-        self.sdk_dir.join("emulator/emulator")
+        self.sdk_dir
+            .join("emulator")
+            .join(self.platform.executable_name("emulator"))
     }
 
     fn platform_dir(&self) -> PathBuf {
@@ -143,7 +150,15 @@ impl AndroidPaths {
     }
 
     fn cmdline_tools_dir(&self) -> PathBuf {
-        self.sdk_dir.join("cmdline-tools/latest")
+        self.sdk_dir.join("cmdline-tools").join("latest")
+    }
+
+    /// Where running emulators advertise their gRPC endpoint.
+    fn emulator_discovery_dirs(&self) -> Vec<PathBuf> {
+        self.platform
+            .emulator_discovery_dirs(paths::home_dir(), &self.user_home, |name| {
+                std::env::var(name).ok()
+            })
     }
 
     fn catalog_dir(&self) -> PathBuf {
@@ -1063,12 +1078,33 @@ impl AndroidSdkManager {
         self.first_boot_job = None;
         self.state = AndroidSdkState::EmulatorBooting;
         cx.notify();
-        self.spawn_emulator_process(avd_name, cold, cx);
+        if !HostPlatform::current().needs_acceleration_check() {
+            self.spawn_emulator_process(avd_name, cold, cx);
+            return;
+        }
+        self.boot_task = Some(cx.spawn(async move |this, cx| {
+            let check = cx
+                .background_spawn(async { check_emulator_acceleration(&AndroidPaths::new()).await })
+                .await;
+            this.update(cx, |this, cx| {
+                this.boot_task = None;
+                if !matches!(this.state, AndroidSdkState::EmulatorBooting) {
+                    return;
+                }
+                match check {
+                    Ok(()) => this.spawn_emulator_process(avd_name, cold, cx),
+                    Err(error) => {
+                        this.set_state(AndroidSdkState::Failed(format!("{error:#}").into()), cx)
+                    }
+                }
+            })
+            .ok();
+        }));
     }
 
     fn spawn_emulator_process(&mut self, avd_name: String, cold: bool, cx: &mut Context<Self>) {
         let paths = AndroidPaths::new();
-        let mut command = smol::process::Command::new(paths.emulator());
+        let mut command = new_command(paths.emulator());
         // Headless: the emulator's screen is streamed into Zed's devices view
         // instead of opening the emulator's own window.
         command.args(emulator_args(&avd_name, true, cold));
@@ -1211,7 +1247,7 @@ impl AndroidSdkManager {
             let serial = serial.clone();
             cx.background_spawn(async move {
                 let paths = AndroidPaths::new();
-                let mut command = smol::process::Command::new(paths.adb());
+                let mut command = new_command(paths.adb());
                 command.args(["-s", &serial, "emu", "kill"]);
                 apply_env(&mut command, &paths, None);
                 command.stdin(Stdio::null());
@@ -1545,7 +1581,7 @@ impl AndroidSdkManager {
         let serial = serial.clone();
         cx.background_spawn(async move {
             let paths = AndroidPaths::new();
-            let mut command = smol::process::Command::new(paths.adb());
+            let mut command = new_command(paths.adb());
             command.args(["-s", &serial, "shell", "input"]);
             command.args(&arguments);
             apply_env(&mut command, &paths, None);
@@ -1781,6 +1817,37 @@ fn emulator_args(avd_name: &str, headless: bool, cold: bool) -> Vec<String> {
     args
 }
 
+/// Asks the emulator whether it can use the host's hypervisor, so a missing WHPX or KVM is
+/// reported instead of the emulator exiting during boot.
+async fn check_emulator_acceleration(paths: &AndroidPaths) -> Result<()> {
+    let mut command = new_command(paths.emulator());
+    command.arg("-accel-check");
+    apply_env(&mut command, paths, None);
+    command.stdin(Stdio::null());
+    let output = command
+        .output()
+        .await
+        .context("Não foi possível executar emulator -accel-check")?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let mut reason =
+        host_platform::acceleration_check_message(&String::from_utf8_lossy(&output.stdout));
+    if reason.is_empty() {
+        reason = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    }
+    let hint = match paths.platform.os {
+        HostOs::Windows => {
+            "Ative a \"Plataforma do Hipervisor do Windows\" nos recursos do Windows e reinicie."
+        }
+        HostOs::Linux => {
+            "Habilite a virtualização na BIOS, carregue o módulo KVM e dê ao seu usuário acesso a /dev/kvm (grupo kvm)."
+        }
+        HostOs::MacOs => "",
+    };
+    anyhow::bail!("A aceleração de hardware do emulador não está disponível: {reason}. {hint}")
+}
+
 async fn exists(path: &Path) -> bool {
     smol::fs::metadata(path).await.is_ok()
 }
@@ -1819,6 +1886,13 @@ async fn migrate_legacy_android_dir() {
 
 async fn detect_installation_on_disk() -> AndroidInstallation {
     migrate_legacy_android_dir().await;
+    if let Err(error) = HostPlatform::supported_current() {
+        return AndroidInstallation {
+            state: AndroidSdkState::Failed(format!("{error:#}").into()),
+            avds: Vec::new(),
+            running_avd: None,
+        };
+    }
     let paths = AndroidPaths::new();
     if installed_java_home(&paths).await.is_none()
         || !exists(&paths.sdkmanager()).await
@@ -1864,7 +1938,7 @@ async fn detect_installation_on_disk() -> AndroidInstallation {
 }
 
 async fn adb_avd_name(paths: &AndroidPaths, serial: &str) -> Option<String> {
-    let mut command = smol::process::Command::new(paths.adb());
+    let mut command = new_command(paths.adb());
     command.args(["-s", serial, "emu", "avd", "name"]);
     apply_env(&mut command, paths, None);
     command.stdin(Stdio::null());
@@ -1887,7 +1961,7 @@ async fn list_device_profiles(
     paths: &AndroidPaths,
     java_home: &Path,
 ) -> Result<Vec<AndroidDeviceProfile>> {
-    let mut command = smol::process::Command::new(paths.avdmanager());
+    let mut command = new_command(paths.avdmanager());
     command.args(["list", "device"]);
     apply_env(&mut command, paths, Some(java_home));
     command.stdin(Stdio::null());
@@ -1986,6 +2060,7 @@ async fn run_install_pipeline(
     http_client: Arc<dyn HttpClient>,
     cx: &mut AsyncApp,
 ) -> Result<()> {
+    let platform = HostPlatform::supported_current()?;
     let paths = AndroidPaths::new();
 
     let java_home = match cx
@@ -1998,8 +2073,10 @@ async fn run_install_pipeline(
         Some(java_home) => java_home,
         None => {
             set_step(this, cx, "Baixando JDK…")?;
-            let archive = paths.downloads_dir.join("jdk.tar.gz");
-            download_step(this, cx, http_client.clone(), jdk_url(), &archive)
+            let archive = paths
+                .downloads_dir
+                .join(format!("jdk.{}", platform.jdk_archive_format().extension()));
+            download_step(this, cx, http_client.clone(), &platform.jdk_url(), &archive)
                 .await
                 .context("Não foi possível baixar o JDK")?;
             set_step(this, cx, "Instalando JDK…")?;
@@ -2016,9 +2093,15 @@ async fn run_install_pipeline(
     if !exists(&paths.sdkmanager()).await {
         set_step(this, cx, "Baixando ferramentas do Android SDK…")?;
         let archive = paths.downloads_dir.join("cmdline-tools.zip");
-        download_step(this, cx, http_client.clone(), CMDLINE_TOOLS_URL, &archive)
-            .await
-            .context("Não foi possível baixar as ferramentas do Android SDK")?;
+        download_step(
+            this,
+            cx,
+            http_client.clone(),
+            &platform.cmdline_tools_url(),
+            &archive,
+        )
+        .await
+        .context("Não foi possível baixar as ferramentas do Android SDK")?;
         set_step(this, cx, "Instalando ferramentas do Android SDK…")?;
         cx.background_spawn({
             let paths = paths.clone();
@@ -2060,7 +2143,7 @@ async fn run_install_pipeline(
         .context("Não foi possível instalar o platform-tools e o emulador")?;
     }
 
-    let image = default_system_image();
+    let image = default_system_image(platform);
     if !avds::system_image_installed(&paths.sdk_dir, &image) {
         set_step(this, cx, "Baixando imagem do sistema Android…")?;
         cx.background_spawn({
@@ -2205,17 +2288,18 @@ async fn installed_java_home(paths: &AndroidPaths) -> Option<PathBuf> {
     if marker.trim() != JDK_VERSION {
         return None;
     }
-    find_java_home(&paths.jdk_dir).await
+    find_java_home(&paths.jdk_dir, paths.platform).await
 }
 
-async fn find_java_home(jdk_dir: &Path) -> Option<PathBuf> {
+async fn find_java_home(jdk_dir: &Path, platform: HostPlatform) -> Option<PathBuf> {
     let mut entries = smol::fs::read_dir(jdk_dir).await.ok()?;
     while let Some(entry) = entries.next().await {
         let Ok(entry) = entry else {
             continue;
         };
-        let java_home = entry.path().join("Contents/Home");
-        if exists(&java_home.join("bin/java")).await {
+        let java_home = platform.java_home_in(&entry.path());
+        let java = java_home.join("bin").join(platform.executable_name("java"));
+        if exists(&java).await {
             return Some(java_home);
         }
     }
@@ -2228,12 +2312,21 @@ async fn install_jdk(paths: &AndroidPaths, archive: &Path) -> Result<PathBuf> {
     }
     smol::fs::create_dir_all(&paths.jdk_dir).await?;
     let file = smol::fs::File::open(archive).await?;
-    let decompressed = GzipDecoder::new(BufReader::new(file));
-    Archive::new(decompressed)
-        .unpack(&paths.jdk_dir)
-        .await
-        .context("extração do JDK")?;
-    let java_home = find_java_home(&paths.jdk_dir)
+    match paths.platform.jdk_archive_format() {
+        ArchiveFormat::TarGz => {
+            let decompressed = GzipDecoder::new(BufReader::new(file));
+            Archive::new(decompressed)
+                .unpack(&paths.jdk_dir)
+                .await
+                .context("extração do JDK")?;
+        }
+        ArchiveFormat::Zip => {
+            util::archive::extract_zip(&paths.jdk_dir, file)
+                .await
+                .context("extração do JDK")?;
+        }
+    }
+    let java_home = find_java_home(&paths.jdk_dir, paths.platform)
         .await
         .context("JAVA_HOME não encontrado após a extração do JDK")?;
     smol::fs::write(paths.jdk_version_marker(), JDK_VERSION).await?;
@@ -2270,7 +2363,7 @@ async fn install_cmdline_tools(paths: &AndroidPaths, archive: &Path) -> Result<(
 async fn run_sdkmanager(paths: &AndroidPaths, java_home: &Path, args: &[&str]) -> Result<()> {
     smol::fs::create_dir_all(&paths.avd_home).await?;
     smol::fs::create_dir_all(&paths.user_home).await?;
-    let mut command = smol::process::Command::new(paths.sdkmanager());
+    let mut command = new_command(paths.sdkmanager());
     command.arg(format!("--sdk_root={}", paths.sdk_dir.display()));
     command.args(args);
     apply_env(&mut command, paths, Some(java_home));
@@ -2287,7 +2380,7 @@ async fn create_avd_on_disk(
     image: &SystemImageId,
 ) -> Result<()> {
     smol::fs::create_dir_all(&paths.avd_home).await?;
-    let mut command = smol::process::Command::new(paths.avdmanager());
+    let mut command = new_command(paths.avdmanager());
     command.args(["create", "avd", "--name", avd_name, "--package"]);
     command.arg(image.package());
     command.args(["--device", device_profile]);
@@ -2560,7 +2653,7 @@ pub fn format_bytes(bytes: u64) -> String {
 
 async fn fetch_catalog(http_client: Arc<dyn HttpClient>) -> Result<SdkCatalog> {
     let paths = AndroidPaths::new();
-    let abi = system_image_abi();
+    let abi = paths.platform.system_image_abi();
     let mut images = Vec::new();
     for (flavor, url) in catalog::system_image_catalog_urls() {
         let cache = paths
@@ -2570,11 +2663,6 @@ async fn fetch_catalog(http_client: Arc<dyn HttpClient>) -> Result<SdkCatalog> {
         images.extend(catalog::parse_system_image_catalog(&xml, flavor, abi)?);
     }
     images.sort_by_key(|image| std::cmp::Reverse(image.id.api()));
-    let host_arch = if std::env::consts::ARCH == "aarch64" {
-        "aarch64"
-    } else {
-        "x64"
-    };
     let repository = cached_text_download(
         &http_client,
         &catalog::repository_url(),
@@ -2583,7 +2671,11 @@ async fn fetch_catalog(http_client: Arc<dyn HttpClient>) -> Result<SdkCatalog> {
     .await?;
     Ok(SdkCatalog {
         images,
-        components: catalog::parse_component_catalog(&repository, host_arch)?,
+        components: catalog::parse_component_catalog(
+            &repository,
+            paths.platform.catalog_host_os(),
+            paths.platform.catalog_host_arch(),
+        )?,
     })
 }
 
@@ -2623,13 +2715,13 @@ async fn cached_text_download(
     Ok(text)
 }
 
-/// The released system images for this Mac, from `sdkmanager --list`, which knows no sizes.
+/// The released system images for this host, from `sdkmanager --list`, which knows no sizes.
 async fn list_available_images_with_sdkmanager() -> Result<Vec<CatalogImage>> {
     let paths = AndroidPaths::new();
     let java_home = installed_java_home(&paths)
         .await
         .context("JDK gerenciado pelo Zed não encontrado")?;
-    let mut command = smol::process::Command::new(paths.sdkmanager());
+    let mut command = new_command(paths.sdkmanager());
     command.arg(format!("--sdk_root={}", paths.sdk_dir.display()));
     command.arg("--list");
     apply_env(&mut command, &paths, Some(&java_home));
@@ -2649,7 +2741,7 @@ async fn list_available_images_with_sdkmanager() -> Result<Vec<CatalogImage>> {
         else {
             continue;
         };
-        if id.abi == system_image_abi()
+        if id.abi == paths.platform.system_image_abi()
             && id.flavor().is_some()
             && id.api().is_some()
             && !images.iter().any(|image| image.id == id)
@@ -2724,9 +2816,12 @@ struct EmulatorGrpcEndpoint {
 /// from dead emulators can linger, so the newest matching file wins and
 /// callers fall back to `screencap` streaming when the endpoint is stale.
 fn discover_grpc_endpoint(wanted_avd: Option<&str>) -> Option<EmulatorGrpcEndpoint> {
-    let running_dir = paths::home_dir().join("Library/Caches/TemporaryItems/avd/running");
-    let entries = std::fs::read_dir(running_dir).ok()?;
     let mut newest: Option<(std::time::SystemTime, EmulatorGrpcEndpoint)> = None;
+    let entries = AndroidPaths::new()
+        .emulator_discovery_dirs()
+        .into_iter()
+        .filter_map(|running_dir| std::fs::read_dir(running_dir).ok())
+        .flatten();
     for entry in entries.flatten() {
         let path = entry.path();
         if path.extension().is_none_or(|extension| extension != "ini") {
@@ -2900,7 +2995,7 @@ fn bgra_render_image(width: u32, height: u32, mut data: Vec<u8>) -> Result<Arc<R
 /// are scaled down server-side.
 async fn fetch_native_screen_size(serial: &str) -> Result<(u32, u32)> {
     let paths = AndroidPaths::new();
-    let mut command = smol::process::Command::new(paths.adb());
+    let mut command = new_command(paths.adb());
     command.args(["-s", serial, "shell", "wm", "size"]);
     apply_env(&mut command, &paths, None);
     command.stdin(Stdio::null());
@@ -3207,7 +3302,7 @@ async fn stream_screen_frames(
     mut frames: mpsc::Sender<(Arc<RenderImage>, u32, u32)>,
 ) -> Result<()> {
     let paths = AndroidPaths::new();
-    let mut command = smol::process::Command::new(paths.adb());
+    let mut command = new_command(paths.adb());
     // `exec-out` (not `shell`) so the device shell has no pty, which would
     // mangle the binary output.
     command.args(["-s", serial, "exec-out", "while true; do screencap; done"]);
@@ -3270,7 +3365,7 @@ fn shell_quote(text: &str) -> String {
 /// Runs `adb -s <serial> <arguments>` and returns its stdout.
 async fn run_adb(serial: &str, arguments: &[&str]) -> Result<Vec<u8>> {
     let paths = AndroidPaths::new();
-    let mut command = smol::process::Command::new(paths.adb());
+    let mut command = new_command(paths.adb());
     command.arg("-s").arg(serial).args(arguments);
     apply_env(&mut command, &paths, None);
     command.stdin(Stdio::null());
@@ -3298,7 +3393,7 @@ fn parse_night_mode(output: &str) -> Result<bool> {
 }
 
 async fn adb_devices(paths: &AndroidPaths) -> Result<Vec<String>> {
-    let mut command = smol::process::Command::new(paths.adb());
+    let mut command = new_command(paths.adb());
     command.arg("devices");
     apply_env(&mut command, paths, None);
     command.stdin(Stdio::null());
@@ -3473,7 +3568,7 @@ fn clean_android_dir(
         }
     }
 
-    let running_avds = running_avd_names();
+    let running_avds = running_avd_names(paths);
     for avd_dir in directory_entries(&paths.avd_home) {
         if avd_dir
             .extension()
@@ -3531,10 +3626,11 @@ fn superseded_versions(versions: &[String]) -> Vec<String> {
 
 /// Names of AVDs with an emulator discovery file. Files of dead emulators can
 /// linger, which only makes the cleanup more conservative.
-fn running_avd_names() -> Vec<String> {
-    let running_dir = paths::home_dir().join("Library/Caches/TemporaryItems/avd/running");
-    directory_entries(&running_dir)
-        .into_iter()
+fn running_avd_names(paths: &AndroidPaths) -> Vec<String> {
+    paths
+        .emulator_discovery_dirs()
+        .iter()
+        .flat_map(|running_dir| directory_entries(running_dir))
         .filter(|path| path.extension().is_some_and(|extension| extension == "ini"))
         .filter_map(|path| {
             let contents = std::fs::read_to_string(path).ok()?;
@@ -3685,7 +3781,7 @@ id: 60 or "wearos_square"
     #[test]
     fn cleanup_removes_superseded_packages_until_they_come_back() -> Result<()> {
         let root = tempfile::tempdir()?;
-        let paths = AndroidPaths::at(root.path().to_path_buf());
+        let paths = AndroidPaths::at(root.path().to_path_buf(), HostPlatform::current());
         for directory in [
             "sdk/ndk/27.0.12077973",
             "sdk/ndk/27.1.12297006",
@@ -3762,7 +3858,7 @@ id: 60 or "wearos_square"
     #[test]
     fn scheduled_cleanup_runs_at_most_once_per_period() -> Result<()> {
         let root = tempfile::tempdir()?;
-        let paths = AndroidPaths::at(root.path().to_path_buf());
+        let paths = AndroidPaths::at(root.path().to_path_buf(), HostPlatform::current());
         std::fs::create_dir_all(&paths.sdk_dir)?;
         std::fs::create_dir_all(&paths.downloads_dir)?;
         let later = std::time::SystemTime::now() + Duration::from_secs(60 * 24 * 60 * 60);

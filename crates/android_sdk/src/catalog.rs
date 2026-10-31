@@ -46,6 +46,14 @@ impl SystemImageId {
             .join(&self.abi)
     }
 
+    /// The AVD `image.sysdir.1` value, which uses forward slashes on every host.
+    pub fn sysdir(&self) -> String {
+        format!(
+            "system-images/android-{}/{}/{}/",
+            self.platform, self.tag, self.abi
+        )
+    }
+
     pub fn parse_package(package: &str) -> Option<Self> {
         let mut parts = package.split(';');
         if parts.next()? != "system-images" {
@@ -61,8 +69,12 @@ impl SystemImageId {
     }
 
     /// Parses an AVD's `image.sysdir.1`, e.g. `system-images/android-35/google_apis/arm64-v8a/`.
+    /// `avdmanager` writes it with backslashes on Windows.
     pub fn parse_sysdir(sysdir: &str) -> Option<Self> {
-        let mut parts = sysdir.trim().trim_end_matches('/').split('/');
+        let mut parts = sysdir
+            .trim()
+            .trim_end_matches(['/', '\\'])
+            .split(['/', '\\']);
         if parts.next()? != "system-images" {
             return None;
         }
@@ -256,7 +268,7 @@ impl ImageFlavor {
     ];
 }
 
-/// A system image the repository offers for this Mac's ABI.
+/// A system image the repository offers for the host's ABI.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CatalogImage {
     pub id: SystemImageId,
@@ -472,8 +484,12 @@ pub(crate) fn parse_system_image_catalog(
 }
 
 /// Reads `repository2-3.xml` for the newest stable emulator, platform-tools and command-line
-/// tools for this Mac.
-pub(crate) fn parse_component_catalog(xml: &str, host_arch: &str) -> Result<Vec<CatalogComponent>> {
+/// tools for the host, whose archives are tagged with `host_os` and `host_arch`.
+pub(crate) fn parse_component_catalog(
+    xml: &str,
+    host_os: &str,
+    host_arch: &str,
+) -> Result<Vec<CatalogComponent>> {
     let mut newest: Vec<(CatalogComponent, Vec<u64>)> = Vec::new();
     for package in parse_remote_packages(xml)? {
         if package
@@ -490,7 +506,7 @@ pub(crate) fn parse_component_catalog(xml: &str, host_arch: &str) -> Result<Vec<
             _ => continue,
         };
         let Some(archive) = package.archives.iter().find(|archive| {
-            archive.host_os.as_deref().is_none_or(|os| os == "macosx")
+            archive.host_os.as_deref().is_none_or(|os| os == host_os)
                 && archive
                     .host_arch
                     .as_deref()
@@ -844,7 +860,7 @@ mod tests {
     <archives><archive><complete><size>7</size></complete><host-os>macosx</host-os></archive></archives>
   </remotePackage>
 </sdk:sdk-repository>"#;
-        let components = parse_component_catalog(xml, "aarch64")?;
+        let components = parse_component_catalog(xml, "macosx", "aarch64")?;
         assert_eq!(
             components,
             vec![
@@ -892,6 +908,63 @@ mod tests {
             "Android 12L"
         );
         assert_eq!(SystemImageId::parse_package("platforms;android-35"), None);
+        assert_eq!(
+            SystemImageId::parse_sysdir("system-images\\android-35\\google_apis\\x86_64\\"),
+            Some(SystemImageId::new("35", ImageFlavor::GoogleApis, "x86_64"))
+        );
+        assert_eq!(
+            SystemImageId::new("35", ImageFlavor::GoogleApis, "x86_64").sysdir(),
+            "system-images/android-35/google_apis/x86_64/"
+        );
+    }
+
+    #[test]
+    fn component_catalog_picks_the_archive_for_the_host_os() -> Result<()> {
+        let xml = r#"<sdk:sdk-repository xmlns:sdk="x">
+  <remotePackage path="emulator">
+    <revision><major>37</major><minor>2</minor><micro>13</micro></revision>
+    <channelRef ref="channel-0"/>
+    <archives>
+      <archive><complete><size>1</size></complete><host-os>linux</host-os><host-arch>x64</host-arch></archive>
+      <archive><complete><size>2</size></complete><host-os>macosx</host-os><host-arch>aarch64</host-arch></archive>
+      <archive><complete><size>3</size></complete><host-os>windows</host-os><host-arch>x64</host-arch></archive>
+    </archives>
+  </remotePackage>
+  <remotePackage path="platform-tools">
+    <revision><major>37</major><minor>0</minor><micro>1</micro></revision>
+    <channelRef ref="channel-0"/>
+    <archives>
+      <archive><complete><size>4</size></complete><host-os>linux</host-os></archive>
+      <archive><complete><size>5</size></complete><host-os>windows</host-os></archive>
+    </archives>
+  </remotePackage>
+</sdk:sdk-repository>"#;
+        let sizes = |host_os: &str, host_arch: &str| -> Result<Vec<(SdkComponentKind, u64)>> {
+            Ok(parse_component_catalog(xml, host_os, host_arch)?
+                .into_iter()
+                .map(|component| (component.kind, component.download_bytes))
+                .collect())
+        };
+        assert_eq!(
+            sizes("windows", "x64")?,
+            vec![
+                (SdkComponentKind::Emulator, 3),
+                (SdkComponentKind::PlatformTools, 5)
+            ]
+        );
+        assert_eq!(
+            sizes("linux", "x64")?,
+            vec![
+                (SdkComponentKind::Emulator, 1),
+                (SdkComponentKind::PlatformTools, 4)
+            ]
+        );
+        // No emulator is published for Linux on ARM.
+        assert_eq!(
+            sizes("linux", "aarch64")?,
+            vec![(SdkComponentKind::PlatformTools, 4)]
+        );
+        Ok(())
     }
 
     #[test]
