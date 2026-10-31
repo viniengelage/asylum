@@ -1457,12 +1457,9 @@ mod tests {
         });
         run_task_to_completion(&foreground_executor, task);
 
+        // Frame events aren't checked: they go to a process-wide buffer, which windows drawn by
+        // tests running concurrently in the same process also write to.
         let events = trace_scope.finish();
-        assert!(
-            events.frame_events.is_empty(),
-            "no window was involved, so no frame events should be recorded"
-        );
-
         let report = BenchReport::default();
         report.record_foreground_events(events.foreground_events());
 
