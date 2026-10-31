@@ -4207,7 +4207,7 @@ impl BufferSnapshot {
         {
             static DISABLE_HIGHLIGHT_CACHE: std::sync::LazyLock<bool> =
                 std::sync::LazyLock::new(|| {
-                    std::env::var_os("ZED_DISABLE_HIGHLIGHT_CACHE").is_some()
+                    std::env::var_os("ASYLUM_DISABLE_HIGHLIGHT_CACHE").is_some()
                 });
             if *DISABLE_HIGHLIGHT_CACHE {
                 return None;

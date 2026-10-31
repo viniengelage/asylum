@@ -71,7 +71,7 @@ To get started with Java, click the `edit debug.json` button in the Debug menu, 
     // this effectively sets a breakpoint at your program entry:
     "stopOnEntry": true,
     // the working directory for the debug process
-    "cwd": "$ZED_WORKTREE_ROOT",
+    "cwd": "$ASYLUM_WORKTREE_ROOT",
   },
 ]
 ```

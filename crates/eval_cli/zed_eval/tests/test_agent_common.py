@@ -61,7 +61,7 @@ class EnvForwardingTests(unittest.TestCase):
         env: dict[str, str] = {}
         add_anthropic_available_models_env(env, '[{"name":"model"}]')
 
-        self.assertEqual(env["ZED_ANTHROPIC_AVAILABLE_MODELS"], '[{"name":"model"}]')
+        self.assertEqual(env["ASYLUM_ANTHROPIC_AVAILABLE_MODELS"], '[{"name":"model"}]')
 
     def test_configure_modal_environment_sets_documented_secret_env(self) -> None:
         args = argparse.Namespace(

@@ -35,8 +35,8 @@ Asylum supports separate themes for light and dark mode with automatic switching
 {
   "theme": {
     "mode": "system",
-    "light": "One Light",
-    "dark": "One Dark"
+    "light": "Ayu Light",
+    "dark": "Polar Dark"
   }
 }
 ```
@@ -55,8 +55,8 @@ Like color themes, icon themes support separate light and dark variants:
 {
   "icon_theme": {
     "mode": "system",
-    "light": "Zed (Default)",
-    "dark": "Zed (Default)"
+    "light": "Asylum (Default)",
+    "dark": "Asylum (Default)"
   }
 }
 ```

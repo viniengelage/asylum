@@ -213,10 +213,13 @@ impl ThemeRegistry {
 
     /// Returns the theme with the given name.
     pub fn get(&self, name: &str) -> Result<Arc<Theme>, ThemeNotFoundError> {
-        self.state
-            .read()
+        let state = self.state.read();
+        state
             .themes
             .get(name)
+            .or_else(|| {
+                legacy_theme_replacement(name).and_then(|replacement| state.themes.get(replacement))
+            })
             .ok_or_else(|| ThemeNotFoundError(name.to_string().into()))
             .cloned()
     }
@@ -241,6 +244,11 @@ impl ThemeRegistry {
 
     /// Returns the icon theme with the specified name.
     pub fn get_icon_theme(&self, name: &str) -> Result<Arc<IconTheme>, IconThemeNotFoundError> {
+        let name = if name == LEGACY_DEFAULT_ICON_THEME_NAME {
+            DEFAULT_ICON_THEME_NAME
+        } else {
+            name
+        };
         self.state
             .read()
             .icon_themes
@@ -365,5 +373,18 @@ impl ThemeRegistry {
 impl Default for ThemeRegistry {
     fn default() -> Self {
         Self::new(Box::new(()))
+    }
+}
+
+/// The default icon theme's name in Zed, which settings carried over from Zed still use.
+const LEGACY_DEFAULT_ICON_THEME_NAME: &str = "Zed (Default)";
+
+/// Zed's bundled themes, which Asylum doesn't ship, mapped to the closest bundled ones so
+/// settings carried over from Zed still get a theme of the same appearance.
+fn legacy_theme_replacement(name: &str) -> Option<&'static str> {
+    match name {
+        "One Dark" => Some("Polar Dark"),
+        "One Light" => Some("Ayu Light"),
+        _ => None,
     }
 }

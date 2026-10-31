@@ -316,7 +316,7 @@ For more control, you can add debug configurations to `.zed/debug.json`. See the
       "command": "cargo",
       "args": ["build"]
     },
-    "program": "$ZED_WORKTREE_ROOT/target/debug/binary",
+    "program": "$ASYLUM_WORKTREE_ROOT/target/debug/binary",
     // sourceLanguages is required for CodeLLDB (not GDB) when using Rust
     "sourceLanguages": ["rust"],
     "request": "launch",

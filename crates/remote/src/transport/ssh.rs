@@ -347,7 +347,7 @@ impl MasterProcess {
 
 #[cfg(windows)]
 impl MasterProcess {
-    const CONNECTION_ESTABLISHED_MAGIC: &str = "ZED_SSH_CONNECTION_ESTABLISHED";
+    const CONNECTION_ESTABLISHED_MAGIC: &str = "ASYLUM_SSH_CONNECTION_ESTABLISHED";
 
     pub fn new(
         askpass_script_path: &std::ffi::OsStr,
@@ -371,7 +371,7 @@ impl MasterProcess {
             .stderr(Stdio::piped())
             .env("SSH_ASKPASS_REQUIRE", "force")
             .env("SSH_ASKPASS", askpass_script_path)
-            .env("ZED_ASKPASS_SOCKET", askpass_socket_path)
+            .env("ASYLUM_ASKPASS_SOCKET", askpass_socket_path)
             .args(additional_args)
             .arg("-t")
             .args(destination_args)
@@ -633,7 +633,7 @@ impl RemoteConnection for SshRemoteConnection {
         delegate: Arc<dyn RemoteClientDelegate>,
         cx: &mut AsyncApp,
     ) -> Task<Result<i32>> {
-        const VARS: [&str; 3] = ["RUST_LOG", "RUST_BACKTRACE", "ZED_GENERATE_MINIDUMPS"];
+        const VARS: [&str; 3] = ["RUST_LOG", "RUST_BACKTRACE", "ASYLUM_GENERATE_MINIDUMPS"];
         delegate.set_status(Some("Starting proxy"), cx);
 
         let Some(remote_binary_path) = self.remote_binary_path.clone() else {
@@ -1077,7 +1077,7 @@ impl SshRemoteConnection {
             ReleaseChannel::Nightly => Ok(None),
             ReleaseChannel::Dev => {
                 anyhow::bail!(
-                    "ZED_BUILD_REMOTE_SERVER is not set and no remote server exists at ({:?})",
+                    "ASYLUM_BUILD_REMOTE_SERVER is not set and no remote server exists at ({:?})",
                     dst_path
                 )
             }
@@ -1513,7 +1513,7 @@ impl SshSocket {
             _proxy.script_path().as_ref().display().to_string(),
         );
         envs.insert(
-            "ZED_ASKPASS_SOCKET".into(),
+            "ASYLUM_ASKPASS_SOCKET".into(),
             _proxy.socket_path().as_ref().display().to_string(),
         );
 

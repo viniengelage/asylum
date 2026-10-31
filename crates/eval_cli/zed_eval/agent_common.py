@@ -39,14 +39,14 @@ def add_openai_compatible_provider_env(
     env: dict[str, str], providers_json: str | None
 ) -> None:
     if providers_json:
-        env["ZED_OPENAI_COMPATIBLE_PROVIDERS"] = providers_json
+        env["ASYLUM_OPENAI_COMPATIBLE_PROVIDERS"] = providers_json
 
 
 def add_anthropic_available_models_env(
     env: dict[str, str], models_json: str | None
 ) -> None:
     if models_json:
-        env["ZED_ANTHROPIC_AVAILABLE_MODELS"] = models_json
+        env["ASYLUM_ANTHROPIC_AVAILABLE_MODELS"] = models_json
 
 
 def add_zed_eval_env(

@@ -22,11 +22,11 @@ pub fn test_missing_glyph_notifications() -> Result<(), JsValue> {
     let text_system = platform.text_system();
     text_system
         .add_fonts(vec![Cow::Borrowed(include_bytes!(
-            "../../../../assets/fonts/lilex/Lilex-Regular.ttf"
+            "../../../../assets/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf"
         ))])
         .map_err(|error| JsValue::from_str(&error.to_string()))?;
     let font_id = text_system
-        .font_id(&font("Lilex"))
+        .font_id(&font("IBM Plex Mono"))
         .map_err(|error| JsValue::from_str(&error.to_string()))?;
     let reports = Arc::new(Reports::default());
     text_system.set_missing_glyph_sink(Some(reports.clone()));
@@ -80,7 +80,7 @@ pub fn test_missing_glyph_notifications() -> Result<(), JsValue> {
         for ((resolved_font, glyph), grapheme) in glyphs.iter().zip(&graphemes) {
             assert_ne!(
                 *resolved_font, font_id,
-                "Missing Lilex glyph must fall back"
+                "Missing IBM Plex Mono glyph must fall back"
             );
             assert_eq!(glyph.index, source_index, "Preserve each source grapheme");
             assert_eq!(glyph.is_emoji, grapheme.ends_with('\u{fe0f}'));

@@ -432,8 +432,8 @@ pub fn init(client: Arc<Client>, cx: &mut App) {
             .map(|channel| channel.poll_for_updates())
             .unwrap_or(false);
 
-        if option_env!("ZED_UPDATE_EXPLANATION").is_none()
-            && env::var("ZED_UPDATE_EXPLANATION").is_err()
+        if option_env!("ASYLUM_UPDATE_EXPLANATION").is_none()
+            && env::var("ASYLUM_UPDATE_EXPLANATION").is_err()
             && poll_for_updates
         {
             let mut update_subscription = AutoUpdateSetting::get_global(cx)
@@ -458,9 +458,9 @@ pub fn init(client: Arc<Client>, cx: &mut App) {
 }
 
 pub fn check(_: &Check, window: &mut Window, cx: &mut App) {
-    if let Some(message) = option_env!("ZED_UPDATE_EXPLANATION")
+    if let Some(message) = option_env!("ASYLUM_UPDATE_EXPLANATION")
         .map(ToOwned::to_owned)
-        .or_else(|| env::var("ZED_UPDATE_EXPLANATION").ok())
+        .or_else(|| env::var("ASYLUM_UPDATE_EXPLANATION").ok())
     {
         drop(window.prompt(
             gpui::PromptLevel::Info,

@@ -4,7 +4,7 @@ if [ "$ZED_WSL_DEBUG_INFO" = true ]; then
 	set -x
 fi
 
-ZED_PATH="$(dirname "$(realpath "$0")")"
+ASYLUM_PATH="$(dirname "$(realpath "$0")")"
 
 IN_WSL=false
 if [ -n "$WSL_DISTRO_NAME" ]; then
@@ -17,9 +17,9 @@ if [ $IN_WSL = true ]; then
     if [ -z "$WSL_USER" ]; then
         WSL_USER="$USERNAME"
     fi
-    "$ZED_PATH/asylum.exe" --wsl "$WSL_USER@$WSL_DISTRO_NAME" "$@"
+    "$ASYLUM_PATH/asylum.exe" --wsl "$WSL_USER@$WSL_DISTRO_NAME" "$@"
     exit $?
 else
-    "$ZED_PATH/asylum.exe" "$@"
+    "$ASYLUM_PATH/asylum.exe" "$@"
     exit $?
 fi

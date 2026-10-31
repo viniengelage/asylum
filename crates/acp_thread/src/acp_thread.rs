@@ -3539,7 +3539,7 @@ pub const TOKEN_USAGE_WARNING_THRESHOLD: f32 = 0.8;
 impl TokenUsage {
     pub fn ratio(&self) -> TokenUsageRatio {
         #[cfg(debug_assertions)]
-        let warning_threshold: f32 = std::env::var("ZED_THREAD_WARNING_THRESHOLD")
+        let warning_threshold: f32 = std::env::var("ASYLUM_THREAD_WARNING_THRESHOLD")
             .unwrap_or(TOKEN_USAGE_WARNING_THRESHOLD.to_string())
             .parse()
             .unwrap();
@@ -16007,15 +16007,15 @@ mod tests {
         let terminal = thread
             .update(cx, |thread, cx| {
                 thread.create_terminal(
-                    r#"[ "$ZED_ACP_PAIR" = 'quote "$literal" héllo' ] &&
-                       [ "${ZED_ACP_EMPTY+x}" = x ] && [ -z "$ZED_ACP_EMPTY" ] &&
+                    r#"[ "$ASYLUM_ACP_PAIR" = 'quote "$literal" héllo' ] &&
+                       [ "${ASYLUM_ACP_EMPTY+x}" = x ] && [ -z "$ASYLUM_ACP_EMPTY" ] &&
                        [ "$PAGER" = caller-pager ] && [ "$GIT_PAGER" = cat ]"#
                         .into(),
                     Vec::new(),
                     vec![
-                        ("ZED_ACP_PAIR".into(), "overridden".into()),
-                        ("ZED_ACP_PAIR".into(), r#"quote "$literal" héllo"#.into()),
-                        ("ZED_ACP_EMPTY".into(), String::new()),
+                        ("ASYLUM_ACP_PAIR".into(), "overridden".into()),
+                        ("ASYLUM_ACP_PAIR".into(), r#"quote "$literal" héllo"#.into()),
+                        ("ASYLUM_ACP_EMPTY".into(), String::new()),
                         ("PAGER".into(), "caller-pager".into()),
                     ],
                     None,

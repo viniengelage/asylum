@@ -38,7 +38,7 @@ use gpui::WindowingModes;
 /// headless when it names none, and can switch between those modes later. A headless platform
 /// stays headless.
 pub fn current_platform(headless: bool) -> Rc<dyn gpui::Platform> {
-    if headless || std::env::var_os("ZED_HEADLESS").is_some() {
+    if headless || std::env::var_os("ASYLUM_HEADLESS").is_some() {
         linux_platform(WindowingModes::HEADLESS)
     } else {
         linux_platform(WindowingModes::all())

@@ -66,7 +66,7 @@ if ($Help) {
 
 Push-Location -Path crates/zed
 $channel = Get-Content "RELEASE_CHANNEL"
-$env:ZED_RELEASE_CHANNEL = $channel
+$env:ASYLUM_RELEASE_CHANNEL = $channel
 $env:RELEASE_CHANNEL = $channel
 Pop-Location
 
@@ -75,7 +75,7 @@ function CheckEnvironmentVariables {
         return
     }
 
-    $requiredVars = @('ZED_WORKSPACE', 'RELEASE_VERSION', 'ZED_RELEASE_CHANNEL')
+    $requiredVars = @('ZED_WORKSPACE', 'RELEASE_VERSION', 'ASYLUM_RELEASE_CHANNEL')
 
     foreach ($var in $requiredVars) {
         if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($var))) {
@@ -171,7 +171,7 @@ function ZipZedAndItsFriendsDebug {
         ".\$CargoOutDir\remote_server.pdb"
     )
 
-    Compress-Archive -Path $items -DestinationPath ".\$CargoOutDir\zed-$env:RELEASE_VERSION-$env:ZED_RELEASE_CHANNEL.dbg.zip" -Force
+    Compress-Archive -Path $items -DestinationPath ".\$CargoOutDir\zed-$env:RELEASE_VERSION-$env:ASYLUM_RELEASE_CHANNEL.dbg.zip" -Force
 }
 
 
@@ -375,8 +375,8 @@ function BuildInstaller {
 
 ParseZedWorkspace
 $innoDir = "$env:ZED_WORKSPACE\inno\$Architecture"
-$debugArchive = "$CargoOutDir\zed-$env:RELEASE_VERSION-$env:ZED_RELEASE_CHANNEL.dbg.zip"
-$debugStoreKey = "$env:ZED_RELEASE_CHANNEL/zed-$env:RELEASE_VERSION-$env:ZED_RELEASE_CHANNEL.dbg.zip"
+$debugArchive = "$CargoOutDir\zed-$env:RELEASE_VERSION-$env:ASYLUM_RELEASE_CHANNEL.dbg.zip"
+$debugStoreKey = "$env:ASYLUM_RELEASE_CHANNEL/zed-$env:RELEASE_VERSION-$env:ASYLUM_RELEASE_CHANNEL.dbg.zip"
 
 CheckEnvironmentVariables
 PrepareForBundle

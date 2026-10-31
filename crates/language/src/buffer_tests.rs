@@ -5669,7 +5669,7 @@ fn test_chunk_highlights_across_row_chunk_seeks(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn test_oversized_chunks_bypass_the_highlight_cache(cx: &mut TestAppContext) {
-    if std::env::var_os("ZED_DISABLE_HIGHLIGHT_CACHE").is_some() {
+    if std::env::var_os("ASYLUM_DISABLE_HIGHLIGHT_CACHE").is_some() {
         return;
     }
     cx.update(|cx| init_settings(cx, |_| {}));

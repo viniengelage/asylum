@@ -341,7 +341,7 @@ pub enum ThemeSelection {
     },
 }
 
-pub const DEFAULT_LIGHT_THEME: &'static str = "One Light";
+pub const DEFAULT_LIGHT_THEME: &'static str = "Ayu Light";
 pub const DEFAULT_DARK_THEME: &'static str = "Polar Dark";
 
 impl Default for ThemeSelection {

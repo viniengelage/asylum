@@ -89,7 +89,7 @@ There are a few different ways to force Asylum to use a specific GPU:
 
 ##### Option A
 
-You can use the `ZED_DEVICE_ID={device_id}` environment variable to specify the device ID of the GPU you wish to have Asylum use.
+You can use the `ASYLUM_DEVICE_ID={device_id}` environment variable to specify the device ID of the GPU you wish to have Asylum use.
 
 You can obtain the device ID of your GPU by running `lspci -nn | grep VGA` which will output each GPU on one line like:
 
@@ -100,7 +100,7 @@ You can obtain the device ID of your GPU by running `lspci -nn | grep VGA` which
 where the device ID here is `2484`. This value is in hexadecimal, so to force Asylum to use this specific GPU you would set the environment variable like so:
 
 ```
-ZED_DEVICE_ID=0x2484 asylum
+ASYLUM_DEVICE_ID=0x2484 asylum
 ```
 
 Make sure to export the variable if you choose to define it globally in a `.bashrc` or similar.
@@ -131,7 +131,7 @@ Additionally, it is extremely beneficial to provide the contents of your Asylum 
 
 ```sh
 truncate -s 0 ~/.local/share/asylum/logs/Asylum.log # Clear the log file
-ZED_LOG=wgpu=info asylum .
+ASYLUM_LOG=wgpu=info asylum .
 cat ~/.local/share/asylum/logs/Asylum.log
 # copy the output
 ```
@@ -139,7 +139,7 @@ cat ~/.local/share/asylum/logs/Asylum.log
 Or, if you have the Asylum cli setup, you can do
 
 ```sh
-ZED_LOG=wgpu=info /path/to/zed/cli --foreground .
+ASYLUM_LOG=wgpu=info /path/to/zed/cli --foreground .
 # copy the output
 ```
 
@@ -299,12 +299,12 @@ Replace `192` with your desired DPI value. This affects the system globally and 
 
 ### Font rendering parameters
 
-On Linux, Asylum reads `ZED_FONTS_GAMMA` and `ZED_FONTS_GRAYSCALE_ENHANCED_CONTRAST` environment variables for the values to use for font rendering.
+On Linux, Asylum reads `ASYLUM_FONTS_GAMMA` and `ASYLUM_FONTS_GRAYSCALE_ENHANCED_CONTRAST` environment variables for the values to use for font rendering.
 
-`ZED_FONTS_GAMMA` corresponds to [getgamma](https://learn.microsoft.com/en-us/windows/win32/api/dwrite/nf-dwrite-idwriterenderingparams-getgamma) values.
+`ASYLUM_FONTS_GAMMA` corresponds to [getgamma](https://learn.microsoft.com/en-us/windows/win32/api/dwrite/nf-dwrite-idwriterenderingparams-getgamma) values.
 Allowed range [1.0, 2.2], other values are clipped.
 Default: 1.8
 
-`ZED_FONTS_GRAYSCALE_ENHANCED_CONTRAST` corresponds to [getgrayscaleenhancedcontrast](https://learn.microsoft.com/en-us/windows/win32/api/dwrite_1/nf-dwrite_1-idwriterenderingparams1-getgrayscaleenhancedcontrast) values.
+`ASYLUM_FONTS_GRAYSCALE_ENHANCED_CONTRAST` corresponds to [getgrayscaleenhancedcontrast](https://learn.microsoft.com/en-us/windows/win32/api/dwrite_1/nf-dwrite_1-idwriterenderingparams1-getgrayscaleenhancedcontrast) values.
 Allowed range: [0.0, ..), other values are clipped.
 Default: 1.0

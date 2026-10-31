@@ -211,7 +211,7 @@ This means:
   },
   {
     "label": "test current file",
-    "command": "pytest $ZED_FILE"
+    "command": "pytest $ASYLUM_FILE"
   }
 ]
 ```
@@ -271,7 +271,7 @@ For more control, create a `.zed/debug.json` file:
   {
     "label": "Debug Current File",
     "adapter": "Debugpy",
-    "program": "$ZED_FILE",
+    "program": "$ASYLUM_FILE",
     "request": "launch"
   },
   {

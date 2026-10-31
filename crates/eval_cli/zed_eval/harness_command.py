@@ -137,7 +137,7 @@ def build_harness_command(run_request: dict[str, Any], jobs_dir: str) -> list[st
         command.extend(
             [
                 "--ae",
-                f"ZED_OPENAI_COMPATIBLE_PROVIDERS={openai_compatible_provider_json}",
+                f"ASYLUM_OPENAI_COMPATIBLE_PROVIDERS={openai_compatible_provider_json}",
             ]
         )
     anthropic_available_models_json = run_request.get("anthropic_available_models_json")
@@ -145,7 +145,7 @@ def build_harness_command(run_request: dict[str, Any], jobs_dir: str) -> list[st
         command.extend(
             [
                 "--ae",
-                f"ZED_ANTHROPIC_AVAILABLE_MODELS={anthropic_available_models_json}",
+                f"ASYLUM_ANTHROPIC_AVAILABLE_MODELS={anthropic_available_models_json}",
             ]
         )
 

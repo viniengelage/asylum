@@ -308,7 +308,7 @@ The following example allows you to debug the test files of a project:
     "label": "Debug tests",
     "adapter": "ElixirLS",
     "request": "launch",
-    "projectDir": "$ZED_WORKTREE_ROOT",
+    "projectDir": "$ASYLUM_WORKTREE_ROOT",
     "task": "test",
     "taskArgs": ["--trace"],
     "requireFiles": ["test/**/test_helper.exs", "test/**/*_test.exs"]
@@ -324,7 +324,7 @@ The following example allows you to debug a Phoenix server:
     "label": "Debug Phoenix server",
     "adapter": "ElixirLS",
     "request": "launch",
-    "projectDir": "$ZED_WORKTREE_ROOT",
+    "projectDir": "$ASYLUM_WORKTREE_ROOT",
     "task": "phx.server",
     "debugAutoInterpretAllModules": false,
     "debugInterpretModulesPatterns": ["MyApp*", "MyAppWeb*"],

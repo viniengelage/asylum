@@ -196,7 +196,7 @@ Caused by:
   process didn't exit successfully: `C:\Users\USER\src\zed\target\debug\build\zed-b24f1e9300107efc\build-script-build` (exit code: 1)
   --- stdout
   cargo:rerun-if-changed=../../.git/logs/HEAD
-  cargo:rustc-env=ZED_COMMIT_SHA=25e2e9c6727ba9b77415588cfa11fd969612adb7
+  cargo:rustc-env=ASYLUM_COMMIT_SHA=25e2e9c6727ba9b77415588cfa11fd969612adb7
   cargo:rustc-link-arg=/stack:8388608
   cargo:rerun-if-changed=resources/windows/app-icon.ico
   package.metadata.winresource does not exist
@@ -207,7 +207,7 @@ Caused by:
 warning: build failed, waiting for other jobs to finish...
 ```
 
-To fix this issue, manually set the `ZED_RC_TOOLKIT_PATH` environment variable to the RC toolkit path. Usually this is:
+To fix this issue, manually set the `ASYLUM_RC_TOOLKIT_PATH` environment variable to the RC toolkit path. Usually this is:
 `C:\Program Files (x86)\Windows Kits\10\bin\<SDK_version>\x64`.
 
 See this [issue](https://github.com/zed-industries/zed/issues/18393) for more information.

@@ -314,10 +314,10 @@ class ZedAgent(BaseInstalledAgent):
     def _get_api_env(self) -> dict[str, str]:
         env = provider_api_env(self.model_name)
         add_openai_compatible_provider_env(
-            env, self._extra_env.get("ZED_OPENAI_COMPATIBLE_PROVIDERS")
+            env, self._extra_env.get("ASYLUM_OPENAI_COMPATIBLE_PROVIDERS")
         )
         add_anthropic_available_models_env(
-            env, self._extra_env.get("ZED_ANTHROPIC_AVAILABLE_MODELS")
+            env, self._extra_env.get("ASYLUM_ANTHROPIC_AVAILABLE_MODELS")
         )
         return env
 

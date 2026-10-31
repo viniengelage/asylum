@@ -222,18 +222,18 @@ pub(crate) static JOBS: LazyLock<[Job; 9]> = LazyLock::new(|| {
         Job {
             apply: Box::new(|_| {
                 std::thread::sleep(Duration::from_millis(1000));
-                if let Ok(config) = std::env::var("ZED_AUTO_UPDATE") {
+                if let Ok(config) = std::env::var("ASYLUM_AUTO_UPDATE") {
                     match config.as_str() {
                         "err1" => Err(std::io::Error::other("Simulated error")).context("Anyhow!"),
                         "err2" => Ok(()),
-                        _ => panic!("Unknown ZED_AUTO_UPDATE value: {}", config),
+                        _ => panic!("Unknown ASYLUM_AUTO_UPDATE value: {}", config),
                     }
                 } else {
                     Ok(())
                 }
             }),
             rollback: Box::new(|_| {
-                unsafe { std::env::set_var("ZED_AUTO_UPDATE_RB", "rollback1") };
+                unsafe { std::env::set_var("ASYLUM_AUTO_UPDATE_RB", "rollback1") };
                 Ok(())
             }),
         },
@@ -255,11 +255,11 @@ pub(crate) static JOBS: LazyLock<[Job; 9]> = LazyLock::new(|| {
         Job {
             apply: Box::new(|_| {
                 std::thread::sleep(Duration::from_millis(1000));
-                if let Ok(config) = std::env::var("ZED_AUTO_UPDATE") {
+                if let Ok(config) = std::env::var("ASYLUM_AUTO_UPDATE") {
                     match config.as_str() {
                         "err1" => Ok(()),
                         "err2" => Err(std::io::Error::other("Simulated error")).context("Anyhow!"),
-                        _ => panic!("Unknown ZED_AUTO_UPDATE value: {}", config),
+                        _ => panic!("Unknown ASYLUM_AUTO_UPDATE value: {}", config),
                     }
                 } else {
                     Ok(())
@@ -484,7 +484,7 @@ mod test {
         let app_dir = tempfile::tempdir().unwrap();
         let app_dir = app_dir.path();
         // Simulate a timeout
-        unsafe { std::env::set_var("ZED_AUTO_UPDATE", "err1") };
+        unsafe { std::env::set_var("ASYLUM_AUTO_UPDATE", "err1") };
         let ret = perform_update(app_dir, None, false, &[]);
         assert!(
             ret.is_err_and(|e| e.to_string().as_str() == "Autoupdate failed, nothing to rollback")
@@ -493,11 +493,11 @@ mod test {
         let app_dir = tempfile::tempdir().unwrap();
         let app_dir = app_dir.path();
         // Simulate a timeout
-        unsafe { std::env::set_var("ZED_AUTO_UPDATE", "err2") };
+        unsafe { std::env::set_var("ASYLUM_AUTO_UPDATE", "err2") };
         let ret = perform_update(app_dir, None, false, &[]);
         assert!(
             ret.is_err_and(|e| e.to_string().as_str() == "Autoupdate failed, rollback successful")
         );
-        assert!(std::env::var("ZED_AUTO_UPDATE_RB").is_ok_and(|e| e == "rollback1"));
+        assert!(std::env::var("ASYLUM_AUTO_UPDATE_RB").is_ok_and(|e| e == "rollback1"));
     }
 }

@@ -86,7 +86,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 fn build_application() -> Application {
     let platform = gpui_platform::current_platform(false);
-    if std::env::var("ZED_EXPERIMENTAL_A11Y").as_deref() == Ok("1") {
+    if std::env::var("ASYLUM_EXPERIMENTAL_A11Y").as_deref() == Ok("1") {
         Application::with_platform(platform)
     } else {
         Application::new_inaccessible(platform)
@@ -201,6 +201,9 @@ static STARTUP_TIME: OnceLock<Instant> = OnceLock::new();
 fn main() {
     STARTUP_TIME.get_or_init(|| Instant::now());
 
+    // SAFETY: called from `main` before the process starts any other thread.
+    unsafe { util::asylum_env::adopt_zed_environment() };
+
     // If this process was re-executed as a Linux sandbox helper, run that mode
     // without returning. Must run before argument parsing: the wrapped command's
     // args are appended verbatim and would otherwise be misinterpreted as Zed's
@@ -310,7 +313,7 @@ fn main() {
         Ok(path) => askpass::set_askpass_program(path),
         Err(err) => {
             eprintln!("Error: {}", err);
-            if std::option_env!("ZED_BUNDLE").is_some() {
+            if std::option_env!("ASYLUM_BUNDLE").is_some() {
                 process::exit(1);
             }
         }
@@ -342,9 +345,9 @@ fn main() {
     #[cfg(unix)]
     util::increase_open_file_limit().log_err();
 
-    let version = option_env!("ZED_BUILD_ID");
-    let app_commit_sha =
-        option_env!("ZED_COMMIT_SHA").map(|commit_sha| AppCommitSha::new(commit_sha.to_string()));
+    let version = option_env!("ASYLUM_BUILD_ID");
+    let app_commit_sha = option_env!("ASYLUM_COMMIT_SHA")
+        .map(|commit_sha| AppCommitSha::new(commit_sha.to_string()));
     let app_version = AppVersion::load(env!("CARGO_PKG_VERSION"), version, app_commit_sha.clone());
 
     if args.system_specs {
@@ -399,7 +402,7 @@ fn main() {
     #[cfg(target_os = "macos")]
     let (instance_requests_tx, mut instance_requests_rx) = futures::channel::mpsc::unbounded();
 
-    let failed_single_instance_check = if *zed_env_vars::ZED_STATELESS
+    let failed_single_instance_check = if *zed_env_vars::ASYLUM_STATELESS
         || *release_channel::RELEASE_CHANNEL == ReleaseChannel::Dev
     {
         false
@@ -464,7 +467,7 @@ fn main() {
 
     let git_hosting_provider_registry = Arc::new(GitHostingProviderRegistry::new());
     let git_binary_path =
-        if cfg!(target_os = "macos") && option_env!("ZED_BUNDLE").as_deref() == Some("true") {
+        if cfg!(target_os = "macos") && option_env!("ASYLUM_BUNDLE").as_deref() == Some("true") {
             app.path_for_auxiliary_executable("git")
                 .context("could not find git binary path")
                 .log_err()
@@ -537,7 +540,7 @@ fn main() {
             AppCommitSha::set_global(app_commit_sha, cx);
         }
         if let Some(timestamp) =
-            option_env!("ZED_COMMIT_TIMESTAMP").and_then(|timestamp| timestamp.parse().ok())
+            option_env!("ASYLUM_COMMIT_TIMESTAMP").and_then(|timestamp| timestamp.parse().ok())
         {
             AppCommitTimestamp::set_global(AppCommitTimestamp(timestamp), cx);
         }

@@ -68,10 +68,10 @@ echo "Using macOS SDK $sdk_version at $SDKROOT (deployment target 12.0)"
 # Get release channel
 pushd crates/zed
 channel=$(<RELEASE_CHANNEL)
-export ZED_RELEASE_CHANNEL="${channel}"
+export ASYLUM_RELEASE_CHANNEL="${channel}"
 popd
 
-export ZED_BUNDLE=true
+export ASYLUM_BUNDLE=true
 export CARGO_BUNDLE_SKIP_BUILD=true
 
 cargo_bundle_version=$(cargo -q bundle --help 2>&1 | head -n 1 || echo "")

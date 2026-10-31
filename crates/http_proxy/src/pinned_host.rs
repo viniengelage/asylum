@@ -163,7 +163,7 @@ pub fn is_forbidden_ip(ip: IpAddr) -> bool {
     // building `bwrap_test_helper`), so in a real Zed build the env var has no
     // effect and cannot disable DNS-rebinding/SSRF protection.
     #[cfg(feature = "nixos-integration-tests")]
-    if std::env::var_os("ZED_SANDBOX_PROXY_ALLOW_LOCAL_IPS").is_some() {
+    if std::env::var_os("ASYLUM_SANDBOX_PROXY_ALLOW_LOCAL_IPS").is_some() {
         return false;
     }
     match ip {

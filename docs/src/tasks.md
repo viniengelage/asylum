@@ -84,31 +84,33 @@ Tasks can be defined:
 Asylum tasks act just like your shell; that also means that you can reference environmental variables via sh-esque `$VAR_NAME` syntax. A couple of additional environmental variables are set for your convenience.
 These variables allow you to pull information from the current editor and use it in your tasks. The following variables are available:
 
-- `ZED_COLUMN`: current line column
-- `ZED_ROW`: current line row
-- `ZED_FILE`: absolute path of the currently opened file (e.g. `/Users/my-user/path/to/project/src/main.rs`)
-- `ZED_FILENAME`: filename of the currently opened file (e.g. `main.rs`)
-- `ZED_DIRNAME`: absolute path of the currently opened file with file name stripped (e.g. `/Users/my-user/path/to/project/src`)
-- `ZED_RELATIVE_FILE`: path of the currently opened file, relative to `ZED_WORKTREE_ROOT` (e.g. `src/main.rs`)
-- `ZED_RELATIVE_DIR`: path of the currently opened file's directory, relative to `ZED_WORKTREE_ROOT` (e.g. `src`)
-- `ZED_STEM`: stem (filename without extension) of the currently opened file (e.g. `main`)
-- `ZED_SYMBOL`: currently selected symbol; should match the last symbol shown in a symbol breadcrumb (e.g. `mod tests > fn test_task_contexts`)
-- `ZED_SELECTED_TEXT`: currently selected text
-- `ZED_LANGUAGE`: language of the currently opened buffer (e.g. `Rust`, `Python`, `Shell Script`)
-- `ZED_WORKTREE_ROOT`: absolute path to the root of the current worktree. (e.g. `/Users/my-user/path/to/project`)
-- `ZED_MAIN_GIT_WORKTREE`: absolute path to the main git worktree's working directory. For normal checkouts this equals `ZED_WORKTREE_ROOT`; for linked git worktrees this is the original repository's working directory.
-- `ZED_CUSTOM_RUST_PACKAGE`: (Rust-specific) name of the parent package of $ZED_FILE source file.
+> Each variable is also available with the `ZED_` prefix instead of `ASYLUM_` (for example `$ZED_FILE`), so tasks written for Zed and the tasks that extensions provide keep working.
+
+- `ASYLUM_COLUMN`: current line column
+- `ASYLUM_ROW`: current line row
+- `ASYLUM_FILE`: absolute path of the currently opened file (e.g. `/Users/my-user/path/to/project/src/main.rs`)
+- `ASYLUM_FILENAME`: filename of the currently opened file (e.g. `main.rs`)
+- `ASYLUM_DIRNAME`: absolute path of the currently opened file with file name stripped (e.g. `/Users/my-user/path/to/project/src`)
+- `ASYLUM_RELATIVE_FILE`: path of the currently opened file, relative to `ASYLUM_WORKTREE_ROOT` (e.g. `src/main.rs`)
+- `ASYLUM_RELATIVE_DIR`: path of the currently opened file's directory, relative to `ASYLUM_WORKTREE_ROOT` (e.g. `src`)
+- `ASYLUM_STEM`: stem (filename without extension) of the currently opened file (e.g. `main`)
+- `ASYLUM_SYMBOL`: currently selected symbol; should match the last symbol shown in a symbol breadcrumb (e.g. `mod tests > fn test_task_contexts`)
+- `ASYLUM_SELECTED_TEXT`: currently selected text
+- `ASYLUM_LANGUAGE`: language of the currently opened buffer (e.g. `Rust`, `Python`, `Shell Script`)
+- `ASYLUM_WORKTREE_ROOT`: absolute path to the root of the current worktree. (e.g. `/Users/my-user/path/to/project`)
+- `ASYLUM_MAIN_GIT_WORKTREE`: absolute path to the main git worktree's working directory. For normal checkouts this equals `ASYLUM_WORKTREE_ROOT`; for linked git worktrees this is the original repository's working directory.
+- `ASYLUM_CUSTOM_RUST_PACKAGE`: (Rust-specific) name of the parent package of $ASYLUM_FILE source file.
 
 To use a variable in a task, prefix it with a dollar sign (`$`):
 
 ```json [tasks]
 {
   "label": "echo current file's path",
-  "command": "echo $ZED_FILE"
+  "command": "echo $ASYLUM_FILE"
 }
 ```
 
-You can also use verbose syntax that allows specifying a default if a given variable is not available: `${ZED_FILE:default_value}`
+You can also use verbose syntax that allows specifying a default if a given variable is not available: `${ASYLUM_FILE:default_value}`
 
 These environmental variables can also be used in tasks' `cwd`, `args`, and `label` fields.
 
@@ -121,7 +123,7 @@ For example, instead of this (which will fail if the path has a space):
 ```json [tasks]
 {
   "label": "stat current file",
-  "command": "stat $ZED_FILE"
+  "command": "stat $ASYLUM_FILE"
 }
 ```
 
@@ -131,7 +133,7 @@ Provide the following:
 {
   "label": "stat current file",
   "command": "stat",
-  "args": ["$ZED_FILE"]
+  "args": ["$ASYLUM_FILE"]
 }
 ```
 
@@ -140,7 +142,7 @@ Or explicitly include escaped quotes like so:
 ```json [tasks]
 {
   "label": "stat current file",
-  "command": "stat \"$ZED_FILE\""
+  "command": "stat \"$ASYLUM_FILE\""
 }
 ```
 
@@ -152,7 +154,7 @@ For example, the following task will appear in the spawn modal only if there is 
 ```json [tasks]
 {
   "label": "selected text",
-  "command": "echo \"$ZED_SELECTED_TEXT\""
+  "command": "echo \"$ASYLUM_SELECTED_TEXT\""
 }
 ```
 
@@ -161,7 +163,7 @@ Set default values to such variables to have such tasks always displayed:
 ```json [tasks]
 {
   "label": "selected text with default",
-  "command": "echo \"${ZED_SELECTED_TEXT:no text selected}\""
+  "command": "echo \"${ASYLUM_SELECTED_TEXT:no text selected}\""
 }
 ```
 
@@ -213,7 +215,7 @@ This could be useful for launching a terminal application that you want to use i
 // In tasks.json
 {
   "label": "start lazygit",
-  "command": "lazygit -p $ZED_WORKTREE_ROOT"
+  "command": "lazygit -p $ASYLUM_WORKTREE_ROOT"
 }
 ```
 
@@ -236,7 +238,7 @@ In addition to being spawned manually, tasks can be configured to run automatica
 
 The following hooks are currently supported:
 
-- `create_worktree` — runs after Asylum creates a new linked Git worktree, either directly through the CLI or from the [worktree picker](./git.md#git-worktrees). The task is spawned with `ZED_WORKTREE_ROOT` pointing at the newly created worktree and `ZED_MAIN_GIT_WORKTREE` pointing at the original repository's working directory, which makes these hooks well-suited to copying untracked files (such as `.env` files) or running per-worktree setup commands.
+- `create_worktree` — runs after Asylum creates a new linked Git worktree, either directly through the CLI or from the [worktree picker](./git.md#git-worktrees). The task is spawned with `ASYLUM_WORKTREE_ROOT` pointing at the newly created worktree and `ASYLUM_MAIN_GIT_WORKTREE` pointing at the original repository's working directory, which makes these hooks well-suited to copying untracked files (such as `.env` files) or running per-worktree setup commands.
 
 Hook tasks are resolved from the same global and worktree-local `tasks.json` files as manually spawned tasks, and multiple tasks may register for the same hook; they all run when the hook fires. A hook task still benefits from the usual task configuration fields — `cwd`, `env`, `reveal`, `hide`, and so on — so you can control how much of the terminal UI is shown while it runs.
 
@@ -245,7 +247,7 @@ Hook tasks are resolved from the same global and worktree-local `tasks.json` fil
   {
     "label": "copy .env into new worktree",
     "command": "cp",
-    "args": ["$ZED_MAIN_GIT_WORKTREE/.env", "$ZED_WORKTREE_ROOT/.env"],
+    "args": ["$ASYLUM_MAIN_GIT_WORKTREE/.env", "$ASYLUM_WORKTREE_ROOT/.env"],
     "hooks": ["create_worktree"],
     "reveal": "no_focus",
     "hide": "on_success"
@@ -260,32 +262,32 @@ Tasks that define `hooks` are still available from the task modal like any other
 The Git Graph supports running custom Git command tasks from the commit context menu.
 To add a command, define a task in your global `tasks.json` file with the `git-command` tag (worktree-local tasks are not supported yet).
 When shown from a commit's context menu, the task is resolved against the selected commit and repository, and runs from the selected repository root by default.
-Right-clicking a ref label (a branch, remote ref, or tag) opens a ref-specific context menu, where the task is additionally resolved against the clicked ref via `ZED_GIT_REF`.
+Right-clicking a ref label (a branch, remote ref, or tag) opens a ref-specific context menu, where the task is additionally resolved against the clicked ref via `ASYLUM_GIT_REF`.
 
 Git Graph command tasks support the Git-specific task variables below.
 These variables are provided only when resolving Git Graph command tasks.
-Other task variables, such as `ZED_FILE`, `ZED_SELECTED_TEXT`, `ZED_WORKTREE_ROOT`, and `ZED_MAIN_GIT_WORKTREE`, are not provided to Git Graph command tasks unless they use default values.
+Other task variables, such as `ASYLUM_FILE`, `ASYLUM_SELECTED_TEXT`, `ASYLUM_WORKTREE_ROOT`, and `ASYLUM_MAIN_GIT_WORKTREE`, are not provided to Git Graph command tasks unless they use default values.
 
-- `ZED_GIT_SHA`: full SHA of the selected commit.
-- `ZED_GIT_SHA_SHORT`: short SHA of the selected commit.
-- `ZED_GIT_REPOSITORY_NAME`: name of the selected Git repository.
-- `ZED_GIT_REPOSITORY_PATH`: absolute path to the selected Git repository's working directory.
-- `ZED_GIT_REF`: name of the clicked ref (a branch, remote ref, or tag). Only provided when the menu is opened from a ref label.
+- `ASYLUM_GIT_SHA`: full SHA of the selected commit.
+- `ASYLUM_GIT_SHA_SHORT`: short SHA of the selected commit.
+- `ASYLUM_GIT_REPOSITORY_NAME`: name of the selected Git repository.
+- `ASYLUM_GIT_REPOSITORY_PATH`: absolute path to the selected Git repository's working directory.
+- `ASYLUM_GIT_REF`: name of the clicked ref (a branch, remote ref, or tag). Only provided when the menu is opened from a ref label.
 
 For example:
 
 ```json [tasks]
 [
   {
-    "label": "Branches containing commit: $ZED_GIT_SHA_SHORT",
+    "label": "Branches containing commit: $ASYLUM_GIT_SHA_SHORT",
     "command": "git",
-    "args": ["branch", "-a", "--contains", "$ZED_GIT_SHA"],
+    "args": ["branch", "-a", "--contains", "$ASYLUM_GIT_SHA"],
     "tags": ["git-command"]
   },
   {
-    "label": "Check out $ZED_GIT_REF",
+    "label": "Check out $ASYLUM_GIT_REF",
     "command": "git",
-    "args": ["checkout", "$ZED_GIT_REF"],
+    "args": ["checkout", "$ASYLUM_GIT_REF"],
     "tags": ["git-command"]
   }
 ]
@@ -333,7 +335,7 @@ To tag a task, add the runnable tag name to the `tags` field on the task templat
 ```json [tasks]
 {
   "label": "echo current file's path",
-  "command": "echo $ZED_FILE",
+  "command": "echo $ASYLUM_FILE",
   "tags": ["rust-test"]
 }
 ```

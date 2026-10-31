@@ -132,15 +132,15 @@ Your AWS credentials need these permissions:
 - `bedrock:InvokeModelWithResponseStream`
 - `bedrock:InvokeModel`
 
-Bedrock supports `ZED_`-prefixed AWS environment variables so Asylum does not override or consume your normal AWS credentials:
+Bedrock supports `ASYLUM_`-prefixed AWS environment variables so Asylum does not override or consume your normal AWS credentials:
 
-- `ZED_ACCESS_KEY_ID`
-- `ZED_SECRET_ACCESS_KEY`
-- `ZED_SESSION_TOKEN`
-- `ZED_AWS_PROFILE`
-- `ZED_AWS_REGION`
-- `ZED_AWS_ENDPOINT`
-- `ZED_BEDROCK_BEARER_TOKEN`
+- `ASYLUM_ACCESS_KEY_ID`
+- `ASYLUM_SECRET_ACCESS_KEY`
+- `ASYLUM_SESSION_TOKEN`
+- `ASYLUM_AWS_PROFILE`
+- `ASYLUM_AWS_REGION`
+- `ASYLUM_AWS_ENDPOINT`
+- `ASYLUM_BEDROCK_BEARER_TOKEN`
 
 ### Bedrock Authentication {#bedrock-authentication}
 

@@ -17,8 +17,8 @@ You can preview/choose amongst your installed themes and icon themes with {#acti
 
 ```json [settings]
 {
-  "theme": "One Dark",
-  "icon_theme": "Zed (Default)"
+  "theme": "Polar Dark",
+  "icon_theme": "Asylum (Default)"
 }
 ```
 
@@ -27,14 +27,14 @@ If you would like to use distinct themes for light mode/dark mode that can be se
 ```json [settings]
 {
   "theme": {
-    "dark": "One Dark",
-    "light": "One Light",
+    "dark": "Polar Dark",
+    "light": "Ayu Light",
     // Mode to use (dark, light) or "system" to follow the OS's light/dark mode (default)
     "mode": "system"
   },
   "icon_theme": {
-    "dark": "Zed (Default)",
-    "light": "Zed (Default)",
+    "dark": "Asylum (Default)",
+    "light": "Asylum (Default)",
     // Mode to use (dark, light) or "system" to follow the OS's light/dark mode (default)
     "mode": "system"
   }
@@ -45,13 +45,13 @@ If you would like to use distinct themes for light mode/dark mode that can be se
 
 ```json [settings]
   // UI Font. Use ".SystemUIFont" to use the default system font (SF Pro on macOS),
-  // or ".ZedSans" for the bundled default (currently IBM Plex)
+  // or ".AsylumSans" for the bundled default (currently IBM Plex)
   "ui_font_family": ".SystemUIFont",
   "ui_font_weight": 400, // Font weight in standard CSS units from 100 to 900.
   "ui_font_size": 16,
 
   // Buffer Font - Used by editor buffers
-  // use ".ZedMono" for the bundled default monospace (currently Lilex)
+  // use ".AsylumMono" for the bundled default monospace (currently IBM Plex Mono)
   "buffer_font_family": "Berkeley Mono", // Font name for editor buffers
   "buffer_font_size": 15,                 // Font size for editor buffers
   "buffer_font_weight": 400,              // Font weight in CSS units [100-900]

@@ -124,7 +124,7 @@ BENCHMARKS: dict[str, Benchmark] = {
         # Air-gapped tasks: the fetch/web-search tools can't reach the network,
         # so disable them (via the agent profile in eval-cli) to stop the agent
         # wasting its budget on tools that can only fail.
-        env={"ZED_EVAL_DISABLE_TOOLS": "fetch,search_web"},
+        env={"ASYLUM_EVAL_DISABLE_TOOLS": "fetch,search_web"},
     ),
     "deepswe": Benchmark(
         id="deepswe",
@@ -142,7 +142,7 @@ BENCHMARKS: dict[str, Benchmark] = {
         needs_judge=False,
         network_allowlist=AGENT_API_HOSTS,
         # Air-gapped except the model API allowlist; fetch/web-search are useless.
-        env={"ZED_EVAL_DISABLE_TOOLS": "fetch,search_web"},
+        env={"ASYLUM_EVAL_DISABLE_TOOLS": "fetch,search_web"},
     ),
 }
 

@@ -657,8 +657,10 @@ pub fn insert_zed_terminal_env(
     env: &mut HashMap<String, String>,
     version: &impl std::fmt::Display,
 ) {
+    env.insert("ASYLUM_TERM".to_string(), "true".to_string());
+    // Kept for shell configs and tools that detect Zed's terminal.
     env.insert("ZED_TERM".to_string(), "true".to_string());
-    env.insert("TERM_PROGRAM".to_string(), "zed".to_string());
+    env.insert("TERM_PROGRAM".to_string(), "asylum".to_string());
     env.insert("TERM".to_string(), "xterm-256color".to_string());
     env.insert("COLORTERM".to_string(), "truecolor".to_string());
     env.insert("TERM_PROGRAM_VERSION".to_string(), version.to_string());

@@ -50,7 +50,7 @@ fn main() {
         std::env::var("TARGET").unwrap()
     );
 
-    let git_sha = match std::env::var("ZED_COMMIT_SHA").ok() {
+    let git_sha = match std::env::var("ASYLUM_COMMIT_SHA").ok() {
         Some(git_sha) => {
             // In deterministic build environments such as Nix, we inject the commit sha into the build script.
             Some(git_sha)
@@ -72,7 +72,7 @@ fn main() {
 
     // The auto-updater compares this against the commit time of the latest release, so a local
     // build that is newer than the release is never replaced by it.
-    let commit_timestamp = std::env::var("ZED_COMMIT_TIMESTAMP").ok().or_else(|| {
+    let commit_timestamp = std::env::var("ASYLUM_COMMIT_TIMESTAMP").ok().or_else(|| {
         let output = Command::new("git")
             .args(["show", "-s", "--format=%ct", "HEAD"])
             .output()
@@ -83,14 +83,14 @@ fn main() {
             .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
     });
     if let Some(commit_timestamp) = commit_timestamp {
-        println!("cargo:rustc-env=ZED_COMMIT_TIMESTAMP={commit_timestamp}");
+        println!("cargo:rustc-env=ASYLUM_COMMIT_TIMESTAMP={commit_timestamp}");
     }
 
     if let Some(git_sha) = git_sha {
-        println!("cargo:rustc-env=ZED_COMMIT_SHA={git_sha}");
+        println!("cargo:rustc-env=ASYLUM_COMMIT_SHA={git_sha}");
 
         if let Some(build_identifier) = option_env!("GITHUB_RUN_NUMBER") {
-            println!("cargo:rustc-env=ZED_BUILD_ID={build_identifier}");
+            println!("cargo:rustc-env=ASYLUM_BUILD_ID={build_identifier}");
         }
 
         if let Ok(build_profile) = std::env::var("PROFILE")
@@ -98,7 +98,7 @@ fn main() {
         {
             // This is currently the best way to make `cargo build ...`'s build script
             // to print something to stdout without extra verbosity.
-            println!("cargo::warning=Info: using '{git_sha}' hash for ZED_COMMIT_SHA env var");
+            println!("cargo::warning=Info: using '{git_sha}' hash for ASYLUM_COMMIT_SHA env var");
         }
     }
 

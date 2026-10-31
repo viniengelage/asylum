@@ -297,7 +297,7 @@ JavaScript debugging is more complicated than other languages because there are 
     "label": "Debug JS file",
     "type": "node",
     "request": "launch",
-    "program": "$ZED_FILE",
+    "program": "$ASYLUM_FILE",
     "skipFiles": ["<node_internals>/**"]
   }
 ]
@@ -312,8 +312,8 @@ JavaScript debugging is more complicated than other languages because there are 
     "label": "Debug app in Chrome",
     "type": "chrome",
     "request": "launch",
-    "file": "$ZED_WORKTREE_ROOT/index.html",
-    "webRoot": "$ZED_WORKTREE_ROOT",
+    "file": "$ASYLUM_WORKTREE_ROOT/index.html",
+    "webRoot": "$ASYLUM_WORKTREE_ROOT",
     "console": "integratedTerminal",
     "skipFiles": ["<node_internals>/**"]
   }

@@ -11,5 +11,5 @@ fn main() {
         .expect("Invalid version format")
         .trim()
         .trim_matches('"');
-    println!("cargo:rustc-env=ZED_PKG_VERSION={}", version);
+    println!("cargo:rustc-env=ASYLUM_PKG_VERSION={}", version);
 }

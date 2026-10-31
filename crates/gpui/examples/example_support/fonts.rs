@@ -23,12 +23,20 @@ pub fn load_fonts(cx: &App) -> bool {
                 .as_slice(),
         ),
         Cow::Borrowed(
-            include_bytes!("../../../../assets/fonts/lilex/Lilex-Regular.ttf").as_slice(),
+            include_bytes!("../../../../assets/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf")
+                .as_slice(),
         ),
-        Cow::Borrowed(include_bytes!("../../../../assets/fonts/lilex/Lilex-Bold.ttf").as_slice()),
-        Cow::Borrowed(include_bytes!("../../../../assets/fonts/lilex/Lilex-Italic.ttf").as_slice()),
         Cow::Borrowed(
-            include_bytes!("../../../../assets/fonts/lilex/Lilex-BoldItalic.ttf").as_slice(),
+            include_bytes!("../../../../assets/fonts/ibm-plex-mono/IBMPlexMono-Bold.ttf")
+                .as_slice(),
+        ),
+        Cow::Borrowed(
+            include_bytes!("../../../../assets/fonts/ibm-plex-mono/IBMPlexMono-Italic.ttf")
+                .as_slice(),
+        ),
+        Cow::Borrowed(
+            include_bytes!("../../../../assets/fonts/ibm-plex-mono/IBMPlexMono-BoldItalic.ttf")
+                .as_slice(),
         ),
     ];
     if let Err(error) = cx.text_system().add_fonts(fonts.into()) {

@@ -23,7 +23,7 @@ while getopts 'h' flag; do
     esac
 done
 
-export ZED_BUNDLE=true
+export ASYLUM_BUNDLE=true
 
 channel=$(<crates/zed/RELEASE_CHANNEL)
 target_dir="${CARGO_TARGET_DIR:-target}"

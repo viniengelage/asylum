@@ -22,10 +22,11 @@ use crate::{
     theme_preview::{ThemePreviewStyle, ThemePreviewTile},
 };
 
-const LIGHT_THEMES: [&str; 3] = ["One Light", "Ayu Light", "Gruvbox Light"];
-const DARK_THEMES: [&str; 3] = ["One Dark", "Ayu Dark", "Gruvbox Dark"];
+// Polar has no light variant, so it fills both slots of its family.
+const LIGHT_THEMES: [&str; 3] = ["Polar Dark", "Ayu Light", "Gruvbox Light"];
+const DARK_THEMES: [&str; 3] = ["Polar Dark", "Ayu Dark", "Gruvbox Dark"];
 const FAMILY_NAMES: [SharedString; 3] = [
-    SharedString::new_static("One"),
+    SharedString::new_static("Polar"),
     SharedString::new_static("Ayu"),
     SharedString::new_static("Gruvbox"),
 ];
@@ -254,7 +255,7 @@ fn render_base_keymap_section(tab_index: &mut isize, cx: &mut App) -> impl IntoE
         ToggleButtonGroup::two_rows(
             "base_keymap_selection",
             [
-                ToggleButtonWithIcon::new("Zed", IconName::AiZed, |_, _, cx| {
+                ToggleButtonWithIcon::new("Asylum", IconName::AiZed, |_, _, cx| {
                     write_keymap_base(BaseKeymap::Zed, cx);
                 }),
                 ToggleButtonWithIcon::new("VS Code", IconName::EditorVsCode, |_, _, cx| {

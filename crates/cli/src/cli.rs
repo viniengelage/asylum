@@ -88,7 +88,7 @@ pub enum CliResponse {
 ///
 /// Note that in the main zed binary, this variable is unset after it's read for the first time,
 /// therefore it should always be accessed through the `FORCE_CLI_MODE` static.
-pub const FORCE_CLI_MODE_ENV_VAR_NAME: &str = "ZED_FORCE_CLI_MODE";
+pub const FORCE_CLI_MODE_ENV_VAR_NAME: &str = "ASYLUM_FORCE_CLI_MODE";
 
 /// Abstracts the transport for sending CLI responses (Zed → CLI).
 ///

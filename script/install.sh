@@ -8,7 +8,7 @@ set -eu
 main() {
     platform="$(uname -s)"
     arch="$(uname -m)"
-    channel="${ZED_CHANNEL:-stable}"
+    channel="${ASYLUM_CHANNEL:-stable}"
     ZED_VERSION="${ZED_VERSION:-latest}"
     # Use TMPDIR if available (for environments with non-standard temp directories)
     if [ -n "${TMPDIR:-}" ] && [ -d "${TMPDIR}" ]; then

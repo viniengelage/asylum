@@ -20,8 +20,8 @@ use release_channel::ReleaseChannel;
 ///
 /// Only works in development. Setting this environment variable in other
 /// release channels is a no-op.
-static ZED_DEVELOPMENT_USE_KEYCHAIN: LazyLock<bool> = LazyLock::new(|| {
-    std::env::var("ZED_DEVELOPMENT_USE_KEYCHAIN").is_ok_and(|value| !value.is_empty())
+static ASYLUM_DEVELOPMENT_USE_KEYCHAIN: LazyLock<bool> = LazyLock::new(|| {
+    std::env::var("ASYLUM_DEVELOPMENT_USE_KEYCHAIN").is_ok_and(|value| !value.is_empty())
 });
 
 pub struct ZedCredentialsProvider(pub Arc<dyn CredentialsProvider>);
@@ -50,9 +50,9 @@ fn new(cx: &App) -> Arc<dyn CredentialsProvider> {
             // credentials provider to avoid getting spammed by relentless
             // keychain access prompts.
             //
-            // However, if the `ZED_DEVELOPMENT_USE_KEYCHAIN` environment
+            // However, if the `ASYLUM_DEVELOPMENT_USE_KEYCHAIN` environment
             // variable is set, we will use the actual keychain.
-            !*ZED_DEVELOPMENT_USE_KEYCHAIN
+            !*ASYLUM_DEVELOPMENT_USE_KEYCHAIN
         }
         Some(ReleaseChannel::Nightly | ReleaseChannel::Preview | ReleaseChannel::Stable) | None => {
             false

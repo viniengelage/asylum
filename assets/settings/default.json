@@ -8,14 +8,14 @@
   // - "dark": Use the theme indicated by the "dark" field
   "theme": {
     "mode": "dark",
-    "light": "One Light",
+    "light": "Ayu Light",
     "dark": "Polar Dark",
   },
-  "icon_theme": "Zed (Default)",
+  "icon_theme": "Asylum (Default)",
   // The name of a base set of key bindings to use.
   // This setting can take the following values:
   //
-  // 1. "Zed"
+  // 1. "Asylum"
   // 2. "VSCode"
   // 3. "Atom"
   // 4. "JetBrains"
@@ -24,11 +24,11 @@
   // 7. "Emacs"
   // 8. "Cursor"
   // 9. "None"
-  "base_keymap": "Zed",
+  "base_keymap": "Asylum",
   // The name of a font to use for rendering text in the editor
-  // ".ZedMono" currently aliases to Lilex
+  // ".AsylumMono" currently aliases to "IBM Plex Mono",
   // but this may change in the future.
-  "buffer_font_family": ".ZedMono",
+  "buffer_font_family": ".AsylumMono",
   // Set the buffer text's font fallbacks, this will be merged with
   // the platform's default fallbacks.
   "buffer_font_fallbacks": null,
@@ -54,9 +54,9 @@
   "buffer_line_height": "comfortable",
   // The name of a font to use for rendering text in the UI
   // You can set this to ".SystemUIFont" to use the system font
-  // ".ZedSans" currently aliases to "IBM Plex Sans", but this may
+  // ".AsylumSans" currently aliases to "IBM Plex Sans", but this may
   // change in the future
-  "ui_font_family": ".ZedSans",
+  "ui_font_family": ".AsylumSans",
   // Set the UI's font fallbacks, this will be merged with the platform's
   // default font fallbacks.
   "ui_font_fallbacks": null,
@@ -2314,7 +2314,7 @@
     // "font_size": 15,
     // Set the terminal's font family. If this option is not included,
     // the terminal will default to matching the buffer's font family.
-    // "font_family": ".ZedMono",
+    // "font_family": ".AsylumMono",
     // Set the terminal's font fallbacks. If this option is not included,
     // the terminal will default to matching the buffer's font fallbacks.
     // This will be merged with the platform's default font fallbacks

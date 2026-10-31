@@ -249,14 +249,14 @@ impl From<BedrockModelMode> for ModelMode {
 /// under in the keychain.
 const AMAZON_AWS_URL: &str = "https://amazonaws.com";
 
-// These environment variables all use a `ZED_` prefix because we don't want to overwrite the user's AWS credentials.
-static ZED_BEDROCK_ACCESS_KEY_ID_VAR: LazyLock<EnvVar> = env_var!("ZED_ACCESS_KEY_ID");
-static ZED_BEDROCK_SECRET_ACCESS_KEY_VAR: LazyLock<EnvVar> = env_var!("ZED_SECRET_ACCESS_KEY");
-static ZED_BEDROCK_SESSION_TOKEN_VAR: LazyLock<EnvVar> = env_var!("ZED_SESSION_TOKEN");
-static ZED_AWS_PROFILE_VAR: LazyLock<EnvVar> = env_var!("ZED_AWS_PROFILE");
-static ZED_BEDROCK_REGION_VAR: LazyLock<EnvVar> = env_var!("ZED_AWS_REGION");
-static ZED_AWS_ENDPOINT_VAR: LazyLock<EnvVar> = env_var!("ZED_AWS_ENDPOINT");
-static ZED_BEDROCK_BEARER_TOKEN_VAR: LazyLock<EnvVar> = env_var!("ZED_BEDROCK_BEARER_TOKEN");
+// These environment variables all use an `ASYLUM_` prefix so they never overwrite the user's AWS credentials.
+static ZED_BEDROCK_ACCESS_KEY_ID_VAR: LazyLock<EnvVar> = env_var!("ASYLUM_ACCESS_KEY_ID");
+static ZED_BEDROCK_SECRET_ACCESS_KEY_VAR: LazyLock<EnvVar> = env_var!("ASYLUM_SECRET_ACCESS_KEY");
+static ZED_BEDROCK_SESSION_TOKEN_VAR: LazyLock<EnvVar> = env_var!("ASYLUM_SESSION_TOKEN");
+static ZED_AWS_PROFILE_VAR: LazyLock<EnvVar> = env_var!("ASYLUM_AWS_PROFILE");
+static ZED_BEDROCK_REGION_VAR: LazyLock<EnvVar> = env_var!("ASYLUM_AWS_REGION");
+static ZED_AWS_ENDPOINT_VAR: LazyLock<EnvVar> = env_var!("ASYLUM_AWS_ENDPOINT");
+static ZED_BEDROCK_BEARER_TOKEN_VAR: LazyLock<EnvVar> = env_var!("ASYLUM_BEDROCK_BEARER_TOKEN");
 
 /// AWS Regions where the `bedrock-mantle` endpoint is available.
 /// See <https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-mantle.html#regions>.

@@ -167,9 +167,9 @@ pub fn post_inc<T: From<u8> + AddAssign<T> + Copy>(value: &mut T) -> T {
 }
 
 pub fn measure<R>(label: &str, f: impl FnOnce() -> R) -> R {
-    static ZED_MEASUREMENTS: OnceLock<bool> = OnceLock::new();
-    let zed_measurements = ZED_MEASUREMENTS.get_or_init(|| {
-        env::var("ZED_MEASUREMENTS")
+    static ASYLUM_MEASUREMENTS: OnceLock<bool> = OnceLock::new();
+    let zed_measurements = ASYLUM_MEASUREMENTS.get_or_init(|| {
+        env::var("ASYLUM_MEASUREMENTS")
             .map(|measurements| measurements == "1" || measurements == "true")
             .unwrap_or(false)
     });

@@ -193,7 +193,7 @@ What this means in practice:
   },
   {
     "label": "test current file",
-    "command": "npm test -- $ZED_FILE"
+    "command": "npm test -- $ASYLUM_FILE"
   }
 ]
 ```
@@ -257,7 +257,7 @@ For more control, create a `.zed/debug.json` file:
   {
     "label": "Debug Current File",
     "adapter": "JavaScript",
-    "program": "$ZED_FILE",
+    "program": "$ASYLUM_FILE",
     "request": "launch"
   },
   {

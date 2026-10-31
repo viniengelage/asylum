@@ -87,7 +87,7 @@ spec:
                   key: url
             - name: DATABASE_MAX_CONNECTIONS
               value: "${DATABASE_MAX_CONNECTIONS}"
-            - name: ZED_CLIENT_CHECKSUM_SEED
+            - name: ASYLUM_CLIENT_CHECKSUM_SEED
               valueFrom:
                 secretKeyRef:
                   name: zed-client
@@ -168,8 +168,8 @@ spec:
               value: ${RUST_LOG}
             - name: LOG_JSON
               value: "true"
-            - name: ZED_ENVIRONMENT
-              value: ${ZED_ENVIRONMENT}
+            - name: ASYLUM_ENVIRONMENT
+              value: ${ASYLUM_ENVIRONMENT}
           securityContext:
             capabilities:
               # TODO - Switch to the more restrictive `PERFMON` capability.

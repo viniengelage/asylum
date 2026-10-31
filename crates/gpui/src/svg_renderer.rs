@@ -342,7 +342,7 @@ fn rasterize_tree(tree: &usvg::Tree, size: SvgSize) -> Result<Pixmap, usvg::Erro
 fn load_bundled_fonts(asset_source: &dyn AssetSource, db: &mut usvg::fontdb::Database) {
     let font_paths = [
         "fonts/ibm-plex-sans/IBMPlexSans-Regular.ttf",
-        "fonts/lilex/Lilex-Regular.ttf",
+        "fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf",
     ];
     for path in font_paths {
         match asset_source.load(path) {
@@ -363,7 +363,7 @@ fn fix_generic_font_families(db: &mut usvg::fontdb::Database) {
         (Family::SansSerif, "IBM Plex Sans"),
         // No serif font bundled; use sans-serif as best available fallback.
         (Family::Serif, "IBM Plex Sans"),
-        (Family::Monospace, "Lilex"),
+        (Family::Monospace, "IBM Plex Mono"),
         (Family::Cursive, "IBM Plex Sans"),
         (Family::Fantasy, "IBM Plex Sans"),
     ];
@@ -394,7 +394,8 @@ mod tests {
 
     const IBM_PLEX_REGULAR: &[u8] =
         include_bytes!("../../../assets/fonts/ibm-plex-sans/IBMPlexSans-Regular.ttf");
-    const LILEX_REGULAR: &[u8] = include_bytes!("../../../assets/fonts/lilex/Lilex-Regular.ttf");
+    const LILEX_REGULAR: &[u8] =
+        include_bytes!("../../../assets/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf");
 
     #[test]
     fn renders_polychrome_svg_at_exact_size_with_its_colors() -> Result<()> {
@@ -470,7 +471,7 @@ mod tests {
         // chunk must use two different fonts so the buggy merge path runs.
         let zalgo = "e\u{0301}\u{0302}\u{0303}\u{0304}\u{0306}\u{0307}\u{0308}\u{030a}";
         let svg = format!(
-            r#"<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg"><text font-family="Lilex" font-size="32">{zalgo}<tspan font-family="IBM Plex Sans">{zalgo}</tspan></text></svg>"#
+            r#"<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg"><text font-family="IBM Plex Mono" font-size="32">{zalgo}<tspan font-family="IBM Plex Sans">{zalgo}</tspan></text></svg>"#
         );
 
         // Before the fix this aborts via panic with a message like
@@ -549,13 +550,14 @@ mod tests {
             .unwrap();
         let lilex = db
             .query(&usvg::fontdb::Query {
-                families: &[usvg::fontdb::Family::Name("Lilex")],
+                families: &[usvg::fontdb::Family::Name("IBM Plex Mono")],
                 weight: usvg::fontdb::Weight(400),
                 stretch: usvg::fontdb::Stretch::Normal,
                 style: usvg::fontdb::Style::Normal,
             })
             .unwrap();
-        let selected = select_emoji_font('│', &[], &db, &["IBM Plex Sans", "Lilex"]).unwrap();
+        let selected =
+            select_emoji_font('│', &[], &db, &["IBM Plex Sans", "IBM Plex Mono"]).unwrap();
 
         assert_eq!(selected, lilex);
         assert!(!font_has_char(&db, ibm_plex_sans, '│'));
@@ -574,8 +576,10 @@ mod tests {
         let id = db.query(&query).expect("Monospace should resolve");
         let face = db.face(id).expect("Face should exist");
         assert!(
-            face.families.iter().any(|(name, _)| name.contains("Lilex")),
-            "Monospace should map to Lilex, got {:?}",
+            face.families
+                .iter()
+                .any(|(name, _)| name.contains("IBM Plex Mono")),
+            "Monospace should map to IBM Plex Mono, got {:?}",
             face.families
         );
     }

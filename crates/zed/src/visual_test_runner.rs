@@ -44,11 +44,11 @@ fn main() {
 
 #[cfg(target_os = "macos")]
 fn main() {
-    // Set ZED_STATELESS early to prevent file system access to real config directories
-    // This must be done before any code accesses zed_env_vars::ZED_STATELESS
+    // Set ASYLUM_STATELESS early to prevent file system access to real config directories
+    // This must be done before any code accesses zed_env_vars::ASYLUM_STATELESS
     // SAFETY: We're at the start of main(), before any threads are spawned
     unsafe {
-        std::env::set_var("ZED_STATELESS", "1");
+        std::env::set_var("ASYLUM_STATELESS", "1");
     }
 
     env_logger::builder()
@@ -154,7 +154,7 @@ fn run_visual_tests(project_path: PathBuf, update_baseline: bool) -> Result<()> 
         Arc::new(Assets),
     );
 
-    // Load embedded fonts (IBM Plex Sans, Lilex, etc.) so UI renders with correct fonts
+    // Load embedded fonts (IBM Plex Sans, IBM Plex Mono, etc.) so UI renders with correct fonts
     cx.update(|cx| {
         Assets.load_fonts(cx).unwrap();
     });

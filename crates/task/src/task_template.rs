@@ -9,8 +9,9 @@ use util::serde::default_true;
 use util::{ResultExt, truncate_and_remove_front};
 
 use crate::{
-    AttachRequest, ResolvedTask, RevealTarget, Shell, SpawnInTerminal, TaskContext, TaskId,
-    VariableName, ZED_VARIABLE_NAME_PREFIX, serde_helpers::non_empty_string_vec,
+    ASYLUM_VARIABLE_NAME_PREFIX, AttachRequest, ResolvedTask, RevealTarget, Shell, SpawnInTerminal,
+    TaskContext, TaskId, VariableName, ZED_VARIABLE_NAME_PREFIX,
+    serde_helpers::non_empty_string_vec,
 };
 
 /// A template definition of a Zed task to run.
@@ -166,18 +167,7 @@ impl TaskTemplate {
 
         let mut variable_names = HashMap::default();
         let mut substituted_variables = HashSet::default();
-        let task_variables = cx
-            .task_variables
-            .0
-            .iter()
-            .map(|(key, value)| {
-                let key_string = key.to_string();
-                if !variable_names.contains_key(&key_string) {
-                    variable_names.insert(key_string.clone(), key.clone());
-                }
-                (key_string, value.as_str())
-            })
-            .collect::<HashMap<_, _>>();
+        let task_variables = task_variables_with_asylum_names(cx, &mut variable_names);
         let truncated_variables = truncate_variables(&task_variables);
         let cwd = match self.cwd.as_deref() {
             Some(cwd) => {
@@ -338,8 +328,9 @@ impl TaskTemplate {
             let colon_position = variable.find(':').unwrap_or(variable.len());
             let variable_name = &variable[..colon_position];
 
-            if variable_name.starts_with(ZED_VARIABLE_NAME_PREFIX)
-                && let without_prefix = &variable_name[ZED_VARIABLE_NAME_PREFIX.len()..]
+            if let Some(without_prefix) = variable_name
+                .strip_prefix(ZED_VARIABLE_NAME_PREFIX)
+                .or_else(|| variable_name.strip_prefix(ASYLUM_VARIABLE_NAME_PREFIX))
                 && !without_prefix.starts_with("CUSTOM_")
                 && variable_name.parse::<VariableName>().is_err()
             {
@@ -372,21 +363,31 @@ fn to_hex_hash(object: impl Serialize) -> anyhow::Result<String> {
     Ok(hex::encode(hasher.finalize()))
 }
 
+/// The task variables keyed by name, each under its `ASYLUM_` name and its `ZED_` alias.
+fn task_variables_with_asylum_names<'a>(
+    context: &'a TaskContext,
+    variable_names: &mut HashMap<String, VariableName>,
+) -> HashMap<String, &'a str> {
+    let mut task_variables = HashMap::default();
+    for (key, value) in context.task_variables.0.iter() {
+        let key_string = key.to_string();
+        let names = util::asylum_env::zed_name(&key_string)
+            .into_iter()
+            .chain([key_string]);
+        for name in names {
+            variable_names
+                .entry(name.clone())
+                .or_insert_with(|| key.clone());
+            task_variables.insert(name, value.as_str());
+        }
+    }
+    task_variables
+}
+
 pub fn substitute_variables_in_str(template_str: &str, context: &TaskContext) -> Option<String> {
     let mut variable_names = HashMap::default();
     let mut substituted_variables = HashSet::default();
-    let task_variables = context
-        .task_variables
-        .0
-        .iter()
-        .map(|(key, value)| {
-            let key_string = key.to_string();
-            if !variable_names.contains_key(&key_string) {
-                variable_names.insert(key_string.clone(), key.clone());
-            }
-            (key_string, value.as_str())
-        })
-        .collect::<HashMap<_, _>>();
+    let task_variables = task_variables_with_asylum_names(context, &mut variable_names);
     substitute_all_template_variables_in_str(
         template_str,
         &task_variables,
@@ -412,8 +413,10 @@ fn substitute_all_template_variables_in_str<A: AsRef<str>>(
             }
             // Got a task variable hit - use the variable value, ignore default
             return Ok(Some(name.as_ref().to_owned()));
-        } else if variable_name.starts_with(ZED_VARIABLE_NAME_PREFIX) {
-            // Unknown ZED variable - use default if available
+        } else if variable_name.starts_with(ZED_VARIABLE_NAME_PREFIX)
+            || variable_name.starts_with(ASYLUM_VARIABLE_NAME_PREFIX)
+        {
+            // Unknown task variable - use default if available
             if !default.is_empty() {
                 // Strip the colon and return the default value
                 return Ok(Some(default[1..].to_owned()));
@@ -467,18 +470,7 @@ pub fn substitute_variables_in_map(
 ) -> Option<HashMap<String, String>> {
     let mut variable_names = HashMap::default();
     let mut substituted_variables = HashSet::default();
-    let task_variables = context
-        .task_variables
-        .0
-        .iter()
-        .map(|(key, value)| {
-            let key_string = key.to_string();
-            if !variable_names.contains_key(&key_string) {
-                variable_names.insert(key_string.clone(), key.clone());
-            }
-            (key_string, value.as_str())
-        })
-        .collect::<HashMap<_, _>>();
+    let task_variables = task_variables_with_asylum_names(context, &mut variable_names);
     substitute_all_template_variables_in_map(
         keys_and_values,
         &task_variables,

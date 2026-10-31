@@ -294,7 +294,7 @@ fn set_origin_marker(env: &mut HashMap<String, String>, origin: EnvironmentOrigi
     env.insert(ZED_ENVIRONMENT_ORIGIN_MARKER.to_string(), origin.into());
 }
 
-const ZED_ENVIRONMENT_ORIGIN_MARKER: &str = "ZED_ENVIRONMENT";
+const ZED_ENVIRONMENT_ORIGIN_MARKER: &str = "ASYLUM_ENVIRONMENT";
 
 enum EnvironmentOrigin {
     Cli,

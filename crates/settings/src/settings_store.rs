@@ -46,8 +46,10 @@ use settings_json::{infer_json_indent_size, update_value_in_json_text};
 pub const LSP_SETTINGS_SCHEMA_URL_PREFIX: &str = "zed://schemas/settings/lsp/";
 
 // GPUI resolves these aliases, but they are not part of the platform font inventory.
-const VIRTUAL_FONT_NAMES: [&str; 5] = [
+const VIRTUAL_FONT_NAMES: [&str; 7] = [
     ".SystemUIFont",
+    ".AsylumMono",
+    ".AsylumSans",
     ".ZedMono",
     ".ZedSans",
     "Zed Plex Mono",
@@ -3359,7 +3361,7 @@ mod tests {
     fn test_font_family_schema_accepts_virtual_aliases() -> Result<()> {
         let schema = SettingsStore::json_schema(&SettingsJsonSchemaParams {
             language_names: &[],
-            font_names: &["IBM Plex Sans".to_string(), "Lilex".to_string()],
+            font_names: &["IBM Plex Sans".to_string(), "IBM Plex Mono".to_string()],
             theme_names: &[],
             icon_theme_names: &[],
             lsp_adapter_names: &[],
@@ -3374,7 +3376,7 @@ mod tests {
             .and_then(Value::as_array)
             .context("FontFamilyName schema should contain allowed font names")?;
 
-        for font_name in ["IBM Plex Sans", "Lilex"]
+        for font_name in ["IBM Plex Sans", "IBM Plex Mono"]
             .into_iter()
             .chain(VIRTUAL_FONT_NAMES)
         {

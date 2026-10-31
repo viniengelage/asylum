@@ -215,7 +215,10 @@ impl FromStr for VariableName {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let without_prefix = s.strip_prefix(ZED_VARIABLE_NAME_PREFIX).ok_or(())?;
+        let without_prefix = s
+            .strip_prefix(ZED_VARIABLE_NAME_PREFIX)
+            .or_else(|| s.strip_prefix(ASYLUM_VARIABLE_NAME_PREFIX))
+            .ok_or(())?;
         let value = match without_prefix {
             "FILE" => Self::File,
             "FILENAME" => Self::Filename,
@@ -251,35 +254,42 @@ impl FromStr for VariableName {
 }
 
 /// A prefix that all [`VariableName`] variants are prefixed with when used in environment variables and similar template contexts.
+/// Every task variable is also available under this prefix, because tasks written for Zed and
+/// the tasks extensions provide use the `ZED_` names.
 pub const ZED_VARIABLE_NAME_PREFIX: &str = "ZED_";
+pub const ASYLUM_VARIABLE_NAME_PREFIX: &str = "ASYLUM_";
 const ZED_CUSTOM_VARIABLE_NAME_PREFIX: &str = "CUSTOM_";
 
 impl std::fmt::Display for VariableName {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::File => write!(f, "{ZED_VARIABLE_NAME_PREFIX}FILE"),
-            Self::Filename => write!(f, "{ZED_VARIABLE_NAME_PREFIX}FILENAME"),
-            Self::RelativeFile => write!(f, "{ZED_VARIABLE_NAME_PREFIX}RELATIVE_FILE"),
-            Self::RelativeDir => write!(f, "{ZED_VARIABLE_NAME_PREFIX}RELATIVE_DIR"),
-            Self::Dirname => write!(f, "{ZED_VARIABLE_NAME_PREFIX}DIRNAME"),
-            Self::Stem => write!(f, "{ZED_VARIABLE_NAME_PREFIX}STEM"),
-            Self::WorktreeRoot => write!(f, "{ZED_VARIABLE_NAME_PREFIX}WORKTREE_ROOT"),
-            Self::Symbol => write!(f, "{ZED_VARIABLE_NAME_PREFIX}SYMBOL"),
-            Self::Row => write!(f, "{ZED_VARIABLE_NAME_PREFIX}ROW"),
-            Self::Column => write!(f, "{ZED_VARIABLE_NAME_PREFIX}COLUMN"),
-            Self::SelectedText => write!(f, "{ZED_VARIABLE_NAME_PREFIX}SELECTED_TEXT"),
-            Self::Language => write!(f, "{ZED_VARIABLE_NAME_PREFIX}LANGUAGE"),
-            Self::RunnableSymbol => write!(f, "{ZED_VARIABLE_NAME_PREFIX}RUNNABLE_SYMBOL"),
-            Self::PickProcessId => write!(f, "{ZED_VARIABLE_NAME_PREFIX}PICK_PID"),
-            Self::MainGitWorktree => write!(f, "{ZED_VARIABLE_NAME_PREFIX}MAIN_GIT_WORKTREE"),
-            Self::GitSha => write!(f, "{ZED_VARIABLE_NAME_PREFIX}GIT_SHA"),
-            Self::GitShaShort => write!(f, "{ZED_VARIABLE_NAME_PREFIX}GIT_SHA_SHORT"),
-            Self::GitRepositoryName => write!(f, "{ZED_VARIABLE_NAME_PREFIX}GIT_REPOSITORY_NAME"),
-            Self::GitRepositoryPath => write!(f, "{ZED_VARIABLE_NAME_PREFIX}GIT_REPOSITORY_PATH"),
-            Self::GitRef => write!(f, "{ZED_VARIABLE_NAME_PREFIX}GIT_REF"),
+            Self::File => write!(f, "{ASYLUM_VARIABLE_NAME_PREFIX}FILE"),
+            Self::Filename => write!(f, "{ASYLUM_VARIABLE_NAME_PREFIX}FILENAME"),
+            Self::RelativeFile => write!(f, "{ASYLUM_VARIABLE_NAME_PREFIX}RELATIVE_FILE"),
+            Self::RelativeDir => write!(f, "{ASYLUM_VARIABLE_NAME_PREFIX}RELATIVE_DIR"),
+            Self::Dirname => write!(f, "{ASYLUM_VARIABLE_NAME_PREFIX}DIRNAME"),
+            Self::Stem => write!(f, "{ASYLUM_VARIABLE_NAME_PREFIX}STEM"),
+            Self::WorktreeRoot => write!(f, "{ASYLUM_VARIABLE_NAME_PREFIX}WORKTREE_ROOT"),
+            Self::Symbol => write!(f, "{ASYLUM_VARIABLE_NAME_PREFIX}SYMBOL"),
+            Self::Row => write!(f, "{ASYLUM_VARIABLE_NAME_PREFIX}ROW"),
+            Self::Column => write!(f, "{ASYLUM_VARIABLE_NAME_PREFIX}COLUMN"),
+            Self::SelectedText => write!(f, "{ASYLUM_VARIABLE_NAME_PREFIX}SELECTED_TEXT"),
+            Self::Language => write!(f, "{ASYLUM_VARIABLE_NAME_PREFIX}LANGUAGE"),
+            Self::RunnableSymbol => write!(f, "{ASYLUM_VARIABLE_NAME_PREFIX}RUNNABLE_SYMBOL"),
+            Self::PickProcessId => write!(f, "{ASYLUM_VARIABLE_NAME_PREFIX}PICK_PID"),
+            Self::MainGitWorktree => write!(f, "{ASYLUM_VARIABLE_NAME_PREFIX}MAIN_GIT_WORKTREE"),
+            Self::GitSha => write!(f, "{ASYLUM_VARIABLE_NAME_PREFIX}GIT_SHA"),
+            Self::GitShaShort => write!(f, "{ASYLUM_VARIABLE_NAME_PREFIX}GIT_SHA_SHORT"),
+            Self::GitRepositoryName => {
+                write!(f, "{ASYLUM_VARIABLE_NAME_PREFIX}GIT_REPOSITORY_NAME")
+            }
+            Self::GitRepositoryPath => {
+                write!(f, "{ASYLUM_VARIABLE_NAME_PREFIX}GIT_REPOSITORY_PATH")
+            }
+            Self::GitRef => write!(f, "{ASYLUM_VARIABLE_NAME_PREFIX}GIT_REF"),
             Self::Custom(s) => write!(
                 f,
-                "{ZED_VARIABLE_NAME_PREFIX}{ZED_CUSTOM_VARIABLE_NAME_PREFIX}{s}"
+                "{ASYLUM_VARIABLE_NAME_PREFIX}{ZED_CUSTOM_VARIABLE_NAME_PREFIX}{s}"
             ),
         }
     }

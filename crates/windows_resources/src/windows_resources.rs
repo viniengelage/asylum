@@ -7,7 +7,7 @@
 use std::process::Command;
 
 fn git_sha() -> Option<String> {
-    if let Ok(sha) = std::env::var("ZED_COMMIT_SHA") {
+    if let Ok(sha) = std::env::var("ASYLUM_COMMIT_SHA") {
         return Some(sha);
     }
 
@@ -116,7 +116,7 @@ END
     let rc_path = out_dir.join("zed_resources.rc");
     std::fs::write(&rc_path, rc_content)?;
 
-    if let Ok(toolkit_path) = std::env::var("ZED_RC_TOOLKIT_PATH") {
+    if let Ok(toolkit_path) = std::env::var("ASYLUM_RC_TOOLKIT_PATH") {
         let rc_exe = std::path::Path::new(&toolkit_path).join("rc.exe");
         unsafe {
             std::env::set_var("RC", rc_exe);

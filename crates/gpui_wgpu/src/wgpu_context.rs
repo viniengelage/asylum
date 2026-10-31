@@ -318,14 +318,14 @@ impl WgpuContext {
 
     #[cfg(not(target_family = "wasm"))]
     fn device_id_filter() -> Option<u32> {
-        match std::env::var("ZED_DEVICE_ID") {
+        match std::env::var("ASYLUM_DEVICE_ID") {
             Ok(value) => parse_pci_id(&value)
-                .context("Failed to parse device ID from `ZED_DEVICE_ID` environment variable")
+                .context("Failed to parse device ID from `ASYLUM_DEVICE_ID` environment variable")
                 .log_err(),
             Err(std::env::VarError::NotPresent) => None,
             error => {
                 error
-                    .context("Failed to read value of `ZED_DEVICE_ID` environment variable")
+                    .context("Failed to read value of `ASYLUM_DEVICE_ID` environment variable")
                     .log_err();
                 None
             }
@@ -522,7 +522,7 @@ impl WgpuContext {
         }
 
         if let Some(device_id) = device_id_filter {
-            log::info!("ZED_DEVICE_ID filter: {:#06x}", device_id);
+            log::info!("ASYLUM_DEVICE_ID filter: {:#06x}", device_id);
         }
 
         Self::sort_adapters(&mut adapters, device_id_filter, compositor_gpu);
@@ -587,7 +587,7 @@ impl WgpuContext {
 
     /// Sort adapters into a single priority order. Tiers (from highest to lowest):
     ///
-    /// 1. ZED_DEVICE_ID match — explicit user override
+    /// 1. ASYLUM_DEVICE_ID match — explicit user override
     /// 2. Compositor GPU match — the GPU the display server is rendering on
     /// 3. Device type (Discrete > Integrated > Other > Virtual > Cpu).
     ///    "Other" ranks above "Virtual" because OpenGL seems to count as "Other".

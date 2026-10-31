@@ -1224,15 +1224,20 @@ mod tests {
         assert!(text_system.all_font_names().is_empty());
 
         text_system.add_fonts(vec![Cow::Borrowed(include_bytes!(
-            "../../../assets/fonts/lilex/Lilex-Regular.ttf"
+            "../../../assets/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf"
         ))])?;
-        assert_eq!(text_system.all_font_names(), ["Lilex"]);
+        assert_eq!(text_system.all_font_names(), ["IBM Plex Mono"]);
 
         text_system.add_fonts(vec![
             Cow::Borrowed(IBM_PLEX),
-            Cow::Borrowed(include_bytes!("../../../assets/fonts/lilex/Lilex-Bold.ttf")),
+            Cow::Borrowed(include_bytes!(
+                "../../../assets/fonts/ibm-plex-mono/IBMPlexMono-Bold.ttf"
+            )),
         ])?;
-        assert_eq!(text_system.all_font_names(), ["IBM Plex Sans", "Lilex"]);
+        assert_eq!(
+            text_system.all_font_names(),
+            ["IBM Plex Mono", "IBM Plex Sans"]
+        );
         Ok(())
     }
 
@@ -1257,7 +1262,8 @@ mod tests {
 
     const IBM_PLEX: &[u8] =
         include_bytes!("../../../assets/fonts/ibm-plex-sans/IBMPlexSans-Regular.ttf");
-    const LILEX: &[u8] = include_bytes!("../../../assets/fonts/lilex/Lilex-Regular.ttf");
+    const IBM_PLEX_MONO: &[u8] =
+        include_bytes!("../../../assets/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf");
 
     /// Every code point of `Bidi_Class=B`, each of which starts a new bidi
     /// paragraph and so can split one line into mixed-direction paragraphs.
@@ -1273,11 +1279,11 @@ mod tests {
 
     #[test]
     fn cached_font_resolution_does_not_wait_for_cold_lookups() -> Result<()> {
-        for family in [".ZedSans", "Missing Font"] {
+        for family in [".AsylumSans", "Missing Font"] {
             let platform_text_system = Arc::new(text_system()?);
             let text_system = gpui::TextSystem::new(platform_text_system.clone());
             let cached = gpui::font(family);
-            let expected = platform_text_system.font_id(&gpui::font(".ZedSans"))?;
+            let expected = platform_text_system.font_id(&gpui::font(".AsylumSans"))?;
             assert_eq!(text_system.resolve_font(&cached), expected);
             let (sender, receiver) = mpsc::channel();
 
@@ -1309,13 +1315,14 @@ mod tests {
 
     #[test]
     fn adding_fonts_retries_cached_font_failures() -> Result<()> {
-        let platform_text_system = Arc::new(CosmicTextSystem::new_without_system_fonts("Lilex"));
+        let platform_text_system =
+            Arc::new(CosmicTextSystem::new_without_system_fonts("IBM Plex Mono"));
         let text_system = gpui::TextSystem::new(platform_text_system.clone());
         text_system.add_fonts(vec![Cow::Borrowed(IBM_PLEX)])?;
-        let original_fallback = platform_text_system.font_id(&gpui::font(".ZedSans"))?;
+        let original_fallback = platform_text_system.font_id(&gpui::font(".AsylumSans"))?;
         let requests = [
             gpui::Font::default(),
-            gpui::font("Lilex"),
+            gpui::font("IBM Plex Mono"),
             gpui::font("Missing Font"),
         ];
         for requested in &requests {
@@ -1323,11 +1330,15 @@ mod tests {
         }
         assert_eq!(
             text_system.get_font_for_id(original_fallback),
-            Some(gpui::font(".ZedSans"))
+            Some(gpui::font(".AsylumSans"))
         );
 
-        text_system.add_fonts(vec![Cow::Borrowed(LILEX)])?;
-        for (requested, resolved) in requests.iter().zip([".SystemUIFont", "Lilex", ".ZedMono"]) {
+        text_system.add_fonts(vec![Cow::Borrowed(IBM_PLEX_MONO)])?;
+        for (requested, resolved) in
+            requests
+                .iter()
+                .zip([".SystemUIFont", "IBM Plex Mono", ".AsylumMono"])
+        {
             let installed = platform_text_system.font_id(&gpui::font(resolved))?;
             assert_ne!(installed, original_fallback);
             assert_eq!(text_system.resolve_font(requested), installed);
@@ -1470,7 +1481,7 @@ mod tests {
         ));
         let loaded_font_count = platform_text_system.0.read().loaded_fonts.len();
 
-        text_system.add_fonts(vec![Cow::Borrowed(LILEX)])?;
+        text_system.add_fonts(vec![Cow::Borrowed(IBM_PLEX_MONO)])?;
 
         let refreshed_layout = window_text_system.shape_line(text, gpui::px(14.0), &runs, None);
         assert!(!std::ptr::eq::<LineLayout>(

@@ -207,7 +207,7 @@ fn main() {
         // navigation tools behind `lsp-tool` / `rename-tool`) so experiments can
         // measure the agent with tools that aren't yet GA. Comma-separated flag
         // names; unset in production.
-        if let Ok(raw_flags) = std::env::var("ZED_EVAL_ENABLE_FLAGS") {
+        if let Ok(raw_flags) = std::env::var("ASYLUM_EVAL_ENABLE_FLAGS") {
             let flags: Vec<String> = raw_flags
                 .split(',')
                 .map(|flag| flag.trim().to_string())
@@ -342,7 +342,7 @@ fn main() {
 /// `{ "api_url": ..., "available_models": [...] }`). Lets zed-eval route the
 /// agent itself through an OpenAI-compatible endpoint (e.g. Baseten) that isn't
 /// one of Zed's built-in providers, without hardcoding it into eval-cli.
-const OPENAI_COMPATIBLE_PROVIDERS_ENV: &str = "ZED_OPENAI_COMPATIBLE_PROVIDERS";
+const OPENAI_COMPATIBLE_PROVIDERS_ENV: &str = "ASYLUM_OPENAI_COMPATIBLE_PROVIDERS";
 
 fn openai_compatible_providers_override() -> Option<String> {
     let raw = std::env::var(OPENAI_COMPATIBLE_PROVIDERS_ENV).ok()?;
@@ -368,7 +368,7 @@ fn apply_openai_compatible_providers(providers_json: &str, cx: &mut gpui::App) -
 /// zed-eval run models that exist on the Anthropic API for the configured
 /// key (e.g. early-access-program models) but aren't returned by the live
 /// `/v1/models` listing, without hardcoding them into eval-cli.
-const ANTHROPIC_AVAILABLE_MODELS_ENV: &str = "ZED_ANTHROPIC_AVAILABLE_MODELS";
+const ANTHROPIC_AVAILABLE_MODELS_ENV: &str = "ASYLUM_ANTHROPIC_AVAILABLE_MODELS";
 
 fn anthropic_available_models_override() -> Option<String> {
     let raw = std::env::var(ANTHROPIC_AVAILABLE_MODELS_ENV).ok()?;
@@ -657,7 +657,7 @@ async fn run_agent(
         // listed explicitly here. Keep WRITE_TOOLS in sync with the "write"
         // profile in assets/settings/default.json.
         let profile_field = {
-            let raw = std::env::var("ZED_EVAL_DISABLE_TOOLS").unwrap_or_default();
+            let raw = std::env::var("ASYLUM_EVAL_DISABLE_TOOLS").unwrap_or_default();
             let disabled = raw
                 .split(',')
                 .map(|name| name.trim().to_string())

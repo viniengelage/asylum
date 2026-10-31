@@ -101,8 +101,8 @@ All other fields are provided by the debug adapter and can contain [task variabl
     "request": "launch",
     // The program to debug. This field supports path resolution with ~ or . symbols.
     "program": "path_to_program",
-    // cwd: defaults to the current working directory of your project ($ZED_WORKTREE_ROOT)
-    "cwd": "$ZED_WORKTREE_ROOT"
+    // cwd: defaults to the current working directory of your project ($ASYLUM_WORKTREE_ROOT)
+    "cwd": "$ASYLUM_WORKTREE_ROOT"
   }
 ]
 ```
@@ -137,7 +137,7 @@ Build tasks can also refer to the existing tasks by unsubstituted label:
     "adapter": "CodeLLDB",
     "program": "path_to_program",
     "request": "launch",
-    "build": "my build task" // Or "my build task for $ZED_FILE"
+    "build": "my build task" // Or "my build task for $ASYLUM_FILE"
   }
 ]
 ```

@@ -88,9 +88,9 @@ You can use CodeLLDB or GDB to debug native binaries. (Make sure that your build
     "build": {
       "command": "make",
       "args": ["-j8"],
-      "cwd": "$ZED_WORKTREE_ROOT"
+      "cwd": "$ASYLUM_WORKTREE_ROOT"
     },
-    "program": "$ZED_WORKTREE_ROOT/build/prog",
+    "program": "$ASYLUM_WORKTREE_ROOT/build/prog",
     "request": "launch",
     "adapter": "CodeLLDB"
   }

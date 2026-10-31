@@ -222,7 +222,7 @@ fn reports_execution_failures_with_the_executable_path() -> Result<()> {
     Ok(())
 }
 
-const CHILD: &str = "ZED_TEST_NODE_DISCOVERY_CHILD";
+const CHILD: &str = "ASYLUM_TEST_NODE_DISCOVERY_CHILD";
 
 /// Isolates cwd and inherited PATH changes from the other tests.
 fn run_child_test(test: &str, directory: &Path, inherited_path: &Path) -> Result<()> {

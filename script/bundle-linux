@@ -11,7 +11,7 @@ Build a release .tar.gz for Linux.
 
 Options:
   -h, --help        Display this help and exit.
-  --flatpak         Set ZED_BUNDLE_TYPE=flatpak so that this can be included in system info
+  --flatpak         Set ASYLUM_BUNDLE_TYPE=flatpak so that this can be included in system info
   "
 }
 
@@ -23,7 +23,7 @@ while [[ $# -gt 0 ]]; do
             exit 0
             ;;
         --flatpak)
-            export ZED_BUNDLE_TYPE=flatpak
+            export ASYLUM_BUNDLE_TYPE=flatpak
             shift
             ;;
         --)
@@ -48,7 +48,7 @@ if [[ -n "${RUSTFLAGS+x}" || -n "${CARGO_ENCODED_RUSTFLAGS+x}" ]]; then
     exit 1
 fi
 
-export ZED_BUNDLE=true
+export ASYLUM_BUNDLE=true
 
 channel=$(<crates/zed/RELEASE_CHANNEL)
 target_dir="${CARGO_TARGET_DIR:-target}"

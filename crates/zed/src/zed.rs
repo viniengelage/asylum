@@ -360,7 +360,7 @@ pub fn build_window_options(display_uuid: Option<Uuid>, cx: &mut App) -> WindowO
             .find(|display| display.uuid().ok() == Some(uuid))
     });
     let app_id = ReleaseChannel::global(cx).app_id();
-    let window_decorations = match std::env::var("ZED_WINDOW_DECORATIONS") {
+    let window_decorations = match std::env::var("ASYLUM_WINDOW_DECORATIONS") {
         Ok(val) if val == "server" => gpui::WindowDecorations::Server,
         Ok(val) if val == "client" => gpui::WindowDecorations::Client,
         _ => match WorkspaceSettings::get_global(cx).window_decorations {
@@ -766,7 +766,7 @@ fn show_software_emulation_warning_if_needed(
     window: &mut Window,
     cx: &mut Context<Workspace>,
 ) {
-    if specs.is_software_emulated && std::env::var("ZED_ALLOW_EMULATED_GPU").is_err() {
+    if specs.is_software_emulated && std::env::var("ASYLUM_ALLOW_EMULATED_GPU").is_err() {
         let (graphics_api, docs_url, open_url) = if cfg!(target_os = "windows") {
             (
                 "DirectX",
@@ -788,7 +788,7 @@ fn show_software_emulation_warning_if_needed(
             will result in awful performance.
 
             For troubleshooting see: {}
-            Set ZED_ALLOW_EMULATED_GPU=1 env var to permanently override.
+            Set ASYLUM_ALLOW_EMULATED_GPU=1 env var to permanently override.
             "#},
             graphics_api, specs.device_name, docs_url
         );
@@ -6518,7 +6518,7 @@ mod tests {
         cx.text_system()
             .add_fonts(vec![
                 Assets
-                    .load("fonts/lilex/Lilex-Regular.ttf")
+                    .load("fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf")
                     .unwrap()
                     .unwrap(),
                 Assets

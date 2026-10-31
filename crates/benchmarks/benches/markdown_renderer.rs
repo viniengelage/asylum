@@ -338,7 +338,7 @@ fn init_context(cx: &mut BenchAppContext) {
 
 fn markdown_sizes() -> Vec<usize> {
     let mut sizes = vec![5_000, 10_000, 50_000, 250_000];
-    if std::env::var("ZED_BENCH_HUGE").is_ok() {
+    if std::env::var("ASYLUM_BENCH_HUGE").is_ok() {
         sizes.push(1_000_000);
     }
     sizes

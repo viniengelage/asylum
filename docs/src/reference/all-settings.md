@@ -455,7 +455,7 @@ Note that a save will be triggered when an unsaved tab is closed, even if this i
 
 ```json [settings]
 {
-  "base_keymap": "Zed"
+  "base_keymap": "Asylum"
 }
 ```
 
@@ -527,11 +527,11 @@ Note that a save will be triggered when an unsaved tab is closed, even if this i
 
 - Description: The name of a font to use for rendering text in the editor.
 - Setting: `buffer_font_family`
-- Default: `.ZedMono`. This currently aliases to [Lilex](https://lilex.myrt.co).
+- Default: `.AsylumMono`. This currently aliases to [IBM Plex Mono](https://lilex.myrt.co).
 
 **Options**
 
-The name of any font family installed on the user's system, or `".ZedMono"`.
+The name of any font family installed on the user's system, or `".AsylumMono"`.
 
 ## Buffer Font Features
 
@@ -3121,7 +3121,7 @@ Inherited patterns are inserted at `"..."`, and duplicates keep their first occu
 
 - Description: The icon theme setting can be specified in two forms - either as the name of an icon theme or as an object containing the `mode`, `dark`, and `light` icon themes for files/folders inside Asylum.
 - Setting: `icon_theme`
-- Default: `Zed (Default)`
+- Default: `Asylum (Default)`
 
 ### Icon Theme Object
 
@@ -3133,8 +3133,8 @@ Inherited patterns are inserted at `"..."`, and duplicates keep their first occu
 {
   "icon_theme": {
     "mode": "system",
-    "dark": "Zed (Default)",
-    "light": "Zed (Default)"
+    "dark": "Asylum (Default)",
+    "light": "Asylum (Default)"
   }
 }
 ```
@@ -3153,8 +3153,8 @@ Inherited patterns are inserted at `"..."`, and duplicates keep their first occu
 {
   "icon_theme": {
     "mode": "dark",
-    "dark": "Zed (Default)",
-    "light": "Zed (Default)"
+    "dark": "Asylum (Default)",
+    "light": "Asylum (Default)"
   }
 }
 ```
@@ -3165,8 +3165,8 @@ Inherited patterns are inserted at `"..."`, and duplicates keep their first occu
 {
   "icon_theme": {
     "mode": "light",
-    "dark": "Zed (Default)",
-    "light": "Zed (Default)"
+    "dark": "Asylum (Default)",
+    "light": "Asylum (Default)"
   }
 }
 ```
@@ -3177,8 +3177,8 @@ Inherited patterns are inserted at `"..."`, and duplicates keep their first occu
 {
   "icon_theme": {
     "mode": "system",
-    "dark": "Zed (Default)",
-    "light": "Zed (Default)"
+    "dark": "Asylum (Default)",
+    "light": "Asylum (Default)"
   }
 }
 ```
@@ -3187,7 +3187,7 @@ Inherited patterns are inserted at `"..."`, and duplicates keep their first occu
 
 - Description: The name of the dark icon theme.
 - Setting: `dark`
-- Default: `Zed (Default)`
+- Default: `Asylum (Default)`
 
 **Options**
 
@@ -3197,7 +3197,7 @@ Run the {#action icon_theme_selector::Toggle} action in the command palette to s
 
 - Description: The name of the light icon theme.
 - Setting: `light`
-- Default: `Zed (Default)`
+- Default: `Asylum (Default)`
 
 **Options**
 
@@ -3783,7 +3783,7 @@ Examples:
       "settings": {
         "buffer_font_size": 20,
         "ui_font_size": 18,
-        "theme": "One Light"
+        "theme": "Ayu Light"
       }
     },
     "Clean Slate": {
@@ -5424,7 +5424,7 @@ Processing stops at the first regex that matches the terminal line, even if the 
 
 - Description: The theme setting can be specified in two forms - either as the name of a theme or as an object containing the `mode`, `dark`, and `light` themes for the Asylum UI.
 - Setting: `theme`
-- Default: `One Dark`
+- Default: `Polar Dark`
 
 ### Theme Object
 
@@ -5436,8 +5436,8 @@ Processing stops at the first regex that matches the terminal line, even if the 
 {
   "theme": {
     "mode": "system",
-    "dark": "One Dark",
-    "light": "One Light"
+    "dark": "Polar Dark",
+    "light": "Ayu Light"
   }
 }
 ```
@@ -5456,8 +5456,8 @@ Processing stops at the first regex that matches the terminal line, even if the 
 {
   "theme": {
     "mode": "dark",
-    "dark": "One Dark",
-    "light": "One Light"
+    "dark": "Polar Dark",
+    "light": "Ayu Light"
   }
 }
 ```
@@ -5468,8 +5468,8 @@ Processing stops at the first regex that matches the terminal line, even if the 
 {
   "theme": {
     "mode": "light",
-    "dark": "One Dark",
-    "light": "One Light"
+    "dark": "Polar Dark",
+    "light": "Ayu Light"
   }
 }
 ```
@@ -5480,8 +5480,8 @@ Processing stops at the first regex that matches the terminal line, even if the 
 {
   "theme": {
     "mode": "system",
-    "dark": "One Dark",
-    "light": "One Light"
+    "dark": "Polar Dark",
+    "light": "Ayu Light"
   }
 }
 ```
@@ -5490,7 +5490,7 @@ Processing stops at the first regex that matches the terminal line, even if the 
 
 - Description: The name of the dark Asylum theme to use for the UI.
 - Setting: `dark`
-- Default: `One Dark`
+- Default: `Polar Dark`
 
 **Options**
 
@@ -5500,7 +5500,7 @@ Run the {#action theme_selector::Toggle} action in the command palette to see a 
 
 - Description: The name of the light Asylum theme to use for the UI.
 - Setting: `light`
-- Default: `One Light`
+- Default: `Ayu Light`
 
 **Options**
 
@@ -6333,11 +6333,11 @@ Float values between `0.0` and `0.9`, where:
 
 - Description: The name of the font to use for text in the UI.
 - Setting: `ui_font_family`
-- Default: `.ZedSans`. This currently aliases to [IBM Plex](https://www.ibm.com/plex/).
+- Default: `.AsylumSans`. This currently aliases to [IBM Plex](https://www.ibm.com/plex/).
 
 **Options**
 
-The name of any font family installed on the system, `".ZedSans"` to use the Asylum-provided default, or `".SystemUIFont"` to use the system's default UI font (on macOS and Windows).
+The name of any font family installed on the system, `".AsylumSans"` to use the Asylum-provided default, or `".SystemUIFont"` to use the system's default UI font (on macOS and Windows).
 
 ## UI Font Features
 
@@ -6434,7 +6434,7 @@ Example:
       "settings": {
         "agent_buffer_font_size": 18.0,
         "buffer_font_size": 18.0,
-        "theme": "One Dark",
+        "theme": "Polar Dark",
         "ui_font_size": 18.0
       }
     },
@@ -6442,7 +6442,7 @@ Example:
       "settings": {
         "agent_buffer_font_size": 18.0,
         "buffer_font_size": 18.0,
-        "theme": "One Light",
+        "theme": "Ayu Light",
         "ui_font_size": 18.0
       }
     },
@@ -6473,7 +6473,7 @@ To preview and enable a settings profile, open the command palette via {#kb comm
   "soft_wrap": "none",
 
   "buffer_font_size": 18,
-  "buffer_font_family": ".ZedMono",
+  "buffer_font_family": ".AsylumMono",
 
   "autosave": "on_focus_change",
   "format_on_save": "off",

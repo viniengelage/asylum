@@ -158,7 +158,7 @@ const instanceWidth = Math.floor(screenWidth / columns);
 const instanceHeight = Math.floor(screenHeight / rows);
 
 // If a user is specified, make sure it's first in the list
-const user = process.env.ZED_IMPERSONATE;
+const user = process.env.ASYLUM_IMPERSONATE;
 if (user) {
   users = [user].concat(users.filter((u) => u !== user));
 }
@@ -201,15 +201,15 @@ setTimeout(() => {
     spawn(binaryPath, i == 0 ? args : [], {
       stdio: "inherit",
       env: Object.assign({}, process.env, {
-        ZED_IMPERSONATE: users[i],
-        ZED_WINDOW_POSITION: position,
-        ZED_STATELESS: isStateful && i == 0 ? "" : "1",
-        ZED_ALWAYS_ACTIVE: "1",
-        ZED_SERVER_URL: "http://localhost:3000",
-        ZED_RPC_URL: "http://localhost:8080/rpc",
-        ZED_ADMIN_API_TOKEN: "internal-api-key-secret",
-        ZED_WINDOW_SIZE: size,
-        ZED_CLIENT_CHECKSUM_SEED: "development-checksum-seed",
+        ASYLUM_IMPERSONATE: users[i],
+        ASYLUM_WINDOW_POSITION: position,
+        ASYLUM_STATELESS: isStateful && i == 0 ? "" : "1",
+        ASYLUM_ALWAYS_ACTIVE: "1",
+        ASYLUM_SERVER_URL: "http://localhost:3000",
+        ASYLUM_RPC_URL: "http://localhost:8080/rpc",
+        ASYLUM_ADMIN_API_TOKEN: "internal-api-key-secret",
+        ASYLUM_WINDOW_SIZE: size,
+        ASYLUM_CLIENT_CHECKSUM_SEED: "development-checksum-seed",
         RUST_LOG: process.env.RUST_LOG || "info",
       }),
     });

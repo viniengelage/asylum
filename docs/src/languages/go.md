@@ -128,7 +128,7 @@ To debug a specific package, you can do so by setting the Delve mode to "debug".
   {
     "label": "Go (Delve)",
     "adapter": "Delve",
-    "program": "$ZED_FILE",
+    "program": "$ASYLUM_FILE",
     "request": "launch",
     "mode": "debug"
   },
@@ -160,7 +160,7 @@ The "program" is still the package name, and you can use the "buildFlags" to do 
     "program": ".",
     "buildFlags": ["-tags", "integration"]
     // To filter down to just the test your cursor is in:
-    // "args": ["-test.run", "$ZED_SYMBOL"]
+    // "args": ["-test.run", "$ASYLUM_SYMBOL"]
   }
 ]
 ```
@@ -177,8 +177,8 @@ and the "build" command should build that.
     "adapter": "Delve",
     "request": "launch",
     "mode": "exec",
-    "program": "${ZED_WORKTREE_ROOT}/__debug_unit",
-    "args": ["-test.v", "-test.run=${ZED_SYMBOL}"],
+    "program": "${ASYLUM_WORKTREE_ROOT}/__debug_unit",
+    "args": ["-test.v", "-test.run=${ASYLUM_SYMBOL}"],
     "build": {
       "command": "go",
       "args": [

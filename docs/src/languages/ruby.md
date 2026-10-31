@@ -313,15 +313,15 @@ To run tests in your Ruby project, you can set up custom tasks in your local `.z
 ```json [tasks]
 [
   {
-    "label": "test $ZED_RELATIVE_FILE -n /$ZED_CUSTOM_RUBY_TEST_NAME/",
+    "label": "test $ASYLUM_RELATIVE_FILE -n /$ASYLUM_CUSTOM_RUBY_TEST_NAME/",
     "command": "bin/rails",
     "args": [
       "test",
-      "$ZED_RELATIVE_FILE",
+      "$ASYLUM_RELATIVE_FILE",
       "-n",
-      "\"$ZED_CUSTOM_RUBY_TEST_NAME\""
+      "\"$ASYLUM_CUSTOM_RUBY_TEST_NAME\""
     ],
-    "cwd": "$ZED_WORKTREE_ROOT",
+    "cwd": "$ASYLUM_WORKTREE_ROOT",
     "tags": ["ruby-test"]
   }
 ]
@@ -329,22 +329,22 @@ To run tests in your Ruby project, you can set up custom tasks in your local `.z
 
 ### Minitest
 
-Plain minitest does not support running tests by line number, only by name, so we need to use `$ZED_CUSTOM_RUBY_TEST_NAME` instead:
+Plain minitest does not support running tests by line number, only by name, so we need to use `$ASYLUM_CUSTOM_RUBY_TEST_NAME` instead:
 
 ```json [tasks]
 [
   {
-    "label": "-Itest $ZED_RELATIVE_FILE -n /$ZED_CUSTOM_RUBY_TEST_NAME/",
+    "label": "-Itest $ASYLUM_RELATIVE_FILE -n /$ASYLUM_CUSTOM_RUBY_TEST_NAME/",
     "command": "bundle",
     "args": [
       "exec",
       "ruby",
       "-Itest",
-      "$ZED_RELATIVE_FILE",
+      "$ASYLUM_RELATIVE_FILE",
       "-n",
-      "\"$ZED_CUSTOM_RUBY_TEST_NAME\""
+      "\"$ASYLUM_CUSTOM_RUBY_TEST_NAME\""
     ],
-    "cwd": "$ZED_WORKTREE_ROOT",
+    "cwd": "$ASYLUM_WORKTREE_ROOT",
     "tags": ["ruby-test"]
   }
 ]
@@ -355,10 +355,10 @@ Plain minitest does not support running tests by line number, only by name, so w
 ```json [tasks]
 [
   {
-    "label": "test $ZED_RELATIVE_FILE:$ZED_ROW",
+    "label": "test $ASYLUM_RELATIVE_FILE:$ASYLUM_ROW",
     "command": "bundle",
-    "args": ["exec", "rspec", "\"$ZED_RELATIVE_FILE:$ZED_ROW\""],
-    "cwd": "$ZED_WORKTREE_ROOT",
+    "args": ["exec", "rspec", "\"$ASYLUM_RELATIVE_FILE:$ASYLUM_ROW\""],
+    "cwd": "$ASYLUM_WORKTREE_ROOT",
     "tags": ["ruby-test"]
   }
 ]
@@ -380,8 +380,8 @@ The Ruby extension provides a debug adapter for debugging Ruby code. Asylum's na
     "label": "Debug current file",
     "adapter": "rdbg",
     "request": "launch",
-    "script": "$ZED_FILE",
-    "cwd": "$ZED_WORKTREE_ROOT"
+    "script": "$ASYLUM_FILE",
+    "cwd": "$ASYLUM_WORKTREE_ROOT"
   }
 ]
 ```
@@ -396,7 +396,7 @@ The Ruby extension provides a debug adapter for debugging Ruby code. Asylum's na
     "request": "launch",
     "command": "./bin/rails",
     "args": ["server"],
-    "cwd": "$ZED_WORKTREE_ROOT",
+    "cwd": "$ASYLUM_WORKTREE_ROOT",
     "env": {
       "RUBY_DEBUG_OPEN": "true"
     }

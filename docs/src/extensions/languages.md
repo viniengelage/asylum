@@ -457,7 +457,7 @@ Here's an example from a `runnables.scm` file for JSON:
 
 This query detects runnable scripts in package.json and composer.json files.
 
-The `@run` capture specifies where the run button should appear in the editor. Other captures, except those prefixed with an underscore, are exposed as environment variables with a prefix of `ZED_CUSTOM_$(capture_name)` when running the code.
+The `@run` capture specifies where the run button should appear in the editor. Other captures, except those prefixed with an underscore, are exposed as environment variables with a prefix of `ASYLUM_CUSTOM_$(capture_name)` when running the code.
 
 | Capture | Description                                            |
 | ------- | ------------------------------------------------------ |
