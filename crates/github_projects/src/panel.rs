@@ -1021,7 +1021,7 @@ impl Render for TasksPanel {
                             secondary_button("tasks-retry", Some((IconName::RotateCw, Color::Muted)), "Tentar de novo", true, cx)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     if let Some(state) = &this.state {
-                                        state.update(cx, |state, cx| state.sync(cx));
+                                        state.update(cx, |state, cx| state.retry_with_fresh_token(cx));
                                     }
                                 }))
                                 .into_any_element(),

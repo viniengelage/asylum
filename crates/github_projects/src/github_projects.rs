@@ -315,6 +315,23 @@ impl RepositoryProjects {
         self.repo_store.read(cx).github_client()
     }
 
+    /// Syncs again after the token was refused for Projects, first picking up the token
+    /// `gh auth refresh -s project` just issued.
+    pub fn retry_with_fresh_token(&mut self, cx: &mut Context<Self>) {
+        let adopt = self
+            .repo_store
+            .update(cx, |store, cx| store.adopt_github_cli_token(cx));
+        self.is_syncing = true;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            if let Err(error) = adopt.await {
+                log::info!("Tarefas: token do gh não aproveitado: {error:#}");
+            }
+            this.update(cx, |this, cx| this.sync(cx))
+        })
+        .detach_and_log_err(cx);
+    }
+
     /// Syncs now and then every [`SYNC_INTERVAL`].
     pub fn sync(&mut self, cx: &mut Context<Self>) {
         let Some((http_client, credentials)) = self.client(cx) else {

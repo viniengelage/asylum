@@ -330,6 +330,32 @@ impl RepoStore {
         })
     }
 
+    /// Saves the token `gh` holds now when it belongs to the connected account and differs from
+    /// the saved one. `gh auth refresh` issues a new token, so the copy saved when connecting
+    /// keeps the scopes it had back then. Returns whether the token was replaced.
+    pub fn adopt_github_cli_token(&mut self, cx: &mut Context<Self>) -> Task<Result<bool>> {
+        let Connection::Connected(current) = &self.github else {
+            return Task::ready(Ok(false));
+        };
+        let host::Credentials::GitHub(current_credentials) = &current.credentials else {
+            return Task::ready(Ok(false));
+        };
+        let current_login = current.user.id.clone();
+        let current_token = current_credentials.token.clone();
+        let validation = self.validate_github_cli(cx);
+        cx.spawn(async move |this, cx| {
+            let account = validation.await?;
+            let host::Credentials::GitHub(credentials) = &account.credentials else {
+                return Ok(false);
+            };
+            if account.user.id != current_login || credentials.token == current_token {
+                return Ok(false);
+            }
+            this.update(cx, |this, cx| this.save(account, cx))?.await?;
+            Ok(true)
+        })
+    }
+
     pub fn save(&mut self, account: Account, cx: &mut Context<Self>) -> Task<Result<()>> {
         let credentials_provider = self.credentials_provider.clone();
         let hosting = account.credentials.hosting();

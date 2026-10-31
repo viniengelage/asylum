@@ -63,3 +63,6 @@ crates/docs_preprocessor/actions.json
 .local*
 test-oauth/
 .cache
+
+# Local OpenPencil design files
+/design/asylum/openpencil/
