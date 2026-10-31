@@ -1,0 +1,93 @@
+# Builds Asylum's extension registry from github.com/zed-industries/extensions and publishes it
+# to the `gh-pages` branch, served at https://<owner>.github.io/<repo>/extensions, together with
+# the static files in `site/` (such as the OAuth client metadata for MCP servers). The app reads
+# it instead of Zed Industries' extension API (see `extensions_registry_url` in
+# crates/extension_host). Each run builds only new versions, in batches, so the first full build
+# takes several runs.
+name: extension_registry
+
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  push:
+    branches:
+      - main
+    paths:
+      - site/**
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: Maximum number of extension versions to build in this run
+        default: "150"
+      only:
+        description: Space-separated extension ids to build (empty builds everything pending)
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: extension-registry
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the Rust toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: extension-registry
+
+      - name: Build the extension packager
+        run: cargo build --release --package extension_cli
+
+      - name: Check out the extensions repository
+        run: git clone --depth 1 https://github.com/zed-industries/extensions.git upstream-extensions
+
+      - name: Check out the published registry
+        run: |
+          if git fetch --depth 1 origin gh-pages; then
+            git worktree add pages FETCH_HEAD
+            git -C pages switch -c gh-pages
+          else
+            git worktree add --orphan -b gh-pages pages
+          fi
+
+      - name: Build new extension versions
+        env:
+          # A push only republishes `site/`; the nightly run builds extensions.
+          LIMIT: ${{ github.event_name == 'push' && '0' || inputs.limit || '150' }}
+          ONLY: ${{ inputs.only }}
+        run: |
+          only_arguments=()
+          if [[ -n "$ONLY" ]]; then
+            read -ra only_ids <<<"$ONLY"
+            only_arguments=(--only "${only_ids[@]}")
+          fi
+          python3 script/build-extension-registry \
+            --extensions-repo upstream-extensions \
+            --registry pages/extensions \
+            --cli target/release/zed-extension \
+            --limit "$LIMIT" \
+            --time-budget-minutes 280 \
+            "${only_arguments[@]}"
+
+      - name: Publish
+        run: |
+          cp -R site/. pages/
+          cd pages
+          touch .nojekyll
+          git add -A
+          if git diff --cached --quiet; then
+            echo "nothing new to publish"
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -m "Update the extension registry"
+          git push origin gh-pages

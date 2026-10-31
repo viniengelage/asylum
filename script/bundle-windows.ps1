@@ -123,9 +123,9 @@ function GenerateLicenses {
 
 function BuildZedAndItsFriends {
     Write-Output "Building Zed and its friends, for channel: $channel"
-    # Build zed.exe, cli.exe and auto_update_helper.exe
+    # Build asylum.exe, cli.exe and auto_update_helper.exe
     cargo --config .cargo/bundle-config.toml build --release --package zed --package cli --package auto_update_helper --target $target
-    Copy-Item -Path ".\$CargoOutDir\zed.exe" -Destination "$innoDir\Zed.exe" -Force
+    Copy-Item -Path ".\$CargoOutDir\asylum.exe" -Destination "$innoDir\Asylum.exe" -Force
     Copy-Item -Path ".\$CargoOutDir\cli.exe" -Destination "$innoDir\cli.exe" -Force
     Copy-Item -Path ".\$CargoOutDir\auto_update_helper.exe" -Destination "$innoDir\auto_update_helper.exe" -Force
     # Build explorer_command_injector.dll
@@ -164,7 +164,7 @@ function BuildRemoteServer {
 
 function ZipZedAndItsFriendsDebug {
     $items = @(
-        ".\$CargoOutDir\zed.pdb",
+        ".\$CargoOutDir\asylum.pdb",
         ".\$CargoOutDir\cli.pdb",
         ".\$CargoOutDir\auto_update_helper.pdb",
         ".\$CargoOutDir\explorer_command_injector.pdb",
@@ -174,33 +174,6 @@ function ZipZedAndItsFriendsDebug {
     Compress-Archive -Path $items -DestinationPath ".\$CargoOutDir\zed-$env:RELEASE_VERSION-$env:ZED_RELEASE_CHANNEL.dbg.zip" -Force
 }
 
-
-function UploadToSentry {
-    if (-not (Get-Command "sentry-cli" -ErrorAction SilentlyContinue)) {
-        Write-Output "sentry-cli not found. skipping sentry upload."
-        Write-Output "install with: 'winget install -e --id=Sentry.sentry-cli'"
-        return
-    }
-    if ([string]::IsNullOrWhiteSpace($env:SENTRY_AUTH_TOKEN)) {
-        Write-Output "missing SENTRY_AUTH_TOKEN. skipping sentry upload."
-        return
-    }
-    Write-Output "Uploading zed debug symbols to sentry..."
-    for ($i = 1; $i -le 3; $i++) {
-        try {
-            sentry-cli debug-files upload --include-sources --wait -p zed -o zed-dev $CargoOutDir
-            break
-        }
-        catch {
-            Write-Output "Sentry upload attempt $i failed: $_"
-            if ($i -eq 3) {
-                Write-Output "All sentry upload attempts failed"
-                throw
-            }
-            Start-Sleep -Seconds 2
-        }
-    }
-}
 
 function MakeAppx {
     switch ($channel) {
@@ -233,7 +206,7 @@ function SignZedAndItsFriends {
         return
     }
 
-    $files = "$innoDir\Zed.exe,$innoDir\cli.exe,$innoDir\auto_update_helper.exe,$innoDir\zed_explorer_command_injector.dll,$innoDir\zed_explorer_command_injector.appx"
+    $files = "$innoDir\Asylum.exe,$innoDir\cli.exe,$innoDir\auto_update_helper.exe,$innoDir\zed_explorer_command_injector.dll,$innoDir\zed_explorer_command_injector.appx"
     & "$innoDir\sign.ps1" $files
 }
 
@@ -258,8 +231,8 @@ function DownloadConpty {
 function CollectFiles {
     Move-Item -Path "$innoDir\zed_explorer_command_injector.appx" -Destination "$innoDir\appx\zed_explorer_command_injector.appx" -Force
     Move-Item -Path "$innoDir\zed_explorer_command_injector.dll" -Destination "$innoDir\appx\zed_explorer_command_injector.dll" -Force
-    Move-Item -Path "$innoDir\cli.exe" -Destination "$innoDir\bin\zed.exe" -Force
-    Move-Item -Path "$innoDir\zed.sh" -Destination "$innoDir\bin\zed" -Force
+    Move-Item -Path "$innoDir\cli.exe" -Destination "$innoDir\bin\asylum.exe" -Force
+    Move-Item -Path "$innoDir\zed.sh" -Destination "$innoDir\bin\asylum" -Force
     Move-Item -Path "$innoDir\auto_update_helper.exe" -Destination "$innoDir\tools\auto_update_helper.exe" -Force
     if($Architecture -eq "aarch64") {
         New-Item -Type Directory -Path "$innoDir\arm64" -Force
@@ -288,7 +261,7 @@ function BuildInstaller {
             # The mutex name has to be `release_channel::app_identifier()` + "-Instance-Mutex",
             # as created in crates\zed\src\zed\windows_only_instance.rs.
             $appMutex = "Asylum-Editor-Stable-Instance-Mutex"
-            $appExeName = "Zed"
+            $appExeName = "Asylum"
             $regValueName = "Asylum"
             $appUserId = "Asylum.Asylum"
             $appShellNameShort = "&Asylum"
@@ -304,7 +277,7 @@ function BuildInstaller {
             # The mutex name has to be `release_channel::app_identifier()` + "-Instance-Mutex",
             # as created in crates\zed\src\zed\windows_only_instance.rs.
             $appMutex = "Asylum-Editor-Preview-Instance-Mutex"
-            $appExeName = "Zed"
+            $appExeName = "Asylum"
             $regValueName = "AsylumPreview"
             $appUserId = "Asylum.Asylum.Preview"
             $appShellNameShort = "&Asylum Preview"
@@ -320,7 +293,7 @@ function BuildInstaller {
             # The mutex name has to be `release_channel::app_identifier()` + "-Instance-Mutex",
             # as created in crates\zed\src\zed\windows_only_instance.rs.
             $appMutex = "Asylum-Editor-Nightly-Instance-Mutex"
-            $appExeName = "Zed"
+            $appExeName = "Asylum"
             $regValueName = "AsylumNightly"
             $appUserId = "Asylum.Asylum.Nightly"
             $appShellNameShort = "&Asylum Nightly"
@@ -336,7 +309,7 @@ function BuildInstaller {
             # The mutex name has to be `release_channel::app_identifier()` + "-Instance-Mutex",
             # as created in crates\zed\src\zed\windows_only_instance.rs.
             $appMutex = "Asylum-Editor-Dev-Instance-Mutex"
-            $appExeName = "Zed"
+            $appExeName = "Asylum"
             $regValueName = "AsylumDev"
             $appUserId = "Asylum.Asylum.Dev"
             $appShellNameShort = "&Asylum Dev"
@@ -417,10 +390,6 @@ DownloadAMDGpuServices
 DownloadConpty
 CollectFiles
 BuildInstaller
-
-if($env:CI) {
-    UploadToSentry
-}
 
 if ($buildSuccess) {
     Write-Output "Build successful"

@@ -1,0 +1,207 @@
+#!/usr/bin/env python3
+"""Builds Asylum's static extension registry from the public Zed extensions repository.
+
+Every extension listed in `extensions.toml` of github.com/zed-industries/extensions is packaged
+with the `zed-extension` CLI (crates/extension_cli) and written to the registry directory:
+
+    index.json                              {"data": [<latest version of every extension>]}
+    extensions/<id>/versions.json           {"data": [<every published version, newest first>]}
+    extensions/<id>/<version>.tar.gz        the packaged extension
+    failures.json                           {<id>: {"version": ..., "error": ...}}
+
+Versions already in the registry are skipped, and so are versions that failed before, so each
+run only builds what changed. A run stops after `--limit` builds or `--time-budget-minutes`, and
+the next run continues where it stopped.
+"""
+
+import argparse
+import datetime
+import json
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import tomllib
+from pathlib import Path
+
+
+def read_json(path, default):
+    try:
+        with open(path) as file:
+            return json.load(file)
+    except FileNotFoundError:
+        return default
+
+
+def write_json(path, value):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    with open(temporary, "w") as file:
+        json.dump(value, file, indent=1, sort_keys=True)
+        file.write("\n")
+    temporary.replace(path)
+
+
+def version_key(version):
+    parts = []
+    for part in version.split("-")[0].split("."):
+        parts.append(int(part) if part.isdigit() else 0)
+    return parts
+
+
+def published_versions(registry, extension_id):
+    versions = read_json(registry / "extensions" / extension_id / "versions.json", {"data": []})
+    return versions["data"]
+
+
+def build_extension(cli, extensions_repo, extension_id, entry, scratch_dir):
+    submodule = entry["submodule"]
+    subprocess.run(
+        ["git", "submodule", "update", "--init", "--depth", "1", "--", submodule],
+        cwd=extensions_repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    source_dir = extensions_repo / submodule
+    if "path" in entry:
+        source_dir = source_dir / entry["path"]
+
+    output_dir = Path(tempfile.mkdtemp(prefix=f"{extension_id}-"))
+    try:
+        result = subprocess.run(
+            [
+                str(cli),
+                "--source-dir",
+                str(source_dir),
+                "--output-dir",
+                str(output_dir),
+                "--scratch-dir",
+                str(scratch_dir),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise RuntimeError((result.stderr or result.stdout)[-4000:])
+        manifest = read_json(output_dir / "manifest.json", None)
+        if manifest is None:
+            raise RuntimeError("the CLI produced no manifest.json")
+        return manifest, output_dir / "archive.tar.gz", output_dir
+    except BaseException:
+        shutil.rmtree(output_dir, ignore_errors=True)
+        raise
+    finally:
+        shutil.rmtree(extensions_repo / submodule, ignore_errors=True)
+        (extensions_repo / submodule).mkdir(parents=True, exist_ok=True)
+
+
+def publish(registry, extension_id, manifest, archive):
+    version = manifest["version"]
+    extension_dir = registry / "extensions" / extension_id
+    extension_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(archive, extension_dir / f"{version}.tar.gz")
+
+    metadata = dict(manifest)
+    metadata["id"] = extension_id
+    metadata["published_at"] = datetime.datetime.now(datetime.timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    metadata["download_count"] = 0
+
+    versions = [
+        existing
+        for existing in published_versions(registry, extension_id)
+        if existing["version"] != version
+    ]
+    versions.append(metadata)
+    versions.sort(key=lambda existing: version_key(existing["version"]), reverse=True)
+    write_json(extension_dir / "versions.json", {"data": versions})
+
+
+def write_index(registry):
+    latest = []
+    extensions_dir = registry / "extensions"
+    if extensions_dir.is_dir():
+        for extension_dir in sorted(extensions_dir.iterdir()):
+            versions = published_versions(registry, extension_dir.name)
+            if versions:
+                latest.append(versions[0])
+    write_json(registry / "index.json", {"data": latest})
+    return len(latest)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--extensions-repo", type=Path, required=True)
+    parser.add_argument("--registry", type=Path, required=True)
+    parser.add_argument("--cli", type=Path, required=True)
+    parser.add_argument("--limit", type=int, default=150)
+    parser.add_argument("--time-budget-minutes", type=float, default=300)
+    parser.add_argument("--only", nargs="*", default=None, help="build only these extension ids")
+    arguments = parser.parse_args()
+
+    extensions_repo = arguments.extensions_repo.resolve()
+    registry = arguments.registry.resolve()
+    cli = arguments.cli.resolve()
+    registry.mkdir(parents=True, exist_ok=True)
+
+    with open(extensions_repo / "extensions.toml", "rb") as file:
+        listed = tomllib.load(file)
+    failures = read_json(registry / "failures.json", {})
+
+    pending = []
+    for extension_id, entry in sorted(listed.items()):
+        if arguments.only is not None and extension_id not in arguments.only:
+            continue
+        version = entry.get("version")
+        if version is None or "submodule" not in entry:
+            continue
+        if any(
+            existing["version"] == version
+            for existing in published_versions(registry, extension_id)
+        ):
+            continue
+        if failures.get(extension_id, {}).get("version") == version:
+            continue
+        pending.append((extension_id, entry))
+
+    print(f"{len(pending)} extension versions to build")
+    deadline = time.monotonic() + arguments.time_budget_minutes * 60
+    scratch_dir = Path(tempfile.mkdtemp(prefix="extension-scratch-"))
+    built = 0
+    try:
+        for extension_id, entry in pending:
+            if built >= arguments.limit or time.monotonic() > deadline:
+                print("stopping here; the next run continues")
+                break
+            print(f"building {extension_id} {entry['version']}", flush=True)
+            try:
+                manifest, archive, output_dir = build_extension(
+                    cli, extensions_repo, extension_id, entry, scratch_dir
+                )
+            except (RuntimeError, subprocess.CalledProcessError) as error:
+                message = str(error)
+                if isinstance(error, subprocess.CalledProcessError):
+                    message = f"{error}: {error.stderr}"
+                print(f"  failed: {message[-500:]}", file=sys.stderr)
+                failures[extension_id] = {"version": entry["version"], "error": message}
+                write_json(registry / "failures.json", failures)
+                continue
+            try:
+                publish(registry, extension_id, manifest, archive)
+            finally:
+                shutil.rmtree(output_dir, ignore_errors=True)
+            failures.pop(extension_id, None)
+            write_json(registry / "failures.json", failures)
+            built += 1
+    finally:
+        shutil.rmtree(scratch_dir, ignore_errors=True)
+
+    count = write_index(registry)
+    print(f"built {built}; the registry lists {count} extensions")
+
+
+if __name__ == "__main__":
+    main()

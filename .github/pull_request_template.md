@@ -1,18 +1,13 @@
 ## Summary
 
-What problem does this solve, how, and why does this change matter?
-Use "Closes #123" for each issue resolved.
-Include artifacts produced when testing: before/after screenshots, GIFs, videos, benchmarks.
+What problem does this solve, and how? Use "Closes #123" for each issue resolved.
+Add screenshots or videos for UI changes.
 
 ## Testing
 
-Manually test your changes; report results, mention platforms if relevant.
-How can reviewers test this easily? Include setup and steps.
+How did you test it, and on which platforms?
 
-## Self-review
-
-- [ ] I've reviewed my diff for quality, security, reliability, and performance.
-- [ ] UI changes follow the [checklist](https://zed.dev/docs/development/ui-checklist).
+- [ ] `./script/clippy` passes.
 - [ ] Tests cover the new or changed behavior.
 
 Release Notes:

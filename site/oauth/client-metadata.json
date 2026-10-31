@@ -1,0 +1,13 @@
+{
+  "client_id": "https://viniengelage.github.io/asylum/oauth/client-metadata.json",
+  "client_name": "Asylum",
+  "client_uri": "https://github.com/viniengelage/asylum",
+  "redirect_uris": [
+    "http://127.0.0.1/callback",
+    "http://[::1]/callback",
+    "http://localhost/callback"
+  ],
+  "grant_types": ["authorization_code", "refresh_token"],
+  "response_types": ["code"],
+  "token_endpoint_auth_method": "none"
+}
