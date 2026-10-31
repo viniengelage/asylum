@@ -21,6 +21,7 @@ actions!(
 );
 
 pub fn init(cx: &mut App) {
+    workspace::register_lazy_panel::<JsonPrettierPanel>(json_prettier::restore_panel, cx);
     cx.observe_new(|workspace: &mut Workspace, _window, _cx| {
         workspace.register_action(|workspace, _: &OpenJsonPrettier, window, cx| {
             json_prettier::open(workspace, window, cx);

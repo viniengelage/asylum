@@ -60,6 +60,22 @@ actions!(
 
 pub fn init(cx: &mut App) {
     workspace::register_panel_item::<DockerPanel>(cx);
+    workspace::register_lazy_panel::<DockerPanel>(
+        |workspace, window, cx| {
+            if workspace.panel::<DockerPanel>(cx).is_some()
+                || !task_agents::toolkit_enabled(
+                    task_agents::toolkit_ids::DOCKER,
+                    workspace.project(),
+                    cx,
+                )
+            {
+                return;
+            }
+            let panel = cx.new(|cx| DockerPanel::new(workspace, window, cx));
+            workspace.add_panel(panel, window, cx);
+        },
+        cx,
+    );
     compose_markers::init(cx);
     cx.observe_new(|workspace: &mut Workspace, _window, _cx| {
         workspace.register_action(|workspace, _: &ToggleFocus, window, cx| {

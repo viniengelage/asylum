@@ -32,6 +32,15 @@ pub fn open(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Wor
     workspace.focus_panel::<JsonPrettierPanel>(window, cx);
 }
 
+/// Adds the panel back to a workspace being restored, without focusing it.
+pub fn restore_panel(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
+    if workspace.panel::<JsonPrettierPanel>(cx).is_none() {
+        let languages = workspace.app_state().languages.clone();
+        let panel = cx.new(|cx| JsonPrettierPanel::new(languages, window, cx));
+        workspace.add_panel(panel, window, cx);
+    }
+}
+
 /// Focuses the tool, or hands focus back if it already has it. Opening it first is what
 /// makes the action work before the panel has ever been asked for.
 pub fn toggle_focus(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {

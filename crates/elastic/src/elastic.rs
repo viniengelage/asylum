@@ -59,6 +59,22 @@ actions!(
 
 pub fn init(cx: &mut App) {
     workspace::register_panel_item::<ElasticPanel>(cx);
+    workspace::register_lazy_panel::<ElasticPanel>(
+        |workspace, window, cx| {
+            if workspace.panel::<ElasticPanel>(cx).is_some()
+                || !task_agents::toolkit_enabled(
+                    task_agents::toolkit_ids::ELASTIC,
+                    workspace.project(),
+                    cx,
+                )
+            {
+                return;
+            }
+            let panel = cx.new(|cx| ElasticPanel::new(workspace, window, cx));
+            workspace.add_panel(panel, window, cx);
+        },
+        cx,
+    );
     cx.observe_new(|workspace: &mut Workspace, _window, _cx| {
         workspace.register_action(|workspace, _: &ToggleFocus, window, cx| {
             toggle_focus(workspace, window, cx);

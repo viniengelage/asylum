@@ -42,6 +42,22 @@ actions!(
 
 pub fn init(cx: &mut App) {
     workspace::register_panel_item::<ApiPanel>(cx);
+    workspace::register_lazy_panel::<ApiPanel>(
+        |workspace, window, cx| {
+            if workspace.panel::<ApiPanel>(cx).is_some()
+                || !task_agents::toolkit_enabled(
+                    task_agents::toolkit_ids::API,
+                    workspace.project(),
+                    cx,
+                )
+            {
+                return;
+            }
+            let panel = cx.new(|cx| ApiPanel::new(workspace, window, cx));
+            workspace.add_panel(panel, window, cx);
+        },
+        cx,
+    );
     lens::init(cx);
     cx.observe_new(|workspace: &mut Workspace, window, cx| {
         workspace.register_action(|workspace, _: &ToggleFocus, window, cx| {

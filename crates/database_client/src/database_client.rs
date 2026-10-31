@@ -68,6 +68,22 @@ actions!(
 
 pub fn init(cx: &mut App) {
     workspace::register_panel_item::<DatabasePanel>(cx);
+    workspace::register_lazy_panel::<DatabasePanel>(
+        |workspace, window, cx| {
+            if workspace.panel::<DatabasePanel>(cx).is_some()
+                || !task_agents::toolkit_enabled(
+                    task_agents::toolkit_ids::DATABASE,
+                    workspace.project(),
+                    cx,
+                )
+            {
+                return;
+            }
+            let panel = cx.new(|cx| DatabasePanel::new(workspace, window, cx));
+            workspace.add_panel(panel, window, cx);
+        },
+        cx,
+    );
     cx.observe_new(|workspace: &mut Workspace, mut window, cx| {
         if let Some(window) = window.as_deref_mut() {
             cx.subscribe_in(&cx.entity(), window, open_asylum_sql_as_query)

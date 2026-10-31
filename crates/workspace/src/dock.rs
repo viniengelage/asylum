@@ -622,6 +622,13 @@ impl Dock {
             .position(|entry| entry.panel.to_any().downcast::<T>().is_ok())
     }
 
+    pub(crate) fn panel_persistent_names(&self) -> Vec<&'static str> {
+        self.panel_entries
+            .iter()
+            .map(|entry| entry.panel.persistent_name())
+            .collect()
+    }
+
     pub fn panel_index_for_persistent_name(&self, ui_name: &str, _cx: &App) -> Option<usize> {
         self.panel_entries
             .iter()

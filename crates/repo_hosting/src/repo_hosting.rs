@@ -47,6 +47,25 @@ const GITHUB_CREDENTIALS_URL: &str = "https://github.com/asylum";
 
 pub fn init(cx: &mut App) {
     workspace::register_panel_item::<RepoPanel>(cx);
+    workspace::register_lazy_panel::<RepoPanel>(
+        |workspace, window, cx| {
+            if workspace.panel::<RepoPanel>(cx).is_some()
+                || !task_agents::toolkit_enabled(
+                    task_agents::toolkit_ids::REPO,
+                    workspace.project(),
+                    cx,
+                )
+            {
+                return;
+            }
+            let store = RepoStore::global(cx);
+            let project = workspace.project().clone();
+            let weak_workspace = workspace.weak_handle();
+            let panel = cx.new(|cx| RepoPanel::new(store, project, weak_workspace, window, cx));
+            workspace.add_panel(panel, window, cx);
+        },
+        cx,
+    );
     cx.observe_new(|workspace: &mut Workspace, _window, cx| {
         agent_toolkit::prefetch_pull_requests(workspace.project().clone(), cx);
         workspace.register_action(|workspace, _: &ToggleFocus, window, cx| {

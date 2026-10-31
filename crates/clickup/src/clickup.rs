@@ -53,6 +53,25 @@ pub const TOKEN_SETTINGS_URL: &str = "https://app.clickup.com/settings/apps";
 
 pub fn init(cx: &mut App) {
     workspace::register_panel_item::<ClickUpPanel>(cx);
+    workspace::register_lazy_panel::<ClickUpPanel>(
+        |workspace, window, cx| {
+            if workspace.panel::<ClickUpPanel>(cx).is_some()
+                || !task_agents::toolkit_enabled(
+                    task_agents::toolkit_ids::CLICKUP,
+                    workspace.project(),
+                    cx,
+                )
+            {
+                return;
+            }
+            let store = ClickUpStore::global(cx);
+            let project = workspace.project().clone();
+            let weak_workspace = workspace.weak_handle();
+            let panel = cx.new(|cx| ClickUpPanel::new(store, project, weak_workspace, window, cx));
+            workspace.add_panel(panel, window, cx);
+        },
+        cx,
+    );
     cx.observe_new(|workspace: &mut Workspace, _window, _cx| {
         workspace.register_action(|workspace, _: &ToggleFocus, window, cx| {
             toggle_focus(workspace, window, cx);

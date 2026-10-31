@@ -52,6 +52,24 @@ const SYNC_INTERVAL: Duration = Duration::from_secs(60);
 
 pub fn init(cx: &mut App) {
     workspace::register_panel_item::<TasksPanel>(cx);
+    workspace::register_lazy_panel::<TasksPanel>(
+        |workspace, window, cx| {
+            if workspace.panel::<TasksPanel>(cx).is_some()
+                || !task_agents::toolkit_enabled(
+                    task_agents::toolkit_ids::GITHUB_PROJECTS,
+                    workspace.project(),
+                    cx,
+                )
+            {
+                return;
+            }
+            let project = workspace.project().clone();
+            let weak_workspace = workspace.weak_handle();
+            let panel = cx.new(|cx| TasksPanel::new(project, weak_workspace, window, cx));
+            workspace.add_panel(panel, window, cx);
+        },
+        cx,
+    );
     flow_steps::register(cx);
     cx.observe_new(|workspace: &mut Workspace, _window, cx| {
         agent_toolkit::prefetch(workspace.project().clone(), cx);

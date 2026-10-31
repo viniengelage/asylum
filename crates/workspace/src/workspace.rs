@@ -1390,6 +1390,27 @@ pub fn register_serializable_item<I: SerializableItem>(cx: &mut App) {
 
 /// Makes a panel restorable as a pane tab. Call once per panel type at startup,
 /// alongside the panel's own registration.
+/// Adds a panel that is only created when first opened (the toolkit docks) back to a
+/// workspace being restored, without focusing it.
+pub type PanelRestorer = fn(&mut Workspace, &mut Window, &mut Context<Workspace>);
+
+#[derive(Default)]
+struct LazyPanels(HashMap<&'static str, PanelRestorer>);
+
+impl Global for LazyPanels {}
+
+/// Remembers, per workspace, whether a panel added on demand was open, so it comes back after a
+/// restart until its tab is closed.
+pub fn register_lazy_panel<T: Panel>(restore: PanelRestorer, cx: &mut App) {
+    cx.default_global::<LazyPanels>()
+        .0
+        .insert(T::persistent_name(), restore);
+}
+
+fn lazy_panels_key(workspace_id: WorkspaceId) -> String {
+    format!("workspace-lazy-panels-{}", i64::from(workspace_id))
+}
+
 pub fn register_panel_item<T: Panel>(cx: &mut App) {
     register_serializable_item::<PanelItem<T>>(cx);
     panel_item::PanelItemRegistry::register::<T>(cx);
@@ -8913,9 +8934,15 @@ impl Workspace {
                     recent_navigation_history,
                 };
 
+                let lazy_panels = self.open_lazy_panels(cx);
                 let db = WorkspaceDb::global(cx);
                 let kvp = db::kvp::KeyValueStore::global(cx);
                 cx.background_spawn(async move {
+                    if let Some(lazy_panels) = lazy_panels {
+                        kvp.write_kvp(lazy_panels_key(database_id), lazy_panels)
+                            .await
+                            .log_err();
+                    }
                     if let Some(docks) = default_docks {
                         persistence::write_default_dock_state(&kvp, docks)
                             .await
@@ -8934,6 +8961,55 @@ impl Workspace {
                         .log_err();
                 })
             }
+        }
+    }
+
+    /// The panels added on demand that should come back after a restart, as JSON. Closing a
+    /// panel only hides its dock, so the one a closed dock was showing is the one the user
+    /// closed and is left out.
+    fn open_lazy_panels(&self, cx: &App) -> Option<String> {
+        let registry = cx.try_global::<LazyPanels>()?;
+        let mut names: Vec<&str> = Vec::new();
+        for dock in self.all_docks() {
+            let dock = dock.read(cx);
+            let closed_panel = (!dock.is_open())
+                .then(|| dock.active_panel().map(|panel| panel.persistent_name()))
+                .flatten();
+            names.extend(
+                dock.panel_persistent_names()
+                    .into_iter()
+                    .filter(|name| registry.0.contains_key(name) && Some(*name) != closed_panel),
+            );
+        }
+        serde_json::to_string(&names).log_err()
+    }
+
+    /// Adds back the panels created on demand that were open when the workspace was saved, so
+    /// the docks can make them active again.
+    fn restore_lazy_panels(
+        &mut self,
+        workspace_id: WorkspaceId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(registry) = cx.try_global::<LazyPanels>() else {
+            return;
+        };
+        let saved = db::kvp::KeyValueStore::global(cx)
+            .read_kvp(&lazy_panels_key(workspace_id))
+            .log_err()
+            .flatten();
+        let Some(names) =
+            saved.and_then(|saved| serde_json::from_str::<Vec<String>>(&saved).log_err())
+        else {
+            return;
+        };
+        let restorers: Vec<PanelRestorer> = names
+            .iter()
+            .filter_map(|name| registry.0.get(name.as_str()).copied())
+            .collect();
+        for restore in restorers {
+            restore(self, window, cx);
         }
     }
 
@@ -9083,6 +9159,7 @@ impl Workspace {
                     }
                 }
 
+                workspace.restore_lazy_panels(serialized_workspace.id, window, cx);
                 let docks = serialized_workspace.docks;
 
                 for (dock, serialized_dock) in [
@@ -22001,6 +22078,64 @@ mod tests {
                 dock.active_panel().map(|panel| panel.panel_id()),
                 Some(first_panel.entity_id()),
             );
+        });
+    }
+
+    #[gpui::test]
+    async fn test_lazy_panels_come_back_unless_closed(cx: &mut gpui::TestAppContext) {
+        init_test(cx);
+        cx.update(|cx| {
+            register_lazy_panel::<SecondTestPanel>(
+                |workspace, window, cx| {
+                    if workspace.panel::<SecondTestPanel>(cx).is_none() {
+                        let panel = cx.new(|cx| SecondTestPanel {
+                            focus_handle: cx.focus_handle(),
+                            zoomed: false,
+                        });
+                        workspace.add_panel(panel, window, cx);
+                    }
+                },
+                cx,
+            )
+        });
+        let fs = FakeFs::new(cx.executor());
+        let project = Project::test(fs, [], cx).await;
+        let (workspace, cx) =
+            cx.add_window_view(|window, cx| Workspace::test_new(project, window, cx));
+
+        workspace.update_in(cx, |workspace, window, cx| {
+            let panel = cx.new(|cx| SecondTestPanel {
+                focus_handle: cx.focus_handle(),
+                zoomed: false,
+            });
+            workspace.add_panel(panel, window, cx);
+            workspace.focus_panel::<SecondTestPanel>(window, cx);
+        });
+        let open = workspace.read_with(cx, |workspace, cx| workspace.open_lazy_panels(cx));
+        assert_eq!(open.as_deref(), Some(r#"["SecondTestPanel"]"#));
+
+        // Closing it hides its dock with it active: that is the user closing it.
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.close_panel::<SecondTestPanel>(window, cx);
+        });
+        let closed = workspace.read_with(cx, |workspace, cx| workspace.open_lazy_panels(cx));
+        assert_eq!(closed.as_deref(), Some("[]"));
+
+        let workspace_id = WorkspaceId::from_i64(4242);
+        cx.update(|_, cx| db::kvp::KeyValueStore::global(cx))
+            .write_kvp(
+                lazy_panels_key(workspace_id),
+                r#"["SecondTestPanel"]"#.to_string(),
+            )
+            .await
+            .expect("writes the saved panels");
+        workspace.update_in(cx, |workspace, window, cx| {
+            if let Some(panel) = workspace.panel::<SecondTestPanel>(cx) {
+                workspace.remove_panel(&panel, window, cx);
+            }
+            assert!(workspace.panel::<SecondTestPanel>(cx).is_none());
+            workspace.restore_lazy_panels(workspace_id, window, cx);
+            assert!(workspace.panel::<SecondTestPanel>(cx).is_some());
         });
     }
 
