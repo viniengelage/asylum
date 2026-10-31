@@ -109,8 +109,6 @@ function PrepareForBundle {
     }
     New-Item -Path "$innoDir" -ItemType Directory -Force
     Copy-Item -Path "$env:ZED_WORKSPACE\crates\zed\resources\windows\*" -Destination "$innoDir" -Recurse -Force
-    New-Item -Path "$innoDir\make_appx" -ItemType Directory -Force
-    New-Item -Path "$innoDir\appx" -ItemType Directory -Force
     New-Item -Path "$innoDir\bin" -ItemType Directory -Force
     New-Item -Path "$innoDir\tools" -ItemType Directory -Force
 
@@ -128,19 +126,6 @@ function BuildZedAndItsFriends {
     Copy-Item -Path ".\$CargoOutDir\asylum.exe" -Destination "$innoDir\Asylum.exe" -Force
     Copy-Item -Path ".\$CargoOutDir\cli.exe" -Destination "$innoDir\cli.exe" -Force
     Copy-Item -Path ".\$CargoOutDir\auto_update_helper.exe" -Destination "$innoDir\auto_update_helper.exe" -Force
-    # Build explorer_command_injector.dll
-    switch ($channel) {
-        "stable" {
-            cargo --config .cargo/bundle-config.toml build --release --features stable --no-default-features --package explorer_command_injector --target $target
-        }
-        "preview" {
-            cargo --config .cargo/bundle-config.toml build --release --features preview --no-default-features --package explorer_command_injector --target $target
-        }
-        default {
-            cargo --config .cargo/bundle-config.toml build --release --package explorer_command_injector --target $target
-        }
-    }
-    Copy-Item -Path ".\$CargoOutDir\explorer_command_injector.dll" -Destination "$innoDir\zed_explorer_command_injector.dll" -Force
 }
 
 function BuildRemoteServer {
@@ -155,7 +140,7 @@ function BuildRemoteServer {
         & "$innoDir\sign.ps1" $remoteServerSrc
     }
 
-    $remoteServerDst = "$env:ZED_WORKSPACE\target\zed-remote-server-windows-$Architecture.zip"
+    $remoteServerDst = "$env:ZED_WORKSPACE\target\asylum-remote-server-windows-$Architecture.zip"
     Write-Output "Compressing remote_server to $remoteServerDst"
     Compress-Archive -Path $remoteServerSrc -DestinationPath $remoteServerDst -Force
 
@@ -167,7 +152,6 @@ function ZipZedAndItsFriendsDebug {
         ".\$CargoOutDir\asylum.pdb",
         ".\$CargoOutDir\cli.pdb",
         ".\$CargoOutDir\auto_update_helper.pdb",
-        ".\$CargoOutDir\explorer_command_injector.pdb",
         ".\$CargoOutDir\remote_server.pdb"
     )
 
@@ -175,38 +159,12 @@ function ZipZedAndItsFriendsDebug {
 }
 
 
-function MakeAppx {
-    switch ($channel) {
-        "stable" {
-            $manifestFile = "$env:ZED_WORKSPACE\crates\explorer_command_injector\AppxManifest.xml"
-        }
-        "preview" {
-            $manifestFile = "$env:ZED_WORKSPACE\crates\explorer_command_injector\AppxManifest-Preview.xml"
-        }
-        default {
-            $manifestFile = "$env:ZED_WORKSPACE\crates\explorer_command_injector\AppxManifest-Nightly.xml"
-        }
-    }
-    Copy-Item -Path "$manifestFile" -Destination "$innoDir\make_appx\AppxManifest.xml"
-    # Add makeAppx.exe to Path, from the newest Windows SDK that has one; runner images do
-    # not all carry the same SDK version.
-    $makeAppx = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\makeappx.exe" -ErrorAction SilentlyContinue |
-        Sort-Object { [version]$_.Directory.Parent.Name } -Descending |
-        Select-Object -First 1
-    if (-not $makeAppx) {
-        Write-Error "makeappx.exe not found in any Windows SDK"
-        exit 1
-    }
-    $env:Path += ';' + $makeAppx.DirectoryName
-    makeAppx.exe pack /d "$innoDir\make_appx" /p "$innoDir\zed_explorer_command_injector.appx" /nv
-}
-
 function SignZedAndItsFriends {
     if (-not $canCodeSign) {
         return
     }
 
-    $files = "$innoDir\Asylum.exe,$innoDir\cli.exe,$innoDir\auto_update_helper.exe,$innoDir\zed_explorer_command_injector.dll,$innoDir\zed_explorer_command_injector.appx"
+    $files = "$innoDir\Asylum.exe,$innoDir\cli.exe,$innoDir\auto_update_helper.exe"
     & "$innoDir\sign.ps1" $files
 }
 
@@ -229,8 +187,6 @@ function DownloadConpty {
 }
 
 function CollectFiles {
-    Move-Item -Path "$innoDir\zed_explorer_command_injector.appx" -Destination "$innoDir\appx\zed_explorer_command_injector.appx" -Force
-    Move-Item -Path "$innoDir\zed_explorer_command_injector.dll" -Destination "$innoDir\appx\zed_explorer_command_injector.dll" -Force
     Move-Item -Path "$innoDir\cli.exe" -Destination "$innoDir\bin\asylum.exe" -Force
     Move-Item -Path "$innoDir\zed.sh" -Destination "$innoDir\bin\asylum" -Force
     Move-Item -Path "$innoDir\auto_update_helper.exe" -Destination "$innoDir\tools\auto_update_helper.exe" -Force
@@ -265,8 +221,6 @@ function BuildInstaller {
             $regValueName = "Asylum"
             $appUserId = "Asylum.Asylum"
             $appShellNameShort = "&Asylum"
-            # The Explorer command injector still ships Zed's package identity.
-            $appAppxFullName = "ZedIndustries.Zed_1.0.0.0_neutral__japxn1gcva8rg"
         }
         "preview" {
             $appId = "{{4B1DAB5D-7A91-4ABC-B315-D437F3FFD31F}"
@@ -281,8 +235,6 @@ function BuildInstaller {
             $regValueName = "AsylumPreview"
             $appUserId = "Asylum.Asylum.Preview"
             $appShellNameShort = "&Asylum Preview"
-            # The Explorer command injector still ships Zed's package identity.
-            $appAppxFullName = "ZedIndustries.Zed.Preview_1.0.0.0_neutral__japxn1gcva8rg"
         }
         "nightly" {
             $appId = "{{1B76922D-3029-4DDA-96B2-F1AECABF42BF}"
@@ -297,8 +249,6 @@ function BuildInstaller {
             $regValueName = "AsylumNightly"
             $appUserId = "Asylum.Asylum.Nightly"
             $appShellNameShort = "&Asylum Nightly"
-            # The Explorer command injector still ships Zed's package identity.
-            $appAppxFullName = "ZedIndustries.Zed.Nightly_1.0.0.0_neutral__japxn1gcva8rg"
         }
         "dev" {
             $appId = "{{621B79EE-C8AE-4E8D-B102-DF767DE70C7C}"
@@ -313,8 +263,6 @@ function BuildInstaller {
             $regValueName = "AsylumDev"
             $appUserId = "Asylum.Asylum.Dev"
             $appShellNameShort = "&Asylum Dev"
-            # The Explorer command injector still ships Zed's package identity.
-            $appAppxFullName = "ZedIndustries.Zed.Dev_1.0.0.0_neutral__japxn1gcva8rg"
         }
         default {
             Write-Error "can't bundle installer for $channel."
@@ -342,7 +290,6 @@ function BuildInstaller {
         "AppUserId"      = $appUserId
         "Version"        = "$env:RELEASE_VERSION"
         "SourceDir"      = "$env:ZED_WORKSPACE"
-        "AppxFullName"   = $appAppxFullName
     }
 
     $defs = @()
@@ -383,7 +330,6 @@ PrepareForBundle
 GenerateLicenses
 BuildZedAndItsFriends
 BuildRemoteServer
-MakeAppx
 SignZedAndItsFriends
 ZipZedAndItsFriendsDebug
 DownloadAMDGpuServices

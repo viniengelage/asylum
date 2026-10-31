@@ -1,0 +1,44 @@
+# Type-checks Asylum on Windows for every pull request and push to main. The Windows-only code
+# (installer helpers, single-instance pipe, Android SDK paths) can't be compiled from macOS
+# because of C dependencies, so this is where it gets checked before a release.
+name: asylum_ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: asylum-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: 1
+
+jobs:
+  check_windows:
+    name: Check (Windows x86_64)
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - name: Allow long paths
+        run: git config --global core.longpaths true
+
+      - uses: actions/checkout@v4
+
+      - name: Install the Rust toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: asylum-ci-windows
+
+      - name: Check the app, CLI and helpers
+        run: cargo check --package zed --package cli --package auto_update_helper --package android_sdk --tests
