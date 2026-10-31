@@ -1,11 +1,11 @@
 ---
 title: Visual Customization
-description: "Various aspects of Zed's visual layout can be configured in the Settings Editor or settings file."
+description: "Various aspects of Asylum's visual layout can be configured in the Settings Editor or settings file."
 ---
 
 # Visual Customization
 
-Various aspects of Zed's visual layout can be configured in the Settings Editor ({#kb zed::OpenSettings}) or in your settings file ({#kb zed::OpenSettingsFile}).
+Various aspects of Asylum's visual layout can be configured in the Settings Editor ({#kb zed::OpenSettings}) or in your settings file ({#kb zed::OpenSettingsFile}).
 
 See [All Settings](./reference/all-settings.md) for additional information and other non-visual settings.
 
@@ -100,7 +100,7 @@ If you would like to use distinct themes for light mode/dark mode that can be se
 
 ### Font ligatures
 
-By default Zed enables font ligatures which will visually combine certain adjacent characters.
+By default Asylum enables font ligatures which will visually combine certain adjacent characters.
 
 For example `=>` will be displayed as `→` and `!=` will be `≠`.
 This is purely cosmetic and the individual characters remain unchanged.
@@ -127,7 +127,6 @@ To disable this behavior use:
   // Individual status bar icons can be hidden:
   // "project_panel": {"button": false },
   // "outline_panel": {"button": false },
-  // "collaboration_panel": {"button": false },
   // "git_panel": {"button": false },
 
   // "agent": {"button": false },
@@ -149,7 +148,6 @@ To disable this behavior use:
     "show_onboarding_banner": true,   // Show/hide onboarding banners
     "show_user_picture": true,        // Show/hide user avatar
     "show_user_menu": true,           // Show/hide app user button
-    "show_sign_in": true,             // Show/hide sign-in button
     "show_menus": false,              // Show/hide menus
     "open_menus_on_hover": false      // Automatically open menus on hover
   },
@@ -159,10 +157,10 @@ To disable this behavior use:
 
 ```json [settings]
 {
-  // Force usage of Zed build in path prompts (file and directory pickers)
+  // Force usage of Asylum build in path prompts (file and directory pickers)
   // instead of OS native pickers (false).
   "use_system_path_prompts": true,
-  // Force usage of Zed built in confirmation prompts ("Do you want to save?")
+  // Force usage of Asylum built in confirmation prompts ("Do you want to save?")
   // instead of OS native prompts (false). On linux this is ignored (always false).
   "use_system_prompts": true,
 
@@ -551,7 +549,7 @@ TBD: Centered layout related settings
 
 When `agent.flexible` is enabled, `agent.default_width` does not control the panel width. Double-clicking the panel’s outer resize handle restores the default proportion. Set `agent.flexible` to `false` to use `agent.default_width` as the reset width.
 
-See [Zed AI Documentation](./ai/overview.md) for additional non-visual AI settings.
+See the [AI documentation](./ai/overview.md) for additional non-visual AI settings.
 
 ## Terminal Panel
 
@@ -633,16 +631,3 @@ See [Terminal settings](./reference/all-settings.md#terminal) for additional non
   }
 ```
 
-## Collaboration Panels
-
-```json [settings]
-{
-  // Collaboration Panel
-  "collaboration_panel": {
-    "button": true, // Show/hide status bar icon
-    "dock": "left", // Where to dock: left, right
-    "default_width": 240 // Default width of the collaboration panel.
-  },
-  "show_call_status_icon": true // Shown call status in the OS status bar.
-}
-```

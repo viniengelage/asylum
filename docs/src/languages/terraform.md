@@ -1,6 +1,6 @@
 ---
 title: Terraform
-description: "Configure Terraform language support in Zed, including language servers, formatting, and debugging."
+description: "Configure Terraform language support in Asylum, including language servers, formatting, and debugging."
 ---
 
 # Terraform

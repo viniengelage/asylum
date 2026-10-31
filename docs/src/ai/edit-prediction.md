@@ -1,43 +1,18 @@
 ---
-title: AI Code Completion in Zed - Zeta, Copilot, Codestral, Mercury Coder
-description: Set up AI code completions in Zed with Zeta (built-in), GitHub Copilot, Codestral, or Mercury Coder. Multi-line predictions as you type.
+title: AI Code Completion in Asylum - Copilot, Codestral, Mercury Coder, Local Models
+description: Set up AI code completions in Asylum with GitHub Copilot, Codestral, Mercury Coder, or a local model. Multi-line predictions as you type.
 ---
 
 # Edit Prediction
 
-Edit Prediction is how Zed's AI code completions work: an LLM predicts the code you want to write.
-As you type, Zed requests predictions from the edit prediction provider, which returns individual or multi-line suggestions you accept by pressing `tab`.
+Edit Prediction is how Asylum's AI code completions work: an LLM predicts the code you want to write.
+As you type, Asylum requests predictions from the edit prediction provider, which returns individual or multi-line suggestions you accept by pressing `tab`.
 
-The default provider is [Zeta, an open source model developed by Zed](https://zed.dev/blog/zeta2), but you can also use [other providers](#other-providers) like GitHub Copilot, Mercury Coder, and Codestral.
+Zed Industries' hosted Zeta service is not available in Asylum. Choose one of the [supported providers](#other-providers): GitHub Copilot, Mercury Coder, Codestral, or a [local or self-hosted model](#local-and-self-hosted-models) (including the open-weight Zeta models).
 
-For privacy and training data details, see
-[AI Privacy](./privacy-and-security.md) and
-[Feedback and Training Data](./ai-improvement.md#edit-predictions).
+For privacy details, see [AI Privacy](./privacy-and-security.md).
 
-## Configuring Zeta
-
-To use Zeta, [sign in](../authentication.md#what-features-require-signing-in).
-Once signed in, predictions appear as you type.
-
-You can confirm that Zeta is properly configured by opening the [Settings Editor](zed://settings/edit_predictions.providers) (`Cmd+,` on macOS or `Ctrl+,` on Linux/Windows) and searching for `edit_predictions`. The `provider` field should be set to `Zed AI`.
-
-Or verify this in your settings.json:
-
-```json [settings]
-{
-  "edit_predictions": {
-    "provider": "zed"
-  }
-}
-```
-
-The Z icon in the status bar also indicates Zeta is active.
-
-### Pricing and Plans
-
-Zeta predictions are included with [Zed Pro](../account/plans-and-pricing.md#pro), the [Pro trial](../account/plans-and-pricing.md#trials), and the [Student](../account/plans-and-pricing.md#student) and [Business](../account/plans-and-pricing.md#business) plans. On the Free plan, you can use [other providers](#other-providers), like GitHub Copilot or a [local model](#local-and-self-hosted-models). See [Zed's pricing page](https://zed.dev/pricing) for details.
-
-### Switching Modes {#switching-modes}
+## Switching Modes {#switching-modes}
 
 Edit Prediction has two display modes:
 
@@ -52,9 +27,7 @@ Toggle between them via the `mode` key:
 },
 ```
 
-Or directly via the UI through the status bar menu:
-
-![Edit Prediction status bar menu, with the modes toggle.](https://zed.dev/img/edit-prediction/status-bar-menu.webp)
+Or directly via the UI through the status bar menu.
 
 > Note that edit prediction modes work with any prediction provider.
 
@@ -140,15 +113,15 @@ In this case, because the binding contains the modifier `ctrl`, it will be used 
 
 ### Cleaning Up Older Keymap Entries
 
-If you configured edit prediction keybindings before Zed `v0.229.0`, your `keymap.json` may have entries that are now redundant.
+If you configured edit prediction keybindings before Asylum `v0.229.0`, your `keymap.json` may have entries that are now redundant.
 
 **Old tab workaround**: Before `unbind` existed, the only way to prevent `tab` from accepting edit predictions was to copy all the default non-edit-prediction `tab` bindings into your keymap alongside a custom `AcceptEditPrediction` binding. If your keymap still contains those copy-pasted entries, delete them and use a single `"unbind"` entry as shown in the examples above.
 
-**Renamed context**: The `edit_prediction_conflict` context has been replaced by `edit_prediction && (showing_completions || in_leading_whitespace)`. Zed automatically migrates any bindings that used `edit_prediction_conflict`, so no changes are required on your end.
+**Renamed context**: The `edit_prediction_conflict` context has been replaced by `edit_prediction && (showing_completions || in_leading_whitespace)`. Asylum automatically migrates any bindings that used `edit_prediction_conflict`, so no changes are required on your end.
 
 ## Configuring the Prediction Debounce
 
-The prediction debounce controls how long Zed waits after you stop typing before automatically requesting an edit prediction. Configure it in milliseconds under the settings for your selected provider:
+The prediction debounce controls how long Asylum waits after you stop typing before automatically requesting an edit prediction. Configure it in milliseconds under the settings for your selected provider:
 
 ```json [settings]
 {
@@ -167,7 +140,6 @@ The default debounce depends on the provider:
 | --------------------- | ------: |
 | GitHub Copilot        |   75 ms |
 | Codestral             |  150 ms |
-| Zed                   |    0 ms |
 | Mercury               |    0 ms |
 | Ollama                |    0 ms |
 | OpenAI-compatible API |    0 ms |
@@ -214,7 +186,7 @@ To disable edit predictions for specific directories or files, set this in your 
 ```json [settings]
 {
   "edit_predictions": {
-    "disabled_globs": ["~/.config/zed/settings.json"]
+    "disabled_globs": ["~/.config/asylum/settings.json"]
   }
 }
 ```
@@ -251,7 +223,7 @@ To sign in to GitHub Copilot, click on the Copilot icon in the status bar. A pop
 
 #### Using GitHub Copilot Enterprise
 
-If your organization uses GitHub Copilot Enterprise, you can configure Zed to use your enterprise instance by specifying the enterprise URI in your settings file ([how to edit](../configuring-zed.md#settings-files)):
+If your organization uses GitHub Copilot Enterprise, you can configure Asylum to use your enterprise instance by specifying the enterprise URI in your settings file ([how to edit](../configuring-zed.md#settings-files)):
 
 ```json [settings]
 {
@@ -264,7 +236,7 @@ If your organization uses GitHub Copilot Enterprise, you can configure Zed to us
 Replace `"https://your.enterprise.domain"` with the URL provided by your GitHub Enterprise administrator (e.g., `https://foo.ghe.com`).
 
 This setting applies to both Copilot edit predictions and Copilot Chat.
-Once set, Zed routes Copilot requests through your enterprise endpoint.
+Once set, Asylum routes Copilot requests through your enterprise endpoint.
 When you sign in by clicking the Copilot icon in the status bar, you are redirected to your configured enterprise URL to complete authentication.
 All other Copilot features and usage remain the same.
 
@@ -372,7 +344,7 @@ The `prompt_format` setting controls how code context is formatted for the model
 - `sweep` - [Sweep Next Edit](https://huggingface.co/sweepai/sweep-next-edit-1.5B/blob/main/run_model.py) rewrite-window format using `<|file_sep|>` file blocks for related files, `original/...`, `current/...`, and `updated/...`.
 - `infer` - Auto-detect from model name (default)
 
-With `"prompt_format": "infer"`, Zed automatically uses Zeta 2 format for models named `zeta2` and Zeta 2.1 format for models named `zeta2.1`.
+With `"prompt_format": "infer"`, Asylum automatically uses Zeta 2 format for models named `zeta2` and Zeta 2.1 format for models named `zeta2.1`.
 
 For example, to use Zeta 2 with Ollama:
 

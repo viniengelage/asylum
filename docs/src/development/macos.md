@@ -1,13 +1,13 @@
 ---
-title: Building Zed for macOS
-description: "Guide to building zed for macos for Zed development."
+title: Building Asylum for macOS
+description: "Guide to building zed for macos for Asylum development."
 ---
 
-# Building Zed for macOS
+# Building Asylum for macOS
 
 ## Repository
 
-Clone the [Zed repository](https://github.com/zed-industries/zed).
+Clone the [Asylum repository](https://github.com/viniengelage/asylum).
 
 ## Dependencies
 
@@ -39,9 +39,9 @@ Clone the [Zed repository](https://github.com/zed-industries/zed).
 Release bundling with `script/bundle-mac` requires the macOS 26 SDK or newer, provided by Xcode 26 or newer.
 The bundled app requires macOS 12.0 (Monterey) or later.
 
-## Building Zed from Source
+## Building Asylum from Source
 
-Once you have the dependencies installed, you can build Zed using [Cargo](https://doc.rust-lang.org/cargo/).
+Once you have the dependencies installed, you can build Asylum using [Cargo](https://doc.rust-lang.org/cargo/).
 
 For a debug build:
 
@@ -63,7 +63,7 @@ cargo test --workspace
 
 ## Visual Regression Tests
 
-Zed includes visual regression tests that capture screenshots of real Zed windows and compare them against baseline images. These tests require macOS with Screen Recording permission.
+Asylum includes visual regression tests that capture screenshots of real Asylum windows and compare them against baseline images. These tests require macOS with Screen Recording permission.
 
 ### Prerequisites
 
@@ -111,37 +111,18 @@ UPDATE_BASELINE=1 cargo run -p zed --bin zed_visual_test_runner --features visua
 
 ## Sampling released builds
 
-How to get a symbolicated CPU profile from a released (non-dev) Zed instance.
-Use this when Zed is using a lot of CPU.
+How to get a symbolicated CPU profile from a released (non-dev) Asylum instance.
+Use this when Asylum is using a lot of CPU.
 
 Released macOS binaries are stripped of local symbols, so `sample` and Instruments show raw addresses for most frames.
 The debug symbols for every release are archived: `script/bundle-mac` uploads `zed.dwarf` to Sentry before stripping.
 
 ### During the incident
 
-- Run `sample Zed 10 -f zed-sample.txt` (adjust the process name for Preview or Nightly).
+- Run `sample Asylum 10 -f asylum-sample.txt` (adjust the process name for Preview or Nightly).
 - Get the exact build: type {#action zed::About} in the command palette and copy the version and commit.
 
-The `zed-sample.txt` file can be sent to Zed together with the exact version.
-
-### Later
-
-This can be done by Zed staff.
-
-- Find the binary UUID in the `Binary Images` section at the bottom of the sample output.
-- Download the matching `zed.dwarf` from the Sentry project's Debug Files page by searching for that UUID.
-- Resolve the addresses:
-  `atos -o zed.dwarf -l <load address> <address...>`
-  Each unresolved frame in the sample output prints its `load address` and absolute address.
-
-To profile a released build on your own machine with full symbols, download the matching `zed.dwarf`, convert it into a `.dSYM` bundle Spotlight can index, and re-run `sample`:
-
-```sh
-mkdir -p Zed.dSYM/Contents/Resources/DWARF
-cp zed.dwarf Zed.dSYM/Contents/Resources/DWARF/zed
-```
-
-Frames then resolve automatically, including file and line information.
+The `asylum-sample.txt` file can be attached to a [GitHub issue](https://github.com/viniengelage/asylum/issues) together with the exact version.
 
 ## Troubleshooting
 
@@ -212,18 +193,18 @@ This error seems to be caused by OS resource constraints. Installing and running
 
 ### Avoiding continual rebuilds
 
-If Zed continually rebuilds root crates, you may be opening the Zed codebase itself in your development build.
+If Asylum continually rebuilds root crates, you may be opening the Asylum codebase itself in your development build.
 
 This causes problems because `cargo run` exports a bunch of environment
 variables which are picked up by the `rust-analyzer` that runs in the development
-build of Zed. These environment variables are in turn passed to `cargo check`, which
+build of Asylum. These environment variables are in turn passed to `cargo check`, which
 invalidates the build cache of some of the crates we depend on.
 
 To avoid this, run the built binary against a different project, for example `cargo run ~/path/to/other/project`.
 
 ### Speeding up verification
 
-If you build Zed frequently, macOS may keep verifying new builds, which can add a few seconds to each iteration.
+If you build Asylum frequently, macOS may keep verifying new builds, which can add a few seconds to each iteration.
 
 To fix this, you can:
 

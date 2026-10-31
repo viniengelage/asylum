@@ -1,17 +1,17 @@
 ---
 title: All Settings
-description: "Complete reference for all Zed settings."
+description: "Complete reference for all Asylum settings."
 ---
 
 # All Settings
 
-This is the complete reference for all Zed settings.
+This is the complete reference for all Asylum settings.
 
 You may also want to change your [theme](../themes.md), configure your [key bindings](../key-bindings.md), set up [tasks](../tasks.md), or install [extensions](../extensions.md).
 
 # Settings
 
-The sections below document supported Zed settings.
+The sections below document supported Asylum settings.
 
 ## Active Pane Modifiers
 
@@ -167,7 +167,7 @@ Open the Settings Editor and search for “Threads Sidebar Default Width”. Or 
 
 Changing this setting immediately updates the sidebar width, even if you previously resized it manually. You can also double-click the divider to reset the sidebar to the configured width.
 
-Widths saved by older versions of Zed are preserved if they differ from the previous default of 300 pixels. A saved width of 300 pixels uses this setting instead.
+Widths saved by older versions of Asylum are preserved if they differ from the previous default of 300 pixels. A saved width of 300 pixels uses this setting instead.
 
 ### Threads Sidebar Auto Open {#agent-threads-sidebar-auto-open}
 
@@ -292,19 +292,19 @@ You can find the names of your currently installed extensions by listing the sub
 On macOS:
 
 ```sh
-ls ~/Library/Application\ Support/Zed/extensions/installed/
+ls ~/Library/Application\ Support/Asylum/extensions/installed/
 ```
 
 On Linux:
 
 ```sh
-ls ~/.local/share/zed/extensions/installed
+ls ~/.local/share/asylum/extensions/installed
 ```
 
 On Windows:
 
 ```pwsh
-Get-ChildItem "$env:LOCALAPPDATA\Zed\extensions\installed" -Name
+Get-ChildItem "$env:LOCALAPPDATA\Asylum\extensions\installed" -Name
 ```
 
 Define extensions which should be installed (`true`) or never installed (`false`).
@@ -343,7 +343,7 @@ Define extensions which should be installed (`true`) or never installed (`false`
 
 **Options**
 
-By default, every installed extension is auto-updated when Zed starts.
+By default, every installed extension is auto-updated when Asylum starts.
 Add an extension here with `false` to pin it to its currently installed version.
 
 ```json [settings]
@@ -542,7 +542,7 @@ The name of any font family installed on the user's system, or `".ZedMono"`.
 
 **Options**
 
-Zed supports all OpenType features that can be enabled or disabled for a given buffer or terminal font, as well as setting values for font features.
+Asylum supports all OpenType features that can be enabled or disabled for a given buffer or terminal font, as well as setting values for font features.
 
 For example, to disable font ligatures, add the following to your settings:
 
@@ -764,7 +764,7 @@ See [Git documentation](../git.md#diff-view-styles) for more details.
 
 ## Disable AI
 
-- Description: Whether to disable all AI features in Zed
+- Description: Whether to disable all AI features in Asylum
 - Setting: `disable_ai`
 - Default: `false`
 
@@ -899,7 +899,7 @@ For the case of "open", regular selection behavior can be achieved by holding `a
 
 List of `string` values.
 
-Use `"..."` to add patterns without repeating Zed's defaults. In project settings, it extends the user or parent configuration value. Omit `"..."` to replace the inherited list.
+Use `"..."` to add patterns without repeating Asylum's defaults. In project settings, it extends the user or parent configuration value. Omit `"..."` to replace the inherited list.
 
 ```json [settings]
 {
@@ -917,9 +917,9 @@ Relative patterns are matched against paths relative to the worktree root. Absol
 
 ### Prediction Debounce
 
-- Description: How long Zed waits after you stop typing before automatically requesting an edit prediction.
+- Description: How long Asylum waits after you stop typing before automatically requesting an edit prediction.
 - Setting: `edit_predictions.<provider>.prediction_debounce`
-- Default: `75` for GitHub Copilot, `150` for Codestral, and `0` for Zed, Mercury, Ollama, and OpenAI-compatible APIs.
+- Default: `75` for GitHub Copilot, `150` for Codestral, and `0` for Asylum, Mercury, Ollama, and OpenAI-compatible APIs.
 
 **Options**
 
@@ -1851,7 +1851,7 @@ or
 
 ### Session
 
-- Description: Controls Zed lifecycle-related behavior.
+- Description: Controls Asylum lifecycle-related behavior.
 - Setting: `session`
 - Default:
 
@@ -1935,7 +1935,7 @@ Each option controls displaying of a particular toolbar element. If all elements
 
 **Options**
 
-This setting enables integration with macOS's native window tabbing feature. When set to `true`, Zed windows can be grouped together as tabs in a single macOS window, following the system-wide tabbing preferences set by the user (such as "Always", "In Full Screen", or "Never"). This setting is only available on macOS.
+This setting enables integration with macOS's native window tabbing feature. When set to `true`, Asylum windows can be grouped together as tabs in a single macOS window, following the system-wide tabbing preferences set by the user (such as "Always", "In Full Screen", or "Never"). This setting is only available on macOS.
 
 ## Fullscreen Mode
 
@@ -2089,7 +2089,7 @@ Positive `integer` value between 1 and 32. Values outside of this range will be 
 - `active_encoding_button`: When to show the active encoding button: `"enabled"`, `"disabled"`, or `"non_utf8"` (only for encodings other than UTF-8 without BOM)
 - `pending_keystrokes_indicator`: Whether to show an indicator while multi-stroke input is pending. If the input has a timeout, a countdown is shown and hovering the indicator pauses it. Its binding preview popover is disabled when the which-key popup is enabled (see [key bindings](../key-bindings.md#precedence))
 
-There is an experimental setting that completely hides the status bar. This causes major usability problems (you will be unable to use many of Zed's features), but is provided for those who value screen real-estate above all else.
+There is an experimental setting that completely hides the status bar. This causes major usability problems (you will be unable to use many of Asylum's features), but is provided for those who value screen real-estate above all else.
 
 ```json
 "status_bar": {
@@ -2171,7 +2171,7 @@ While other options may be changed at a runtime and should be placed under `sett
 
 - `button`: Whether to show the LSP status button in the status bar
 - `request_timeout`: The maximum amount of time to wait for responses from language servers, in seconds. A value of `0` will result in no timeout being applied (causing all LSP responses to wait indefinitely until completed). Default: `120`
-- `max_buffer_line_length`: The maximum line length a buffer may contain before Zed disables all language server features for that entire buffer. If any line exceeds this value, Zed does not open the buffer with language servers or send them buffer-specific requests. Default: `20000`
+- `max_buffer_line_length`: The maximum line length a buffer may contain before Asylum disables all language server features for that entire buffer. If any line exceeds this value, Asylum does not open the buffer with language servers or send them buffer-specific requests. Default: `20000`
 - `notifications`: Notification-related settings.
   - `dismiss_timeout_ms`: Timeout in milliseconds for automatically dismissing language server notifications. Set to 0 to disable auto-dismiss.
 
@@ -2226,7 +2226,7 @@ Non-negative `integer` values
 - Setting: `format_on_save`
 - Default: `off`
 
-Zed ships `"format_on_save": "on"` as a per-language default for Astro, Dart, EEx, Elixir, Elm, Go, GraphQL, HEEx, Kotlin, Rust, Starlark, and Zig. Every other language uses the top-level default above. Use [`languages`](#languages) to configure individual languages differently.
+Asylum ships `"format_on_save": "on"` as a per-language default for Astro, Dart, EEx, Elixir, Elm, Go, GraphQL, HEEx, Kotlin, Rust, Starlark, and Zig. Every other language uses the top-level default above. Use [`languages`](#languages) to configure individual languages differently.
 
 **Options**
 
@@ -2295,7 +2295,7 @@ Similar to `modifications`, but behaves like `on` when range formatting cannot b
 }
 ```
 
-Tools that rewrite files on disk instead of printing the formatted contents to stdout (such as `cargo fmt`) are not compatible with `"external"`: since Zed reads the formatted buffer from stdout, a formatter that emits nothing there will not update the buffer. For Rust, use `"formatter": "language_server"` or invoke `rustfmt` directly (which supports stdin/stdout via `--emit stdout`) instead of `cargo fmt`.
+Tools that rewrite files on disk instead of printing the formatted contents to stdout (such as `cargo fmt`) are not compatible with `"external"`: since Asylum reads the formatted buffer from stdout, a formatter that emits nothing there will not update the buffer. For Rust, use `"formatter": "language_server"` or invoke `rustfmt` directly (which supports stdin/stdout via `--emit stdout`) instead of `cargo fmt`.
 
 3. External formatters may optionally include a `{buffer_path}` placeholder which at runtime will include the path of the buffer being formatted. Formatters operate by receiving file content via standard input, reformatting it and then outputting it to standard output and so normally don't know the filename of what they are formatting. Tools like Prettier support receiving the file path via a command line argument which can then be used to impact formatting decisions.
 
@@ -2404,7 +2404,7 @@ The result is still `)))` and not `))))))`, which is what it would be by default
 }
 ```
 
-Use `"..."` to add patterns without repeating Zed's defaults. In project settings, it extends the user or parent configuration value. Omit `"..."` to replace the inherited list.
+Use `"..."` to add patterns without repeating Asylum's defaults. In project settings, it extends the user or parent configuration value. Omit `"..."` to replace the inherited list.
 
 ```json [settings]
 {
@@ -2426,7 +2426,7 @@ Inherited patterns are inserted at `"..."`, and duplicates keep their first occu
 }
 ```
 
-Use `"..."` to add patterns without repeating Zed's defaults. In project settings, it extends the user or parent configuration value. Omit `"..."` to replace the inherited list.
+Use `"..."` to add patterns without repeating Asylum's defaults. In project settings, it extends the user or parent configuration value. Omit `"..."` to replace the inherited list.
 
 ```json [settings]
 {
@@ -2439,7 +2439,7 @@ Inherited patterns are inserted at `"..."`, and duplicates keep their first occu
 ## File Scan Depth
 
 - Setting: `file_scan_depth`
-- Description: Maximum directory depth that Zed eagerly indexes outside of git repositories. Directories at this depth or deeper are indexed on demand: when expanded in the project panel or when a file inside them is opened. Contents of directories that were not indexed yet are invisible to the file finder and project search. When directories get deferred, the status bar of the affected window shows a brief "Partial file index" message. Set to `0` to always index everything eagerly and activate all git repositories immediately.
+- Description: Maximum directory depth that Asylum eagerly indexes outside of git repositories. Directories at this depth or deeper are indexed on demand: when expanded in the project panel or when a file inside them is opened. Contents of directories that were not indexed yet are invisible to the file finder and project search. When directories get deferred, the status bar of the affected window shows a brief "Partial file index" message. Set to `0` to always index everything eagerly and activate all git repositories immediately.
 - Default: `5`
 
 ```json [settings]
@@ -2491,12 +2491,12 @@ In multi-folder projects, depth is measured from each root folder separately.
 }
 ```
 
-When set to `expanded`, symbolic links are only scanned after you explicitly expand them in the project panel. When set to `always`, Zed follows all symbolic links and scans their contents when indexing the project, unless they match gitignore rules. The `always` option may have performance implications for projects with many or deeply nested symlinks.
+When set to `expanded`, symbolic links are only scanned after you explicitly expand them in the project panel. When set to `always`, Asylum follows all symbolic links and scans their contents when indexing the project, unless they match gitignore rules. The `always` option may have performance implications for projects with many or deeply nested symlinks.
 
 ## File Types
 
 - Setting: `file_types`
-- Description: Configure how Zed selects a language for a file based on its filename or extension. Supports glob entries.
+- Description: Configure how Asylum selects a language for a file based on its filename or extension. Supports glob entries.
 - Default:
 
 ```json [settings]
@@ -2995,7 +2995,7 @@ Example:
 }
 ```
 
-Use `"..."` to add patterns without repeating Zed's defaults. In project settings, it extends the user or parent configuration value. Omit `"..."` to replace the inherited list.
+Use `"..."` to add patterns without repeating Asylum's defaults. In project settings, it extends the user or parent configuration value. Omit `"..."` to replace the inherited list.
 
 ```json [settings]
 {
@@ -3119,7 +3119,7 @@ Inherited patterns are inserted at `"..."`, and duplicates keep their first occu
 
 ## Icon Theme
 
-- Description: The icon theme setting can be specified in two forms - either as the name of an icon theme or as an object containing the `mode`, `dark`, and `light` icon themes for files/folders inside Zed.
+- Description: The icon theme setting can be specified in two forms - either as the name of an icon theme or as an object containing the `mode`, `dark`, and `light` icon themes for files/folders inside Asylum.
 - Setting: `icon_theme`
 - Default: `Zed (Default)`
 
@@ -3274,7 +3274,7 @@ Inlay hints querying consists of two parts: editor (client) and LSP server.
 When the inlay settings above are changed to enable the hints, the editor will start to query certain types of hints and react on LSP hint refresh request from the server.
 At this point, the server may or may not return hints depending on its implementation, further configuration might be needed, refer to the corresponding LSP server documentation.
 
-The following languages have inlay hints preconfigured by Zed:
+The following languages have inlay hints preconfigured by Asylum:
 
 - [Go](../languages/go.md)
 - [Rust](../languages/rust.md)
@@ -3283,7 +3283,7 @@ The following languages have inlay hints preconfigured by Zed:
 
 Use the `lsp` section for the server configuration. Examples are provided in the corresponding language documentation.
 
-Hints are not instantly queried in Zed, two kinds of debounces are used, either may be set to 0 to be disabled.
+Hints are not instantly queried in Asylum, two kinds of debounces are used, either may be set to 0 to be disabled.
 Settings-related hint updates are not debounced.
 
 All possible config values for `toggle_on_modifiers_press` are:
@@ -3621,7 +3621,7 @@ Positive `integer` values, or `0` to disable modeline parsing
 
 ## Network Proxy
 
-- Description: Configure a network proxy for Zed.
+- Description: Configure a network proxy for Asylum.
 - Setting: `proxy`
 - Default: `null`
 
@@ -3640,7 +3640,7 @@ The following URI schemes are supported:
 
 `http` will be used when no scheme is specified.
 
-By default no proxy will be used, or Zed will attempt to retrieve proxy settings from environment variables, such as `http_proxy`, `HTTP_PROXY`, `https_proxy`, `HTTPS_PROXY`, `all_proxy`, `ALL_PROXY`, `no_proxy` and `NO_PROXY`.
+By default no proxy will be used, or Asylum will attempt to retrieve proxy settings from environment variables, such as `http_proxy`, `HTTP_PROXY`, `https_proxy`, `HTTPS_PROXY`, `all_proxy`, `ALL_PROXY`, `no_proxy` and `NO_PROXY`.
 
 For example, to set an `http` proxy, add the following to your settings:
 
@@ -3722,16 +3722,16 @@ Or add this to your settings.json:
 }
 ```
 
-Zed opens one README from the first project root with a match.
-Zed checks `README.md`, `readme.md`, `Readme.md`, `README`, `readme`, `Readme`, `README.txt`, `readme.txt`, and `Readme.txt`, in that order.
+Asylum opens one README from the first project root with a match.
+Asylum checks `README.md`, `readme.md`, `Readme.md`, `README`, `readme`, `Readme`, `README.txt`, `readme.txt`, and `Readme.txt`, in that order.
 These are direct root-level file checks, not a directory scan.
 Other spellings do not match, even on case-insensitive filesystems.
 File-index exclusions do not affect README discovery.
 Adding a folder to an already open project does not open a README.
 Files passed when opening the project and restored tabs take precedence.
 The README opens in a temporary [preview tab](#preview-tabs) when `preview_tabs.enabled` is `true`, or a regular tab otherwise.
-Zed uses your existing file opener settings, without forcing a rendered Markdown preview.
-If no matching README exists, Zed leaves the project's pane empty.
+Asylum uses your existing file opener settings, without forcing a rendered Markdown preview.
+If no matching README exists, Asylum leaves the project's pane empty.
 
 ## Instrumentation
 
@@ -3761,7 +3761,7 @@ If no matching README exists, Zed leaves the project's pane empty.
 
 ## Profiles
 
-- Description: Configuration profiles that can be temporarily applied on top of existing settings or Zed's defaults.
+- Description: Configuration profiles that can be temporarily applied on top of existing settings or Asylum's defaults.
 - Setting: `profiles`
 - Default: `{}`
 
@@ -3771,7 +3771,7 @@ Each profile is an object with the following optional fields:
 
 - `base`: What settings to start from before applying the profile's overrides.
   - `"user"` (default): Apply on top of your current user settings.
-  - `"default"`: Apply on top of Zed's default settings, ignoring user customizations.
+  - `"default"`: Apply on top of Asylum's default settings, ignoring user customizations.
 - `settings`: The settings overrides for this profile.
 
 Examples:
@@ -3995,7 +3995,7 @@ List of `string` glob patterns
 }
 ```
 
-Use `"..."` to add patterns without repeating Zed's defaults. In project settings, it extends the user or parent configuration value. Omit `"..."` to replace the inherited list.
+Use `"..."` to add patterns without repeating Asylum's defaults. In project settings, it extends the user or parent configuration value. Omit `"..."` to replace the inherited list.
 
 ```json [settings]
 {
@@ -4099,7 +4099,7 @@ List of strings containing any combination of:
 
 **Options**
 
-1. Restore all workspaces that were open when quitting Zed:
+1. Restore all workspaces that were open when quitting Asylum:
 
 ```json [settings]
 {
@@ -4601,7 +4601,7 @@ Positive integer values
 
 ## Use Auto Surround
 
-- Description: Whether to automatically surround selected text when typing opening parenthesis, bracket, brace, single or double quote characters. For example, when you select text and type '(', Zed will surround the text with ().
+- Description: Whether to automatically surround selected text when typing opening parenthesis, bracket, brace, single or double quote characters. For example, when you select text and type '(', Asylum will surround the text with ().
 - Setting: `use_auto_surround`
 - Default: `true`
 
@@ -4611,7 +4611,7 @@ Positive integer values
 
 ## Use System Path Prompts
 
-- Description: Whether to use the system provided dialogs for Open and Save As. When set to false, Zed will use the built-in keyboard-first pickers.
+- Description: Whether to use the system provided dialogs for Open and Save As. When set to false, Asylum will use the built-in keyboard-first pickers.
 - Setting: `use_system_path_prompts`
 - Default: `true`
 
@@ -4621,7 +4621,7 @@ Positive integer values
 
 ## Use System Prompts
 
-- Description: Whether to use the system provided dialogs for prompts, such as confirmation prompts. When set to false, Zed will use its built-in prompts. Note that on Linux, this option is ignored and Zed will always use the built-in prompts.
+- Description: Whether to use the system provided dialogs for prompts, such as confirmation prompts. When set to false, Asylum will use its built-in prompts. Note that on Linux, this option is ignored and Asylum will always use the built-in prompts.
 - Setting: `use_system_prompts`
 - Default: `true`
 
@@ -4651,7 +4651,7 @@ List of `integer` column numbers
 
 ## Tasks
 
-- Description: Configuration for tasks that can be run within Zed
+- Description: Configuration for tasks that can be run within Asylum
 - Setting: `tasks`
 - Default:
 
@@ -4669,11 +4669,11 @@ List of `integer` column numbers
 
 - `variables`: Custom variables for task configuration
 - `enabled`: Whether tasks are enabled
-- `prefer_lsp`: Whether to prefer LSP-provided tasks over Zed language extension ones
+- `prefer_lsp`: Whether to prefer LSP-provided tasks over Asylum language extension ones
 
 ## Telemetry
 
-- Description: Control what info is collected by Zed.
+- Description: Control what info is collected by Asylum.
 - Setting: `telemetry`
 - Default:
 
@@ -4700,7 +4700,7 @@ List of `integer` column numbers
 
 ### Metrics
 
-- Description: Setting for sending anonymized usage data, such as what languages you're using Zed with.
+- Description: Setting for sending anonymized usage data, such as what languages you're using Asylum with.
 - Setting: `metrics`
 - Default: `true`
 
@@ -5373,7 +5373,7 @@ Example command to set the title: `echo -e "\e]2;New Title\007";`
 }
 ```
 
-Use `"..."` to add regexes without repeating Zed's defaults. In project settings, it extends the user or parent configuration value. Omit `"..."` to replace the inherited list. Set `[]` to clear it. Omitting this setting keeps the inherited list.
+Use `"..."` to add regexes without repeating Asylum's defaults. In project settings, it extends the user or parent configuration value. Omit `"..."` to replace the inherited list. Set `[]` to clear it. Omitting this setting keeps the inherited list.
 
 ```json [settings]
 {
@@ -5422,7 +5422,7 @@ Processing stops at the first regex that matches the terminal line, even if the 
 
 ## Theme
 
-- Description: The theme setting can be specified in two forms - either as the name of a theme or as an object containing the `mode`, `dark`, and `light` themes for the Zed UI.
+- Description: The theme setting can be specified in two forms - either as the name of a theme or as an object containing the `mode`, `dark`, and `light` themes for the Asylum UI.
 - Setting: `theme`
 - Default: `One Dark`
 
@@ -5488,7 +5488,7 @@ Processing stops at the first regex that matches the terminal line, even if the 
 
 ### Dark
 
-- Description: The name of the dark Zed theme to use for the UI.
+- Description: The name of the dark Asylum theme to use for the UI.
 - Setting: `dark`
 - Default: `One Dark`
 
@@ -5498,7 +5498,7 @@ Run the {#action theme_selector::Toggle} action in the command palette to see a 
 
 ### Light
 
-- Description: The name of the light Zed theme to use for the UI.
+- Description: The name of the light Asylum theme to use for the UI.
 - Setting: `light`
 - Default: `One Light`
 
@@ -5542,7 +5542,7 @@ Run the {#action theme_selector::Toggle} action in the command palette to see a 
 - `show_sign_in`: Whether to show the sign in button in the titlebar
 - `show_menus`: Whether to show the menus in the titlebar
 - `open_menus_on_hover`: Whether to open title-bar menus on hover. Once a menu is open, hovering always switches between menus.
-- `button_layout`: The layout of window control buttons in the title bar (Linux only). Can be set to `"platform_default"` to follow the system setting, `"standard"` to use Zed's built-in layout, or a custom format like `"close:minimize,maximize"`
+- `button_layout`: The layout of window control buttons in the title bar (Linux only). Can be set to `"platform_default"` to follow the system setting, `"standard"` to use Asylum's built-in layout, or a custom format like `"close:minimize,maximize"`
 
 ## Window Title Format
 
@@ -5565,7 +5565,7 @@ Available variables:
 | `fileStem`     | File name without extension (e.g. `main`)             |
 | `remoteName`   | Display name of the remote connection, if any         |
 | `remoteHost`   | Host of the remote connection, if any                 |
-| `appName`      | Zed release channel name (e.g. `Zed`, `Zed Nightly`)  |
+| `appName`      | Asylum release channel name (e.g. `Asylum`, `Asylum Nightly`)  |
 | `branch`       | Git branch checked out in the active repository       |
 | `separator`    | Separator string, omitted when neighbors are empty    |
 
@@ -5590,13 +5590,13 @@ Available variables:
 
 ## Window Decorations
 
-- Description: Controls whether Zed or the window manager or compositor draws window decorations.
+- Description: Controls whether Asylum or the window manager or compositor draws window decorations.
 - Setting: `window_decorations`
 - Default: `"client"`
 
 **Options**
 
-1. To have Zed draw its own window decorations, use `"client"`:
+1. To have Asylum draw its own window decorations, use `"client"`:
 
 ```json [settings]
 {
@@ -5612,7 +5612,7 @@ Available variables:
 }
 ```
 
-> Note: This setting only affects Linux. GNOME Wayland does not support server-side decorations. Changes only apply to newly created windows. Restart Zed to apply the setting to all windows.
+> Note: This setting only affects Linux. GNOME Wayland does not support server-side decorations. Changes only apply to newly created windows. Restart Asylum to apply the setting to all windows.
 
 ## Vim
 
@@ -5638,7 +5638,7 @@ Available variables:
 **Options**
 
 - `enabled`: Whether to show the which-key menu. When enabled, the pending keystrokes indicator remains visible, but its binding preview popover is disabled.
-- `delay_ms`: How long Zed waits before showing the menu, in milliseconds.
+- `delay_ms`: How long Asylum waits before showing the menu, in milliseconds.
 
 ## When Closing With No Tabs
 
@@ -6099,7 +6099,7 @@ Visit [AI Quick Start](../ai/quick-start.md) under the AI section to learn more 
 
 ### Subagent Model {#agent-subagent-model}
 
-- Description: The model, reasoning, and speed settings for new Zed Agent subagents. This setting does not configure external agents. See [Subagent Models](../ai/agent-settings.md#subagent-models).
+- Description: The model, reasoning, and speed settings for new Asylum Agent subagents. This setting does not configure external agents. See [Subagent Models](../ai/agent-settings.md#subagent-models).
 - Setting: `agent.subagent_model`
 
 ## Collaboration Panel
@@ -6141,7 +6141,7 @@ Visit [AI Quick Start](../ai/quick-start.md) under the AI section to learn more 
 }
 ```
 
-See the [debugger page](../debugger.md) for more information about debugging support within Zed.
+See the [debugger page](../debugger.md) for more information about debugging support within Asylum.
 
 ## Git Panel
 
@@ -6337,7 +6337,7 @@ Float values between `0.0` and `0.9`, where:
 
 **Options**
 
-The name of any font family installed on the system, `".ZedSans"` to use the Zed-provided default, or `".SystemUIFont"` to use the system's default UI font (on macOS and Windows).
+The name of any font family installed on the system, `".ZedSans"` to use the Asylum-provided default, or `".SystemUIFont"` to use the system's default UI font (on macOS and Windows).
 
 ## UI Font Features
 
@@ -6357,7 +6357,7 @@ The name of any font family installed on the system, `".ZedSans"` to use the Zed
 
 **Options**
 
-Zed supports all OpenType features that can be enabled or disabled for a given UI font, as well as setting values for font features.
+Asylum supports all OpenType features that can be enabled or disabled for a given UI font, as well as setting values for font features.
 
 For example, to disable font ligatures, add the following to your settings:
 
@@ -6423,7 +6423,7 @@ For example, to use `Nerd Font` as a fallback, add the following to your setting
 - Default: `{}`
 
 In your `settings.json` file, add the `profiles` object.
-Each key within this object is the name of a settings profile. Each profile has an optional `base` field (`"user"` or `"default"`) and a `settings` object containing any of Zed's settings.
+Each key within this object is the name of a settings profile. Each profile has an optional `base` field (`"user"` or `"default"`) and a `settings` object containing any of Asylum's settings.
 
 Example:
 
@@ -6465,7 +6465,7 @@ To preview and enable a settings profile, open the command palette via {#kb comm
 ## An example configuration:
 
 ```json [settings]
-// ~/.config/zed/settings.json
+// ~/.config/asylum/settings.json
 {
   "theme": "cave-light",
   "tab_size": 2,

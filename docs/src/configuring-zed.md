@@ -1,17 +1,17 @@
 ---
-title: Configuring Zed - Settings and Preferences
-description: Configure Zed with the Settings Editor, JSON files, and project-specific overrides. Covers all settings options.
+title: Configuring Asylum - Settings and Preferences
+description: Configure Asylum with the Settings Editor, JSON files, and project-specific overrides. Covers all settings options.
 ---
 
-# Configuring Zed
+# Configuring Asylum
 
-This guide explains how Zed's settings system works, including the Settings Editor, JSON configuration files, and project-specific settings.
+This guide explains how Asylum's settings system works, including the Settings Editor, JSON configuration files, and project-specific settings.
 
 For visual customization (themes, fonts, icons), see [Appearance](./appearance.md).
 
 ## Settings Editor
 
-The **Settings Editor** ({#kb zed::OpenSettings}) is the primary way to configure Zed. It provides a searchable interface where you can browse available settings, see their current values, and make changes.
+The **Settings Editor** ({#kb zed::OpenSettings}) is the primary way to configure Asylum. It provides a searchable interface where you can browse available settings, see their current values, and make changes.
 
 To open it:
 
@@ -30,9 +30,9 @@ Your user settings apply globally across all projects. Open the file with {#kb z
 
 The file is located at:
 
-- macOS: `~/.config/zed/settings.json`
-- Linux: `~/.config/zed/settings.json` (or `$XDG_CONFIG_HOME/zed/settings.json`)
-- Windows: `%APPDATA%\Zed\settings.json`
+- macOS: `~/.config/asylum/settings.json`
+- Linux: `~/.config/asylum/settings.json` (or `$XDG_CONFIG_HOME/asylum/settings.json`)
+- Windows: `%APPDATA%\Asylum\settings.json`
 
 The syntax is JSON with support for `//` comments.
 
@@ -63,7 +63,7 @@ You can also add settings files in subdirectories for more granular control.
 
 Settings are applied in layers:
 
-1. **Default settings** — Zed's built-in defaults
+1. **Default settings** — Asylum's built-in defaults
 2. **User settings** — Your global preferences
 3. **Project settings** — Project-specific overrides
 
@@ -71,7 +71,7 @@ Later layers override earlier ones. For object settings (like `terminal`), prope
 
 ## Per-file Settings
 
-Zed has some compatibility support for Emacs and Vim [modelines](./modelines.md), so you can set some settings per-file.
+Asylum has some compatibility support for Emacs and Vim [modelines](./modelines.md), so you can set some settings per-file.
 
 ## Per-Release Channel Overrides
 
@@ -101,12 +101,12 @@ Changes made in the Settings Editor apply across all channels.
 
 ## Settings Deep Links
 
-Zed supports deep links that open specific settings directly:
+Asylum supports deep links that open specific settings directly:
 
 ```
-zed://settings/theme
-zed://settings/vim_mode
-zed://settings/buffer_font_size
+asylum://settings/theme
+asylum://settings/vim_mode
+asylum://settings/buffer_font_size
 ```
 
 These are useful for sharing configuration tips or linking from documentation.

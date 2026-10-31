@@ -1,15 +1,15 @@
 ---
-title: Building Zed for FreeBSD
-description: "Guide to building zed for freebsd for Zed development."
+title: Building Asylum for FreeBSD
+description: "Guide to building zed for freebsd for Asylum development."
 ---
 
-# Building Zed for FreeBSD
+# Building Asylum for FreeBSD
 
 FreeBSD is not currently a supported platform, so this guide is a work in progress.
 
 ## Repository
 
-Clone the [Zed repository](https://github.com/zed-industries/zed).
+Clone the [Asylum repository](https://github.com/viniengelage/asylum).
 
 ## Dependencies
 
@@ -19,11 +19,11 @@ Clone the [Zed repository](https://github.com/zed-industries/zed).
   script/freebsd
   ```
 
-  If preferred, you can inspect [`script/freebsd`](https://github.com/zed-industries/zed/blob/main/script/freebsd) and perform the steps manually.
+  If preferred, you can inspect [`script/freebsd`](https://github.com/viniengelage/asylum/blob/main/script/freebsd) and perform the steps manually.
 
 ## Building from source
 
-Once the dependencies are installed, you can build Zed using [Cargo](https://doc.rust-lang.org/cargo/).
+Once the dependencies are installed, you can build Asylum using [Cargo](https://doc.rust-lang.org/cargo/).
 
 For a debug build of the editor:
 
@@ -47,7 +47,7 @@ cargo run -p cli
 
 Building `webrtc-sys` on FreeBSD currently fails due to missing upstream support and unavailable prebuilt binaries. As a result, collaboration features that depend on WebRTC (audio calls and screen sharing) are temporarily disabled.
 
-See [Issue #15309: FreeBSD Support] and [Discussion #29550: Unofficial FreeBSD port for Zed] for more.
+See [Issue #15309: FreeBSD Support] and [Discussion #29550: Unofficial FreeBSD port for Asylum] for more.
 
 ## Troubleshooting
 

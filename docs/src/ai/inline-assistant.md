@@ -1,6 +1,6 @@
 ---
-title: Inline AI Code Editing - Zed
-description: Transform code inline with AI in Zed. Send selections to any LLM for refactoring, generation, or editing with multi-cursor support.
+title: Inline AI Code Editing - Asylum
+description: Transform code inline with AI in Asylum. Send selections to any LLM for refactoring, generation, or editing with multi-cursor support.
 ---
 
 # Inline Assistant
@@ -16,12 +16,12 @@ The Inline Assistant sends your current selection (or line) to a language model 
 If you're using the Inline Assistant for the first time, you need to have at least one [LLM provider](./llm-providers.md) configured.
 You can do that by:
 
-1. [using Zed-hosted models](../account/zed-hosted-models.md), so you have access to models billed through Zed
-2. [using API access](./use-api-access.md), either from model providers like Anthropic or model gateways like OpenRouter.
+1. [using API access](./use-api-access.md), either from model providers like Anthropic or model gateways like OpenRouter.
+2. [using a local model](./use-a-local-model.md).
 
 If you have already set up an LLM provider to interact with [the Agent Panel](./agent-panel.md#getting-started), then that will also work for the Inline Assistant.
 
-[External Agents](./external-agents.md) run in agent threads, but they are not available for Inline Assistant generations. The Inline Assistant uses Zed-configured [LLM providers](./llm-providers.md), including Zed-hosted models, provider API keys, gateways, [local models](./use-a-local-model.md), and supported subscriptions.
+[External Agents](./external-agents.md) run in agent threads, but they are not available for Inline Assistant generations. The Inline Assistant uses Asylum-configured [LLM providers](./llm-providers.md), including provider API keys, gateways, [local models](./use-a-local-model.md), and supported subscriptions.
 
 ## Adding Context
 
@@ -52,12 +52,12 @@ Here's how you can customize your settings file ([how to edit](../configuring-ze
 {
   "agent": {
     "default_model": {
-      "provider": "zed.dev",
+      "provider": "anthropic",
       "model": "claude-sonnet-4-5"
     },
     "inline_alternatives": [
       {
-        "provider": "zed.dev",
+        "provider": "openai",
         "model": "gpt-5-mini"
       }
     ]
@@ -76,16 +76,16 @@ One with Claude Sonnet 4.5 (the default model), another with GPT-5-mini, and ano
 {
   "agent": {
     "default_model": {
-      "provider": "zed.dev",
+      "provider": "anthropic",
       "model": "claude-sonnet-4-5"
     },
     "inline_alternatives": [
       {
-        "provider": "zed.dev",
+        "provider": "openai",
         "model": "gpt-5-mini"
       },
       {
-        "provider": "zed.dev",
+        "provider": "google",
         "model": "gemini-3-flash"
       }
     ]
@@ -98,7 +98,7 @@ One with Claude Sonnet 4.5 (the default model), another with GPT-5-mini, and ano
 Both features generate inline code, but they work differently:
 
 - **Inline Assistant**: You write a prompt and select what to transform. You control the context.
-- **[Edit Prediction](./edit-prediction.md)**: Zed automatically suggests edits based on your recent changes, visited files, and cursor position. No prompting required.
+- **[Edit Prediction](./edit-prediction.md)**: Asylum automatically suggests edits based on your recent changes, visited files, and cursor position. No prompting required.
 
 The key difference: Inline Assistant is explicit and prompt-driven; Edit Prediction is automatic and context-inferred.
 

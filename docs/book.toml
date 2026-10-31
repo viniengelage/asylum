@@ -1,9 +1,9 @@
 [book]
-authors = ["The Zed Team"]
+authors = ["Vinicios Engelage", "The Zed Team"]
 language = "en"
 multilingual = false
 src = "src"
-title = "Zed"
+title = "Asylum Docs"
 site-url = "/docs/"
 
 [build]
@@ -20,12 +20,13 @@ command = "cargo run -p docs_preprocessor -- postprocess"
 smart-punctuation = true
 # Set here instead of above as we only use it replace the `#description#` we set in the template
 # when no front-matter is provided value
-default-description = "Learn how to use and customize Zed, the fast, collaborative code editor. Official docs on features, configuration, AI tools, and workflows."
-default-title = "Zed Code Editor Documentation"
+default-description = "Learn how to use and customize Asylum, a fork of the Zed code editor. Docs on features, configuration, AI tools, and workflows."
+default-title = "Asylum Documentation"
 no-section-label = true
 preferred-dark-theme = "dark"
-additional-css = ["theme/page-toc.css", "theme/plugins.css", "theme/highlight.css", "theme/consent-banner.css"]
-additional-js  = ["redirects/legacy-fragment-redirects.js", "theme/page-toc.js", "theme/plugins.js", "theme/c15t@2.0.0-rc.3.js", "theme/analytics.js"]
+git-repository-url = "https://github.com/viniengelage/asylum"
+additional-css = ["theme/page-toc.css", "theme/plugins.css", "theme/highlight.css"]
+additional-js  = ["redirects/legacy-fragment-redirects.js", "theme/page-toc.js", "theme/plugins.js"]
 
 [output.zed-html.print]
 enable = false
@@ -36,9 +37,8 @@ enable = false
 # 1. Not start with `/docs`
 # 2. End in `.html`
 #
-# The destination URLs are interpreted relative to `https://zed.dev`.
+# The destination URLs are interpreted relative to the site root.
 # - Redirects to other docs pages should end in `.html`
-# - You can link to pages on the Zed site by omitting the `/docs` in front of it.
 [output.zed-html.redirect]
 # AI
 "/ai.html" = "/docs/ai/overview.html"
@@ -54,25 +54,12 @@ enable = false
 "/assistant/model-context-protocol.html" = "/docs/ai/mcp.html"
 "/assistant/prompting.html" = "/docs/ai/skills.html"
 "/language-model-integration.html" = "/docs/assistant/assistant.html"
-"/model-improvement.html" = "/docs/ai/ai-improvement.html"
 "/ai/temperature.html" = "/docs/ai/agent-settings.html#model-temperature"
-"/ai/subscription.html" = "/docs/account/zed-hosted-models.html"
-"/ai/models.html" = "/docs/account/zed-hosted-models.html"
-"/ai/plans-and-usage.html" = "/docs/account/plans-and-pricing.html"
-"/ai/billing.html" = "/docs/account/billing.html"
 "/ai/configuration.html" = "/docs/ai/quick-start.html"
 "/ai/set-up-ai.html" = "/docs/ai/quick-start.html"
 
 # Core
 "/configuring-zed.html" = "/docs/reference/all-settings.html"
-
-# Collaboration
-"/channels.html" = "/docs/collaboration/channels.html"
-"/collaboration.html" = "/docs/collaboration/overview.html"
-
-# Community
-"/community/feedback.html" = "/community-links"
-"/conversations.html" = "/community-links"
 
 # Debugger
 "/debuggers.html" = "/docs/debugger.html"
@@ -95,7 +82,7 @@ enable = false
 "/python.html" = "/docs/languages/python.html"
 "/ruby.html" = "/docs/languages/ruby.html"
 
-# Zed development
+# Asylum development
 "/contribute-to-zed.html" = "/docs/development.html#contributor-links"
 "/contributing.html" = "/docs/development.html#contributor-links"
 "/developing-zed.html" = "/docs/development.html"

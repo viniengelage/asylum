@@ -1,13 +1,13 @@
 ---
-title: Use a Gateway - Zed
-description: Configure OpenRouter, Vercel AI Gateway, Amazon Bedrock, and other gateway or cloud model platforms in Zed.
+title: Use a Gateway - Asylum
+description: Configure OpenRouter, Vercel AI Gateway, Amazon Bedrock, and other gateway or cloud model platforms in Asylum.
 ---
 
 # Use a Gateway
 
 Use a gateway when you route model requests through a platform such as OpenRouter, Vercel AI Gateway, Amazon Bedrock, or another OpenAI-compatible service.
 
-| Gateway                   | Zed AI features | [External Agents](./external-agents.md) | Terminal Threads | Notes                                        |
+| Gateway                   | Asylum AI features | [External Agents](./external-agents.md) | Terminal Threads | Notes                                        |
 | ------------------------- | --------------- | --------------------------------------- | ---------------- | -------------------------------------------- |
 | OpenRouter                | Yes             | Separate config                         | Separate config  | Uses OpenRouter API access                   |
 | Vercel AI Gateway         | Yes             | Separate config                         | Separate config  | Uses Vercel AI Gateway API access            |
@@ -16,14 +16,14 @@ Use a gateway when you route model requests through a platform such as OpenRoute
 
 ## OpenRouter {#openrouter}
 
-Use OpenRouter when you want to route Zed AI features through OpenRouter.
+Use OpenRouter when you want to route Asylum AI features through OpenRouter.
 
 1. Visit [OpenRouter](https://openrouter.ai) and create an account.
 2. Generate an API key from your [OpenRouter keys page](https://openrouter.ai/keys).
 3. Open **Settings → AI → LLM Providers** with {#action agent::OpenSettings} and find the OpenRouter row.
 4. Enter your OpenRouter API key.
 
-Zed also reads `OPENROUTER_API_KEY` from the local Zed process environment.
+Asylum also reads `OPENROUTER_API_KEY` from the local Asylum process environment.
 
 When using OpenRouter as your assistant provider, explicitly select a model in your settings:
 
@@ -101,13 +101,13 @@ Supported fields include `order`, `allow_fallbacks`, `require_parameters`, `data
 
 ## Vercel AI Gateway {#vercel-ai-gateway}
 
-Use Vercel AI Gateway when you want to route Zed AI features through Vercel.
+Use Vercel AI Gateway when you want to route Asylum AI features through Vercel.
 
 1. Create an API key from your Vercel AI Gateway keys page.
 2. Open **Settings → AI → LLM Providers** with {#action agent::OpenSettings} and find the Vercel AI Gateway row.
 3. Enter your Vercel AI Gateway API key.
 
-Zed also reads `VERCEL_AI_GATEWAY_API_KEY` from the local Zed process environment.
+Asylum also reads `VERCEL_AI_GATEWAY_API_KEY` from the local Asylum process environment.
 
 You can set a custom endpoint for Vercel AI Gateway in settings:
 
@@ -132,7 +132,7 @@ Your AWS credentials need these permissions:
 - `bedrock:InvokeModelWithResponseStream`
 - `bedrock:InvokeModel`
 
-Bedrock supports Zed-prefixed AWS environment variables so Zed does not override or consume your normal AWS credentials:
+Bedrock supports `ZED_`-prefixed AWS environment variables so Asylum does not override or consume your normal AWS credentials:
 
 - `ZED_ACCESS_KEY_ID`
 - `ZED_SECRET_ACCESS_KEY`
@@ -179,9 +179,9 @@ The API key itself is stored in the system keychain, not in `settings.json`.
 
 ### Bedrock Cross-Region Inference {#bedrock-cross-region-inference}
 
-Zed uses [Cross-Region inference](https://docs.aws.amazon.com/bedrock/latest/userguide/cross-region-inference.html) for Bedrock on a best-effort basis.
+Asylum uses [Cross-Region inference](https://docs.aws.amazon.com/bedrock/latest/userguide/cross-region-inference.html) for Bedrock on a best-effort basis.
 
-By default, Zed uses regional inference profiles. To opt into global profiles, add `allow_global`:
+By default, Asylum uses regional inference profiles. To opt into global profiles, add `allow_global`:
 
 ```json [settings]
 {
@@ -215,7 +215,7 @@ Some AWS environments require a guardrail on every Bedrock API call. Add `guardr
 
 ### Custom Bedrock Models {#bedrock-custom-models}
 
-Add models that are not yet built into Zed with `available_models`. Use the Bedrock model ID as `name`, including a region prefix when you want a specific inference profile:
+Add models that are not yet built into Asylum with `available_models`. Use the Bedrock model ID as `name`, including a region prefix when you want a specific inference profile:
 
 ```json [settings]
 {
@@ -270,7 +270,7 @@ To send Bedrock Converse requests to a proxy or gateway instead of AWS, set `end
 
 [Mantle models](#bedrock-mantle-models), including the built-in GPT-5.6, GPT-5.5, GPT-5.4, and Grok 4.3 models and any models in `mantle_available_models`, are called through a different service with a different request shape, so they ignore `endpoint_url` and go to AWS.
 
-If your gateway serves one of those models over the Converse API, add it as a [custom Bedrock model](#bedrock-custom-models) so Zed calls it through `endpoint_url`. Use the model ID your gateway expects as `name`:
+If your gateway serves one of those models over the Converse API, add it as a [custom Bedrock model](#bedrock-custom-models) so Asylum calls it through `endpoint_url`. Use the model ID your gateway expects as `name`:
 
 ```json [settings]
 {
@@ -296,9 +296,9 @@ Don't use an ID that a Mantle model already uses as `name`, whether it's built i
 
 ### Bedrock Mantle Models {#bedrock-mantle-models}
 
-Some models, such as the GPT-5.6 family (Sol, Terra, and Luna), GPT-5.5, GPT-5.4, and Grok 4.3, aren't available through Bedrock's Converse API and are only reachable through `bedrock-mantle`, AWS's OpenAI-compatible inference endpoint. Zed routes these models through `bedrock-mantle` automatically; they appear alongside the rest of the Bedrock models in the model picker once you're authenticated, with no extra configuration required.
+Some models, such as the GPT-5.6 family (Sol, Terra, and Luna), GPT-5.5, GPT-5.4, and Grok 4.3, aren't available through Bedrock's Converse API and are only reachable through `bedrock-mantle`, AWS's OpenAI-compatible inference endpoint. Asylum routes these models through `bedrock-mantle` automatically; they appear alongside the rest of the Bedrock models in the model picker once you're authenticated, with no extra configuration required.
 
-Mantle models require IAM permissions for the `bedrock-mantle` endpoint (for example via the `AmazonBedrockMantleInferenceAccess` managed policy) in addition to whatever permissions your existing Bedrock credentials already have, and `bedrock-mantle` is only available in [some AWS Regions](https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-mantle.html#regions). Zed surfaces an error naming the current Region and the supported ones if you try to use a Mantle model outside of them.
+Mantle models require IAM permissions for the `bedrock-mantle` endpoint (for example via the `AmazonBedrockMantleInferenceAccess` managed policy) in addition to whatever permissions your existing Bedrock credentials already have, and `bedrock-mantle` is only available in [some AWS Regions](https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-mantle.html#regions). Asylum surfaces an error naming the current Region and the supported ones if you try to use a Mantle model outside of them.
 
 #### Custom Bedrock Mantle Models {#bedrock-mantle-custom-models}
 
@@ -324,7 +324,7 @@ You can add custom models served through `bedrock-mantle` with `mantle_available
 }
 ```
 
-`protocol` selects which OpenAI-compatible API the model is called through, and must be either `chat_completions` or `responses`. Set `supports_thinking` to `true` for custom Mantle models that accept OpenAI reasoning effort parameters; Zed will then expose `low`, `medium`, `high`, and `xhigh` in the thinking effort picker, while disabling thinking sends `none`.
+`protocol` selects which OpenAI-compatible API the model is called through, and must be either `chat_completions` or `responses`. Set `supports_thinking` to `true` for custom Mantle models that accept OpenAI reasoning effort parameters; Asylum will then expose `low`, `medium`, `high`, and `xhigh` in the thinking effort picker, while disabling thinking sends `none`.
 
 ## OpenAI-Compatible Gateways {#openai-compatible}
 

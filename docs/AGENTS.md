@@ -130,11 +130,11 @@ Images are hosted externally. Reference format:
 
 ### Core Principles
 
-- **Practical over promotional**: Focus on what users can do, not on selling Zed. Avoid marketing language like "powerful," "revolutionary," or "best-in-class."
-- **Honest about limitations**: When Zed lacks a feature or doesn't match another tool's depth, say so directly. Pair limitations with workarounds or alternative workflows.
+- **Practical over promotional**: Focus on what users can do, not on selling Asylum. Avoid marketing language like "powerful," "revolutionary," or "best-in-class."
+- **Honest about limitations**: When Asylum lacks a feature or doesn't match another tool's depth, say so directly. Pair limitations with workarounds or alternative workflows.
 - **Direct and concise**: Use short sentences. Get to the point. Developers are scanning, not reading novels.
 - **Second person**: Address the reader as "you." Avoid "the user" or "one."
-- **Present tense**: "Zed opens the file" not "Zed will open the file."
+- **Present tense**: "Asylum opens the file" not "Asylum will open the file."
 
 ### What to Avoid
 
@@ -160,13 +160,13 @@ Or add this to your settings.json:
 ### Bad: Wordy and promotional
 
 ```
-Zed provides a powerful and seamless formatting experience. Simply navigate to the settings and you'll find the format_on_save option which enables Zed's incredible auto-formatting capabilities.
+Asylum provides a powerful and seamless formatting experience. Simply navigate to the settings and you'll find the format_on_save option which enables Asylum's incredible auto-formatting capabilities.
 ```
 
 ### Good: Honest about limitations
 
 ```
-Zed doesn't index your project like IntelliJ does. You open a folder and start working immediately—no waiting. The trade-off: cross-project analysis relies on language servers, which may not go as deep.
+Asylum doesn't index your project like IntelliJ does. You open a folder and start working immediately—no waiting. The trade-off: cross-project analysis relies on language servers, which may not go as deep.
 
 **How to adapt:**
 - Use `Cmd+Shift+F` for project-wide text search
@@ -176,7 +176,7 @@ Zed doesn't index your project like IntelliJ does. You open a folder and start w
 ### Bad: Defensive or dismissive
 
 ```
-While some users might miss indexing, Zed's approach is actually better because it's faster.
+While some users might miss indexing, Asylum's approach is actually better because it's faster.
 ```
 
 ## Scope
@@ -266,11 +266,11 @@ Inherit all conventions from `docs/.rules`. Key points:
 | panel           | tool window, sidebar (be specific: "Project Panel," "Terminal Panel") |
 | language server | LSP (spell out first use, then LSP is fine)                           |
 
-## Zed-Specific Conventions
+## Asylum-Specific Conventions
 
 ### Recognized Rules Files
 
-When documenting rules/instructions for AI, note that Zed recognizes these files (in priority order):
+When documenting rules/instructions for AI, note that Asylum recognizes these files (in priority order):
 
 - `.rules`
 - `.cursorrules`
@@ -284,15 +284,15 @@ When documenting rules/instructions for AI, note that Zed recognizes these files
 
 ### Settings File Locations
 
-- macOS: `~/.config/zed/settings.json`
-- Linux: `~/.config/zed/settings.json`
-- Windows: `%AppData%\Zed\settings.json`
+- macOS: `~/.config/asylum/settings.json`
+- Linux: `~/.config/asylum/settings.json`
+- Windows: `%AppData%\Asylum\settings.json`
 
 ### Keymap File Locations
 
-- macOS: `~/.config/zed/keymap.json`
-- Linux: `~/.config/zed/keymap.json`
-- Windows: `%AppData%\Zed\keymap.json`
+- macOS: `~/.config/asylum/keymap.json`
+- Linux: `~/.config/asylum/keymap.json`
+- Windows: `%AppData%\Asylum\keymap.json`
 
 ## Safety Constraints
 

@@ -1,24 +1,24 @@
 ---
 title: Windows & Projects
-description: "How Zed handles multiple projects in windows, including the threads sidebar and options for opening in new windows."
+description: "How Asylum handles multiple projects in windows, including the threads sidebar and options for opening in new windows."
 ---
 
 # Windows & Projects
 
-Zed lets you work on multiple projects in a single window. Projects appear in the threads sidebar on the left, and you can switch between them while keeping your context intact.
+Asylum lets you work on multiple projects in a single window. Projects appear in the threads sidebar on the left, and you can switch between them while keeping your context intact.
 
 Use **Panel Layout > Agentic** from the user menu in the title bar (or the {#action workspace::UseAgenticLayout} action) to keep the Threads Sidebar and [Agent Panel](./ai/agent-panel.md) together on the left. Use **Panel Layout > Classic** (or {#action workspace::UseClassicLayout}) to restore the editor-oriented layout.
 
 ## How Projects Open
 
-By default, when you open a folder in Zed, it opens as a new project in your current window's threads sidebar rather than creating a new window. This keeps related work together and preserves your agent threads and layout.
+By default, when you open a folder in Asylum, it opens as a new project in your current window's threads sidebar rather than creating a new window. This keeps related work together and preserves your agent threads and layout.
 
 | Action             | Result                                    |
 | ------------------ | ----------------------------------------- |
 | File > Open        | Opens in current window (threads sidebar) |
 | File > Open Recent | Opens in current window (threads sidebar) |
-| Drag folder to Zed | Opens in current window (threads sidebar) |
-| `zed ~/project`    | Opens in current window (threads sidebar) |
+| Drag folder to Asylum | Opens in current window (threads sidebar) |
+| `asylum ~/project`    | Opens in current window (threads sidebar) |
 
 ## Working with Multiple Projects
 
@@ -47,7 +47,7 @@ When using File > Open Recent ({#kb projects::OpenRecent}):
 Use the `-n` flag to force a new window:
 
 ```sh
-zed -n ~/projects/other-project
+asylum -n ~/projects/other-project
 ```
 
 Other CLI options for controlling window behavior:
@@ -62,7 +62,7 @@ See [CLI Reference](./reference/cli.md) for full details.
 
 ### Via Settings
 
-You can change the default behavior by setting `cli_default_open_behavior`, which controls CLI opens, and `default_open_behavior`, which controls UI project opens and external open requests, such as macOS Finder's `Open With > Zed`.
+You can change the default behavior by setting `cli_default_open_behavior`, which controls CLI opens, and `default_open_behavior`, which controls UI project opens and external open requests, such as macOS Finder's `Open With > Asylum`.
 
 To use separate windows, open the Settings Editor and search for `CLI Default Open Behavior` or `Default Open Behavior`, setting either or both to `new_window`. Or add this to your settings.json:
 
@@ -94,4 +94,4 @@ This adds the folder as an additional root in your current project's file tree, 
 
 - [Threads Sidebar](./ai/parallel-agents.md#threads-sidebar): Managing threads across projects
 - [Getting Started](./getting-started.md): Essential commands and setup
-- [VS Code Migration](./migrate/vs-code.md): How Zed's project model differs from VS Code
+- [VS Code Migration](./migrate/vs-code.md): How Asylum's project model differs from VS Code

@@ -1,6 +1,6 @@
 ---
-title: Agent Settings - Zed
-description: Map the AI settings pages to Zed AI setup for LLM providers, External Agents, MCP servers, and related settings.
+title: Agent Settings - Asylum
+description: Map the AI settings pages to Asylum AI setup for LLM providers, External Agents, MCP servers, and related settings.
 ---
 
 # Agent Settings
@@ -16,11 +16,11 @@ Within the AI page, LLM Providers, External Agents, and MCP Servers each open as
 | Settings Editor | {#action agent::OpenSettings}   | AI settings: LLM providers, External Agents, MCP servers, and related pages |
 | Settings file   | {#action zed::OpenSettingsFile} | Direct JSON edits and settings not exposed in UI                            |
 
-For general settings mechanics, see [Configuring Zed](../configuring-zed.md).
+For general settings mechanics, see [Configuring Asylum](../configuring-zed.md).
 
 ## LLM Providers {#llm-providers}
 
-The `LLM Providers` section configures model providers for Zed AI features, including Zed Agent, Inline Assistant, Git commit generation, thread summaries, and similar model-backed features.
+The `LLM Providers` section configures model providers for Asylum AI features, including Asylum Agent, Inline Assistant, Git commit generation, thread summaries, and similar model-backed features.
 
 Use this section to:
 
@@ -33,7 +33,7 @@ For the model-access paths and provider-specific setup, see [LLM Providers](./ll
 
 ## Feature-Specific Settings {#feature-specific-settings}
 
-Some Zed AI features have their own model or prompt settings in `settings.json`, including:
+Some Asylum AI features have their own model or prompt settings in `settings.json`, including:
 
 - `agent.inline_assistant_model`
 - `agent.commit_message_model`
@@ -57,7 +57,7 @@ For feature-specific model examples, see [Feature-specific Models](#feature-spec
 
 ## Automatic Compaction {#automatic-compaction}
 
-Zed Agent can automatically compact long threads before they reach the selected model's context window. Compaction summarizes earlier messages and keeps the conversation usable without starting a new thread.
+Asylum Agent can automatically compact long threads before they reach the selected model's context window. Compaction summarizes earlier messages and keeps the conversation usable without starting a new thread.
 
 Automatic compaction is enabled by default and runs when the thread reaches `90%` of the model's context window. You can change the threshold or disable automatic compaction in `settings.json`:
 
@@ -80,9 +80,9 @@ The `threshold` value can be one of:
 | Positive integer, like `100000` | Compact after that many tokens have been used.                                 |
 | Negative integer, like `-20000` | Compact once fewer than that many tokens remain in the model's context window. |
 
-`0` is not a valid threshold. If the threshold is invalid, Zed falls back to `90%`.
+`0` is not a valid threshold. If the threshold is invalid, Asylum falls back to `90%`.
 
-You can compact a Zed Agent thread manually at any time by typing `/compact` in the Agent Panel message editor. For more on thread token usage and compaction behavior, see [Token Usage and Compaction](./agent-panel.md#token-usage).
+You can compact an Asylum Agent thread manually at any time by typing `/compact` in the Agent Panel message editor. For more on thread token usage and compaction behavior, see [Token Usage and Compaction](./agent-panel.md#token-usage).
 
 ## Compaction Model {#compaction-model}
 
@@ -120,7 +120,7 @@ For setup details and support boundaries, see [External Agents](./external-agent
 
 ## MCP Servers {#mcp-servers}
 
-The `MCP Servers` page configures Model Context Protocol servers connected to Zed.
+The `MCP Servers` page configures Model Context Protocol servers connected to Asylum.
 
 Use `Add Server` (in the page header) to:
 
@@ -142,23 +142,23 @@ Some AI settings are not configured on the AI settings pages:
 
 | Task                                                         | Go to                                          |
 | ------------------------------------------------------------ | ---------------------------------------------- |
-| Choose which tools are available in a Zed Agent thread       | [Agent Profiles](./agent-profiles.md)          |
+| Choose which tools are available in an Asylum Agent thread       | [Agent Profiles](./agent-profiles.md)          |
 | Control whether tool calls are allowed, denied, or confirmed | [Tool Permissions](./tool-permissions.md)      |
 | Configure reusable task instructions                         | [Skills](./skills.md)                          |
 | Configure always-on personal or project instructions         | [Instructions](./instructions.md)              |
 | Configure edit prediction providers                          | [Edit Prediction](./edit-prediction.md)        |
 | Turn AI off                                                  | [AI Quick Start](./quick-start.md#turn-ai-off) |
-| Edit raw settings JSON                                       | [Configuring Zed](../configuring-zed.md)       |
+| Edit raw settings JSON                                       | [Configuring Asylum](../configuring-zed.md)       |
 
 ## Feature-Specific Models {#feature-specific-models}
 
-Zed supports feature-specific model settings for Inline Assistant, Git commit generation, thread summaries, and subagents. Configure these in settings when you need a different model for a specific workflow.
+Asylum supports feature-specific model settings for Inline Assistant, Git commit generation, thread summaries, and subagents. Configure these in settings when you need a different model for a specific workflow.
 
 See [LLM Providers](./llm-providers.md) for model access, and [All Settings](../reference/all-settings.md) for the complete settings reference.
 
 ### Subagent Models {#subagent-models}
 
-By default, Zed Agent's subagents inherit the parent thread's model, thinking setting, reasoning effort, and speed. Set `agent.subagent_model` in `settings.json` to choose separate model, reasoning, and speed settings. You can override the model by asking the agent to use a specific model for a subagent. When that model matches the provider and model in `agent.subagent_model`, its `enable_thinking`, `effort`, and `speed` settings are preserved. This setting does not configure [External Agents](./external-agents.md).
+By default, Asylum Agent's subagents inherit the parent thread's model, thinking setting, reasoning effort, and speed. Set `agent.subagent_model` in `settings.json` to choose separate model, reasoning, and speed settings. You can override the model by asking the agent to use a specific model for a subagent. When that model matches the provider and model in `agent.subagent_model`, its `enable_thinking`, `effort`, and `speed` settings are preserved. This setting does not configure [External Agents](./external-agents.md).
 
 Configure this setting with a `provider` and `model`. To choose a reasoning effort for a model that supports it, also set `enable_thinking` and `effort`:
 
@@ -179,7 +179,7 @@ Choose an `effort` value supported by the selected model. Omitting `effort` from
 
 To find supported effort values:
 
-1. Choose the target provider and model from the model selector in a native Zed Agent thread, even if it is already selected, to save it as `agent.default_model`.
+1. Choose the target provider and model from the model selector in a native Asylum Agent thread, even if it is already selected, to save it as `agent.default_model`.
 2. Enable thinking if it is off, then open the thinking effort menu. The "Change Thinking Effort" menu lists the model's supported levels. If the model offers no effort choices, omit `effort`.
 3. Choose a level and read `agent.default_model.effort` in `settings.json` for the exact value to use in `agent.subagent_model.effort`.
 
@@ -202,7 +202,7 @@ The agent can only request a model for a subagent, not a separate effort or spee
 
 ## Model Temperature {#model-temperature}
 
-Most Zed AI features use the selected model's default generation behavior.
+Most Asylum AI features use the selected model's default generation behavior.
 Use `agent.model_parameters` when you need to set a temperature for a provider,
 a model, or a specific provider/model pair.
 
@@ -220,7 +220,7 @@ a model, or a specific provider/model pair.
 }
 ```
 
-Zed checks matching entries from last to first. An entry can omit `provider` or
+Asylum checks matching entries from last to first. An entry can omit `provider` or
 `model` to apply more broadly. For provider-specific model configuration such as
 custom model entries, context windows, or gateway routing, see
 [LLM Providers](./llm-providers.md) and the provider setup pages.

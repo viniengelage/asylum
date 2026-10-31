@@ -1,51 +1,120 @@
 > [!IMPORTANT]
 > Remove this line to confirm you've reviewed this PR before submitting.
 
-# Zed
+<p align="center">
+  <img src="design/asylum/brand/asylum-app-icon.svg" width="112" alt="Asylum">
+</p>
 
-[![Zed](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/zed-industries/zed/main/assets/badge/v0.json)](https://zed.dev)
-[![CI](https://github.com/zed-industries/zed/actions/workflows/run_tests.yml/badge.svg)](https://github.com/zed-industries/zed/actions/workflows/run_tests.yml)
+<h1 align="center">Asylum</h1>
 
-Welcome to Zed, a high-performance, multiplayer code editor from the creators of [Atom](https://github.com/atom/atom) and [Tree-sitter](https://github.com/tree-sitter/tree-sitter).
+<p align="center">
+  A free and open-source code editor for mobile and full-stack development,<br>
+  built on top of <a href="https://github.com/zed-industries/zed">Zed</a>.
+</p>
+
+<p align="center">
+  <a href="https://github.com/viniengelage/asylum/releases/latest">Download</a> ·
+  <a href="#building-from-source">Build from source</a> ·
+  <a href="NOTICE">Notice</a> ·
+  <a href="LICENSE-GPL">License</a>
+</p>
 
 ---
 
-### Installation
+Asylum keeps everything that makes Zed fast (the GPU-rendered UI, tree-sitter, language servers,
+multi-buffers, Vim mode) and adds the tools a mobile and web developer usually keeps in other
+windows: device emulators, a browser, an API client, a database client and an agent that can
+drive all of them. It is free, has no account, no subscription and no hosted services of its own.
 
-On macOS, Linux, and Windows you can [download Zed directly](https://zed.dev/download) or install Zed via your local package manager ([macOS](https://zed.dev/docs/installation#macos)/[Linux](https://zed.dev/docs/linux#installing-via-a-package-manager)/[Windows](https://zed.dev/docs/windows#package-managers)).
+> [!NOTE]
+> Asylum is an independent fork. It is **not** affiliated with or endorsed by Zed Industries.
+> See [NOTICE](NOTICE) for attribution and licensing details.
 
-Other platforms are not yet available:
+## Features
 
-- Web ([tracking discussion](https://github.com/zed-industries/zed/discussions/26195))
+**Devices**
+- **iOS Simulator embedded in the editor** (macOS), with touch, keyboard, rotation and a manager
+  to download runtimes and create simulators.
+- **Android emulator embedded in the editor**: Asylum downloads the JDK, the SDK and the system
+  images on demand and creates the virtual devices for you.
+- React Native / Expo debug adapter.
 
-### Developing Zed
+**Web**
+- **Web Preview**: a Chromium tab inside the workspace (CEF), with DevTools protocol access so the
+  agent can open, inspect and interact with pages.
 
-- [Building Zed for macOS](./docs/src/development/macos.md)
-- [Building Zed for Linux](./docs/src/development/linux.md)
-- [Building Zed for Windows](./docs/src/development/windows.md)
+**Backend tools**
+- **API client** compatible with Postman collections and OpenAPI: environments, captures, cookies,
+  forms and code lenses that send requests straight from your spec.
+- **Database client** for PostgreSQL: query editor, result grid and schema browser.
+- **Docker dock**: containers, logs and actions without leaving the editor.
+- **Elasticsearch dock**: ES|QL queries, live tail and trace view.
 
-### Contributing
+**Asylum Agent**
+- Zed's native agent, reworked to spend fewer tokens (compact tool output, smarter context).
+- Tools to drive the docks: devices, browser, database, API client.
+- **Task agents** (`/command`), **pipelines** with per-step acceptance criteria, **plan mode**,
+  profiles and per-profile toolkits.
+- Bring your own model: Anthropic (including a Claude subscription), OpenAI, Google, Ollama and the
+  other providers supported upstream, plus any ACP agent such as Claude Code or Codex.
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for ways you can contribute to Zed.
+**Workflow**
+- GitHub repositories, pull requests and Projects boards; ClickUp tasks.
+- Profiles with their own data directory, icon and launcher.
+- A unified pane layout tuned for ultrawide monitors, and Asylum's own icon family.
 
-Also... we're hiring! Check out our [jobs](https://zed.dev/jobs) page for open roles.
+## Install
 
-### Licensing
+Download the latest build from the
+[releases page](https://github.com/viniengelage/asylum/releases/latest).
 
-Zed source code is licensed primarily under GPL-3.0-or-later, with Apache-2.0 components where marked.
+| Platform | Status |
+|---|---|
+| macOS (Apple Silicon) | Supported |
+| Windows (x86_64) | Preview: the iOS Simulator is not available, and the Android emulator and Web Preview are still being ported |
+| Linux | Builds from source; no packaged release yet |
 
-License information for third party dependencies must be correctly provided for CI to pass.
+Builds are not notarized yet. On macOS, the first time you open Asylum right-click the app and
+choose **Open**.
 
-We use [`cargo-about`](https://github.com/EmbarkStudios/cargo-about) to automatically comply with open source licenses. If CI is failing, check the following:
+Asylum uses its own data directories (`~/Library/Application Support/Asylum` and
+`~/.config/asylum` on macOS), so it can be installed next to Zed without sharing settings.
 
-- Is it showing a `no license specified` error for a crate you've created? If so, add `publish = false` under `[package]` in your crate's Cargo.toml.
-- Is the error `failed to satisfy license requirements` for a dependency? If so, first determine what license the project has and whether this system is sufficient to comply with this license's requirements. If you're unsure, ask a lawyer. Once you've verified that this system is acceptable add the license's SPDX identifier to the `accepted` array in `script/licenses/zed-licenses.toml`.
-- Is `cargo-about` unable to find the license for a dependency? If so, add a clarification field at the end of `script/licenses/zed-licenses.toml`, as specified in the [cargo-about book](https://embarkstudios.github.io/cargo-about/cli/generate/config.html#crate-configuration).
+## Building from source
 
-## Sponsorship
+Requirements:
 
-Zed is developed by **Zed Industries, Inc.**, a for-profit company.
+- Rust (the toolchain in `rust-toolchain.toml` is installed automatically by `rustup`).
+- macOS: Xcode with the Metal Toolchain (`xcodebuild -downloadComponent MetalToolchain` on
+  Xcode 26+), and [Ninja](https://ninja-build.org/) for the Web Preview (`brew install ninja`).
+- Windows and Linux: see Zed's guides for
+  [Windows](docs/src/development/windows.md) and [Linux](docs/src/development/linux.md);
+  the same dependencies apply.
 
-If you’d like to financially support the project, you can do so via GitHub Sponsors.
-Sponsorships go directly to Zed Industries and are used as general company revenue.
-There are no perks or entitlements associated with sponsorship.
+```sh
+git clone https://github.com/viniengelage/asylum.git
+cd asylum
+cargo run --release
+```
+
+To produce a macOS app bundle and DMG, run `script/bundle-mac`.
+
+## Contributing
+
+Issues and pull requests are welcome. Before opening a pull request, run `./script/clippy` and the
+tests of the crates you touched. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+Asylum is distributed under the same licenses as Zed: **GPL-3.0-or-later** for most of the source
+tree ([LICENSE-GPL](LICENSE-GPL)) and **Apache-2.0** for the components marked as such, such as
+GPUI ([LICENSE-APACHE](LICENSE-APACHE)). Every crate declares its license in its `Cargo.toml`.
+
+Asylum is a modified version of [Zed](https://github.com/zed-industries/zed), © Zed Industries,
+Inc. "Zed" is a trademark of Zed Industries, Inc., used here only to describe where the code comes
+from. The changes Asylum makes are listed in [NOTICE](NOTICE) and in the git history.
+
+Third-party dependency licenses are collected with
+[`cargo-about`](https://github.com/EmbarkStudios/cargo-about) and can be viewed in the app under
+**Help → View Dependency Licenses**. If CI reports a missing license, see
+`script/licenses/zed-licenses.toml`.

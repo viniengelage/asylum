@@ -1,6 +1,6 @@
 ---
-title: Use API Access - Zed
-description: Configure provider API access, API keys, API credits, usage billing, and OpenAI-compatible endpoints for Zed AI features.
+title: Use API Access - Asylum
+description: Configure provider API access, API keys, API credits, usage billing, and OpenAI-compatible endpoints for Asylum AI features.
 ---
 
 # Use API Access
@@ -11,7 +11,7 @@ Paid API credits, usage billing, and top-ups are API access, even when you pay t
 
 ## Supported API Providers {#providers}
 
-Zed supports these first-class API providers for model-backed Zed AI features:
+Asylum supports these first-class API providers for model-backed Asylum AI features:
 
 - [Anthropic](#anthropic)
   - [Custom Anthropic Models](#anthropic-custom-models)
@@ -32,8 +32,8 @@ Zed supports these first-class API providers for model-backed Zed AI features:
 
 ## What API Access Applies To {#support}
 
-Use API access for the Zed Agent, Inline Assistant, Git commit generation,
-thread summaries, and similar Zed-owned AI features.
+Use API access for the Asylum Agent, Inline Assistant, Git commit generation,
+thread summaries, and similar Asylum-owned AI features.
 
 External Agents and Terminal Threads usually configure model access in the
 agent or CLI itself. See [Agents](./agents.md) for the difference between
@@ -41,9 +41,9 @@ agent paths and model access paths.
 
 ## API Keys and Environment Variables {#api-keys}
 
-Most API-access providers can be configured on the **Settings → AI → LLM Providers** page with {#action agent::OpenSettings}. Keys saved through Zed are stored in the system keychain, not in `settings.json`.
+Most API-access providers can be configured on the **Settings → AI → LLM Providers** page with {#action agent::OpenSettings}. Keys saved through Asylum are stored in the system keychain, not in `settings.json`.
 
-Zed also reads provider-specific environment variables. Non-empty [environment variables](../environment.md) take precedence over keychain values. If a key comes from an environment variable, unset the variable and restart Zed to stop using it.
+Asylum also reads provider-specific environment variables. Non-empty [environment variables](../environment.md) take precedence over keychain values. If a key comes from an environment variable, unset the variable and restart Asylum to stop using it.
 
 | Provider          | Environment variable                                  |
 | ----------------- | ----------------------------------------------------- |
@@ -63,7 +63,7 @@ OpenAI-compatible provider environment variables are generated from the configur
 
 ## Custom Headers {#custom-headers}
 
-You can attach extra HTTP headers to every request Zed makes to supported HTTP-based providers. This is useful in corporate environments or for observability tooling.
+You can attach extra HTTP headers to every request Asylum makes to supported HTTP-based providers. This is useful in corporate environments or for observability tooling.
 
 Configure them with `language_models.<provider>.custom_headers`:
 
@@ -82,11 +82,11 @@ Configure them with `language_models.<provider>.custom_headers`:
 
 `custom_headers` is supported by Amazon Bedrock, Anthropic, DeepSeek, Google AI, LM Studio, Mistral, Ollama, OpenAI, OpenAI-compatible providers, OpenCode, OpenRouter, [Vercel AI Gateway](./use-a-gateway.md), and xAI.
 
-Headers managed by Zed for each provider, such as `Authorization`, `Content-Type`, `Accept`, and provider-specific authentication headers, are ignored with a warning if you try to override them.
+Headers managed by Asylum for each provider, such as `Authorization`, `Content-Type`, `Accept`, and provider-specific authentication headers, are ignored with a warning if you try to override them.
 
 ## Remote Projects {#remote-projects}
 
-Zed LLM providers for Zed AI features are initialized in the local Zed app. In SSH, dev container, and other remote projects, API keys saved in Zed are read from the local system keychain, and provider environment variables are read from the local Zed process environment.
+Asylum LLM providers for Asylum AI features are initialized in the local Asylum app. In SSH, dev container, and other remote projects, API keys saved in Asylum are read from the local system keychain, and provider environment variables are read from the local Asylum process environment.
 
 External Agents and Terminal Threads may run their own processes and use their own remote or local environment. See [External Agents](./external-agents.md) and [Terminal Threads](./terminal-threads.md).
 
@@ -101,7 +101,7 @@ Use Anthropic API access when you have an Anthropic API key or API credits. Clau
 3. Open Agent Settings with {#action agent::OpenSettings} and go to the Anthropic section.
 4. Enter your Anthropic API key.
 
-Zed also reads `ANTHROPIC_API_KEY` from the local Zed process environment.
+Asylum also reads `ANTHROPIC_API_KEY` from the local Asylum process environment.
 
 #### Custom Anthropic Models {#anthropic-custom-models}
 
@@ -157,7 +157,7 @@ Use OpenAI API access when you have an OpenAI API key or API billing. ChatGPT Pl
 3. Open Agent Settings with {#action agent::OpenSettings} and go to the OpenAI section.
 4. Enter your OpenAI API key.
 
-Zed also reads `OPENAI_API_KEY` from the local Zed process environment.
+Asylum also reads `OPENAI_API_KEY` from the local Asylum process environment.
 
 #### Custom OpenAI Models {#openai-custom-models}
 
@@ -191,7 +191,7 @@ Use Google AI API access when you have a Gemini API key.
 2. Open [Agent Settings](./agent-settings.md) with {#action agent::OpenSettings} and go to the Google AI section.
 3. Enter your Google AI API key.
 
-Zed reads `GEMINI_API_KEY`, falling back to `GOOGLE_AI_API_KEY`, from the local Zed process environment.
+Asylum reads `GEMINI_API_KEY`, falling back to `GOOGLE_AI_API_KEY`, from the local Asylum process environment.
 
 #### Custom Google AI Models {#google-ai-custom-models}
 
@@ -235,7 +235,7 @@ Use Mistral API access when you have a Mistral API key.
 2. Open Agent Settings with {#action agent::OpenSettings} and go to the Mistral section.
 3. Enter your Mistral API key.
 
-Zed also reads `MISTRAL_API_KEY` from the local Zed process environment.
+Asylum also reads `MISTRAL_API_KEY` from the local Asylum process environment.
 
 #### Custom Mistral Models {#mistral-custom-models}
 
@@ -265,13 +265,13 @@ support, image support, or a custom endpoint.
 
 ### DeepSeek {#deepseek}
 
-Use DeepSeek API access when you have paid API usage, top-ups, or an API key. In Zed, DeepSeek is API access, not subscription sign-in.
+Use DeepSeek API access when you have paid API usage, top-ups, or an API key. In Asylum, DeepSeek is API access, not subscription sign-in.
 
 1. Visit the DeepSeek platform and [create an API key](https://platform.deepseek.com/api_keys).
 2. Open Agent Settings with {#action agent::OpenSettings} and go to the DeepSeek section.
 3. Enter your DeepSeek API key.
 
-Zed also reads `DEEPSEEK_API_KEY` from the local Zed process environment.
+Asylum also reads `DEEPSEEK_API_KEY` from the local Asylum process environment.
 
 #### Custom DeepSeek Models {#deepseek-custom-models}
 
@@ -310,7 +310,7 @@ Use xAI API access when you have an xAI API key.
 2. Open Agent Settings with {#action agent::OpenSettings} and go to the xAI section.
 3. Enter your xAI API key.
 
-Zed also reads `XAI_API_KEY` from the local Zed process environment.
+Asylum also reads `XAI_API_KEY` from the local Asylum process environment.
 
 #### Custom xAI Models {#xai-custom-models}
 
@@ -346,20 +346,20 @@ image support, or a custom endpoint.
 
 Use OpenCode API access when you have an OpenCode API key. OpenCode Zen and Go affect which OpenCode models are available.
 
-Zed does not sign in to OpenCode with OAuth or detect your OpenCode subscription; it uses an OpenCode API key saved in the system keychain or `OPENCODE_API_KEY`.
+Asylum does not sign in to OpenCode with OAuth or detect your OpenCode subscription; it uses an OpenCode API key saved in the system keychain or `OPENCODE_API_KEY`.
 
 1. Visit [OpenCode Console](https://opencode.ai/auth) and create an account.
 2. To use Zen or Go models, make sure you have enough credits or an active
    subscription. OpenCode Free models are not available when using OpenCode as a
-   provider in Zed's Agent. You can use them in Zed by running OpenCode as an
-   [external agent through ACP](https://zed.dev/acp/agent/opencode).
+   provider in Asylum's Agent. You can use them in Asylum by running OpenCode as an
+   [external agent through ACP](./external-agents.md#opencode).
 3. Generate an API key from the API Keys section in the OpenCode Console.
 4. Open Agent Settings with {#action agent::OpenSettings} and go to the OpenCode section.
 5. Enter your OpenCode API key.
 
-Zed also reads `OPENCODE_API_KEY` from the local Zed process environment.
+Asylum also reads `OPENCODE_API_KEY` from the local Asylum process environment.
 
-Zed fetches the available Zen and Go models and their capabilities from OpenCode. OpenCode Free models are excluded since they are only allowed to be used from within OpenCode.
+Asylum fetches the available Zen and Go models and their capabilities from OpenCode. OpenCode Free models are excluded since they are only allowed to be used from within OpenCode.
 
 By default, both Zen and Go models are shown. You can hide Zen or Go models by adding this to your settings file:
 
@@ -460,7 +460,7 @@ By default, Anthropic-compatible models inherit these capabilities:
 
 Enable `prompt_caching` to send explicit `cache_control` breakpoints for [prompt caching](https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching); leave it disabled if the provider rejects requests containing them.
 
-The optional `custom_headers` map adds extra headers to every request, which some providers require. Headers managed by Zed (such as `X-Api-Key` and `Anthropic-Version`) cannot be overridden.
+The optional `custom_headers` map adds extra headers to every request, which some providers require. Headers managed by Asylum (such as `X-Api-Key` and `Anthropic-Version`) cannot be overridden.
 
 Models also support the optional `default_temperature`, `extra_beta_headers` (sent as `anthropic-beta` headers), `mode`, and `tool_override` fields, which behave the same as in [Custom Anthropic Models](#anthropic-custom-models).
 
@@ -503,9 +503,9 @@ By default, OpenAI-compatible models inherit these capabilities:
 - `interleaved_reasoning`: `false`
 - `max_tokens_parameter`: `false`
 
-If a model only works with the Responses API, set `capabilities.chat_completions` to `false`. Zed will use the Responses endpoint for that model.
+If a model only works with the Responses API, set `capabilities.chat_completions` to `false`. Asylum will use the Responses endpoint for that model.
 
-For reasoning models (e.g. GPT-5), set `reasoning_effort` to the non-`none` effort level your endpoint supports. This enables thinking in the agent panel and tells Zed which effort to send when thinking is enabled. The provider settings UI can configure this when adding an OpenAI-compatible provider. Zed sends OpenAI-style `reasoning_effort` on chat-completions requests.
+For reasoning models (e.g. GPT-5), set `reasoning_effort` to the non-`none` effort level your endpoint supports. This enables thinking in the agent panel and tells Asylum which effort to send when thinking is enabled. The provider settings UI can configure this when adding an OpenAI-compatible provider. Asylum sends OpenAI-style `reasoning_effort` on chat-completions requests.
 
 If the model requires the Responses API for reasoning state, set `capabilities.chat_completions` to `false`:
 

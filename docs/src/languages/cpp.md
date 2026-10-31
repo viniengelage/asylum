@@ -1,22 +1,22 @@
 ---
 title: C++
-description: "Configure C++ language support in Zed, including language servers, formatting, and debugging."
+description: "Configure C++ language support in Asylum, including language servers, formatting, and debugging."
 ---
 
 # C++
 
-C++ support is available natively in Zed.
+C++ support is available natively in Asylum.
 
 - Tree-sitter: [tree-sitter/tree-sitter-cpp](https://github.com/tree-sitter/tree-sitter-cpp)
 - Language Server: [clangd/clangd](https://github.com/clangd/clangd)
 
 ## Binary
 
-You can configure which `clangd` binary Zed should use.
+You can configure which `clangd` binary Asylum should use.
 
-By default, Zed will try to find a `clangd` in your `$PATH` and try to use that. If that binary successfully executes, it's used. Otherwise, Zed will fall back to installing its own `clangd` version and use that.
+By default, Asylum will try to find a `clangd` in your `$PATH` and try to use that. If that binary successfully executes, it's used. Otherwise, Asylum will fall back to installing its own `clangd` version and use that.
 
-If you want to install a pre-release `clangd` version instead you can instruct Zed to do so by setting `pre_release` to `true` in your `settings.json`:
+If you want to install a pre-release `clangd` version instead you can instruct Asylum to do so by setting `pre_release` to `true` in your `settings.json`:
 
 ```json [settings]
 {
@@ -30,7 +30,7 @@ If you want to install a pre-release `clangd` version instead you can instruct Z
 }
 ```
 
-If you want to disable Zed looking for a `clangd` binary, you can set `ignore_system_version` to `true` in your `settings.json`:
+If you want to disable Asylum looking for a `clangd` binary, you can set `ignore_system_version` to `true` in your `settings.json`:
 
 ```json [settings]
 {
@@ -80,7 +80,7 @@ You can pass any number of arguments to clangd. To see a full set of available o
 
 ## Formatting
 
-By default Zed will use the `clangd` language server for formatting C++ code. Its formatter is the same as the `clang-format` CLI tool. To configure this you can add a `.clang-format` file. For example:
+By default Asylum will use the `clangd` language server for formatting C++ code. Its formatter is the same as the `clang-format` CLI tool. To configure this you can add a `.clang-format` file. For example:
 
 ```yaml
 # yaml-language-server: $schema=https://json.schemastore.org/clang-format-21.x.json
@@ -168,7 +168,7 @@ You can use CodeLLDB or GDB to [debug](../debugger.md) native binaries. (Make su
 
 ## Protocol Extensions
 
-Zed currently implements the following `clangd` [extensions](https://clangd.llvm.org/extensions):
+Asylum currently implements the following `clangd` [extensions](https://clangd.llvm.org/extensions):
 
 ### Inactive Regions
 

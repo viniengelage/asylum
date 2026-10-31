@@ -1,23 +1,23 @@
 ---
-title: Zed Agent
-description: Use Zed's native AI agent with Zed-configured models, tools, profiles, skills, instructions, and MCP servers.
+title: Asylum Agent
+description: Use Asylum's native AI agent with Asylum-configured models, tools, profiles, skills, instructions, and MCP servers.
 ---
 
-# Zed Agent
+# Asylum Agent
 
-Zed Agent is Zed's native agent path. It runs in the [Agent Panel](./agent-panel.md) and [Threads Sidebar](./parallel-agents.md#threads-sidebar), uses models configured through [LLM Providers](./llm-providers.md), and integrates with Zed's project, editor, terminal, and review surfaces.
+Asylum Agent is Asylum's native agent path. It runs in the [Agent Panel](./agent-panel.md) and [Threads Sidebar](./parallel-agents.md#threads-sidebar), uses models configured through [LLM Providers](./llm-providers.md), and integrates with Asylum's project, editor, terminal, and review surfaces.
 
-Use Zed Agent when you want the agent to:
+Use Asylum Agent when you want the agent to:
 
 - read and search your project
 - edit files
 - run terminal commands
-- use Zed-managed MCP tools
+- use Asylum-managed MCP tools
 - follow [Agent Profiles](./agent-profiles.md)
-- use Zed [Skills](./skills.md) and [Instructions](./instructions.md)
-- show changes in Zed's review UI
+- use Asylum [Skills](./skills.md) and [Instructions](./instructions.md)
+- show changes in Asylum's review UI
 
-## What Zed Agent Uses {#what-zed-agent-uses}
+## What Asylum Agent Uses {#what-zed-agent-uses}
 
 | Capability                 | Source of truth                           |
 | -------------------------- | ----------------------------------------- |
@@ -34,7 +34,7 @@ Use Zed Agent when you want the agent to:
 
 | Agent path                                | Main difference                                                                              |
 | ----------------------------------------- | -------------------------------------------------------------------------------------------- |
-| [Zed Agent](./zed-agent.md)               | Uses Zed's model, tool, profile, skill, instruction, and MCP configuration                   |
+| [Asylum Agent](./zed-agent.md)               | Uses Asylum's model, tool, profile, skill, instruction, and MCP configuration                   |
 | [External Agents](./external-agents.md)   | Use an ACP integration and often own auth, model, tool, and native instruction configuration |
 | [Terminal Threads](./terminal-threads.md) | Run a CLI/TUI in a terminal-backed thread; the CLI owns auth and configuration               |
 

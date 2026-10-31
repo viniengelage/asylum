@@ -1,75 +1,28 @@
 ---
-title: Install Zed - macOS, Linux, Windows
-description: Download and install Zed on macOS, Linux, or Windows. Includes Homebrew, direct download, and package manager options.
+title: Install Asylum - macOS, Linux, Windows
+description: Download and install Asylum on macOS or Windows, or build it from source.
 ---
 
-# Installing Zed
+# Installing Asylum
 
-## Download Zed
+## Download Asylum
 
-### macOS
+Prebuilt releases are published on the [GitHub releases page](https://github.com/viniengelage/asylum/releases):
 
-Get the latest stable builds via [the download page](https://zed.dev/download). If you want to download our preview build, you can find it on its [releases page](https://zed.dev/releases/preview). After the first manual installation, Zed will periodically check for install updates.
+- **macOS** (Apple silicon): `Asylum-aarch64.dmg`
+- **Windows** (x86_64): `Asylum-x86_64.exe`, when available for that release
 
-You can also install Zed stable via Homebrew:
+After the first manual installation, Asylum periodically checks the GitHub releases page for updates.
 
-```sh
-brew install --cask zed
-```
-
-As well as Zed preview:
-
-```sh
-brew install --cask zed@preview
-```
-
-### Windows
-
-Get the latest stable builds via [the download page](https://zed.dev/download). If you want to download our preview build, you can find it on its [releases page](https://zed.dev/releases/preview). After the first manual installation, Zed will periodically check for install updates.
-
-Additionally, you can install Zed using winget:
-
-```sh
-winget install -e --id ZedIndustries.Zed
-```
-
-### Linux
-
-For most Linux users, the easiest way to install Zed is through our installation script:
-
-```sh
-curl -f https://zed.dev/install.sh | sh
-```
-
-You can now optionally specify a **version** of Zed to install using the `ZED_VERSION` environment variable:
-
-```sh
-# Install the latest stable version (default)
-curl -f https://zed.dev/install.sh | sh
-
-# Install a specific version
-curl -f https://zed.dev/install.sh | ZED_VERSION=0.216.0 sh
-```
-
-To install the preview build, which receives updates about a week ahead of stable:
-
-```sh
-curl -f https://zed.dev/install.sh | ZED_CHANNEL=preview sh
-```
-
-This script supports `x86_64` and `AArch64`, as well as common Linux distributions: Ubuntu, Arch, Debian, RedHat, CentOS, Fedora, and more.
-
-If Zed is installed using this installation script, it can be uninstalled at any time by running the shell command `zed --uninstall`. The shell will then prompt you whether you'd like to keep your preferences or delete them. After making a choice, you should see a message that Zed was successfully uninstalled.
-
-If this script is insufficient for your use case, you run into problems running Zed, or there are errors in uninstalling Zed, please see our [Linux-specific documentation](./linux.md).
+There are no prebuilt Linux or Intel Mac builds yet. On those platforms, build Asylum [from source](./development.md).
 
 ## System Requirements
 
 ### macOS
 
-Zed requires macOS 12.0 (Monterey) or later.
+Asylum requires macOS 12.0 (Monterey) or later.
 
-| Version            | Codename    | Apple Status   | Zed Status          |
+| Version            | Codename    | Apple Status   | Asylum Status          |
 | ------------------ | ----------- | -------------- | ------------------- |
 | macOS 27.x         | Golden Gate | Supported      | Supported           |
 | macOS 26.x         | Tahoe       | Supported      | Supported           |
@@ -79,14 +32,13 @@ Zed requires macOS 12.0 (Monterey) or later.
 | macOS 12.x (12.3+) | Monterey    | EOL 2024-09-16 | Supported           |
 | macOS 12.0–12.2    | Monterey    | EOL 2024-09-16 | Partially Supported |
 
-The macOS releases labelled "Partially Supported" (Monterey 12.0–12.2) do not support screen sharing via Zed Collaboration.
-Screen sharing uses [ScreenCaptureKit.framework](https://developer.apple.com/documentation/screencapturekit/), which is available on macOS 12.3 and newer.
+The macOS releases labelled "Partially Supported" (Monterey 12.0–12.2) do not support features that use [ScreenCaptureKit.framework](https://developer.apple.com/documentation/screencapturekit/), which is available on macOS 12.3 and newer.
 
 Apple support status and EOL dates are from [endoflife.date](https://endoflife.date/macos).
 
 #### Mac Hardware
 
-Zed supports machines with Intel (x86_64) or Apple (aarch64) processors that meet the above macOS requirements:
+Asylum supports machines with Intel (x86_64) or Apple (aarch64) processors that meet the above macOS requirements:
 
 - MacBook Pro (Early 2015 and newer)
 - MacBook Air (Early 2015 and newer)
@@ -99,9 +51,9 @@ Zed supports machines with Intel (x86_64) or Apple (aarch64) processors that mee
 
 ### Linux
 
-Zed supports 64-bit Intel/AMD (x86_64) and 64-bit Arm (aarch64) processors.
+Asylum supports 64-bit Intel/AMD (x86_64) and 64-bit Arm (aarch64) processors.
 
-Zed requires a Vulkan 1.3 driver and the following desktop portals:
+Asylum requires a Vulkan 1.3 driver and the following desktop portals:
 
 - `org.freedesktop.portal.FileChooser`
 - `org.freedesktop.portal.OpenURI`
@@ -109,25 +61,25 @@ Zed requires a Vulkan 1.3 driver and the following desktop portals:
 
 ### Windows
 
-Zed supports the following Windows releases:
-| Version | Zed Status |
+Asylum supports the following Windows releases:
+| Version | Asylum Status |
 | ------------------------- | ------------------- |
 | Windows 11, version 22H2 and later | Supported |
 | Windows 10, version 1903 and later | Supported |
 
-A 64-bit operating system is required to run Zed.
+A 64-bit operating system is required to run Asylum.
 
 #### Windows Hardware
 
-Zed supports machines with x64 (Intel, AMD) or Arm64 (Qualcomm) processors that meet the following requirements:
+Asylum supports machines with x64 (Intel, AMD) or Arm64 (Qualcomm) processors that meet the following requirements:
 
 - Graphics: A GPU that supports DirectX 11 (most PCs from 2012+).
 - Driver: Current NVIDIA/AMD/Intel/Qualcomm driver (not the Microsoft Basic Display Adapter).
 
 ### FreeBSD
 
-Not yet available as an official download. Can be built [from source](./development/freebsd.md).
+Not available as a prebuilt download. Can be built [from source](./development/freebsd.md).
 
 ### Web
 
-Not supported at this time. See our [Platform Support issue](https://github.com/zed-industries/zed/issues/5391).
+Not supported at this time.

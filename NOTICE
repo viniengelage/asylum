@@ -1,0 +1,50 @@
+Asylum
+Copyright 2025-2026 Vinicios Engelage
+
+Asylum is a modified version ("fork") of Zed, the code editor developed by
+Zed Industries, Inc. (https://github.com/zed-industries/zed).
+
+  Zed: Copyright 2022-2025 Zed Industries, Inc.
+
+Asylum is an independent project. It is not affiliated with, sponsored by, or
+endorsed by Zed Industries, Inc. "Zed" and the Zed logo are trademarks of
+Zed Industries, Inc. and are used here only to describe the origin of the
+source code.
+
+Licensing
+---------
+
+Asylum is distributed under the same licenses as Zed:
+
+  * GPL-3.0-or-later for most of the source tree (see LICENSE-GPL).
+  * Apache-2.0 for the components marked as such in their Cargo.toml,
+    such as GPUI (see LICENSE-APACHE).
+
+Each crate declares its license in its Cargo.toml. Files originating in Zed
+keep their original copyright and license. Asylum's changes are released
+under the license of the crate they belong to.
+
+Modifications
+-------------
+
+Asylum has been modified from Zed continuously since 2025. The changes
+include, among others: embedded iOS simulator and Android emulator, embedded
+web preview (Chromium Embedded Framework), API client, database client,
+Docker and Elasticsearch docks, task agents and pipelines, the Asylum Agent
+(token usage reductions and dock interaction), GitHub and ClickUp
+integrations, its own icon family, and removal of the dependencies on
+Zed Industries' hosted services.
+
+The complete history of changes is available in the git history of
+https://github.com/viniengelage/asylum, which is also where the
+Corresponding Source for every published build can be found (each release
+is tagged).
+
+Third-party dependencies
+------------------------
+
+The licenses of third-party dependencies bundled with Asylum are listed in
+the application under Help > View Dependency Licenses.
+
+THERE IS NO WARRANTY FOR THE PROGRAM, TO THE EXTENT PERMITTED BY APPLICABLE
+LAW. See section 15 of LICENSE-GPL.

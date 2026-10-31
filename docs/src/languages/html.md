@@ -1,11 +1,11 @@
 ---
 title: HTML
-description: "Configure HTML language support in Zed, including language servers, formatting, and debugging."
+description: "Configure HTML language support in Asylum, including language servers, formatting, and debugging."
 ---
 
 # HTML
 
-HTML support is available through the [HTML extension](https://github.com/zed-industries/zed/tree/main/extensions/html).
+HTML support is available through the [HTML extension](https://github.com/viniengelage/asylum/tree/main/extensions/html).
 
 - Tree-sitter: [tree-sitter/tree-sitter-html](https://github.com/tree-sitter/tree-sitter-html)
 - Language Server: [microsoft/vscode-html-languageservice](https://github.com/microsoft/vscode-html-languageservice)
@@ -22,7 +22,7 @@ This extension is automatically installed, but if you do not want to use it, you
 
 ## Formatting
 
-By default Zed uses [Prettier](https://prettier.io/) for formatting HTML.
+By default Asylum uses [Prettier](https://prettier.io/) for formatting HTML.
 
 Configure formatting in Settings ({#kb zed::OpenSettings}) under Languages > HTML, or add to your settings file:
 
@@ -48,7 +48,7 @@ To use the `vscode-html-language-server` language server auto-formatting instead
   }
 ```
 
-You can customize various [formatting options](https://code.visualstudio.com/docs/languages/html#_formatting) for `vscode-html-language-server` via your Zed `settings.json`:
+You can customize various [formatting options](https://code.visualstudio.com/docs/languages/html#_formatting) for `vscode-html-language-server` via your Asylum `settings.json`:
 
 ```json [settings]
   "lsp": {

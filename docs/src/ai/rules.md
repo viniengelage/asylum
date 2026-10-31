@@ -1,6 +1,6 @@
 ---
 title: Rules (Replaced by Skills)
-description: Rules have been replaced by Skills and Instructions in Zed.
+description: Rules have been replaced by Skills and Instructions in Asylum.
 ---
 
 # Rules {#rules}
@@ -32,7 +32,7 @@ Other instruction filenames are also supported for compatibility with other agen
 Existing Rules migrate automatically:
 
 - Non-default Rules become global Skills in `~/.agents/skills/`, each with `disable-model-invocation: true`. They remain user-invocable by slash command or `@`-mention.
-- Default Rules are appended to your global `AGENTS.md` file (`~/.config/zed/AGENTS.md` on macOS and Linux, `%APPDATA%\Zed\AGENTS.md` on Windows).
+- Default Rules are appended to your global `AGENTS.md` file (`~/.config/asylum/AGENTS.md` on macOS and Linux, `%APPDATA%\Asylum\AGENTS.md` on Windows).
 - Git commit prompt customizations are also appended to the global `AGENTS.md` file.
 
-Rules Library content is not deleted, so downgrading to an earlier version of Zed leaves your Rules intact.
+Rules Library content is not deleted, so downgrading to an earlier version of Asylum leaves your Rules intact.

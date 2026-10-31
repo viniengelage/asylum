@@ -1,56 +1,55 @@
 ---
-title: Model Context Protocol (MCP) in Zed
-description: Install and configure MCP servers in Zed to extend your AI agent with external tools, data sources, and integrations.
+title: Model Context Protocol (MCP) in Asylum
+description: Install and configure MCP servers in Asylum to extend your AI agent with external tools, data sources, and integrations.
 ---
 
 # Model Context Protocol
 
-Zed uses the [Model Context Protocol](https://modelcontextprotocol.io/) to interact with context servers.
+Asylum uses the [Model Context Protocol](https://modelcontextprotocol.io/) to interact with context servers.
 
 > The Model Context Protocol (MCP) is an open protocol for connecting LLM applications to external tools and data sources through a standard interface.
 
 ## Supported Features
 
-Zed currently supports MCP's [Tools](https://modelcontextprotocol.io/specification/2025-11-25/server/tools) and [Prompts](https://modelcontextprotocol.io/specification/2025-11-25/server/prompts) features.
-We welcome contributions that help advance Zed's MCP feature coverage (Discovery, Sampling, Elicitation, etc).
+Asylum currently supports MCP's [Tools](https://modelcontextprotocol.io/specification/2025-11-25/server/tools) and [Prompts](https://modelcontextprotocol.io/specification/2025-11-25/server/prompts) features.
+We welcome contributions that help advance Asylum's MCP feature coverage (Discovery, Sampling, Elicitation, etc).
 
-Zed also handles the `notifications/tools/list_changed` notification from MCP servers. When a server adds, removes, or modifies its available tools at runtime, Zed automatically reloads the tool list without requiring a server restart.
+Asylum also handles the `notifications/tools/list_changed` notification from MCP servers. When a server adds, removes, or modifies its available tools at runtime, Asylum automatically reloads the tool list without requiring a server restart.
 
 ## Agent Path Support {#agent-path-support}
 
 | Agent path                                | MCP behavior                                                                            |
 | ----------------------------------------- | --------------------------------------------------------------------------------------- |
-| [Zed Agent](./zed-agent.md)               | Uses Zed-configured MCP servers directly                                                |
-| [External Agents](./external-agents.md)   | Zed can forward configured MCP servers over ACP; agents may also read native MCP config |
+| [Asylum Agent](./zed-agent.md)               | Uses Asylum-configured MCP servers directly                                                |
+| [External Agents](./external-agents.md)   | Asylum can forward configured MCP servers over ACP; agents may also read native MCP config |
 | [Terminal Threads](./terminal-threads.md) | Native CLIs/TUIs read their own MCP configuration                                       |
 
 ## Installing MCP Servers
 
 ### As Extensions
 
-One of the ways you can use MCP servers in Zed is by exposing them as an extension.
+One of the ways you can use MCP servers in Asylum is by exposing them as an extension.
 Check out the [MCP Server Extensions](../extensions/mcp-extensions.md) page to learn how to create your own.
 
 Many MCP servers are available as extensions. Find them via:
 
-1. [the Zed website](https://zed.dev/extensions?filter=context-servers)
-2. in the app, open the Command Palette and run the {#action zed::Extensions} action
-3. in the app, open **Settings → AI → MCP Servers**, click `Add Server`, and choose `Install from Extensions`
+1. in the app, open the Command Palette and run the {#action zed::Extensions} action
+2. in the app, open **Settings → AI → MCP Servers**, click `Add Server`, and choose `Install from Extensions`
 
 Popular servers available as an extension include:
 
-- [Context7](https://zed.dev/extensions/mcp-server-context7)
-- [GitHub](https://zed.dev/extensions/mcp-server-github)
-- [Puppeteer](https://zed.dev/extensions/mcp-server-puppeteer)
-- [Gem](https://zed.dev/extensions/gem)
-- [Brave Search](https://zed.dev/extensions/mcp-server-brave-search)
+- Context7
+- GitHub
+- Puppeteer
+- Gem
+- Brave Search
 - [Prisma](https://github.com/aqrln/prisma-mcp-zed)
-- [Framelink Figma](https://zed.dev/extensions/mcp-server-figma)
-- [Resend](https://zed.dev/extensions/mcp-server-resend)
+- Framelink Figma
+- Resend
 
 ### As Custom Servers
 
-Creating an extension is not the only way to use MCP servers in Zed.
+Creating an extension is not the only way to use MCP servers in Asylum.
 You can connect both local and remote MCP servers from **[Settings → AI → MCP Servers](./agent-settings.md)** (also accessible via the {#action agent::OpenSettings} action, then selecting `MCP Servers`). Click `Add Server` in the page header, then choose `Add Local Server` or `Add Remote Server`. Your specified configuration will create entries in your settings file (which you can open with {#action zed::OpenSettingsFile}) similar to the ones below:
 
 ```json [settings]
@@ -72,7 +71,7 @@ You can connect both local and remote MCP servers from **[Settings → AI → MC
 }
 ```
 
-> Note: When a remote MCP server has no configured `"Authorization"` header, Zed will prompt you to authenticate yourself against the MCP server using the standard MCP OAuth flow.
+> Note: When a remote MCP server has no configured `"Authorization"` header, Asylum will prompt you to authenticate yourself against the MCP server using the standard MCP OAuth flow.
 
 ## Using MCP Servers
 
@@ -80,7 +79,7 @@ You can connect both local and remote MCP servers from **[Settings → AI → MC
 
 Most MCP servers require configuration after installation.
 
-In the case of an extension, after installing it, Zed will pop up a modal displaying what is required for you to properly set it up.
+In the case of an extension, after installing it, Asylum will pop up a modal displaying what is required for you to properly set it up.
 For example, the GitHub MCP extension requires you to add a [Personal Access Token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens).
 
 In the case of custom servers, make sure you check the provider documentation to determine what type of command, arguments, and environment variables need to be added to the JSON.
@@ -98,7 +97,7 @@ Mentioning the MCP server by name can help the model pick tools from that server
 
 However, if you want to _ensure_ a given MCP server will be used, you can create [a custom profile](./agent-profiles.md) where all built-in tools (or the ones that could cause conflicts with the server's tools) are turned off and only the tools coming from the MCP server are turned on.
 
-As an example, [the Dagger team suggests](https://container-use.com/agent-integrations#zed) doing that with their [Container Use MCP server](https://zed.dev/extensions/mcp-server-container-use):
+As an example, [the Dagger team suggests](https://container-use.com/agent-integrations#zed) doing that with their Container Use MCP server:
 
 ```json [settings]
 "agent": {
@@ -146,7 +145,7 @@ As an example, [the Dagger team suggests](https://container-use.com/agent-integr
 > **Note:** In Zed v0.224.0 and above, tool approval is controlled by `agent.tool_permissions.default`.
 > In earlier versions, it was controlled by the `agent.always_allow_tool_actions` boolean (default `false`).
 
-Zed's Agent Panel provides the `agent.tool_permissions.default` setting to control tool approval behavior for the native Zed agent:
+Asylum's Agent Panel provides the `agent.tool_permissions.default` setting to control tool approval behavior for the native Asylum agent:
 
 - `"confirm"` (default) — Prompts for approval before running any tool action, including MCP tool calls
 - `"allow"` — Auto-approves tool actions without prompting
@@ -160,9 +159,9 @@ Learn more about [how tool permissions work](./tool-permissions.md), how to furt
 
 ### External Agents
 
-MCP servers configured in Zed are forwarded to [External Agents](./external-agents.md) via the [Agent Client Protocol](https://agentclientprotocol.com/). External Agents can also access MCP servers from their own native configuration files.
+MCP servers configured in Asylum are forwarded to [External Agents](./external-agents.md) via the [Agent Client Protocol](https://agentclientprotocol.com/). External Agents can also access MCP servers from their own native configuration files.
 
-For details on what configuration is shared between Zed and External Agents, see [Configuration Boundaries](./external-agents.md#configuration-boundaries).
+For details on what configuration is shared between Asylum and External Agents, see [Configuration Boundaries](./external-agents.md#configuration-boundaries).
 
 ### Error Handling
 

@@ -1,11 +1,11 @@
 ---
 title: JavaScript
-description: "Configure JavaScript language support in Zed, including language servers, formatting, and debugging."
+description: "Configure JavaScript language support in Asylum, including language servers, formatting, and debugging."
 ---
 
 # JavaScript
 
-JavaScript support is available natively in Zed.
+JavaScript support is available natively in Asylum.
 
 - Tree-sitter: [tree-sitter/tree-sitter-javascript](https://github.com/tree-sitter/tree-sitter-javascript)
 - Language Server: [yioneko/vtsls](https://github.com/yioneko/vtsls)
@@ -56,11 +56,11 @@ Configure formatting in Settings ({#kb zed::OpenSettings}) under Languages > Jav
 
 ## React Native and Expo debugging
 
-Zed includes the `React Native / Expo` debug adapter for attaching to a Hermes runtime exposed by Metro. It uses the same Debug Adapter Protocol server as the built-in JavaScript debugger and supports breakpoints, stepping, variables, and Metro source maps.
+Asylum includes the `React Native / Expo` debug adapter for attaching to a Hermes runtime exposed by Metro. It uses the same Debug Adapter Protocol server as the built-in JavaScript debugger and supports breakpoints, stepping, variables, and Metro source maps.
 
 On macOS, the iOS device sidebar provides an **Iniciar Expo e depurar o app iOS** button. It starts Expo, opens the installed app in the selected embedded iOS Simulator, then attaches the debugger to Metro's Hermes Inspector on port `8081`.
 
-The app must use Hermes, which is the default JavaScript engine for Expo. Metro must be reachable from Zed; the adapter discovers the connected Hermes target through Metro's `/json/list` endpoint and reconnects after Fast Refresh by default.
+The app must use Hermes, which is the default JavaScript engine for Expo. Metro must be reachable from Asylum; the adapter discovers the connected Hermes target through Metro's `/json/list` endpoint and reconnects after Fast Refresh by default.
 
 To attach manually to an existing Metro instance, add this to `.zed/debug.json`:
 
@@ -91,18 +91,18 @@ When more than one app is connected to Metro, provide the exact Inspector WebSoc
 
 ## JSX
 
-Zed supports JSX syntax highlighting out of the box.
+Asylum supports JSX syntax highlighting out of the box.
 
 In JSX strings, the [`tailwindcss-language-server`](./tailwindcss.md) is used to provide autocompletion for Tailwind CSS classes.
 
 ## JSDoc
 
-Zed supports JSDoc syntax in JavaScript and TypeScript comments that match the JSDoc syntax.
-Zed uses [tree-sitter/tree-sitter-jsdoc](https://github.com/tree-sitter/tree-sitter-jsdoc) for parsing and highlighting JSDoc.
+Asylum supports JSDoc syntax in JavaScript and TypeScript comments that match the JSDoc syntax.
+Asylum uses [tree-sitter/tree-sitter-jsdoc](https://github.com/tree-sitter/tree-sitter-jsdoc) for parsing and highlighting JSDoc.
 
 ## ESLint
 
-You can configure Zed to format code using `eslint --fix` by running the ESLint code action when formatting.
+You can configure Asylum to format code using `eslint --fix` by running the ESLint code action when formatting.
 
 Configure code actions on format in Settings ({#kb zed::OpenSettings}) under Languages > JavaScript, or add to your settings file:
 
@@ -266,7 +266,7 @@ To get all the features (autocomplete, linting, etc.) from the [Tailwind CSS lan
 
 ## Debugging
 
-Zed supports debugging JavaScript code out of the box with `vscode-js-debug`.
+Asylum supports debugging JavaScript code out of the box with `vscode-js-debug`.
 The following can be debugged without writing additional configuration:
 
 - Tasks from `package.json`
@@ -278,7 +278,7 @@ Run {#action debugger::Start} ({#kb debugger::Start}) to see a contextual list o
 
 > **Note:** Node test is automatically detected when `@types/node` is present in `package.json` (requires Node.js 20+).
 
-As for all languages, configurations from `.vscode/launch.json` are also available for debugging in Zed.
+As for all languages, configurations from `.vscode/launch.json` are also available for debugging in Asylum.
 
 If your use-case isn't covered by any of these, you can take full control by adding debug configurations to `.zed/debug.json`. See below for example configurations.
 

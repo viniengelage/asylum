@@ -72,8 +72,6 @@
         <!-- MathJax -->
         <script async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
         {{/if}}
-        <meta name="amplitude-key" content="#amplitude_key#" />
-        <meta name="consent-io-instance" content="#consent_io_instance#" />
     </head>
     <body class="no-js">
     <div id="body-container">
@@ -94,7 +92,7 @@
         <header class="header-bar">
             <div class="left-container">
                 <a href="/" class="logo-nav">
-                    <img src="https://zed.dev/logo_icon.webp" class="icon-logo-img" alt="Zed Industries" style="height: 26px;">
+                    <span class="icon-logo-img" style="font-weight: 600;">Asylum</span>
                 </a>
                 <button id="sidebar-toggle" class="icon-button ib-hidden-desktop" type="button" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar" aria-expanded="false">
                     <i class="fa fa-bars"></i>
@@ -130,7 +128,7 @@
                     <i class="fa fa-copy"></i>
                 </button>
 
-                <a class="download-button" href="https://zed.dev/download" title="Download Zed" aria-label="Download Zed">
+                <a class="download-button" href="https://github.com/viniengelage/asylum/releases" title="Download Asylum" aria-label="Download Asylum">
                     Download
                 </a>
                 {{#if git_repository_url}}
@@ -182,48 +180,17 @@
                             {{/next}}
                         </div>
                         <footer class="footer">
-                            <a href="/" class="logo-nav">
-                                <img
-                                    src="https://zed.dev/logo_icon.webp"
-                                    class="footer-logo"
-                                    alt="Zed Industries"
-                                />
-                            </a>
-                            <span class="footer-separator">•</span>
-                            <a class="footer-link" href="https://zed.dev"
-                                >Back to Site</a
-                            >
-                            <span class="footer-separator">•</span>
                             <a
                                 class="footer-link"
-                                href="https://zed.dev/releases"
+                                href="https://github.com/viniengelage/asylum/releases"
                                 >Releases</a
                             >
                             <span class="footer-separator">•</span>
                             <a
                                 class="footer-link"
-                                href="https://zed.dev/roadmap"
-                                >Roadmap</a
-                            >
-                            <span class="footer-separator">•</span>
-                            <a
-                                class="footer-link"
-                                href="https://github.com/zed-industries/zed"
+                                href="https://github.com/viniengelage/asylum"
                                 >GitHub</a
                             >
-                            <span class="footer-separator">•</span>
-                            <a
-                                class="footer-link"
-                                href="https://zed.dev/blog"
-                                >Blog</a
-                            >
-                            <span class="footer-separator">•</span>
-                            <button
-                                id="c15t-manage-consent-btn"
-                                class="footer-link"
-                            >
-                                Manage Site Cookies
-                            </button>
                         </footer>
                     </main>
                     <div class="toc-container">
@@ -487,82 +454,6 @@
         {{/if}}
         {{/if}}
 
-        <!-- c15t Consent Banner -->
-        <div id="c15t-banner" style="display: none;">
-            <div>
-                <p id="c15t-description">
-                    Zed uses cookies to improve your experience and for marketing. Read <a href="https://zed.dev/cookie-policy">our cookie policy</a> for more details.
-                </p>
-            </div>
-            <div id="c15t-configure-section" style="display: none">
-                <div>
-                    <label for="c15t-toggle-necessary"
-                        >Strictly Necessary</label
-                    >
-                    <label class="c15t-switch">
-                        <input
-                            type="checkbox"
-                            id="c15t-toggle-necessary"
-                            checked
-                            disabled
-                        />
-                        <span class="c15t-slider"></span>
-                    </label>
-                </div>
-                <div>
-                    <label for="c15t-toggle-measurement">Analytics</label>
-                    <label class="c15t-switch">
-                        <input
-                            type="checkbox"
-                            id="c15t-toggle-measurement"
-                        />
-                        <span class="c15t-slider"></span>
-                    </label>
-                </div>
-                <div>
-                    <label for="c15t-toggle-marketing">Marketing</label>
-                    <label class="c15t-switch">
-                        <input
-                            type="checkbox"
-                            id="c15t-toggle-marketing"
-                        />
-                        <span class="c15t-slider"></span>
-                    </label>
-                </div>
-            </div>
-            <div id="c15t-footer">
-                <button
-                    id="c15t-configure-btn"
-                    class="c15t-button icon"
-                    title="Configure"
-                >
-                    <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                    >
-                        <path d="M20 7h-9" />
-                        <path d="M14 17H5" />
-                        <circle cx="17" cy="17" r="3" />
-                        <circle cx="7" cy="7" r="3" />
-                    </svg>
-                </button>
-                <div>
-                    <button id="c15t-decline" class="c15t-button">
-                        Reject all
-                    </button>
-                    <button id="c15t-accept" class="c15t-button primary">
-                        Accept all
-                    </button>
-                </div>
-            </div>
-        </div>
     </div>
     </body>
 </html>

@@ -39,15 +39,15 @@ Use this checklist when your changes affect UI.
 
 ## Consistency {#consistency}
 
-- Does it match Zed’s design language (spacing, typography, icons)?
-  - Make sure to visit [the icon design guidelines](https://github.com/zed-industries/zed/blob/main/crates/icons/README.md)
-- Are terminology, labels, and tone consistent with the rest of Zed?
+- Does it match Asylum’s design language (spacing, typography, icons)?
+  - Make sure to visit [the icon design guidelines](https://github.com/viniengelage/asylum/blob/main/crates/icons/README.md)
+- Are terminology, labels, and tone consistent with the rest of Asylum?
 - Are interactions consistent (e.g., how tabs close, how modals dismiss, how errors show)?
 
 ## Internationalization & Text {#internationalization-text}
 
 - Are strings concise, clear, and unambiguous?
-- Do we avoid internal Zed jargon that only insiders would know?
+- Do we avoid internal Asylum jargon that only insiders would know?
 
 ## User Paths & Edge Cases {#user-paths-edge-cases}
 
@@ -56,7 +56,7 @@ Use this checklist when your changes affect UI.
 - How does it work in offline vs. online states?
 - How does it work in unauthenticated vs. authenticated states?
 - How does it behave if data is missing, corrupted, or delayed?
-- Are error messages actionable and consistent with Zed’s voice?
+- Are error messages actionable and consistent with Asylum’s voice?
 
 ## Discoverability & Learning {#discoverability-learning}
 
@@ -65,4 +65,4 @@ Use this checklist when your changes affect UI.
 - Are power features discoverable but not intrusive?
 - Is there a path from beginner → expert usage (progressive disclosure)?
 
-See the [contribution guidelines](https://github.com/zed-industries/zed/blob/main/CONTRIBUTING.md) for preparing your pull request.
+See the [contribution guidelines](https://github.com/viniengelage/asylum/blob/main/CONTRIBUTING.md) for preparing your pull request.

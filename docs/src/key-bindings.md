@@ -1,18 +1,18 @@
 ---
-title: Key Bindings and Shortcuts - Zed
-description: Customize Zed's keyboard shortcuts. Rebind actions, create key sequences, and set context-specific bindings.
+title: Key Bindings and Shortcuts - Asylum
+description: Customize Asylum's keyboard shortcuts. Rebind actions, create key sequences, and set context-specific bindings.
 ---
 
 # Key bindings
 
-Zed's key binding system is fully customizable. You can rebind any action, create key sequences, and define context-specific bindings.
+Asylum's key binding system is fully customizable. You can rebind any action, create key sequences, and define context-specific bindings.
 
 ## Predefined Keymaps
 
 If you're used to a specific editor's defaults, you can change your `base_keymap` through the settings window ({#kb zed::OpenSettings}) or directly through your `settings.json` file ({#kb zed::OpenSettingsFile}).
 We currently support:
 
-- Zed (default)
+- Asylum (default)
 - VS Code
 - Atom
 - Emacs (Beta)
@@ -31,7 +31,7 @@ For more information, see the documentation for [Vim mode](./vim.md) and [Helix 
 
 You can access the keymap editor through the {#kb zed::OpenKeymap} action or by running {#action zed::OpenKeymap} action from the [command palette](./command-palette.md). You can easily add or change a keybind for an action with the `Change Keybinding` or `Add Keybinding` button on the command palette's left bottom corner.
 
-In there, you can see all of the existing actions in Zed as well as the associated keybindings set to them by default.
+In there, you can see all of the existing actions in Asylum as well as the associated keybindings set to them by default.
 
 You can also customize them right from there, either by clicking on the pencil icon that appears when you hover over a particular action, by double-clicking on the action row, or by pressing the `enter` key.
 
@@ -41,8 +41,8 @@ Anything that you end up doing on the keymap editor also gets reflected on the `
 
 The keymap file is stored in the following locations for each platform:
 
-- macOS/Linux: `~/.config/zed/keymap.json`
-- Windows: `~\AppData\Roaming\Zed/keymap.json`
+- macOS/Linux: `~/.config/asylum/keymap.json`
+- Windows: `~\AppData\Roaming\Asylum/keymap.json`
 
 You can open the keymap with the {#action zed::OpenKeymapFile} action from the command palette.
 
@@ -74,18 +74,18 @@ For example:
 ]
 ```
 
-You can see all of Zed's default bindings for each platform in the default keymaps files:
+You can see all of Asylum's default bindings for each platform in the default keymaps files:
 
-- [macOS](https://github.com/zed-industries/zed/blob/main/assets/keymaps/default-macos.json)
-- [Windows](https://github.com/zed-industries/zed/blob/main/assets/keymaps/default-windows.json)
-- [Linux](https://github.com/zed-industries/zed/blob/main/assets/keymaps/default-linux.json).
+- [macOS](https://github.com/viniengelage/asylum/blob/main/assets/keymaps/default-macos.json)
+- [Windows](https://github.com/viniengelage/asylum/blob/main/assets/keymaps/default-windows.json)
+- [Linux](https://github.com/viniengelage/asylum/blob/main/assets/keymaps/default-linux.json).
 
 If you want to debug problems with custom keymaps, you can use {#action dev::OpenKeyContextView} from the command palette.
-Please file [an issue](https://github.com/zed-industries/zed) if you run into something you think should work but isn't.
+Please file [an issue](https://github.com/viniengelage/asylum/issues) if you run into something you think should work but isn't.
 
 ### Keybinding Syntax
 
-Zed has the ability to match against not just a single keypress, but a sequence of keys typed in order. Each key in the `"bindings"` map is a sequence of keypresses separated with a space.
+Asylum has the ability to match against not just a single keypress, but a sequence of keys typed in order. Each key in the `"bindings"` map is a sequence of keypresses separated with a space.
 
 Each keypress is a sequence of modifiers followed by a key. The modifiers are:
 
@@ -94,7 +94,7 @@ Each keypress is a sequence of modifiers followed by a key. The modifiers are:
 - `alt-` for alt (option on macOS)
 - `shift-` The shift key
 - `fn-` The function key
-- `secondary-` Equivalent to `cmd` when Zed is running on macOS and `ctrl` when on Windows and Linux
+- `secondary-` Equivalent to `cmd` when Asylum is running on macOS and `ctrl` when on Windows and Linux
 
 The keys can be any single Unicode codepoint that your keyboard generates (for example `a`, `0`, `£` or `ç`), or any named key (`tab`, `f1`, `shift`, or `cmd`). If you are using a non-Latin layout (e.g. Cyrillic), you can bind either to the Cyrillic character or the Latin character that key generates with `cmd` pressed.
 
@@ -113,15 +113,15 @@ A few examples:
 
 The `shift-` modifier can only be used in combination with a letter to indicate the uppercase version. For example, `shift-g` matches typing `G`. Although on many keyboards shift is used to type punctuation characters like `(`, the keypress is not considered to be modified, and so `shift-(` does not match.
 
-The `alt-` modifier can be used on many layouts to generate a different key. For example, on a macOS US keyboard, the combination `alt-c` types `ç`. You can match against either in your keymap file, though by convention, Zed spells this combination as `alt-c`.
+The `alt-` modifier can be used on many layouts to generate a different key. For example, on a macOS US keyboard, the combination `alt-c` types `ç`. You can match against either in your keymap file, though by convention, Asylum spells this combination as `alt-c`.
 
 It is possible to match against typing a modifier key on its own. For example, `shift shift` can be used to implement JetBrains' 'Search Everywhere' shortcut. In this case, the binding happens on key release instead of on keypress.
 
 ### Contexts
 
-If a binding group has a `"context"` key, it will be matched against the currently active contexts in Zed.
+If a binding group has a `"context"` key, it will be matched against the currently active contexts in Asylum.
 
-Zed's contexts make up a tree, with the root being `Workspace`. Workspaces contain Panes and Panels, and Panes contain Editors, etc. The easiest way to see what contexts are active at a given moment is the key context view, which you can get to with the {#action dev::OpenKeyContextView} command in the command palette.
+Asylum's contexts make up a tree, with the root being `Workspace`. Workspaces contain Panes and Panels, and Panes contain Editors, etc. The easiest way to see what contexts are active at a given moment is the key context view, which you can get to with the {#action dev::OpenKeyContextView} command in the command palette.
 
 For example:
 
@@ -159,8 +159,8 @@ If you're using Vim mode, we have information on how [vim modes influence the co
 
 ### Actions
 
-Almost all of Zed's functionality is exposed as actions.
-Although there is no explicitly documented list, you can find most of them by searching in the command palette, by looking in the default keymaps for [macOS](https://github.com/zed-industries/zed/blob/main/assets/keymaps/default-macos.json), [Windows](https://github.com/zed-industries/zed/blob/main/assets/keymaps/default-windows.json) or [Linux](https://github.com/zed-industries/zed/blob/main/assets/keymaps/default-linux.json), or by using Zed's autocomplete in your keymap file.
+Almost all of Asylum's functionality is exposed as actions.
+Although there is no explicitly documented list, you can find most of them by searching in the command palette, by looking in the default keymaps for [macOS](https://github.com/viniengelage/asylum/blob/main/assets/keymaps/default-macos.json), [Windows](https://github.com/viniengelage/asylum/blob/main/assets/keymaps/default-windows.json) or [Linux](https://github.com/viniengelage/asylum/blob/main/assets/keymaps/default-linux.json), or by using Asylum's autocomplete in your keymap file.
 
 Most actions do not require any arguments, and so you can bind them as strings: `"ctrl-a": "language_selector::Toggle"`. Some require a single argument and must be bound as an array: `"cmd-1": ["workspace::ActivatePane", 0]`. Some actions require multiple arguments and are bound as an array of a string and an object: `"ctrl-a": ["pane::DeploySearch", { "replace_enabled": true }]`.
 
@@ -173,9 +173,9 @@ When multiple keybindings have the same keystroke and are active at the same tim
 
 The other kind of conflict that arises is when you have two bindings, one of which is a prefix of the other. For example, if you have `"ctrl-w":"editor::DeleteToNextWordEnd"` and `"ctrl-w left":"editor::DeleteToEndOfLine"`.
 
-When this happens, and both bindings are active in the current context, Zed will wait for 1 second after you type `ctrl-w` to see if you're about to type `left`. If you don't type anything, or if you type a different key, then `DeleteToNextWordEnd` will be triggered. If you do, then `DeleteToEndOfLine` will be triggered.
+When this happens, and both bindings are active in the current context, Asylum will wait for 1 second after you type `ctrl-w` to see if you're about to type `left`. If you don't type anything, or if you type a different key, then `DeleteToNextWordEnd` will be triggered. If you do, then `DeleteToEndOfLine` will be triggered.
 
-Zed can also wait before inserting printable text when it might begin a multi-stroke binding. For example, with a `j k` binding, typing `j` waits briefly for `k`; otherwise, `j` is inserted after the timeout.
+Asylum can also wait before inserting printable text when it might begin a multi-stroke binding. For example, with a `j k` binding, typing `j` waits briefly for `k`; otherwise, `j` is inserted after the timeout.
 
 Whenever multi-stroke input is pending, an indicator with the pending keystrokes is shown in the status bar. Hovering it lists the bindings that could still match. If the input has a timeout, the indicator also shows a countdown, and hovering pauses the timeout so you can read the bindings. The timeout resumes with the same remaining duration when the pointer leaves. Without a timeout, the pending keystrokes are shown without a countdown. The indicator can be hidden with `{"status_bar": {"pending_keystrokes_indicator": false}}`. Vim and Helix modes continue to use their existing pending-key indicator instead.
 
@@ -222,11 +222,11 @@ popover is disabled. Or add this to your settings.json:
 }
 ```
 
-Set `which_key.delay_ms` to change how long Zed waits before opening the menu.
+Set `which_key.delay_ms` to change how long Asylum waits before opening the menu.
 
 ### Non-QWERTY keyboards
 
-Zed's support for non-QWERTY keyboards is still a work in progress.
+Asylum's support for non-QWERTY keyboards is still a work in progress.
 
 If your keyboard can type the full ASCII range (DVORAK, COLEMAK, etc.), then shortcuts should work as you expect.
 
@@ -234,7 +234,7 @@ Otherwise, read on...
 
 #### macOS
 
-On Cyrillic, Hebrew, Armenian, and other keyboards that are mostly non-ASCII, macOS automatically maps keys to the ASCII range when `cmd` is held. Zed takes this a step further, and it can always match key-presses against either the ASCII layout or the real layout, regardless of modifiers and the `use_key_equivalents` setting. For example, in Thai, pressing `ctrl-ๆ` will match bindings associated with `ctrl-q` or `ctrl-ๆ`.
+On Cyrillic, Hebrew, Armenian, and other keyboards that are mostly non-ASCII, macOS automatically maps keys to the ASCII range when `cmd` is held. Asylum takes this a step further, and it can always match key-presses against either the ASCII layout or the real layout, regardless of modifiers and the `use_key_equivalents` setting. For example, in Thai, pressing `ctrl-ๆ` will match bindings associated with `ctrl-q` or `ctrl-ๆ`.
 
 On keyboards that support extended Latin alphabets (French AZERTY, German QWERTZ, etc.), it is often not possible to type the entire ASCII range without `option`. This introduces an ambiguity: `option-2` produces `@`. To ensure that all the built-in keyboard shortcuts can still be typed on these keyboards, we move key bindings around. For example, shortcuts bound to `@` on QWERTY are moved to `"` on a Spanish layout. This mapping is based on the macOS system defaults and can be seen by running {#action dev::OpenKeyContextView} from the command palette.
 
@@ -279,7 +279,7 @@ the sequence, or if you want to disable multikey bindings starting with that key
 
 A `null` binding follows the same precedence rules as normal actions, so it disables all bindings that would match further up in the tree too. If you'd like a binding that matches further up in the tree to take precedence over a lower binding, you need to rebind it to the action you want in the context you want.
 
-This is useful for preventing Zed from falling back to a default key binding when the action you specified is conditional and propagates. For example, `buffer_search::DeployReplace` only triggers when the search bar is not in view. If the search bar is in view, it would propagate and trigger the default action set for that key binding, such as opening the right dock. To prevent this from happening:
+This is useful for preventing Asylum from falling back to a default key binding when the action you specified is conditional and propagates. For example, `buffer_search::DeployReplace` only triggers when the search bar is not in view. If the search bar is in view, it would propagate and trigger the default action set for that key binding, such as opening the right dock. To prevent this from happening:
 
 ```json [keymap]
 [
@@ -337,9 +337,9 @@ If the argument to `SendKeystrokes` contains the binding used to trigger it, it 
 
 ### Forward keys to terminal
 
-If you're on Linux or Windows, you might find yourself wanting to forward key combinations to the built-in terminal instead of them being handled by Zed.
+If you're on Linux or Windows, you might find yourself wanting to forward key combinations to the built-in terminal instead of them being handled by Asylum.
 
-For example, `ctrl-n` creates a new tab in Zed on Linux. If you want to send `ctrl-n` to the built-in terminal when it's focused, add the following to your keymap:
+For example, `ctrl-n` creates a new tab in Asylum on Linux. If you want to send `ctrl-n` to the built-in terminal when it's focused, add the following to your keymap:
 
 ```json [keymap]
 {
@@ -352,12 +352,12 @@ For example, `ctrl-n` creates a new tab in Zed on Linux. If you want to send `ct
 
 ### Task Key bindings
 
-You can also bind keys to launch Zed Tasks defined in your `tasks.json`.
+You can also bind keys to launch Asylum Tasks defined in your `tasks.json`.
 See the [tasks documentation](tasks.md#custom-keybindings-for-tasks) for more.
 
 ### Subword Navigation
 
-Zed exposes word and subword motions as separate actions. Word motions stop at whitespace and punctuation boundaries, while subword motions also stop inside identifiers such as `camelCase`, `PascalCase`, and `snake_case`.
+Asylum exposes word and subword motions as separate actions. Word motions stop at whitespace and punctuation boundaries, while subword motions also stop inside identifiers such as `camelCase`, `PascalCase`, and `snake_case`.
 
 The JetBrains base keymap uses editor-local `alt-left` / `alt-right` and `shift-alt-left` / `shift-alt-right` for subword navigation to match JetBrains-style CamelHump navigation. If you use another base keymap and want that behavior, add this to your `keymap.json`:
 

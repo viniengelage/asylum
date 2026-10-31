@@ -1,121 +1,86 @@
 ---
 title: Uninstall
-description: "This guide covers how to uninstall Zed on different operating systems."
+description: "This guide covers how to uninstall Asylum on different operating systems."
 ---
 
 # Uninstall
 
-This guide covers how to uninstall Zed on different operating systems.
+This guide covers how to uninstall Asylum on different operating systems.
 
 ## macOS
 
-### Standard Installation
-
-If you installed Zed by downloading it from the website:
-
-1. Quit Zed if it's running
+1. Quit Asylum if it's running
 2. Open Finder and go to your Applications folder
-3. Drag Zed to the Trash (or right-click and select "Move to Trash")
+3. Drag Asylum to the Trash (or right-click and select "Move to Trash")
 4. Empty the Trash
-
-### Homebrew Installation
-
-If you installed Zed using Homebrew, use the following command:
-
-```sh
-brew uninstall --cask zed
-```
-
-Or for the preview version:
-
-```sh
-brew uninstall --cask zed@preview
-```
 
 ### Removing User Data (Optional)
 
-To completely remove all Zed configuration files and data:
+To completely remove all Asylum configuration files and data:
 
 1. Open Finder
 2. Press `Cmd + Shift + G` to open "Go to Folder"
 3. Delete the following directories if they exist:
-   - `~/Library/Application Support/Zed`
-   - `~/Library/Saved Application State/dev.zed.Zed.savedState`
-   - `~/Library/Logs/Zed`
-   - `~/Library/Caches/dev.zed.Zed`
-   - `~/Library/Caches/Zed`
-   - `~/.config/zed`
-   - `~/.local/state/Zed`
+   - `~/Library/Application Support/Asylum`
+   - `~/Library/Saved Application State/dev.asylum.Asylum.savedState`
+   - `~/Library/Logs/Asylum`
+   - `~/Library/Caches/Asylum`
+   - `~/.config/asylum`
 
 ## Linux
 
 ### Standard Uninstall
 
-If Zed was installed using the default installation script, run:
+There are no prebuilt Linux releases of Asylum. If you built and installed it with `script/install-linux`, run the bundled uninstall command:
 
 ```sh
-zed --uninstall
+$HOME/.local/bin/asylum --uninstall
 ```
 
-You'll be prompted whether to keep or delete your preferences. After making a choice, you should see a message that Zed was successfully uninstalled.
-
-If the `zed` command is not found in your PATH, try:
-
-```sh
-$HOME/.local/bin/zed --uninstall
-```
-
-or:
-
-```sh
-$HOME/.local/zed.app/bin/zed --uninstall
-```
-
-### Package Manager
-
-If you installed Zed using a package manager (such as Flatpak, Snap, or a distribution-specific package manager), consult that package manager's documentation for uninstallation instructions.
+You'll be prompted whether to keep or delete your preferences.
 
 ### Manual Removal
 
-If the uninstall command fails or Zed was installed to a custom location, you can manually remove:
+If the uninstall command fails or Asylum was installed to a custom location, you can manually remove:
 
-- Installation directory: `~/.local/zed.app` (or your custom installation path)
-- Binary symlink: `~/.local/bin/zed`
-- Configuration and data: `~/.config/zed`
+- Installation directory: `~/.local/asylum.app` (or your custom installation path)
+- Binary symlink: `~/.local/bin/asylum`
+- Configuration: `~/.config/asylum`
+- Data: `$XDG_DATA_HOME/asylum` (usually `~/.local/share/asylum`)
 
 ## Windows
 
 ### Standard Installation
 
-1. Quit Zed if it's running
+1. Quit Asylum if it's running
 2. Open Settings (Windows key + I)
 3. Go to "Apps" > "Installed apps" (or "Apps & features" on Windows 10)
-4. Search for "Zed"
-5. Click the three dots menu next to Zed and select "Uninstall"
+4. Search for "Asylum"
+5. Click the three dots menu next to Asylum and select "Uninstall"
 6. Follow the prompts to complete the uninstallation
 
 Alternatively, you can:
 
 1. Open the Start menu
-2. Right-click on Zed
+2. Right-click on Asylum
 3. Select "Uninstall"
 
 ### Removing User Data (Optional)
 
-To completely remove all Zed configuration files and data:
+To completely remove all Asylum configuration files and data:
 
 1. Press `Windows key + R` to open Run
 2. Type `%APPDATA%` and press Enter
-3. Delete the `Zed` folder if it exists
+3. Delete the `Asylum` folder if it exists
 4. Press `Windows key + R` again, type `%LOCALAPPDATA%` and press Enter
-5. Delete the `Zed` folder if it exists
+5. Delete the `Asylum` folder if it exists
 
 ## Troubleshooting
 
 If you encounter issues during uninstallation:
 
-- **macOS/Windows**: Ensure Zed is completely quit before attempting to uninstall. Check Activity Manager (macOS) or Task Manager (Windows) for any running Zed processes.
+- **macOS/Windows**: Ensure Asylum is completely quit before attempting to uninstall. Check Activity Manager (macOS) or Task Manager (Windows) for any running Asylum processes.
 - **Linux**: If the uninstall script fails, check the error message and consider manual removal of the directories listed above.
-- **All platforms**: If you want to start fresh while keeping Zed installed, you can delete the configuration directories instead of uninstalling the application entirely.
+- **All platforms**: If you want to start fresh while keeping Asylum installed, you can delete the configuration directories instead of uninstalling the application entirely.
 
-For additional help, see our [Linux-specific documentation](./linux.md) or visit the [Zed community](https://zed.dev/community-links).
+For additional help, see the [Linux-specific documentation](./linux.md) or [open an issue](https://github.com/viniengelage/asylum/issues).

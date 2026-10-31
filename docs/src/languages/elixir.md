@@ -1,6 +1,6 @@
 ---
 title: Elixir
-description: "Configure Elixir language support in Zed, including language servers, formatting, and debugging."
+description: "Configure Elixir language support in Asylum, including language servers, formatting, and debugging."
 ---
 
 # Elixir
@@ -30,7 +30,7 @@ Alternatively, you can provide your own custom binaries by passing the path and 
 
 Some of the language servers can also accept initialization or workspace configuration options. See the sections below for an outline of what each server supports. The configuration can be passed in your settings file via `lsp.{language-server-id}.initialization_options` and `lsp.{language-server-id}.settings` respectively.
 
-Visit the [Configuring Zed](../configuring-zed.md#settings-files) guide for more information on how to edit your settings file.
+Visit the [Configuring Asylum](../configuring-zed.md#settings-files) guide for more information on how to edit your settings file.
 
 ### Using ElixirLS
 
@@ -170,7 +170,7 @@ Enable Next LS by adding the following to your settings file:
 
 Next LS can accept initialization options.
 
-Completions are an experimental feature within Next LS, and are enabled by default in Zed. Disable them by adding the following to your settings file:
+Completions are an experimental feature within Next LS, and are enabled by default in Asylum. Disable them by adding the following to your settings file:
 
 ```json [settings]
   "lsp": {
@@ -296,7 +296,7 @@ The Elixir extension also provides a debug adapter via ElixirLS. Like the langua
 
 Alternatively, you can provide your own custom binary by passing the path and arguments in your settings file via `dap.ElixirLS.binary` and `dap.ElixirLS.args` respectively.
 
-Refer to the [Debugger](../debugger.md#getting-started) documentation for more information on how debugging works in Zed.
+Refer to the [Debugger](../debugger.md#getting-started) documentation for more information on how debugging works in Asylum.
 
 ### Using ElixirLS
 

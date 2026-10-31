@@ -1,6 +1,6 @@
 ---
 title: Svelte
-description: "Configure Svelte language support in Zed, including language servers, formatting, and debugging."
+description: "Configure Svelte language support in Asylum, including language servers, formatting, and debugging."
 ---
 
 # Svelte
@@ -29,7 +29,7 @@ You can modify how certain styles, such as directives and modifiers, appear in a
 
 ## Inlay Hints
 
-When inlay hints are enabled in Zed, to make the language server send them back, Zed sets the following initialization options:
+When inlay hints are enabled in Asylum, to make the language server send them back, Asylum sets the following initialization options:
 
 ```json
 "inlayHints": {

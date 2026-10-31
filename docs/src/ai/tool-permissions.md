@@ -8,7 +8,7 @@ For a list of available tools, [see the Tools page](./tools.md).
 
 ## Quick Start
 
-Use Zed's Settings Editor to [configure tool permissions](zed://settings/agent.tool_permissions), or add rules directly to your settings file:
+Use Asylum's Settings Editor to [configure tool permissions](asylum://settings/agent.tool_permissions), or add rules directly to your settings file:
 
 ```json [settings]
 {
@@ -139,11 +139,11 @@ To auto-approve all tool actions:
 }
 ```
 
-This bypasses confirmation prompts for most tools, but `always_deny`, `always_confirm`, built-in security rules, and paths inside Zed settings directories still prompt or block.
+This bypasses confirmation prompts for most tools, but `always_deny`, `always_confirm`, built-in security rules, and paths inside Asylum settings directories still prompt or block.
 
 ## Shell Compatibility
 
-For the `terminal` tool, Zed parses chained commands (e.g., `echo hello && rm file`) to check each sub-command against your patterns.
+For the `terminal` tool, Asylum parses chained commands (e.g., `echo hello && rm file`) to check each sub-command against your patterns.
 
 All supported shells work with tool permission patterns, including sh, bash, zsh, dash, fish, PowerShell 7+, pwsh, cmd, xonsh, csh, tcsh, Nushell, Elvish, and rc (Plan 9).
 
@@ -162,7 +162,7 @@ You can use the "Test Your Rules" checker, available in each individual tool pag
 
 ## Built-in Security Rules
 
-Zed includes a small set of hardcoded security rules that **cannot be overridden** by any setting.
+Asylum includes a small set of hardcoded security rules that **cannot be overridden** by any setting.
 These only apply to the **terminal** tool and block recursive deletion of critical directories:
 
 - `rm -rf /` and `rm -rf /*` — filesystem root

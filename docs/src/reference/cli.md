@@ -1,24 +1,24 @@
 ---
 title: CLI Reference
-description: "Reference for Zed's command-line interface (CLI), including opening files and directories, integrating with tools, and controlling Zed from scripts."
+description: "Reference for Asylum's command-line interface (CLI), including opening files and directories, integrating with tools, and controlling Asylum from scripts."
 ---
 
 # CLI Reference
 
-Use Zed's command-line interface (CLI) to open files and directories, integrate with other tools, and control Zed from scripts.
+Use Asylum's command-line interface (CLI) to open files and directories, integrate with other tools, and control Asylum from scripts.
 
 ## Installation
 
-**macOS:** Run the {#action cli::InstallCliBinary} command from the command palette ({#kb command_palette::Toggle}) to install the `zed` CLI to `/usr/local/bin/zed`.
+**macOS:** Run the {#action cli::InstallCliBinary} command from the command palette ({#kb command_palette::Toggle}) to install the `asylum` CLI to `/usr/local/bin/asylum`.
 
-**Linux:** The CLI is included with Zed packages. The binary name may vary by distribution (commonly `zed` or `zeditor`).
+**Linux:** The CLI is included in the Asylum bundle as `bin/asylum`.
 
-**Windows:** The CLI is included with Zed. Add Zed's installation directory to your PATH, or use the full path to `zed.exe`.
+**Windows:** The CLI is included with Asylum. Add the `bin` folder in Asylum's installation directory to your PATH.
 
 ## Usage
 
 ```sh
-zed [OPTIONS] [PATHS]...
+asylum [OPTIONS] [PATHS]...
 ```
 
 ## Opening Files and Directories
@@ -26,26 +26,26 @@ zed [OPTIONS] [PATHS]...
 Open a file:
 
 ```sh
-zed myfile.txt
+asylum myfile.txt
 ```
 
 Open a directory as a workspace:
 
 ```sh
-zed ~/projects/myproject
+asylum ~/projects/myproject
 ```
 
 Open multiple files or directories:
 
 ```sh
-zed file1.txt file2.txt ~/projects/myproject
+asylum file1.txt file2.txt ~/projects/myproject
 ```
 
 Open a file at a specific line and column:
 
 ```sh
-zed myfile.txt:42        # Open at line 42
-zed myfile.txt:42:10     # Open at line 42, column 10
+asylum myfile.txt:42        # Open at line 42
+asylum myfile.txt:42:10     # Open at line 42, column 10
 ```
 
 ## Options
@@ -54,11 +54,11 @@ zed myfile.txt:42:10     # Open at line 42, column 10
 
 Wait for all opened files to be closed before the CLI exits. When opening a directory, waits until the window is closed.
 
-This is useful for integrating Zed with tools that expect an editor to block until editing is complete (e.g., `git commit`):
+This is useful for integrating Asylum with tools that expect an editor to block until editing is complete (e.g., `git commit`):
 
 ```sh
-export EDITOR="zed --wait"
-git commit  # Opens Zed and waits for you to close the commit message file
+export EDITOR="asylum --wait"
+git commit  # Opens Asylum and waits for you to close the commit message file
 ```
 
 ### `-n`, `--new`
@@ -66,7 +66,7 @@ git commit  # Opens Zed and waits for you to close the commit message file
 Open paths in a new workspace window, even if the paths are already open in an existing window:
 
 ```sh
-zed -n ~/projects/myproject
+asylum -n ~/projects/myproject
 ```
 
 ### `-a`, `--add`
@@ -74,7 +74,7 @@ zed -n ~/projects/myproject
 Add paths to the currently focused workspace instead of opening a new window. When multiple workspace windows are open, files open in the focused window:
 
 ```sh
-zed -a newfile.txt
+asylum -a newfile.txt
 ```
 
 ### `-r`, `--reuse`
@@ -82,15 +82,15 @@ zed -a newfile.txt
 Reuse an existing window, replacing its current workspace with the new paths:
 
 ```sh
-zed -r ~/projects/different-project
+asylum -r ~/projects/different-project
 ```
 
 ### `-e`, `--existing`
 
-Open paths in an existing Zed window instead of creating a new one:
+Open paths in an existing Asylum window instead of creating a new one:
 
 ```sh
-zed -e myfile.txt
+asylum -e myfile.txt
 ```
 
 By default (without `-n`, `-a`, `-r`, or `-e`), directories open in the current window's sidebar. You can change this default with the `cli_default_open_behavior` setting. See [Windows & Projects](../windows-and-projects.md) for more details.
@@ -100,16 +100,16 @@ By default (without `-n`, `-a`, `-r`, or `-e`), directories open in the current 
 Open a diff view comparing two files. Can be specified multiple times:
 
 ```sh
-zed --diff file1.txt file2.txt
-zed --diff old.rs new.rs --diff old2.rs new2.rs
+asylum --diff file1.txt file2.txt
+asylum --diff old.rs new.rs --diff old2.rs new2.rs
 ```
 
 ### `--foreground`
 
-Run Zed in the foreground, keeping the terminal attached. Useful for debugging:
+Run Asylum in the foreground, keeping the terminal attached. Useful for debugging:
 
 ```sh
-zed --foreground
+asylum --foreground
 ```
 
 ### `--user-data-dir <DIR>`
@@ -117,33 +117,33 @@ zed --foreground
 Use a custom directory for all user data (database, extensions, logs) instead of the default location:
 
 ```sh
-zed --user-data-dir ~/.zed-custom
+asylum --user-data-dir ~/.asylum-custom
 ```
 
 Default locations:
 
-- **macOS:** `~/Library/Application Support/Zed`
-- **Linux:** `$XDG_DATA_HOME/zed` (typically `~/.local/share/zed`)
-- **Windows:** `%LOCALAPPDATA%\Zed`
+- **macOS:** `~/Library/Application Support/Asylum`
+- **Linux:** `$XDG_DATA_HOME/asylum` (typically `~/.local/share/asylum`)
+- **Windows:** `%LOCALAPPDATA%\Asylum`
 
 ### `-v`, `--version`
 
-Print Zed's version and exit:
+Print Asylum's version and exit:
 
 ```sh
-zed --version
+asylum --version
 ```
 
 ### `--completions <SHELL>`
 
-Generate shell completions for the `zed` CLI:
+Generate shell completions for the `asylum` CLI:
 
 #### Bash
 
 Add to `~/.bashrc`:
 
 ```bash
-eval "$(zed --completions bash)"
+eval "$(asylum --completions bash)"
 ```
 
 #### Elvish
@@ -152,7 +152,7 @@ Add to `~/.config/elvish/rc.elv`:
 
 ```elvish
 set edit:completion:arg-completer[zed] = { |@args|
-    eval (zed --completions elvish | slurp)
+    eval (asylum --completions elvish | slurp)
     $edit:completion:arg-completer[zed] $@args
 }
 ```
@@ -162,7 +162,7 @@ set edit:completion:arg-completer[zed] = { |@args|
 Add to `~/.config/fish/config.fish`:
 
 ```fish
-zed --completions fish | source
+asylum --completions fish | source
 ```
 
 #### Nushell
@@ -171,7 +171,7 @@ Add to `~/.config/nushell/config.nu`:
 
 ```nu
 mkdir ($nu.data-dir | path join "vendor/autoload")
-^zed --completions nushell | save --force ($nu.data-dir | path join "vendor/autoload/zed.nu")
+^asylum --completions nushell | save --force ($nu.data-dir | path join "vendor/autoload/asylum.nu")
 ```
 
 #### Powershell
@@ -179,7 +179,7 @@ mkdir ($nu.data-dir | path join "vendor/autoload")
 Add to `$PROFILE`:
 
 ```powershell
-(&zed --completions powershell) | Out-String | Invoke-Expression
+(&asylum --completions powershell) | Out-String | Invoke-Expression
 ```
 
 #### Zsh
@@ -187,23 +187,23 @@ Add to `$PROFILE`:
 Add to `~/.zshrc`:
 
 ```zsh
-eval "$(zed --completions zsh)"
+eval "$(asylum --completions zsh)"
 ```
 
 ### `--uninstall`
 
-Uninstall Zed and remove all related files (macOS and Linux only):
+Uninstall Asylum and remove all related files (macOS and Linux only):
 
 ```sh
-zed --uninstall
+asylum --uninstall
 ```
 
 ### `--zed <PATH>`
 
-Specify a custom path to the Zed application or binary:
+Specify a custom path to the Asylum application or binary:
 
 ```sh
-zed --zed /path/to/Zed.app myfile.txt
+asylum --zed /path/to/Asylum.app myfile.txt
 ```
 
 ## Reading from Standard Input
@@ -211,33 +211,33 @@ zed --zed /path/to/Zed.app myfile.txt
 Read content from stdin by passing `-` as the path:
 
 ```sh
-echo "Hello, World!" | zed -
-cat myfile.txt | zed -
-ps aux | zed -
+echo "Hello, World!" | asylum -
+cat myfile.txt | asylum -
+ps aux | asylum -
 ```
 
-This creates a temporary file with the stdin content and opens it in Zed.
+This creates a temporary file with the stdin content and opens it in Asylum.
 
 ## URL Handling
 
-The CLI can open `zed://`, `file://`, and `ssh://` URLs:
+The CLI can open `asylum://`, `file://`, and `ssh://` URLs:
 
 ```sh
-zed zed://settings
-zed file:///Users/whatever/.zshrc
-zed ssh://me@example.com/abs/path
-zed ssh://me@example.com:/abs/path
-zed ssh://me@example.com/~/project
-zed ssh://me@example.com:~/project
+asylum asylum://settings
+asylum file:///Users/whatever/.zshrc
+asylum ssh://me@example.com/abs/path
+asylum ssh://me@example.com:/abs/path
+asylum ssh://me@example.com/~/project
+asylum ssh://me@example.com:~/project
 ```
 
-## Using Zed as Your Default Editor
+## Using Asylum as Your Default Editor
 
-Set Zed as your default editor for Git and other tools:
+Set Asylum as your default editor for Git and other tools:
 
 ```sh
-export EDITOR="zed --wait"
-export VISUAL="zed --wait"
+export EDITOR="asylum --wait"
+export VISUAL="asylum --wait"
 ```
 
 Add these lines to your shell configuration file (e.g., `~/.bashrc`, `~/.zshrc`).
@@ -247,14 +247,14 @@ Add these lines to your shell configuration file (e.g., `~/.bashrc`, `~/.zshrc`)
 On macOS, you can launch a specific release channel by passing the channel name as the first argument:
 
 ```sh
-zed --stable myfile.txt
-zed --preview myfile.txt
-zed --nightly myfile.txt
+asylum --stable myfile.txt
+asylum --preview myfile.txt
+asylum --nightly myfile.txt
 ```
 
 ## WSL Integration (Windows)
 
-On Windows, the CLI supports opening paths from WSL distributions. This is handled automatically when launching Zed from within WSL.
+On Windows, the CLI supports opening paths from WSL distributions. This is handled automatically when launching Asylum from within WSL.
 
 ## Exit Codes
 

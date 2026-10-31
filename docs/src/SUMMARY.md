@@ -29,12 +29,6 @@
 - [Git](./git.md)
 - [Modelines](./modelines.md)
 
-# Collaboration
-
-- [Overview](./collaboration/overview.md)
-  - [Channels](./collaboration/channels.md)
-  - [Contacts and Private Calls](./collaboration/contacts-and-private-calls.md)
-
 # Remote Development
 
 - [Overview](./remote-development.md)
@@ -47,7 +41,7 @@
 - [AI Quick Start](./ai/quick-start.md)
 - [AI by Company](./ai/by-company.md)
 - [Agents](./ai/agents.md)
-  - [Zed Agent](./ai/zed-agent.md)
+  - [Asylum Agent](./ai/zed-agent.md)
   - [External Agents](./ai/external-agents.md)
   - [Terminal Threads](./ai/terminal-threads.md)
 - [Agent Panel](./ai/agent-panel.md)
@@ -68,29 +62,11 @@
   - [Use a Local Model](./ai/use-a-local-model.md)
 - [Edit Prediction](./ai/edit-prediction.md)
 - [AI Privacy](./ai/privacy-and-security.md)
-  - [Feedback and Training Data](./ai/ai-improvement.md)
-
-# Account & Billing
-
-- [Authenticate](./authentication.md)
-- [Plans & Pricing](./account/plans-and-pricing.md)
-- [Zed-Hosted Models](./account/zed-hosted-models.md)
-- [Billing](./account/billing.md)
-
-# Zed Business
-
-- [Overview](./business/overview.md)
-- [Organizations](./business/organizations.md)
-- [Roles & Permissions](./roles.md)
-- [Admin Controls](./business/admin-controls.md)
-- [Business Support](./business/business-support.md)
 
 # Privacy & Security
 
 - [Worktree Trust](./worktree-trust.md)
-- [Privacy for Business](./business/privacy.md)
 - [Telemetry](./telemetry.md)
-- [SOC2](./soc2.md)
 
 # Platform Support
 
@@ -221,9 +197,9 @@
 - [All Actions](./all-actions.md)
 - [CLI Reference](./reference/cli.md)
 
-# Developing Zed
+# Developing Asylum
 
-- [Developing Zed](./development.md)
+- [Developing Asylum](./development.md)
   - [macOS](./development/macos.md)
   - [Linux](./development/linux.md)
   - [Windows](./development/windows.md)
@@ -232,5 +208,4 @@
   - [Performance](./performance.md)
   - [UI/UX Checklist](./development/ui-checklist.md)
   - [Glossary](./development/glossary.md)
-- [Release Notes](./development/release-notes.md)
 - [Debugging Crashes](./development/debugging-crashes.md)

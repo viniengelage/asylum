@@ -1,27 +1,27 @@
 ---
-title: AI in Zed
-description: Understand Zed's AI features, agent paths, model providers, and setup routes.
+title: AI in Asylum
+description: Understand Asylum's AI features, agent paths, model providers, and setup routes.
 ---
 
 # AI
 
-Zed's AI docs are organized around three areas:
+Asylum's AI docs are organized around three areas:
 
 | Area         | Use it to choose                    | Examples                                                                                   |
 | ------------ | ----------------------------------- | ------------------------------------------------------------------------------------------ |
-| Agents       | How agentic work runs in Zed        | Zed Agent, External Agents, Terminal Threads                                               |
-| Model access | How Zed connects to language models | Zed-hosted models, API access, subscriptions, [gateways](./use-a-gateway.md), local models |
+| Agents       | How agentic work runs in Asylum        | Asylum Agent, External Agents, Terminal Threads                                               |
+| Model access | How Asylum connects to language models | API access, subscriptions, [gateways](./use-a-gateway.md), local models |
 | Features     | Which AI workflow you want to use   | Agentic editing, inline edits, edit prediction, Git assistance                             |
 
 Start with [AI Quick Start](./quick-start.md) if you know what you want to do. Use [AI by Company](./by-company.md) if you know the company, subscription, model provider, agent, or CLI you want to use.
 
 ## Agent Paths {#agent-paths}
 
-Agent paths decide how agentic work runs in Zed.
+Agent paths decide how agentic work runs in Asylum.
 
-- [Zed Agent](./zed-agent.md): Zed's native agent. It can use models configured through [LLM Providers](./llm-providers.md), including [Zed-hosted models](../account/zed-hosted-models.md), provider API keys, supported subscriptions, gateways, and [local models](./use-a-local-model.md). It also uses built-in tools, profiles, skills, instructions, and MCP servers.
+- [Asylum Agent](./zed-agent.md): Asylum's native agent. It can use models configured through [LLM Providers](./llm-providers.md), including provider API keys, supported subscriptions, gateways, and [local models](./use-a-local-model.md). It also uses built-in tools, profiles, skills, instructions, and MCP servers.
 - [External Agents](./external-agents.md): ACP-integrated agents that run through their own process and configuration.
-- [Terminal Threads](./terminal-threads.md): terminal-backed threads for running an agent CLI or TUI directly in Zed.
+- [Terminal Threads](./terminal-threads.md): terminal-backed threads for running an agent CLI or TUI directly in Asylum.
 
 The [Threads Sidebar](./parallel-agents.md#threads-sidebar) is where you organize agent work. You can run multiple agent threads and Terminal Threads at once, each using a different agent and working against different projects.
 
@@ -29,13 +29,13 @@ See [Agents](./agents.md) for a comparison.
 
 ## Model Access {#model-access}
 
-Model access controls which models power the Zed Agent and other model-backed Zed AI features. Zed can use hosted models, [provider API access](./use-api-access.md), subscription sign-in, gateways, and local models.
+Model access controls which models power the Asylum Agent and other model-backed Asylum AI features. Asylum can use [provider API access](./use-api-access.md), subscription sign-in, gateways, and local models.
 
 See [LLM Providers](./llm-providers.md) to choose a model access path.
 
 ## AI Features {#ai-features}
 
-Zed has several AI-powered workflows:
+Asylum has several AI-powered workflows:
 
 - [Agent Panel](./agent-panel.md): prompt agents, add context, review changes, and manage active threads.
 - [Parallel Agents](./parallel-agents.md): run multiple threads across projects and worktrees.
@@ -47,4 +47,4 @@ Zed has several AI-powered workflows:
 
 Use [AI Quick Start](./quick-start.md) to choose the right setup path, configure model access, add agents or MCP servers, control tools, and turn AI off.
 
-For privacy, provider data boundaries, and opt-in data sharing, see [AI Privacy](./privacy-and-security.md) and [Feedback and Training Data](./ai-improvement.md).
+For privacy and provider data boundaries, see [AI Privacy](./privacy-and-security.md).
