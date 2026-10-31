@@ -284,6 +284,10 @@ fn choose_device(
         lowercase.as_str(),
         "ios" | "iphone" | "simulador" | "simulator"
     ) {
+        anyhow::ensure!(
+            crate::IOS_SIMULATOR_SUPPORTED,
+            "O simulador iOS só está disponível no macOS."
+        );
         let device = selected_udid
             .and_then(|udid| ios.iter().find(|device| device.udid == udid))
             .or_else(|| crate::default_ios_device(ios))

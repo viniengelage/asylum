@@ -40,14 +40,37 @@ pub static RELEASE_CHANNEL: LazyLock<ReleaseChannel> =
         _ => panic!("invalid release channel {}", *RELEASE_CHANNEL_NAME),
     });
 
-/// The app identifier for the current release channel, Windows only.
-#[cfg(target_os = "windows")]
+/// The app identifier for the current release channel, which names the Windows
+/// single-instance mutex and pipe.
 pub fn app_identifier() -> &'static str {
-    match *RELEASE_CHANNEL {
-        ReleaseChannel::Dev => "Asylum-Editor-Dev",
-        ReleaseChannel::Nightly => "Asylum-Editor-Nightly",
-        ReleaseChannel::Preview => "Asylum-Editor-Preview",
-        ReleaseChannel::Stable => "Asylum-Editor-Stable",
+    RELEASE_CHANNEL.app_identifier()
+}
+
+/// The name of the mutex that marks the running instance of `profile_id` on Windows.
+///
+/// The app and the CLI must build this the same way, or the CLI talks to the wrong instance.
+pub fn instance_mutex_name(profile_id: Option<&str>) -> String {
+    format!("{}-Instance-Mutex", instance_identifier(profile_id))
+}
+
+/// The name of the pipe the running instance of `profile_id` reads open requests from on
+/// Windows.
+pub fn instance_pipe_name(profile_id: Option<&str>) -> String {
+    format!(
+        "\\\\.\\pipe\\{}-Named-Pipe",
+        instance_identifier(profile_id)
+    )
+}
+
+/// Each profile is its own instance, so a profile other than the default one is part of the
+/// name. The default profile keeps the bare identifier, which is what a CLI or an instance from
+/// before profiles existed uses.
+fn instance_identifier(profile_id: Option<&str>) -> String {
+    match profile_id {
+        Some(profile_id) if profile_id != "default" => {
+            format!("{}-Profile-{profile_id}", app_identifier())
+        }
+        _ => app_identifier().to_string(),
     }
 }
 
@@ -236,6 +259,16 @@ impl ReleaseChannel {
         !matches!(self, ReleaseChannel::Dev)
     }
 
+    /// The app identifier for this [`ReleaseChannel`].
+    pub fn app_identifier(&self) -> &'static str {
+        match self {
+            ReleaseChannel::Dev => "Asylum-Editor-Dev",
+            ReleaseChannel::Nightly => "Asylum-Editor-Nightly",
+            ReleaseChannel::Preview => "Asylum-Editor-Preview",
+            ReleaseChannel::Stable => "Asylum-Editor-Stable",
+        }
+    }
+
     /// Returns the display name for this [`ReleaseChannel`].
     pub fn display_name(&self) -> &'static str {
         match self {
@@ -318,7 +351,29 @@ impl FromStr for ReleaseChannel {
 
 #[cfg(test)]
 mod tests {
-    use super::ReleaseChannel;
+    use super::{ReleaseChannel, app_identifier, instance_mutex_name, instance_pipe_name};
+
+    #[test]
+    fn test_each_profile_gets_its_own_instance_names() {
+        let app = app_identifier();
+        assert_eq!(instance_mutex_name(None), format!("{app}-Instance-Mutex"));
+        assert_eq!(
+            instance_mutex_name(Some("default")),
+            instance_mutex_name(None)
+        );
+        assert_eq!(
+            instance_mutex_name(Some("work")),
+            format!("{app}-Profile-work-Instance-Mutex")
+        );
+        assert_eq!(
+            instance_pipe_name(None),
+            format!(r"\\.\pipe\{app}-Named-Pipe")
+        );
+        assert_eq!(
+            instance_pipe_name(Some("work")),
+            format!(r"\\.\pipe\{app}-Profile-work-Named-Pipe")
+        );
+    }
 
     #[test]
     fn test_docs_url_points_at_the_repository_docs() {

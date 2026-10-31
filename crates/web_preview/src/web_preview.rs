@@ -61,6 +61,7 @@ actions!(
 );
 
 /// How often the poll loop looks for a URL dropped by the `zed browse` utility.
+#[cfg(target_os = "macos")]
 const BROWSE_REQUEST_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
 
 /// How long a browser gets to paint its first frame before we stop trusting the GPU to
@@ -79,6 +80,15 @@ struct PreviewError {
     headline: SharedString,
     detail: SharedString,
 }
+
+/// Whether the embedded browser can run here. It renders offscreen into IOSurfaces, which only
+/// exist on macOS.
+pub const fn is_supported() -> bool {
+    cfg!(target_os = "macos")
+}
+
+const UNSUPPORTED_HEADLINE: &str = "Web Preview ainda não está disponível neste sistema";
+const UNSUPPORTED_DETAIL: &str = "Por enquanto o browser embutido só funciona no macOS.";
 
 /// Registers the browser toolkit agents use to drive the embedded Chromium.
 #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
@@ -182,9 +192,11 @@ impl StatusItemView for WebPreviewToolkitButton {
     }
 
     fn is_hidden(&self, cx: &App) -> bool {
-        self.workspace
-            .upgrade()
-            .is_some_and(|workspace| !browser_enabled(workspace.read(cx).project(), cx))
+        !is_supported()
+            || self
+                .workspace
+                .upgrade()
+                .is_some_and(|workspace| !browser_enabled(workspace.read(cx).project(), cx))
     }
 }
 
@@ -260,8 +272,8 @@ impl WebPreviewView {
         cx: &mut Context<Workspace>,
     ) {
         let url = action.url.clone();
-        // With the embedded browser off, a link still has to go somewhere.
-        if !browser_enabled(workspace.project(), cx) {
+        // With the embedded browser off or unavailable, a link still has to go somewhere.
+        if !is_supported() || !browser_enabled(workspace.project(), cx) {
             cx.open_url(&url);
             return;
         }
@@ -298,6 +310,10 @@ impl WebPreviewView {
         window: &mut Window,
         cx: &mut Context<Workspace>,
     ) {
+        if !is_supported() {
+            cx.open_url(&url);
+            return;
+        }
         let view = cx.new(|cx| {
             let mut view = Self::new_with_url(url, window, cx);
             view.request_id = request_id;
@@ -335,7 +351,7 @@ impl WebPreviewView {
         // after the first click. Guarded on `is_focused` so focusing the URL bar — a
         // descendant — is left alone.
         let focus_redirect = cx.on_focus_in(&focus_handle, window, |this, window, cx| {
-            if this.focus_handle.is_focused(window) {
+            if is_supported() && this.focus_handle.is_focused(window) {
                 this.browser_focus.focus(window, cx);
             }
         });
@@ -367,6 +383,8 @@ impl WebPreviewView {
             }
         });
 
+        // Without a browser there is nothing to pump or repaint, so the loop is macOS-only.
+        #[cfg(target_os = "macos")]
         let poll_task = cx.spawn(async move |this, cx| {
             let mut delay = std::time::Duration::from_millis(1);
             let mut last_browse_check = std::time::Instant::now();
@@ -407,10 +425,6 @@ impl WebPreviewView {
                     }
 
                     delay = cef_browser::pump_message_loop();
-                }
-                #[cfg(not(target_os = "macos"))]
-                {
-                    delay = std::time::Duration::from_millis(50);
                 }
 
                 // Check for browse requests from the terminal utility. This is a miss
@@ -518,10 +532,6 @@ impl WebPreviewView {
                         break;
                     }
                 }
-                #[cfg(not(target_os = "macos"))]
-                if this.update(cx, |_this, cx| cx.notify()).is_err() {
-                    break;
-                }
             }
         });
 
@@ -548,7 +558,10 @@ impl WebPreviewView {
             pressed_buttons: 0,
             #[cfg(target_os = "macos")]
             last_modifiers: gpui::Modifiers::default(),
+            #[cfg(target_os = "macos")]
             _poll_task: Some(poll_task),
+            #[cfg(not(target_os = "macos"))]
+            _poll_task: None,
             _subscriptions: {
                 let mut subscriptions = vec![
                     submit_subscription,
@@ -1242,6 +1255,27 @@ impl Focusable for WebPreviewView {
 
 impl Render for WebPreviewView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if !is_supported() {
+            return v_flex()
+                .id("web-preview-view")
+                .size_full()
+                .track_focus(&self.focus_handle)
+                .items_center()
+                .justify_center()
+                .gap_2()
+                .p_4()
+                .child(
+                    Label::new(UNSUPPORTED_HEADLINE)
+                        .size(ui::LabelSize::Large)
+                        .color(Color::Muted),
+                )
+                .child(
+                    Label::new(UNSUPPORTED_DETAIL)
+                        .size(ui::LabelSize::Small)
+                        .color(Color::Disabled),
+                );
+        }
+
         let can_go_back = self.can_go_back;
         let can_go_forward = self.can_go_forward;
         let loading = self.loading;
@@ -1623,6 +1657,7 @@ impl Item for WebPreviewView {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn browse_request_path() -> std::path::PathBuf {
     runtime_discovery::discovery_dir().join("browse-request.txt")
 }
@@ -2053,6 +2088,11 @@ impl project::ProjectItem for PdfFile {
         path: &project::ProjectPath,
         cx: &mut App,
     ) -> Option<Task<anyhow::Result<Entity<Self>>>> {
+        // Without the embedded browser a PDF is better left to the default handling than
+        // opened into a tab that can't show it.
+        if !is_supported() {
+            return None;
+        }
         let is_pdf = path
             .path
             .extension()

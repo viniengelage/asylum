@@ -57,7 +57,9 @@ impl Session {
     }
 }
 
-/// What survives between launches besides the login: cookies and captured values.
+/// What survives between launches besides the login: cookies and captured values. Kept in a
+/// file rather than the keychain because Windows caps a credential at 2560 bytes, which a
+/// cookie jar easily outgrows.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 struct StoredState {
     #[serde(default)]
@@ -131,6 +133,8 @@ pub struct Collection {
     secrets: BTreeMap<String, String>,
     pub session: Session,
     pub login_status: LoginStatus,
+    /// Why the last attempt to save the session, credentials or cookies failed.
+    pub storage_error: Option<SharedString>,
     pub cookies: CookieJar,
     captured: BTreeMap<String, String>,
     drafts: HashMap<String, RequestDraft>,
@@ -168,6 +172,7 @@ impl Collection {
             secrets: BTreeMap::default(),
             session: Session::default(),
             login_status: LoginStatus::Idle,
+            storage_error: None,
             cookies: CookieJar::default(),
             captured: BTreeMap::default(),
             drafts: HashMap::default(),
@@ -205,6 +210,7 @@ impl Collection {
         let secrets_url = secrets_url(&self.id);
         let session_url = session_url(&self.id);
         let state_url = state_url(&self.id);
+        let state_path = state_file_path(&self.id);
         cx.spawn(async move |this, cx| {
             let text = fs.load(&file_path).await;
             let loaded = this.update(cx, |this, cx| {
@@ -231,7 +237,7 @@ impl Collection {
                 read_json::<BTreeMap<String, String>>(&credentials_provider, &secrets_url, cx)
                     .await;
             let session = read_json::<Session>(&credentials_provider, &session_url, cx).await;
-            let state = read_json::<StoredState>(&credentials_provider, &state_url, cx).await;
+            let state = load_state(&fs, &credentials_provider, &state_url, &state_path, cx).await;
             this.update(cx, |this, cx| {
                 if let Some(secrets) = secrets {
                     this.secrets = secrets;
@@ -451,10 +457,11 @@ impl Collection {
         let secrets = self.secrets.clone();
         let url = secrets_url(&self.id);
         let credentials_provider = self.credentials_provider.clone();
-        cx.spawn(async move |_this, cx| {
-            write_json(&credentials_provider, &url, &secrets, cx).await
+        cx.spawn(async move |this, cx| {
+            let result = write_json(&credentials_provider, &url, &secrets, cx).await;
+            report_storage_result(&this, "as credenciais", result, cx);
         })
-        .detach_and_log_err(cx);
+        .detach();
     }
 
     /// The `{{secret.*}}` names the login body asks for.
@@ -582,10 +589,13 @@ impl Collection {
             cookies: self.cookies.clone(),
             captured: self.captured.clone(),
         };
-        let url = state_url(&self.id);
-        let credentials_provider = self.credentials_provider.clone();
-        cx.spawn(async move |_this, cx| write_json(&credentials_provider, &url, &state, cx).await)
-            .detach_and_log_err(cx);
+        let path = state_file_path(&self.id);
+        let fs = self.fs.clone();
+        cx.spawn(async move |this, cx| {
+            let result = write_state_file(&fs, &path, &state).await;
+            report_storage_result(&this, "os cookies", result, cx);
+        })
+        .detach();
     }
 
     pub fn capture_rules(&self, operation_key: &str) -> Vec<CaptureRule> {
@@ -839,10 +849,11 @@ impl Collection {
         let session = self.session.clone();
         let url = session_url(&self.id);
         let credentials_provider = self.credentials_provider.clone();
-        cx.spawn(async move |_this, cx| {
-            write_json(&credentials_provider, &url, &session, cx).await
+        cx.spawn(async move |this, cx| {
+            let result = write_json(&credentials_provider, &url, &session, cx).await;
+            report_storage_result(&this, "a sessão", result, cx);
         })
-        .detach_and_log_err(cx);
+        .detach();
     }
 
     pub fn logout(&mut self, cx: &mut Context<Self>) {
@@ -854,8 +865,11 @@ impl Collection {
         cx.notify();
         let url = session_url(&self.id);
         let credentials_provider = self.credentials_provider.clone();
-        cx.spawn(async move |_this, cx| credentials_provider.delete_credentials(&url, cx).await)
-            .detach_and_log_err(cx);
+        cx.spawn(async move |this, cx| {
+            let result = credentials_provider.delete_credentials(&url, cx).await;
+            report_storage_result(&this, "o logout", result, cx);
+        })
+        .detach();
     }
 
     pub fn start_login(&mut self, cx: &mut Context<Self>) {
@@ -1181,6 +1195,103 @@ async fn write_json<T: Serialize>(
     credentials_provider
         .write_credentials(url, "asylum", &bytes, cx)
         .await
+}
+
+/// Where a collection's cookies and captured values live, in the active profile's data
+/// directory.
+fn state_file_path(id: &str) -> PathBuf {
+    let file_name: String = id
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    paths::data_dir()
+        .join("api_client")
+        .join(format!("{file_name}.state.json"))
+}
+
+async fn write_state_file(fs: &Arc<dyn Fs>, path: &Path, state: &StoredState) -> Result<()> {
+    if let Some(directory) = path.parent() {
+        fs.create_dir(directory)
+            .await
+            .with_context(|| format!("falha ao criar {}", directory.display()))?;
+    }
+    let text = serde_json::to_string(state)?;
+    fs.atomic_write(path.to_path_buf(), text)
+        .await
+        .with_context(|| format!("falha ao gravar {}", path.display()))
+}
+
+/// Reads the stored state from its file. Earlier versions kept it in the keychain, so an entry
+/// found there is moved to the file and then removed, keeping the cookies of an existing install.
+async fn load_state(
+    fs: &Arc<dyn Fs>,
+    credentials_provider: &Arc<dyn CredentialsProvider>,
+    url: &str,
+    path: &Path,
+    cx: &AsyncApp,
+) -> Option<StoredState> {
+    if fs.is_file(path).await {
+        return match fs.load(path).await {
+            Ok(text) => serde_json::from_str(&text)
+                .map_err(|error| {
+                    log::error!(
+                        "API: arquivo de estado ilegível ({}): {error}",
+                        path.display()
+                    )
+                })
+                .ok(),
+            Err(error) => {
+                log::error!("API: falha ao ler {}: {error:#}", path.display());
+                None
+            }
+        };
+    }
+
+    let state = read_json::<StoredState>(credentials_provider, url, cx).await?;
+    match write_state_file(fs, path, &state).await {
+        Ok(()) => {
+            if let Err(error) = credentials_provider.delete_credentials(url, cx).await {
+                log::error!(
+                    "API: estado migrado, mas a entrada antiga do keychain ficou ({url}): {error:#}"
+                );
+            }
+        }
+        // The keychain entry stays, so the next launch tries again.
+        Err(error) => log::error!("API: falha ao migrar o estado do keychain: {error:#}"),
+    }
+    Some(state)
+}
+
+/// Shows a failed save in the panel instead of leaving it to the log, and clears the message
+/// once a save goes through.
+fn report_storage_result(
+    this: &WeakEntity<Collection>,
+    what: &str,
+    result: Result<()>,
+    cx: &mut AsyncApp,
+) {
+    let error = match result {
+        Ok(()) => None,
+        Err(error) => {
+            log::error!("API: não foi possível salvar {what}: {error:#}");
+            Some(SharedString::from(format!(
+                "Não foi possível salvar {what}: {error:#}"
+            )))
+        }
+    };
+    this.update(cx, |this, cx| {
+        if this.storage_error != error {
+            this.storage_error = error;
+            cx.notify();
+        }
+    })
+    .log_err();
 }
 
 /// A new collection file for a spec, written next to the project's `.asylum` folder.
@@ -1540,9 +1651,70 @@ paths:
             Some("GET /me?user=7 Bearer new cookie=sid=s1")
         );
         cx.run_until_parked();
-        let state = keychain.0.lock().get(&state_url("trix")).cloned().unwrap();
-        let state: StoredState = serde_json::from_slice(&state.1).unwrap();
+        assert!(
+            keychain.0.lock().get(&state_url("trix")).is_none(),
+            "cookies no longer go to the keychain"
+        );
+        let state = fs.load(&state_file_path("trix")).await.unwrap();
+        let state: StoredState = serde_json::from_str(&state).unwrap();
         assert_eq!(state.captured.get("userId").map(String::as_str), Some("7"));
         assert_eq!(state.cookies.cookies[0].name, "sid");
+    }
+
+    #[gpui::test]
+    async fn moves_the_keychain_state_to_a_file(cx: &mut TestAppContext) {
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree("/project", serde_json::json!({ "openapi.yml": SPEC }))
+            .await;
+        let keychain = Arc::new(MemoryKeychain::default());
+        let mut captured = BTreeMap::default();
+        captured.insert("userId".to_string(), "7".to_string());
+        let state = serde_json::to_vec(&StoredState {
+            cookies: CookieJar::default(),
+            captured,
+        })
+        .unwrap();
+        keychain
+            .0
+            .lock()
+            .insert(state_url("trix"), ("asylum".to_string(), state));
+        cx.update(|cx| {
+            cx.set_global(db::AppDatabase::test_new());
+            cx.set_global(zed_credentials_provider::ZedCredentialsProvider(
+                keychain.clone(),
+            ));
+            cx.set_http_client(FakeHttpClient::with_404_response());
+        });
+
+        let file_path = cx
+            .update(|cx| {
+                let fs: Arc<dyn Fs> = fs.clone();
+                cx.spawn(async move |cx| {
+                    create(
+                        fs,
+                        PathBuf::from("/project"),
+                        PathBuf::from("/project/openapi.yml"),
+                        cx,
+                    )
+                    .await
+                })
+            })
+            .await
+            .unwrap();
+        let collection =
+            cx.new(|cx| Collection::new(PathBuf::from("/project"), file_path, fs.clone(), cx));
+        cx.run_until_parked();
+
+        collection.read_with(cx, |collection, _| {
+            assert_eq!(
+                collection.captured.get("userId").map(String::as_str),
+                Some("7")
+            );
+            assert_eq!(collection.storage_error, None);
+        });
+        assert!(keychain.0.lock().get(&state_url("trix")).is_none());
+        let state = fs.load(&state_file_path("trix")).await.unwrap();
+        let state: StoredState = serde_json::from_str(&state).unwrap();
+        assert_eq!(state.captured.get("userId").map(String::as_str), Some("7"));
     }
 }

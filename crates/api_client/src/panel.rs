@@ -1097,6 +1097,8 @@ impl ApiPanel {
         let rows = self.tree_rows(cx);
         let spec_error = collection.read(cx).spec_error.clone();
         let file_error = collection.read(cx).file_error.clone();
+        let storage_error = collection.read(cx).storage_error.clone();
+        let banner_error = file_error.or(spec_error).or(storage_error);
         let spec = collection.read(cx).spec.clone();
         let spec_file_name = collection
             .read(cx)
@@ -1132,7 +1134,7 @@ impl ApiPanel {
                     .pt_3()
                     .child(self.render_auth_card(collection, cx)),
             )
-            .when_some(file_error.or(spec_error), |this, error| {
+            .when_some(banner_error, |this, error| {
                 this.child(
                     h_flex()
                         .mx_3()

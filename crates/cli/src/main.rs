@@ -1183,7 +1183,7 @@ mod flatpak {
 #[cfg(target_os = "windows")]
 mod windows {
     use anyhow::Context;
-    use release_channel::app_identifier;
+    use release_channel::{instance_mutex_name, instance_pipe_name};
     use windows::{
         Win32::{
             Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GENERIC_WRITE, GetLastError},
@@ -1200,14 +1200,11 @@ mod windows {
     use std::path::{Path, PathBuf};
     use std::process::{ExitStatus, Stdio};
 
+    // The CLI has no `--profile`, so it always talks to the default profile's instance.
     fn check_single_instance() -> bool {
         let mutex = unsafe {
-            CreateMutexW(
-                None,
-                false,
-                &HSTRING::from(format!("{}-Instance-Mutex", app_identifier())),
-            )
-            .expect("Unable to create instance sync event")
+            CreateMutexW(None, false, &HSTRING::from(instance_mutex_name(None)))
+                .expect("Unable to create instance sync event")
         };
         let last_err = unsafe { GetLastError() };
         let _ = unsafe { CloseHandle(mutex) };
@@ -1248,7 +1245,7 @@ mod windows {
             } else {
                 unsafe {
                     let pipe = CreateFileW(
-                        &HSTRING::from(format!("\\\\.\\pipe\\{}-Named-Pipe", app_identifier())),
+                        &HSTRING::from(instance_pipe_name(None)),
                         GENERIC_WRITE.0,
                         FILE_SHARE_MODE::default(),
                         None,

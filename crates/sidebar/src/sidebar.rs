@@ -154,11 +154,23 @@ enum SerializedSidebarView {
     Devices,
 }
 
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+/// The iOS simulator runs through Xcode and SimulatorKit, so only macOS has it.
+pub(crate) const IOS_SIMULATOR_SUPPORTED: bool = cfg!(target_os = "macos");
+
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum DevicePlatform {
     Android,
-    #[default]
     Ios,
+}
+
+impl Default for DevicePlatform {
+    fn default() -> Self {
+        if IOS_SIMULATOR_SUPPORTED {
+            Self::Ios
+        } else {
+            Self::Android
+        }
+    }
 }
 
 /// What a devices instance shows: one of the tabs in its header.
@@ -169,7 +181,11 @@ enum DeviceInstanceKind {
 }
 
 impl DeviceInstanceKind {
-    const ALL: [Self; 2] = [Self::Android, Self::Ios];
+    /// The tabs this system can show.
+    #[cfg(target_os = "macos")]
+    const ALL: &'static [Self] = &[Self::Android, Self::Ios];
+    #[cfg(not(target_os = "macos"))]
+    const ALL: &'static [Self] = &[Self::Android];
 
     fn label(self) -> &'static str {
         match self {
@@ -10876,6 +10892,11 @@ impl Sidebar {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let kind = if DeviceInstanceKind::ALL.contains(&kind) {
+            kind
+        } else {
+            DeviceInstanceKind::Android
+        };
         match kind {
             DeviceInstanceKind::Android => {
                 self.hide_ios_simulator_view(window);
@@ -10894,7 +10915,8 @@ impl Sidebar {
 
     fn visible_device_tabs(&self) -> Vec<DeviceInstanceKind> {
         DeviceInstanceKind::ALL
-            .into_iter()
+            .iter()
+            .copied()
             .filter(|kind| !self.hidden_device_tabs.contains(kind))
             .collect()
     }
@@ -11210,7 +11232,7 @@ impl Sidebar {
                         menu = menu.separator();
                     }
                     menu = menu.header("Nova instância à direita");
-                    for kind in DeviceInstanceKind::ALL {
+                    for kind in DeviceInstanceKind::ALL.iter().copied() {
                         let already_open = open_kinds.contains(&kind);
                         let description = if already_open {
                             "Já aberto em outra instância"
@@ -12106,7 +12128,7 @@ impl Sidebar {
 
 #[cfg(not(target_os = "macos"))]
 async fn list_ios_simulators() -> anyhow::Result<Vec<IosSimulatorDevice>> {
-    Ok(Vec::new())
+    anyhow::bail!("simuladores iOS só estão disponíveis no macOS")
 }
 
 #[cfg(target_os = "macos")]
@@ -12551,6 +12573,8 @@ impl WorkspaceSidebar for Sidebar {
             self.agents_section_collapsed = serialized.agents_section_collapsed;
             self.flows_section_collapsed = serialized.flows_section_collapsed;
             self.hidden_device_tabs = serialized.hidden_device_tabs;
+            self.hidden_device_tabs
+                .retain(|kind| DeviceInstanceKind::ALL.contains(kind));
             self.hidden_device_tabs.dedup();
             if self.hidden_device_tabs.len() >= DeviceInstanceKind::ALL.len() {
                 self.hidden_device_tabs.clear();

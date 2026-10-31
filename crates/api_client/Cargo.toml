@@ -27,6 +27,7 @@ jsonschema.workspace = true
 language.workspace = true
 log.workspace = true
 menu.workspace = true
+paths.workspace = true
 project.workspace = true
 schemars.workspace = true
 serde.workspace = true
