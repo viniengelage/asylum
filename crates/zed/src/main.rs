@@ -828,6 +828,7 @@ fn main() {
         collab_ui::init(&app_state, cx);
         git_ui::init(cx);
         feedback::init(cx);
+        settings_sync::init(&app_state.client, cx);
         markdown_preview::init(cx);
         tabular_data_preview::init(cx);
         svg_preview::init(cx);

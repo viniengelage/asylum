@@ -56,6 +56,7 @@ semver.workspace = true
 schemars.workspace = true
 serde.workspace = true
 settings.workspace = true
+settings_sync.workspace = true
 smallvec.workspace = true
 telemetry.workspace = true
 theme.workspace = true

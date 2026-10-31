@@ -50,7 +50,7 @@ use update_version::UpdateVersion;
 use util::ResultExt;
 use workspace::{
     AccessibleMode, MultiWorkspace, ToggleWorktreeSecurity, Workspace,
-    notifications::{NotifyResultExt, NotifyTaskExt as _},
+    notifications::NotifyTaskExt as _,
 };
 
 use zed_actions::OpenRemote;
@@ -307,11 +307,6 @@ impl Render for TitleBar {
                     | client::Status::Authenticated
                     | client::Status::Connecting
             );
-        let is_signed_out_or_auth_error = user.is_none()
-            && matches!(
-                status,
-                client::Status::SignedOut | client::Status::AuthenticationError
-            );
 
         children.push(
             h_flex()
@@ -321,12 +316,9 @@ impl Render for TitleBar {
                 .child(self.render_call_controls(window, cx))
                 .children(self.render_connection_status(status, cx))
                 .child(self.update_version.clone())
-                .when(
-                    user.is_none()
-                        && is_signed_out_or_auth_error
-                        && TitleBarSettings::get_global(cx).show_sign_in,
-                    |this| this.child(self.render_sign_in_button(cx)),
-                )
+                .when(TitleBarSettings::get_global(cx).show_sign_in, |this| {
+                    this.children(settings_sync::render_title_bar_button(cx))
+                })
                 .when(is_signing_in, |this| {
                     this.child(
                         Label::new("Signing in…")
@@ -452,6 +444,9 @@ impl TitleBar {
             }),
         );
         subscriptions.push(cx.observe(&user_store, |_a, _, cx| cx.notify()));
+        if let Some(settings_sync) = settings_sync::SettingsSync::global(cx) {
+            subscriptions.push(cx.observe(&settings_sync, |_, _, cx| cx.notify()));
+        }
         if let Some(workspace_entity) = workspace.weak_handle().upgrade() {
             subscriptions.push(cx.subscribe(
                 &workspace_entity,
@@ -905,26 +900,6 @@ impl TitleBar {
             }
             _ => None,
         }
-    }
-
-    pub fn render_sign_in_button(&mut self, _: &mut Context<Self>) -> Button {
-        let client = self.client.clone();
-        let workspace = self.workspace.clone();
-        Button::new("sign_in", "Sign In")
-            .label_size(LabelSize::Small)
-            .tab_index(0isize)
-            .on_click(move |_, window, cx| {
-                let client = client.clone();
-                let workspace = workspace.clone();
-                window
-                    .spawn(cx, async move |mut cx| {
-                        client
-                            .sign_in_with_optional_connect(true, cx)
-                            .await
-                            .notify_workspace_async_err(workspace, &mut cx);
-                    })
-                    .detach();
-            })
     }
 
     pub fn render_user_menu_button(&mut self, cx: &mut Context<Self>) -> impl Element {

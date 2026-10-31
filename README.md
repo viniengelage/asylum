@@ -60,6 +60,8 @@ drive all of them. It is free, has no account, no subscription and no hosted ser
 
 **Workflow**
 - GitHub repositories, pull requests and Projects boards; ClickUp tasks.
+- **Settings sync** through your GitHub account: settings, keymap, snippets, themes, agents and
+  flows are kept in a private gist, with no Asylum server involved.
 - Profiles with their own data directory, icon and launcher.
 - A unified pane layout tuned for ultrawide monitors, and Asylum's own icon family.
 

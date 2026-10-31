@@ -6,6 +6,7 @@
 - [Installation](./installation.md)
   - [Update](./update.md)
   - [Uninstall](./uninstall.md)
+- [Settings Sync](./settings-sync.md)
 - [Troubleshooting](./troubleshooting.md)
 
 # Working with Code
