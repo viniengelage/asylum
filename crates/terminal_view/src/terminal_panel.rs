@@ -1233,6 +1233,18 @@ impl TerminalPanel {
         self.assistant_enabled
     }
 
+    /// Opens a view that isn't a terminal (a container's logs) as a tab next to the terminals.
+    pub fn add_item(
+        &mut self,
+        item: Box<dyn workspace::ItemHandle>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.active_pane.update(cx, |pane, cx| {
+            pane.add_item(item, true, true, None, window, cx);
+        });
+    }
+
     /// Returns all panes in the terminal panel.
     pub fn panes(&self) -> Vec<&Entity<Pane>> {
         self.center.panes()

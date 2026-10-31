@@ -5302,6 +5302,48 @@ dependencies = [
 ]
 
 [[package]]
+name = "docker"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes 1.11.1",
+ "chrono",
+ "collections",
+ "db",
+ "dotenvy",
+ "editor",
+ "futures 0.3.34",
+ "gpui",
+ "http-body-util",
+ "hyper 1.11.1",
+ "hyper-util",
+ "language",
+ "log",
+ "menu",
+ "multi_buffer",
+ "paths",
+ "project",
+ "regex",
+ "reqwest_client",
+ "schemars 1.0.4",
+ "serde",
+ "serde_json",
+ "settings",
+ "sha2 0.10.9",
+ "task",
+ "task_agents",
+ "terminal_view",
+ "theme_settings",
+ "thiserror 2.0.17",
+ "tokio",
+ "ui",
+ "urlencoding",
+ "util",
+ "workspace",
+ "zed_actions",
+]
+
+[[package]]
 name = "docs_preprocessor"
 version = "0.1.0"
 dependencies = [
@@ -23142,6 +23184,7 @@ dependencies = [
  "debugger_ui",
  "dev_container",
  "diagnostics",
+ "docker",
  "edit_prediction",
  "edit_prediction_ui",
  "editor",

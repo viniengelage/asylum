@@ -646,6 +646,7 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
         let database_button =
             cx.new(|cx| database_client::DatabaseToolkitButton::new(workspace, cx));
         let elastic_button = cx.new(|cx| elastic::ElasticToolkitButton::new(workspace, cx));
+        let docker_button = cx.new(|cx| docker::DockerToolkitButton::new(workspace, cx));
         let task_agents_button =
             cx.new(|cx| agent_ui::task_agents_view::TaskAgentsToolkitButton::new(workspace, cx));
         let flows_button =
@@ -677,6 +678,7 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
             status_bar.add_toolkit_item(api_button, window, cx);
             status_bar.add_toolkit_item(database_button, window, cx);
             status_bar.add_toolkit_item(elastic_button, window, cx);
+            status_bar.add_toolkit_item(docker_button, window, cx);
             status_bar.add_toolkit_item(task_agents_button, window, cx);
             status_bar.add_toolkit_item(flows_button, window, cx);
             // Editor info renders right items in reverse, so this sits at its right end,
@@ -6392,6 +6394,7 @@ mod tests {
                 "debugger",
                 "dev",
                 "devices",
+                "docker",
                 "diagnostics",
                 "edit_prediction",
                 "editor",

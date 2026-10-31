@@ -1982,6 +1982,43 @@
     },
   },
   {
+    // Docker (crates/docker), declared here for the same reason as the database client's.
+    "context": "DockerPanel",
+    "use_key_equivalents": true,
+    "bindings": {
+      "cmd-shift-n": "docker::NewContainer",
+      "cmd-f": "docker::FocusFilter",
+      "alt-t": "docker::OpenTerminal",
+      "alt-l": "docker::OpenLogs",
+      "alt-i": "docker::Inspect",
+      "alt-p": "docker::TogglePause",
+      "alt-r": "docker::Restart",
+      "alt-s": "docker::ToggleStop",
+      "cmd-backspace": "docker::Remove",
+    },
+  },
+  {
+    "context": "DockerNewContainer",
+    "use_key_equivalents": true,
+    "bindings": {
+      "cmd-enter": "docker::CreateContainer",
+    },
+  },
+  {
+    "context": "DockerNewContainer > Editor",
+    "use_key_equivalents": true,
+    "bindings": {
+      "cmd-enter": "docker::CreateContainer",
+    },
+  },
+  {
+    "context": "DockerLogs",
+    "use_key_equivalents": true,
+    "bindings": {
+      "cmd-.": "docker::ToggleFollow",
+    },
+  },
+  {
     "context": "DatabaseTableFilter > Editor",
     "use_key_equivalents": true,
     "bindings": {

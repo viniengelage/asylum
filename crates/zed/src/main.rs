@@ -828,6 +828,7 @@ fn main() {
         api_client::init(cx);
         database_client::init(cx);
         elastic::init(cx);
+        docker::init(cx);
         cx.set_global(agent::DatabaseSchemaSource(std::sync::Arc::new(
             database_client::describe_for_agent,
         )));
@@ -836,6 +837,7 @@ fn main() {
         api_client::register_agent_toolkit(cx);
         database_client::register_agent_toolkit(cx);
         elastic::register_agent_toolkit(cx);
+        docker::register_agent_toolkit(cx);
         repo_hosting::register_agent_toolkit(cx);
         github_projects::register_agent_toolkit(cx);
         clickup::register_agent_toolkit(cx);
