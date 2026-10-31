@@ -13,6 +13,7 @@ mod panel;
 pub use agent_toolkit::register_toolkit as register_agent_toolkit;
 use panel::PullRequestFollowup;
 pub use panel::RepoPanel;
+use std::rc::Rc;
 
 use anyhow::{Context as _, Result};
 use credentials_provider::CredentialsProvider;
@@ -20,10 +21,10 @@ use gpui::{Entity, Global, Subscription, Task, WeakEntity, actions};
 use http_client::HttpClient;
 use project::Project;
 use std::{any::TypeId, collections::HashMap, sync::Arc};
-use ui::{Tooltip, prelude::*};
+use ui::prelude::*;
 use util::ResultExt as _;
 use workspace::{
-    HideStatusItem, ItemHandle, StatusItemView, Toast, Workspace, dock::StatusBarButton,
+    HideStatusItem, ItemHandle, StatusItemView, Toast, ToolkitEntry, Workspace,
     notifications::NotificationId,
 };
 
@@ -617,18 +618,25 @@ impl RepoToolkitButton {
 }
 
 impl Render for RepoToolkitButton {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        // The status bar lists it in the toolkit menu instead; see `toolkit_entry`.
+        gpui::Empty
+    }
+}
+
+impl StatusItemView for RepoToolkitButton {
+    fn toolkit_entry(&self, cx: &App) -> Option<ToolkitEntry> {
         let is_open = self
             .workspace
             .upgrade()
             .is_some_and(|workspace| panel_is_visible(workspace.read(cx), cx));
         let workspace = self.workspace.clone();
-
-        StatusBarButton::new("toolkit-repo", IconName::PullRequest, is_open)
-            .tab_index(0isize)
-            .aria_label("Repo")
-            .tooltip(|_window, cx| Tooltip::for_action("Pull requests", &ToggleFocus, cx))
-            .on_click(move |_, window, cx| {
+        Some(ToolkitEntry {
+            icon: IconName::PullRequest,
+            label: "Repo".into(),
+            is_open,
+            action: Box::new(ToggleFocus),
+            toggle: Rc::new(move |window, cx| {
                 workspace
                     .update(cx, |workspace, cx| {
                         if is_open {
@@ -638,11 +646,10 @@ impl Render for RepoToolkitButton {
                         }
                     })
                     .log_err();
-            })
+            }),
+        })
     }
-}
 
-impl StatusItemView for RepoToolkitButton {
     fn is_hidden(&self, cx: &App) -> bool {
         self.workspace.upgrade().is_some_and(|workspace| {
             !task_agents::toolkit_enabled(

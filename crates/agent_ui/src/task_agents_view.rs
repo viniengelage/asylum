@@ -29,8 +29,7 @@ use task_agents::{
 use ui::{ContextMenu, DropdownMenu, KeyBinding, Switch, Tooltip, prelude::*, primary_button};
 use util::ResultExt as _;
 use workspace::{
-    HideStatusItem, ItemHandle, StatusItemView, Workspace,
-    dock::StatusBarButton,
+    HideStatusItem, ItemHandle, StatusItemView, ToolkitEntry, Workspace,
     item::{Item, ItemEvent, TabContentParams},
 };
 
@@ -2874,7 +2873,14 @@ impl TaskAgentsToolkitButton {
 }
 
 impl Render for TaskAgentsToolkitButton {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        // The status bar lists it in the toolkit menu instead; see `toolkit_entry`.
+        gpui::Empty
+    }
+}
+
+impl StatusItemView for TaskAgentsToolkitButton {
+    fn toolkit_entry(&self, cx: &App) -> Option<ToolkitEntry> {
         let is_open = self.workspace.upgrade().is_some_and(|workspace| {
             workspace
                 .read(cx)
@@ -2882,19 +2888,19 @@ impl Render for TaskAgentsToolkitButton {
                 .is_some_and(|item| item.downcast::<TaskAgentsView>().is_some())
         });
         let workspace = self.workspace.clone();
-        StatusBarButton::new("toolkit-task-agents", IconName::UserGroup, is_open)
-            .tab_index(0isize)
-            .aria_label("Agentes")
-            .tooltip(|_window, cx| Tooltip::for_action("Agentes", &OpenTaskAgents, cx))
-            .on_click(move |_, window, cx| {
+        Some(ToolkitEntry {
+            icon: IconName::UserGroup,
+            label: "Agentes".into(),
+            is_open,
+            action: Box::new(OpenTaskAgents),
+            toggle: Rc::new(move |window, cx| {
                 workspace
                     .update(cx, |workspace, cx| open(workspace, window, cx))
                     .log_err();
-            })
+            }),
+        })
     }
-}
 
-impl StatusItemView for TaskAgentsToolkitButton {
     fn set_active_pane_item(
         &mut self,
         _active_pane_item: Option<&dyn ItemHandle>,

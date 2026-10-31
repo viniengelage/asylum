@@ -25,10 +25,11 @@ pub use panel::ElasticPanel;
 
 use gpui::{Subscription, WeakEntity, actions};
 use std::any::TypeId;
-use ui::{Tooltip, prelude::*};
+use std::rc::Rc;
+use ui::prelude::*;
 use util::ResultExt as _;
 use workspace::{
-    HideStatusItem, ItemHandle, StatusItemView, Toast, Workspace, dock::StatusBarButton,
+    HideStatusItem, ItemHandle, StatusItemView, Toast, ToolkitEntry, Workspace,
     notifications::NotificationId,
 };
 
@@ -213,18 +214,25 @@ impl ElasticToolkitButton {
 }
 
 impl Render for ElasticToolkitButton {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        // The status bar lists it in the toolkit menu instead; see `toolkit_entry`.
+        gpui::Empty
+    }
+}
+
+impl StatusItemView for ElasticToolkitButton {
+    fn toolkit_entry(&self, cx: &App) -> Option<ToolkitEntry> {
         let is_open = self
             .workspace
             .upgrade()
             .is_some_and(|workspace| panel_is_visible(workspace.read(cx), cx));
         let workspace = self.workspace.clone();
-
-        StatusBarButton::new("toolkit-elastic", IconName::CloudPulse, is_open)
-            .tab_index(0isize)
-            .aria_label("Elastic")
-            .tooltip(|_window, cx| Tooltip::for_action("Elastic", &ToggleFocus, cx))
-            .on_click(move |_, window, cx| {
+        Some(ToolkitEntry {
+            icon: IconName::CloudPulse,
+            label: "Elastic".into(),
+            is_open,
+            action: Box::new(ToggleFocus),
+            toggle: Rc::new(move |window, cx| {
                 workspace
                     .update(cx, |workspace, cx| {
                         if is_open {
@@ -234,11 +242,10 @@ impl Render for ElasticToolkitButton {
                         }
                     })
                     .log_err();
-            })
+            }),
+        })
     }
-}
 
-impl StatusItemView for ElasticToolkitButton {
     fn is_hidden(&self, cx: &App) -> bool {
         self.workspace.upgrade().is_some_and(|workspace| {
             !task_agents::toolkit_enabled(

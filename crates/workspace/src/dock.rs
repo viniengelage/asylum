@@ -1822,6 +1822,24 @@ impl StatusBarButton {
     }
 }
 
+// Lets a status bar button open a menu, as the toolkit's does.
+impl Clickable for StatusBarButton {
+    fn on_click(self, handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> Self {
+        StatusBarButton::on_click(self, handler)
+    }
+
+    fn cursor_style(mut self, cursor_style: gpui::CursorStyle) -> Self {
+        self.button = self.button.cursor_style(cursor_style);
+        self
+    }
+}
+
+impl Toggleable for StatusBarButton {
+    fn toggle_state(self, _selected: bool) -> Self {
+        self
+    }
+}
+
 impl RenderOnce for StatusBarButton {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let size = DynamicSpacing::Base24.rems(cx);

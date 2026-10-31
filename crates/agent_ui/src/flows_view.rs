@@ -30,8 +30,7 @@ use ui::{Divider, ListItem, ListItemSpacing, prelude::*};
 use ui::{primary_button, secondary_button, segment_option};
 use util::ResultExt as _;
 use workspace::{
-    HideStatusItem, ItemHandle, StatusItemView, Workspace,
-    dock::StatusBarButton,
+    HideStatusItem, ItemHandle, StatusItemView, ToolkitEntry, Workspace,
     item::{Item, ItemEvent, TabContentParams},
 };
 
@@ -1747,7 +1746,14 @@ impl FlowsToolkitButton {
 }
 
 impl Render for FlowsToolkitButton {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        // The status bar lists it in the toolkit menu instead; see `toolkit_entry`.
+        gpui::Empty
+    }
+}
+
+impl StatusItemView for FlowsToolkitButton {
+    fn toolkit_entry(&self, cx: &App) -> Option<ToolkitEntry> {
         let is_open = self.workspace.upgrade().is_some_and(|workspace| {
             workspace
                 .read(cx)
@@ -1755,21 +1761,21 @@ impl Render for FlowsToolkitButton {
                 .is_some_and(|item| item.downcast::<FlowView>().is_some())
         });
         let workspace = self.workspace.clone();
-        StatusBarButton::new("toolkit-flows", IconName::ListTree, is_open)
-            .tab_index(0isize)
-            .aria_label("Esteiras")
-            .tooltip(|_window, cx| ui::Tooltip::for_action("Esteiras", &RunFlow::default(), cx))
-            .on_click(move |_, window, cx| {
+        Some(ToolkitEntry {
+            icon: IconName::ListTree,
+            label: "Esteiras".into(),
+            is_open,
+            action: Box::new(RunFlow::default()),
+            toggle: Rc::new(move |window, cx| {
                 workspace
                     .update(cx, |workspace, cx| {
                         run_flow(workspace, RunFlow::default(), window, cx)
                     })
                     .log_err();
-            })
+            }),
+        })
     }
-}
 
-impl StatusItemView for FlowsToolkitButton {
     fn set_active_pane_item(
         &mut self,
         _active_pane_item: Option<&dyn ItemHandle>,

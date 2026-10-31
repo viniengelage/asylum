@@ -668,7 +668,7 @@ pub fn register_toolkit(cx: &mut App) {
             id: task_agents::toolkit_ids::DOCKER.into(),
             name: "Docker".into(),
             description: "Containers da máquina: estado, logs e ciclo de vida".into(),
-            icon: "box".into(),
+            icon: "docker".into(),
             mention: Some("@container".into()),
             tools: vec![
                 ToolkitTool::new(

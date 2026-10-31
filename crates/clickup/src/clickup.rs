@@ -13,16 +13,17 @@ use credentials_provider::CredentialsProvider;
 use gpui::{Entity, Global, Subscription, Task, WeakEntity, actions};
 use http_client::HttpClient;
 use settings::SettingsStore;
+use std::rc::Rc;
 use std::{
     any::TypeId,
     sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use task_agents::toolkit_ids;
-use ui::{Tooltip, prelude::*};
+use ui::prelude::*;
 use util::ResultExt as _;
 use workspace::{
-    AppState, HideStatusItem, ItemHandle, StatusItemView, Toast, Workspace, dock::StatusBarButton,
+    AppState, HideStatusItem, ItemHandle, StatusItemView, Toast, ToolkitEntry, Workspace,
     notifications::NotificationId,
 };
 
@@ -555,18 +556,25 @@ impl ClickUpToolkitButton {
 }
 
 impl Render for ClickUpToolkitButton {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        // The status bar lists it in the toolkit menu instead; see `toolkit_entry`.
+        gpui::Empty
+    }
+}
+
+impl StatusItemView for ClickUpToolkitButton {
+    fn toolkit_entry(&self, cx: &App) -> Option<ToolkitEntry> {
         let is_open = self
             .workspace
             .upgrade()
             .is_some_and(|workspace| panel_is_visible(workspace.read(cx), cx));
         let workspace = self.workspace.clone();
-
-        StatusBarButton::new("toolkit-clickup", IconName::ListTodo, is_open)
-            .tab_index(0isize)
-            .aria_label("ClickUp")
-            .tooltip(|_window, cx| Tooltip::for_action("ClickUp", &ToggleFocus, cx))
-            .on_click(move |_, window, cx| {
+        Some(ToolkitEntry {
+            icon: IconName::ListTodo,
+            label: "ClickUp".into(),
+            is_open,
+            action: Box::new(ToggleFocus),
+            toggle: Rc::new(move |window, cx| {
                 workspace
                     .update(cx, |workspace, cx| {
                         if is_open {
@@ -576,11 +584,10 @@ impl Render for ClickUpToolkitButton {
                         }
                     })
                     .log_err();
-            })
+            }),
+        })
     }
-}
 
-impl StatusItemView for ClickUpToolkitButton {
     fn set_active_pane_item(
         &mut self,
         _active_pane_item: Option<&dyn ItemHandle>,

@@ -1,11 +1,16 @@
-use crate::{ItemHandle, MultiWorkspace, Pane, dock::PanelButtons};
+use crate::{
+    ItemHandle, MultiWorkspace, Pane,
+    dock::{PanelButtons, StatusBarButton},
+};
 use gpui::{
-    AnyElement, AnyView, App, Context, Entity, FocusHandle, Focusable, FontWeight, IntoElement,
+    Action, AnyElement, AnyView, App, Context, Entity, FocusHandle, Focusable, IntoElement,
     ParentElement, Render, Role, SharedString, Styled, Subscription, WeakEntity, Window,
 };
 use settings::{SettingsContent, SettingsStore, update_settings_file};
-use std::{any::TypeId, sync::Arc};
-use ui::{ContextMenu, IconPosition, prelude::*, right_click_menu};
+use std::{any::TypeId, rc::Rc, sync::Arc};
+use ui::{
+    ContextMenu, ContextMenuEntry, IconPosition, PopoverMenu, Tooltip, prelude::*, right_click_menu,
+};
 
 /// Describes how a status-bar item can be hidden by the user.
 ///
@@ -35,6 +40,18 @@ impl HideStatusItem {
     }
 }
 
+/// A developer tool as a row of the toolkit menu in the status bar.
+pub struct ToolkitEntry {
+    pub icon: IconName,
+    pub label: SharedString,
+    /// Whether the tool's dock is showing; the row is filled and the toolkit button lit.
+    pub is_open: bool,
+    /// What opens the tool, for the shortcut the row shows.
+    pub action: Box<dyn Action>,
+    /// Opens the tool, or closes it when it is open.
+    pub toggle: Rc<dyn Fn(&mut Window, &mut App)>,
+}
+
 pub trait StatusItemView: Render {
     /// Event callback that is triggered when the active pane item changes.
     fn set_active_pane_item(
@@ -58,6 +75,12 @@ pub trait StatusItemView: Render {
     fn is_hidden(&self, _cx: &App) -> bool {
         false
     }
+
+    /// The row this item shows in the toolkit menu. Items added with
+    /// [`StatusBar::add_toolkit_item`] are listed there instead of drawn in the bar.
+    fn toolkit_entry(&self, _cx: &App) -> Option<ToolkitEntry> {
+        None
+    }
 }
 
 trait StatusItemViewHandle: Send {
@@ -71,6 +94,7 @@ trait StatusItemViewHandle: Send {
     fn item_type(&self) -> TypeId;
     fn hide_setting(&self, cx: &App) -> Option<HideStatusItem>;
     fn is_hidden(&self, cx: &App) -> bool;
+    fn toolkit_entry(&self, cx: &App) -> Option<ToolkitEntry>;
 }
 
 /// The groups the status bar is divided into, in the order they appear from left to right.
@@ -87,7 +111,7 @@ pub(crate) enum StatusItemZone {
     /// Facts about the active editor, such as the cursor position and language. Where right
     /// items go.
     EditorInfo,
-    /// One button per developer tool, under a `TOOLKIT` label.
+    /// The toolbox button, whose menu lists each developer tool.
     Toolkit,
     /// Buttons for the panels beside the editor, such as Device, Agent and Git.
     Panels,
@@ -116,6 +140,9 @@ pub struct StatusBar {
     focus_handle: FocusHandle,
     _observe_active_pane: Subscription,
     _observe_settings: Subscription,
+    /// The toolkit items aren't drawn, so the bar redraws when they change (a dock opening
+    /// lights the toolbox button).
+    _observe_toolkit_items: Vec<Subscription>,
 }
 
 impl Focusable for StatusBar {
@@ -270,21 +297,56 @@ fn render_zone(zone: StatusItemZone, items: &[&dyn StatusItemViewHandle], cx: &A
         })
         .h(DynamicSpacing::Base24.rems(cx))
         .gap(DynamicSpacing::Base04.rems(cx))
-        .when(zone == StatusItemZone::Toolkit, |this| {
-            this.child(
-                Label::new("TOOLKIT")
-                    .size(LabelSize::XSmall)
-                    .weight(FontWeight::SEMIBOLD)
-                    .color(Color::Placeholder)
-                    .mr(DynamicSpacing::Base04.rems(cx)),
-            )
+        .map(|this| {
+            if zone == StatusItemZone::Toolkit {
+                this.child(render_toolkit_menu(items, cx))
+            } else {
+                this.children(
+                    items
+                        .iter()
+                        .enumerate()
+                        .map(|(index, item)| render_hideable_item(zone.id(), index, *item, cx)),
+                )
+            }
         })
-        .children(
-            items
-                .iter()
-                .enumerate()
-                .map(|(index, item)| render_hideable_item(zone.id(), index, *item, cx)),
+        .into_any_element()
+}
+
+/// One toolbox button for every developer tool, lit while any of them is open; its menu has a
+/// row per tool, the open ones filled.
+fn render_toolkit_menu(items: &[&dyn StatusItemViewHandle], cx: &App) -> AnyElement {
+    let entries: Rc<Vec<ToolkitEntry>> = Rc::new(
+        items
+            .iter()
+            .filter_map(|item| item.toolkit_entry(cx))
+            .collect(),
+    );
+    let any_open = entries.iter().any(|entry| entry.is_open);
+    PopoverMenu::new("status-bar-toolkit-menu")
+        .anchor(gpui::Anchor::BottomRight)
+        .trigger(
+            StatusBarButton::new("status-bar-toolkit-button", IconName::Toolbox, any_open)
+                .tab_index(0isize)
+                .aria_label("Toolkit")
+                .tooltip(Tooltip::text("Toolkit")),
         )
+        .menu(move |window, cx| {
+            let entries = entries.clone();
+            Some(ContextMenu::build(window, cx, move |menu, _window, _cx| {
+                entries
+                    .iter()
+                    .fold(menu.sectioned().header("Toolkit"), |menu, entry| {
+                        let toggle = entry.toggle.clone();
+                        menu.item(
+                            ContextMenuEntry::new(entry.label.clone())
+                                .icon(entry.icon)
+                                .toggleable(IconPosition::End, entry.is_open)
+                                .action(entry.action.boxed_clone())
+                                .handler(move |window, cx| toggle(window, cx)),
+                        )
+                    })
+            }))
+        })
         .into_any_element()
 }
 
@@ -348,6 +410,7 @@ impl StatusBar {
                 this.update_active_pane_item(window, cx)
             }),
             _observe_settings: cx.observe_global::<SettingsStore>(|_, cx| cx.notify()),
+            _observe_toolkit_items: Vec::new(),
         };
         this.update_active_pane_item(window, cx);
         this
@@ -401,6 +464,8 @@ impl StatusBar {
     ) where
         T: 'static + StatusItemView,
     {
+        self._observe_toolkit_items
+            .push(cx.observe(&item, |_, _, cx| cx.notify()));
         self.add_zoned_item(StatusItemZone::Toolkit, item, window, cx);
     }
 
@@ -562,6 +627,10 @@ impl<T: StatusItemView> StatusItemViewHandle for Entity<T> {
 
     fn is_hidden(&self, cx: &App) -> bool {
         self.read(cx).is_hidden(cx)
+    }
+
+    fn toolkit_entry(&self, cx: &App) -> Option<ToolkitEntry> {
+        self.read(cx).toolkit_entry(cx)
     }
 }
 
