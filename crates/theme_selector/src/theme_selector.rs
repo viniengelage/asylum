@@ -548,7 +548,7 @@ impl PickerDelegate for ThemeSelectorDelegate {
                                 .color(Color::Muted),
                         )
                         .on_click(cx.listener(|_, _, _, cx| {
-                            cx.open_url("https://zed.dev/docs/themes");
+                            cx.open_url("https://github.com/viniengelage/asylum/blob/main/docs/src/themes.md");
                         })),
                 )
                 .child(

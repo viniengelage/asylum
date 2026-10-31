@@ -21,7 +21,7 @@ use util::ResultExt as _;
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub(crate) enum AgentFilter {
     Agent(AgentId),
-    /// A task agent, by command; its threads run on the Zed Agent.
+    /// A task agent, by command; its threads run on the Asylum Agent.
     TaskAgent(SharedString),
 }
 
@@ -218,7 +218,7 @@ impl Sidebar {
         let (thread_count, running) = count_of(&zed_filter);
         agents.push(AgentRow {
             filter: Some(zed_filter),
-            name: "Zed Agent".into(),
+            name: "Asylum Agent".into(),
             icon: IconName::ZedAgent,
             external_icon: None,
             command: None,
@@ -448,7 +448,7 @@ impl Sidebar {
         agents.splice(insert_at..insert_at, pinned);
         let active_label = self.agent_filter.as_ref().map(|filter| match filter {
             AgentFilter::Agent(agent_id) if agent_id == &*ZED_AGENT_ID => {
-                SharedString::from("Zed Agent")
+                SharedString::from("Asylum Agent")
             }
             AgentFilter::Agent(agent_id) => SharedString::from(agent_id.to_string()),
             AgentFilter::TaskAgent(command) => self
@@ -541,7 +541,7 @@ impl Sidebar {
                 .map(|agent| format!("Nova thread com {}", agent.name).into())
                 .unwrap_or_else(|| format!("Nova thread com /{command}").into()),
             AgentFilter::Agent(agent_id) if agent_id == &*ZED_AGENT_ID => {
-                "Nova thread com o Zed Agent".into()
+                "Nova thread com o Asylum Agent".into()
             }
             AgentFilter::Agent(agent_id) => format!("Nova thread com {agent_id}").into(),
         };

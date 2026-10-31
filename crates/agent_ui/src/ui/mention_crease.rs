@@ -275,7 +275,7 @@ pub(crate) fn open_migrated_rule(
             "Rules have been migrated to Skills.",
         )
         .on_click("View docs", |_, cx| {
-            cx.open_url("https://zed.dev/docs/ai/skills");
+            cx.open_url("https://github.com/viniengelage/asylum/blob/main/docs/src/ai/skills.md");
         })
         .autohide(),
         cx,

@@ -16,7 +16,11 @@ pub const DEFAULT_REDIRECT_URI: &str = "https://platform.claude.com/oauth/code/c
 /// Scopes requested at sign-in and echoed back on every refresh. The token endpoint grants what
 /// it is asked for, so omitting them on refresh can hand back a narrower token than the session
 /// started with.
-pub const SCOPES: &[&str] = &["user:profile", "user:inference", "user:sessions:claude_code"];
+pub const SCOPES: &[&str] = &[
+    "user:profile",
+    "user:inference",
+    "user:sessions:claude_code",
+];
 /// How long before the stated expiry a token is treated as spent. The access token outlives
 /// sign-in by hours, so a session that is still running when it lapses would otherwise fail its
 /// next request; refreshing early also keeps a request that starts just under the wire valid for
@@ -70,7 +74,6 @@ pub fn build_authorize_url() -> Result<AuthorizeParams> {
 pub fn build_authorize_url_with_redirect(redirect_uri: &str) -> Result<AuthorizeParams> {
     let (challenge, verifier) = generate_pkce_pair();
 
-    // Generate a random CSRF state token (separate from the verifier).
     let mut state_bytes = [0u8; 16];
     rand::rng().fill_bytes(&mut state_bytes);
     let state: String = state_bytes.iter().map(|b| format!("{b:02x}")).collect();
@@ -169,8 +172,8 @@ pub async fn exchange_code_with_redirect_and_state(
         ));
     }
 
-    let token: TokenResponse = serde_json::from_str(&response_body)
-        .context("failed to parse OAuth token response")?;
+    let token: TokenResponse =
+        serde_json::from_str(&response_body).context("failed to parse OAuth token response")?;
 
     token_response_to_auth(token, None)
 }
@@ -354,10 +357,9 @@ mod tests {
 
     #[test]
     fn credentials_stored_before_scopes_were_tracked_fall_back_to_the_defaults() {
-        let auth: AnthropicOAuth = serde_json::from_str(
-            r#"{"refresh_token":"r","access_token":"a","expires_ms":1}"#,
-        )
-        .unwrap();
+        let auth: AnthropicOAuth =
+            serde_json::from_str(r#"{"refresh_token":"r","access_token":"a","expires_ms":1}"#)
+                .unwrap();
 
         assert_eq!(auth.scopes_to_request(), SCOPES.join(" "));
     }

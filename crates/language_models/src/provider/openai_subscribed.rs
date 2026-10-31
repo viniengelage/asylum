@@ -17,7 +17,7 @@ use std::sync::Arc;
 use ui::{ConfiguredApiCard, prelude::*};
 
 const SUBSCRIPTION_DESCRIPTION: &str =
-    "Sign in with your ChatGPT Plus or Pro subscription to use OpenAI models in Zed's agent.";
+    "Sign in with your ChatGPT Plus or Pro subscription to use OpenAI models in the Asylum Agent.";
 
 pub struct OpenAiSubscribedProvider {
     state: Entity<State>,

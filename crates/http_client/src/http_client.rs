@@ -277,62 +277,54 @@ impl HttpClientWithUrl {
         format!("{}{}", self.base_url(), path)
     }
 
+    /// The base URL for the hosted services the `build_zed_*` helpers address. Asylum ships
+    /// without such a server and never addresses Zed Industries' own, so this fails unless the
+    /// user configures a self-hosted `server_url`.
+    fn hosted_services_base_url(&self) -> Result<String> {
+        let base_url = self.base_url();
+        anyhow::ensure!(
+            !base_url.trim().is_empty(),
+            "Asylum has no hosted server; set `server_url` to use a self-hosted one"
+        );
+        let host = Url::parse(&base_url)?
+            .host_str()
+            .map(str::to_ascii_lowercase)
+            .unwrap_or_default();
+        anyhow::ensure!(
+            host != "zed.dev" && !host.ends_with(".zed.dev"),
+            "Asylum doesn't connect to Zed Industries' hosted services"
+        );
+        Ok(base_url)
+    }
+
+    /// Fails unless a self-hosted server is configured, see [`Self::hosted_services_base_url`].
+    pub fn ensure_hosted_services_available(&self) -> Result<()> {
+        self.hosted_services_base_url().map(|_| ())
+    }
+
     /// Builds a Zed API URL using the given path.
     pub fn build_zed_api_url(&self, path: &str, query: &[(&str, &str)]) -> Result<Url> {
-        let base_url = self.base_url();
-        let base_api_url = match base_url.as_ref() {
-            "https://zed.dev" => "https://api.zed.dev",
-            "https://staging.zed.dev" => "https://api-staging.zed.dev",
-            "http://localhost:3000" => "http://localhost:8080",
-            other => other,
-        };
-
-        Ok(Url::parse_with_params(
-            &format!("{}{}", base_api_url, path),
-            query,
-        )?)
+        let base_url = self.hosted_services_base_url()?;
+        Ok(Url::parse_with_params(&format!("{base_url}{path}"), query)?)
     }
 
     /// Builds a Zed Cloud URL using the given path.
     pub fn build_zed_cloud_url(&self, path: &str) -> Result<Url> {
-        let base_url = self.base_url();
-        let base_api_url = match base_url.as_ref() {
-            "https://zed.dev" => "https://cloud.zed.dev",
-            "https://staging.zed.dev" => "https://cloud.zed.dev",
-            "http://localhost:3000" => "http://localhost:8787",
-            other => other,
-        };
-
-        Ok(Url::parse(&format!("{}{}", base_api_url, path))?)
+        let base_url = self.hosted_services_base_url()?;
+        Ok(Url::parse(&format!("{base_url}{path}"))?)
     }
 
     /// Builds a Zed Cloud URL using the given path and query params.
     pub fn build_zed_cloud_url_with_query(&self, path: &str, query: impl Serialize) -> Result<Url> {
-        let base_url = self.base_url();
-        let base_api_url = match base_url.as_ref() {
-            "https://zed.dev" => "https://cloud.zed.dev",
-            "https://staging.zed.dev" => "https://cloud.zed.dev",
-            "http://localhost:3000" => "http://localhost:8787",
-            other => other,
-        };
+        let base_url = self.hosted_services_base_url()?;
         let query = serde_urlencoded::to_string(&query)?;
-        Ok(Url::parse(&format!("{}{}?{}", base_api_url, path, query))?)
+        Ok(Url::parse(&format!("{base_url}{path}?{query}"))?)
     }
 
     /// Builds a Zed LLM URL using the given path.
     pub fn build_zed_llm_url(&self, path: &str, query: &[(&str, &str)]) -> Result<Url> {
-        let base_url = self.base_url();
-        let base_api_url = match base_url.as_ref() {
-            "https://zed.dev" => "https://cloud.zed.dev",
-            "https://staging.zed.dev" => "https://llm-staging.zed.dev",
-            "http://localhost:3000" => "http://localhost:8787",
-            other => other,
-        };
-
-        Ok(Url::parse_with_params(
-            &format!("{}{}", base_api_url, path),
-            query,
-        )?)
+        let base_url = self.hosted_services_base_url()?;
+        Ok(Url::parse_with_params(&format!("{base_url}{path}"), query)?)
     }
 }
 

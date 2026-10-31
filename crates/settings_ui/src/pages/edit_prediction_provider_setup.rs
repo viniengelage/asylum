@@ -31,7 +31,6 @@ pub(crate) fn render_edit_prediction_setup_page(
 ) -> AnyElement {
     let providers = [
         Some(render_provider_dropdown(window, cx)),
-        Some(render_zed_provider(settings_window, window, cx).into_any_element()),
         render_github_copilot_provider(settings_window, window, cx)
             .map(IntoElement::into_any_element),
         Some(
@@ -320,7 +319,7 @@ fn render_api_key_provider(
                         .when_some(env_var_name, |this, env_var_name| {
                             this.child({
                                 let label = format!(
-                                    "Or set the {} env var and restart Zed.",
+                                    "Or set the {} env var and restart Asylum.",
                                     env_var_name.as_ref()
                                 );
                                 Label::new(label).size(LabelSize::Small).color(Color::Muted)
@@ -873,63 +872,6 @@ fn mercury_settings() -> Box<[SettingsPageItem]> {
         metadata: None,
         files: USER,
     })])
-}
-
-fn zed_settings() -> Box<[SettingsPageItem]> {
-    Box::new([SettingsPageItem::SettingItem(SettingItem {
-        title: "Prediction Debounce",
-        description: "Delay in milliseconds before automatically requesting a prediction after typing stops. Set to 0 to request predictions immediately.",
-        field: Box::new(SettingField {
-            organization_override: None,
-            pick: |settings| {
-                settings
-                    .project
-                    .all_languages
-                    .edit_predictions
-                    .as_ref()?
-                    .zed
-                    .as_ref()?
-                    .prediction_debounce
-                    .as_ref()
-            },
-            write: |settings, value, _app: &App| {
-                settings
-                    .project
-                    .all_languages
-                    .edit_predictions
-                    .get_or_insert_default()
-                    .zed
-                    .get_or_insert_default()
-                    .prediction_debounce = value;
-            },
-            json_path: Some("edit_predictions.zed.prediction_debounce"),
-        }),
-        metadata: None,
-        files: USER,
-    })])
-}
-
-fn render_zed_provider(
-    settings_window: &SettingsWindow,
-    window: &mut Window,
-    cx: &mut Context<SettingsWindow>,
-) -> impl IntoElement {
-    let zed_settings = zed_settings();
-    let additional_fields = settings_window
-        .render_sub_page_items_section(zed_settings.iter().enumerate(), true, window, cx)
-        .into_any_element();
-
-    v_flex()
-        .id("zed")
-        .min_w_0()
-        .pt_8()
-        .gap_1p5()
-        .child(
-            SettingsSectionHeader::new("Zed Predictions")
-                .icon(IconName::ZedPredict)
-                .no_padding(true),
-        )
-        .child(div().px_neg_8().child(additional_fields))
 }
 
 fn copilot_settings() -> Box<[SettingsPageItem]> {

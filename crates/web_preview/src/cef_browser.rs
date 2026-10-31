@@ -53,7 +53,6 @@ static HANDLING_SEND_EVENT: AtomicBool = AtomicBool::new(false);
 
 unsafe fn install_cef_app_protocol_methods() {
     unsafe {
-        // Use the raw ObjC runtime C API to add methods to GPUIApplication
         unsafe extern "C" {
             fn objc_getClass(name: *const std::os::raw::c_char) -> *mut c_void;
             fn sel_registerName(name: *const std::os::raw::c_char) -> *mut c_void;
@@ -211,7 +210,7 @@ fn ensure_cef_initialized() -> Result<()> {
 }
 
 fn try_init_cef() -> Result<()> {
-    // Patch GPUIApplication with CrAppProtocol methods before CEF touches it
+    // Has to happen before CEF first touches NSApplication.
     unsafe { install_cef_app_protocol_methods() };
 
     let (cef_dir, source) = cef_paths::find_framework().ok_or_else(|| {
@@ -412,7 +411,6 @@ fn profile_directory() -> PathBuf {
     crate::runtime_discovery::browser_cache_dir()
 }
 
-// CEF App implementation
 wrap_app! {
     struct WebPreviewApp;
 
@@ -498,7 +496,6 @@ wrap_browser_process_handler! {
     }
 }
 
-// Browser state that's shared between CEF callbacks and the Rust view
 #[derive(Debug, Clone)]
 pub struct BrowserState {
     pub url: String,
@@ -1261,9 +1258,9 @@ impl CefBrowserInstance {
 
         let mut client: Option<Client> = Some(WebPreviewClient::new(handler.clone()));
 
-        // Configure WindowInfo for offscreen (windowless) rendering. Shared textures ask
-        // the GPU process to hand us an IOSurface instead of rasterizing into system
-        // memory for us to copy; there is no GPU process to ask in single-process mode.
+        // Shared textures ask the GPU process to hand us an IOSurface instead of rasterizing
+        // into system memory for us to copy; there is no GPU process to ask in single-process
+        // mode.
         let window_info = WindowInfo {
             windowless_rendering_enabled: 1,
             shared_texture_enabled: shared_texture_enabled() as i32,

@@ -13,9 +13,12 @@ pub const EDITORCONFIG_NAME: &str = ".editorconfig";
 
 /// The application name, used to derive platform-specific data, config, cache,
 /// and state directory paths.
-///
-/// Forks should change this to avoid colliding with Zed's user data.
-pub const APP_NAME: &str = "Zed";
+pub const APP_NAME: &str = "Asylum";
+
+/// The name Asylum's directories had while they were shared with Zed's. Their contents are
+/// copied once into Asylum's own directories by [`migrate_legacy_directories`].
+const LEGACY_APP_NAME: &str = "Zed";
+const LEGACY_APP_NAME_LOWERCASE: &str = "zed";
 
 /// Lowercased form of [`APP_NAME`], for use in XDG-style paths on
 /// Linux/FreeBSD and the macOS `~/.config` fallback.
@@ -132,19 +135,23 @@ pub fn config_dir() -> &'static PathBuf {
 /// The configuration directory used when no custom data directory is set,
 /// which is also the default profile's.
 fn platform_config_dir() -> PathBuf {
+    platform_config_dir_named(APP_NAME, APP_NAME_LOWERCASE)
+}
+
+fn platform_config_dir_named(app_name: &str, app_name_lowercase: &str) -> PathBuf {
     if cfg!(target_os = "windows") {
         dirs::config_dir()
             .expect("failed to determine RoamingAppData directory")
-            .join(APP_NAME)
+            .join(app_name)
     } else if cfg!(any(target_os = "linux", target_os = "freebsd")) {
         if let Ok(flatpak_xdg_config) = std::env::var("FLATPAK_XDG_CONFIG_HOME") {
             flatpak_xdg_config.into()
         } else {
             dirs::config_dir().expect("failed to determine XDG_CONFIG_HOME directory")
         }
-        .join(APP_NAME_LOWERCASE)
+        .join(app_name_lowercase)
     } else {
-        home_dir().join(".config").join(APP_NAME_LOWERCASE)
+        home_dir().join(".config").join(app_name_lowercase)
     }
 }
 
@@ -176,23 +183,120 @@ pub fn data_dir() -> &'static PathBuf {
 /// The data directory used when no custom one is set, which is also where the
 /// default profile lives.
 fn platform_data_dir() -> PathBuf {
+    platform_data_dir_named(APP_NAME, APP_NAME_LOWERCASE).unwrap_or_else(|| config_dir().clone())
+}
+
+fn platform_data_dir_named(app_name: &str, app_name_lowercase: &str) -> Option<PathBuf> {
     if cfg!(target_os = "macos") {
-        home_dir()
-            .join("Library/Application Support")
-            .join(APP_NAME)
+        Some(
+            home_dir()
+                .join("Library/Application Support")
+                .join(app_name),
+        )
     } else if cfg!(any(target_os = "linux", target_os = "freebsd")) {
-        if let Ok(flatpak_xdg_data) = std::env::var("FLATPAK_XDG_DATA_HOME") {
-            flatpak_xdg_data.into()
-        } else {
-            dirs::data_local_dir().expect("failed to determine XDG_DATA_HOME directory")
-        }
-        .join(APP_NAME_LOWERCASE)
+        Some(
+            if let Ok(flatpak_xdg_data) = std::env::var("FLATPAK_XDG_DATA_HOME") {
+                flatpak_xdg_data.into()
+            } else {
+                dirs::data_local_dir().expect("failed to determine XDG_DATA_HOME directory")
+            }
+            .join(app_name_lowercase),
+        )
     } else if cfg!(target_os = "windows") {
-        dirs::data_local_dir()
-            .expect("failed to determine LocalAppData directory")
-            .join(APP_NAME)
+        Some(
+            dirs::data_local_dir()
+                .expect("failed to determine LocalAppData directory")
+                .join(app_name),
+        )
     } else {
-        config_dir().clone() // Fallback
+        None
+    }
+}
+
+/// Copies the data and config directories Asylum shared with Zed into Asylum's own, the first
+/// time Asylum runs with them. The old directories are left in place because an installed Zed
+/// may still be using them.
+///
+/// Must run before anything resolves or creates the data or config directories. Returns a
+/// description of each directory that could not be copied.
+pub fn migrate_legacy_directories() -> Vec<String> {
+    let mut pairs = vec![(
+        platform_config_dir_named(LEGACY_APP_NAME, LEGACY_APP_NAME_LOWERCASE),
+        platform_config_dir(),
+    )];
+    if let (Some(legacy), Some(current)) = (
+        platform_data_dir_named(LEGACY_APP_NAME, LEGACY_APP_NAME_LOWERCASE),
+        platform_data_dir_named(APP_NAME, APP_NAME_LOWERCASE),
+    ) {
+        pairs.push((legacy, current));
+    }
+
+    let mut failures = Vec::new();
+    for (legacy, current) in pairs {
+        if current.exists() || !legacy.is_dir() {
+            continue;
+        }
+        if let Err(error) = copy_directory_atomically(&legacy, &current) {
+            failures.push(format!(
+                "failed to copy {} to {}: {error}",
+                legacy.display(),
+                current.display()
+            ));
+        }
+    }
+    failures
+}
+
+/// Copies into a sibling staging directory first and renames it at the end, so an interrupted
+/// copy is retried from scratch on the next launch instead of leaving a partial directory that
+/// would be taken as already migrated.
+fn copy_directory_atomically(source: &Path, destination: &Path) -> std::io::Result<()> {
+    let mut staging_name = destination
+        .file_name()
+        .map(|name| name.to_os_string())
+        .unwrap_or_default();
+    staging_name.push(".migrating");
+    let staging = destination.with_file_name(staging_name);
+    if staging.exists() {
+        std::fs::remove_dir_all(&staging)?;
+    }
+    copy_directory_recursively(source, &staging)?;
+    std::fs::rename(&staging, destination)
+}
+
+fn copy_directory_recursively(source: &Path, destination: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(destination)?;
+    for entry in std::fs::read_dir(source)? {
+        let entry = entry?;
+        let source_path = entry.path();
+        let destination_path = destination.join(entry.file_name());
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
+            copy_directory_recursively(&source_path, &destination_path)?;
+        } else if file_type.is_symlink() {
+            copy_symlink(&source_path, &destination_path)?;
+        } else if file_type.is_file() {
+            // On APFS this clones the file instead of duplicating its bytes, which keeps copying
+            // large directories such as the Android SDK cheap.
+            std::fs::copy(&source_path, &destination_path)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn copy_symlink(source: &Path, destination: &Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(std::fs::read_link(source)?, destination)
+}
+
+#[cfg(not(unix))]
+fn copy_symlink(source: &Path, destination: &Path) -> std::io::Result<()> {
+    if source.is_dir() {
+        copy_directory_recursively(source, destination)
+    } else if source.is_file() {
+        std::fs::copy(source, destination).map(|_| ())
+    } else {
+        Ok(())
     }
 }
 
@@ -384,9 +488,7 @@ pub fn settings_file() -> &'static PathBuf {
 pub fn inherited_settings_file() -> Option<&'static PathBuf> {
     static INHERITED_SETTINGS_FILE: OnceLock<Option<PathBuf>> = OnceLock::new();
     INHERITED_SETTINGS_FILE
-        .get_or_init(|| {
-            active_profile_id().map(|_| shared_config_dir().join("settings.json"))
-        })
+        .get_or_init(|| active_profile_id().map(|_| shared_config_dir().join("settings.json")))
         .as_ref()
 }
 

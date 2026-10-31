@@ -9,8 +9,8 @@ use std::{
 
 use futures::channel::mpsc::UnboundedSender;
 use nix::unistd::getuid;
-use serde::{Deserialize, Serialize};
 use release_channel::ReleaseChannel;
+use serde::{Deserialize, Serialize};
 
 const LOCALHOST: Ipv4Addr = Ipv4Addr::new(127, 0, 0, 1);
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(10);

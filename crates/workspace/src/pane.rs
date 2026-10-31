@@ -4225,7 +4225,6 @@ impl Pane {
             .update(cx, |_, cx| {
                 cx.defer_in(window, move |workspace, _window, cx| {
                     if let Some(split_direction) = split_direction {
-                        // Move all items from source pane into a new split of target
                         let items: Vec<Box<dyn crate::ItemHandle>> =
                             source_pane.read(cx).items().cloned().collect();
                         let new_pane =
@@ -4242,7 +4241,6 @@ impl Pane {
                             );
                         }
                     } else {
-                        // Swap the two panes
                         workspace.center.swap(&source_pane, &target_pane, cx);
                         cx.notify();
                     }

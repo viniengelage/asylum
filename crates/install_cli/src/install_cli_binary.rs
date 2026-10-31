@@ -17,7 +17,8 @@ actions!(
     ]
 );
 
-const CANT_INSTALL_DOCS_URL: &str = "https://zed.dev/docs/macos#cant-install-cli";
+const CANT_INSTALL_DOCS_URL: &str =
+    "https://github.com/viniengelage/asylum/blob/main/docs/src/macos.md#cant-install-cli";
 
 /// Attempts to install the CLI symlink. Returns the installed path on success,
 /// or `None` if the user dismissed the macOS administrator authentication
@@ -25,7 +26,7 @@ const CANT_INSTALL_DOCS_URL: &str = "https://zed.dev/docs/macos#cant-install-cli
 /// commonly because the user is not an admin.
 async fn install_script(cx: &AsyncApp) -> Result<Option<PathBuf>> {
     let cli_path = cx.update(|cx| cx.path_for_auxiliary_executable("cli"))?;
-    let link_path = Path::new("/usr/local/bin/zed");
+    let link_path = Path::new("/usr/local/bin/asylum");
     let bin_dir_path = link_path.parent().unwrap();
 
     // Don't re-create symlink if it points to the same CLI binary.
@@ -111,7 +112,7 @@ pub fn install_cli_binary(window: &mut Window, cx: &mut Context<Workspace>) {
                                     "You can add `zed` to your PATH manually.",
                                     cx,
                                 )
-                                .with_title("Couldn't install the Zed CLI")
+                                .with_title("Couldn't install the Asylum CLI")
                                 .more_info_message("Show me how")
                                 .more_info_url(CANT_INSTALL_DOCS_URL)
                             })
@@ -140,5 +141,5 @@ pub fn install_cli_binary(window: &mut Window, cx: &mut Context<Workspace>) {
         register_zed_scheme(cx).await.log_err();
         Ok(())
     })
-    .detach_and_prompt_err("Cannot install the Zed CLI", window, cx, |_, _, _| None);
+    .detach_and_prompt_err("Cannot install the Asylum CLI", window, cx, |_, _, _| None);
 }

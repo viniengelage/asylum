@@ -63,10 +63,7 @@ use util::{
     PathExt, ResultExt,
     paths::{PathStyle, RemotePathBuf},
 };
-use wasm_host::{
-    WasmExtension, WasmHost,
-    wit::{is_supported_wasm_api_version, wasm_api_version_range},
-};
+use wasm_host::{WasmExtension, WasmHost, wit::is_supported_wasm_api_version};
 
 pub use extension::{
     ExtensionLibraryKind, GrammarManifestEntry, OldExtensionManifest, SchemaVersion,
@@ -125,6 +122,38 @@ static SUPPRESSED_EXTENSIONS: LazyLock<FxHashSet<&str>> = LazyLock::new(|| {
         "qqcode",
     ])
 });
+
+/// Where Asylum's extension registry is published: a static mirror of the Zed extensions
+/// repository, built by Asylum's CI. It holds `index.json` (the latest version of every
+/// extension), `extensions/<id>/versions.json` and `extensions/<id>/<version>.tar.gz`.
+/// `ASYLUM_EXTENSIONS_REGISTRY_URL` points Asylum at another copy, such as a self-hosted one.
+const DEFAULT_EXTENSIONS_REGISTRY_URL: &str = "https://viniengelage.github.io/asylum/extensions";
+
+fn extensions_registry_url() -> String {
+    std::env::var("ASYLUM_EXTENSIONS_REGISTRY_URL")
+        .ok()
+        .map(|url| url.trim_end_matches('/').to_string())
+        .filter(|url| !url.is_empty())
+        .unwrap_or_else(|| DEFAULT_EXTENSIONS_REGISTRY_URL.to_string())
+}
+
+fn extensions_registry_path(path: &str) -> Result<Url> {
+    Ok(Url::parse(&format!(
+        "{}/{path}",
+        extensions_registry_url()
+    ))?)
+}
+
+fn extension_matches_search(extension: &ExtensionMetadata, search: &str) -> bool {
+    let search = search.to_lowercase();
+    extension.id.to_lowercase().contains(&search)
+        || extension.manifest.name.to_lowercase().contains(&search)
+        || extension
+            .manifest
+            .description
+            .as_ref()
+            .is_some_and(|description| description.to_lowercase().contains(&search))
+}
 
 /// Returns the [`SchemaVersion`] range that is compatible with this version of Zed.
 pub fn schema_version_range() -> RangeInclusive<SchemaVersion> {
@@ -664,70 +693,64 @@ impl ExtensionStore {
         provides_filter: Option<&BTreeSet<ExtensionProvides>>,
         cx: &mut Context<Self>,
     ) -> Task<Result<Vec<ExtensionMetadata>>> {
-        let version = SchemaVersion::CURRENT.to_string();
-        let mut query = vec![("max_schema_version", version.as_str())];
-        if let Some(search) = search {
-            query.push(("filter", search));
-        }
-
-        let provides_filter = provides_filter.map(|provides_filter| {
-            provides_filter
-                .iter()
-                .map(|provides| provides.to_string())
-                .collect::<Vec<_>>()
-                .join(",")
-        });
-        if let Some(provides_filter) = provides_filter.as_deref() {
-            query.push(("provides", provides_filter));
-        }
-
-        self.fetch_extensions_from_api("/extensions", &query, cx)
+        let search = search.map(str::to_string);
+        let provides_filter = provides_filter.cloned();
+        let task = self.fetch_extensions_from_registry("index.json", cx);
+        cx.background_spawn(async move {
+            let mut extensions = task
+                .await?
+                .into_iter()
+                .filter(|extension| {
+                    extension.manifest.schema_version.unwrap_or(0) <= SchemaVersion::CURRENT.0
+                })
+                .filter(|extension| {
+                    search
+                        .as_deref()
+                        .is_none_or(|search| extension_matches_search(extension, search))
+                })
+                .filter(|extension| {
+                    provides_filter.as_ref().is_none_or(|provides_filter| {
+                        provides_filter
+                            .iter()
+                            .any(|provides| extension.manifest.provides.contains(provides))
+                    })
+                })
+                .collect::<Vec<_>>();
+            extensions.sort_by(|left, right| {
+                right
+                    .download_count
+                    .cmp(&left.download_count)
+                    .then_with(|| left.manifest.name.cmp(&right.manifest.name))
+            });
+            Ok(extensions)
+        })
     }
 
     pub fn fetch_extensions_with_update_available(
         &mut self,
         cx: &mut Context<Self>,
     ) -> Task<Result<Vec<ExtensionMetadata>>> {
-        let schema_versions = schema_version_range();
-        let wasm_api_versions = wasm_api_version_range(ReleaseChannel::global(cx));
+        let release_channel = ReleaseChannel::global(cx);
         let extension_settings = ExtensionSettings::get_global(cx);
-        let extension_ids = self
+        let installed_versions = self
             .extension_index
             .extensions
             .iter()
             .filter(|(id, entry)| !entry.dev && extension_settings.should_auto_update(id))
-            .map(|(id, _)| id.as_ref())
-            .collect::<Vec<_>>()
-            .join(",");
-        let task = self.fetch_extensions_from_api(
-            "/extensions/updates",
-            &[
-                ("min_schema_version", &schema_versions.start().to_string()),
-                ("max_schema_version", &schema_versions.end().to_string()),
-                (
-                    "min_wasm_api_version",
-                    &wasm_api_versions.start().to_string(),
-                ),
-                ("max_wasm_api_version", &wasm_api_versions.end().to_string()),
-                ("ids", &extension_ids),
-            ],
-            cx,
-        );
-        cx.spawn(async move |this, cx| {
-            let extensions = task.await?;
-            this.update(cx, |this, _cx| {
-                extensions
-                    .into_iter()
-                    .filter(|extension| {
-                        this.extension_index
-                            .extensions
-                            .get(&extension.id)
-                            .is_none_or(|installed_extension| {
-                                installed_extension.manifest.version != extension.manifest.version
-                            })
-                    })
-                    .collect()
-            })
+            .map(|(id, entry)| (id.clone(), entry.manifest.version.clone()))
+            .collect::<HashMap<_, _>>();
+        let task = self.fetch_extensions_from_registry("index.json", cx);
+        cx.background_spawn(async move {
+            Ok(task
+                .await?
+                .into_iter()
+                .filter(|extension| {
+                    installed_versions
+                        .get(&extension.id)
+                        .is_some_and(|installed| *installed != extension.manifest.version)
+                })
+                .filter(|extension| is_version_compatible(release_channel, extension))
+                .collect())
         })
     }
 
@@ -736,7 +759,7 @@ impl ExtensionStore {
         extension_id: &str,
         cx: &mut Context<Self>,
     ) -> Task<Result<Vec<ExtensionMetadata>>> {
-        self.fetch_extensions_from_api(&format!("/extensions/{extension_id}"), &[], cx)
+        self.fetch_extensions_from_registry(&format!("extensions/{extension_id}/versions.json"), cx)
     }
 
     /// Installs any extensions that should be included with Zed by default.
@@ -810,13 +833,12 @@ impl ExtensionStore {
         anyhow::Ok(())
     }
 
-    fn fetch_extensions_from_api(
+    fn fetch_extensions_from_registry(
         &self,
         path: &str,
-        query: &[(&str, &str)],
         cx: &mut Context<ExtensionStore>,
     ) -> Task<Result<Vec<ExtensionMetadata>>> {
-        let url = self.http_client.build_zed_api_url(path, query);
+        let url = extensions_registry_path(path);
         let http_client = self.http_client.clone();
         cx.spawn(async move |_, _| {
             let mut response = http_client
@@ -830,7 +852,7 @@ impl ExtensionStore {
                 .await
                 .context("error reading extensions")?;
 
-            if response.status().is_client_error() {
+            if !response.status().is_success() {
                 let text = String::from_utf8_lossy(body.as_slice());
                 bail!(
                     "status error {}, response: {text:?}",
@@ -975,34 +997,32 @@ impl ExtensionStore {
     pub fn install_latest_extension(&mut self, extension_id: Arc<str>, cx: &mut Context<Self>) {
         log::info!("installing extension {extension_id} latest version");
 
-        let schema_versions = schema_version_range();
-        let wasm_api_versions = wasm_api_version_range(ReleaseChannel::global(cx));
-
-        let Some(url) = self
-            .http_client
-            .build_zed_api_url(
-                &format!("/extensions/{extension_id}/download"),
-                &[
-                    ("min_schema_version", &schema_versions.start().to_string()),
-                    ("max_schema_version", &schema_versions.end().to_string()),
-                    (
-                        "min_wasm_api_version",
-                        &wasm_api_versions.start().to_string(),
-                    ),
-                    ("max_wasm_api_version", &wasm_api_versions.end().to_string()),
-                ],
-            )
-            .log_err()
-        else {
-            return;
-        };
-
-        self.install_or_upgrade_extension_at_endpoint(
-            extension_id,
-            url,
-            ExtensionOperation::Install,
-            cx,
-        )
+        let release_channel = ReleaseChannel::global(cx);
+        let versions = self.fetch_extension_versions(&extension_id, cx);
+        cx.spawn(async move |this, cx| {
+            let latest_compatible = versions
+                .await?
+                .into_iter()
+                .filter(|extension| is_version_compatible(release_channel, extension))
+                .filter_map(|extension| {
+                    let version = Version::from_str(&extension.manifest.version).ok()?;
+                    Some((version, extension.manifest.version))
+                })
+                .max_by(|(left, _), (right, _)| left.cmp(right))
+                .map(|(_, version)| version)
+                .with_context(|| {
+                    format!("no version of {extension_id} is compatible with this build")
+                })?;
+            this.update(cx, |this, cx| {
+                this.install_or_upgrade_extension(
+                    extension_id,
+                    latest_compatible,
+                    ExtensionOperation::Install,
+                    cx,
+                )
+            })?
+            .await
+        })
         .detach_and_log_err(cx);
     }
 
@@ -1023,15 +1043,11 @@ impl ExtensionStore {
         cx: &mut Context<Self>,
     ) -> Task<Result<()>> {
         log::info!("installing extension {extension_id} {version}");
-        let Some(url) = self
-            .http_client
-            .build_zed_api_url(
-                &format!("/extensions/{extension_id}/{version}/download"),
-                &[],
-            )
-            .log_err()
-        else {
-            return Task::ready(Ok(()));
+        let url = match extensions_registry_path(&format!(
+            "extensions/{extension_id}/{version}.tar.gz"
+        )) {
+            Ok(url) => url,
+            Err(error) => return Task::ready(Err(error)),
         };
 
         self.install_or_upgrade_extension_at_endpoint(extension_id, url, operation, cx)

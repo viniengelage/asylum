@@ -711,7 +711,7 @@ impl StdioTransport {
     ) -> Result<Self> {
         let Some(binary_command) = &binary.command else {
             bail!(
-                "When using the `stdio` transport, the path to a debug adapter binary must be set by Zed."
+                "When using the `stdio` transport, the path to a debug adapter binary must be set by Asylum."
             );
         };
         let mut command = util::command::new_std_command(&binary_command);

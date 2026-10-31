@@ -670,7 +670,7 @@ mod tests {
             assert_eq!(outcome.result_sets[0].rows, [[Some("1".to_owned())]]);
 
             // Inside a transaction the same cancel aborts it, so the next statement fails until
-            // a ROLLBACK. Phase 3 has to page with a cursor there instead.
+            // a ROLLBACK; paging there has to go through a cursor instead.
             session.run("begin", 10).await.unwrap();
             session
                 .run("select g from generate_series(1, 5000000) g", 1000)
@@ -721,8 +721,6 @@ mod tests {
                 .unwrap();
             assert_eq!(outcome.result_sets[0].rows_affected, Some(1));
 
-            // Cell edits: the update matches while the old values hold, and matches nothing once
-            // someone else changed the row.
             let page = session
                 .run(
                     "select id, name, profile from database_client_spike.users order by id",

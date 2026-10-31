@@ -636,8 +636,6 @@ async fn execute<T: DeserializeOwned>(
 ) -> Result<T> {
     // Errors name the endpoint; the query only makes them longer.
     let path = path.split('?').next().unwrap_or(path);
-    // Errors name the endpoint; the query only makes them longer.
-    let path = path.split('?').next().unwrap_or(path);
     let mut response = client
         .send(request)
         .await

@@ -383,9 +383,8 @@ impl SettingsStore {
             fs.clone(),
             paths::global_settings_file().clone(),
         );
-        let mut inherited_settings_file = paths::inherited_settings_file().map(|path| {
-            crate::watch_config_file(cx.background_executor(), fs, path.clone())
-        });
+        let mut inherited_settings_file = paths::inherited_settings_file()
+            .map(|path| crate::watch_config_file(cx.background_executor(), fs, path.clone()));
 
         if let Some((inherited_settings_file_rx, _)) = inherited_settings_file.as_mut()
             && let Some(inherited_content) = cx

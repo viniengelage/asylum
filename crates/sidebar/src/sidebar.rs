@@ -8906,7 +8906,7 @@ impl Sidebar {
         render_import_onboarding_banner(
             "acp",
             "Looking for threads from external agents?",
-            "Import threads from agents like Claude Agent, Codex, and more, whether started in Zed or another client.",
+            "Import threads from agents like Claude Agent, Codex, and more, whether started in Asylum or another client.",
             if verbose_labels {
                 "Import Threads from External Agents"
             } else {
@@ -9897,7 +9897,7 @@ impl Sidebar {
                     .gap_2()
                     .child(
                         div().flex_1().min_w_0().child(
-                            Label::new("Verificamos de novo quando o Zed volta ao foco.")
+                            Label::new("Verificamos de novo quando o Asylum volta ao foco.")
                                 .size(LabelSize::XSmall)
                                 .color(Color::Placeholder),
                         ),
@@ -10402,7 +10402,8 @@ impl Sidebar {
         let manager = cx.new(IosSimulatorManager::new);
         self.ios_simulator_subscriptions
             .push(cx.observe(&manager, |_, _, cx| cx.notify()));
-        // Board J tells the user it checks again once they come back from installing Xcode.
+        // The missing-Xcode screen promises to check again once the user comes back from
+        // installing it.
         self.ios_simulator_subscriptions
             .push(cx.observe_window_activation(window, |this, window, cx| {
                 if !window.is_window_active() {
@@ -10771,7 +10772,7 @@ impl Sidebar {
                 .child(Label::new("Emulador Android não instalado"))
                 .child(
                     Label::new(
-                        "O Zed pode baixar o JDK e o Android SDK e criar um dispositivo virtual automaticamente.",
+                        "O Asylum pode baixar o JDK e o Android SDK e criar um dispositivo virtual automaticamente.",
                     )
                     .size(LabelSize::Small)
                     .color(Color::Muted),
@@ -11272,7 +11273,8 @@ impl Sidebar {
                 DeviceInstanceKind::Ios => ("device-tab-ios", "remove-device-tab-ios"),
             };
             // Drawn here rather than with `ui::Tab`, whose slot keeps the remove button's
-            // width even while it is hidden; the board only makes room for it under the pointer.
+            // width even while it is hidden; the remove button should only take room under the
+            // pointer.
             h_flex()
                 .id(tab_id)
                 .h(DEVICE_TOOL_SIZE)

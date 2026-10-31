@@ -960,7 +960,6 @@
   {
     "context": "!Terminal",
     "bindings": {
-      "ctrl-shift-c": "collab_panel::ToggleFocus",
     },
   },
   {

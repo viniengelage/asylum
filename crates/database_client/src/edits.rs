@@ -124,7 +124,6 @@ mod tests {
         edits.insert((0, 1), Some("diego@trix.com.br".to_owned()));
         edits.insert((1, 1), Some("o'brien@x.com".to_owned()));
         edits.insert((1, 2), None);
-        // Typed back to what it was: nothing to write.
         edits.insert((0, 2), Some("{investor}".to_owned()));
         let updates = row_updates("public", "users", &names, &[0], &rows, &edits).unwrap();
         assert_eq!(

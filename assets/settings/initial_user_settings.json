@@ -1,9 +1,9 @@
-// Zed settings
+// Asylum settings
 //
-// For information on how to configure Zed, see the Zed
-// documentation: https://zed.dev/docs/configuring-zed
+// For information on how to configure Asylum, see the Asylum
+// documentation: https://github.com/viniengelage/asylum/blob/main/docs/src/configuring-zed.md
 //
-// To see all of Zed's default settings without changing your
+// To see all of Asylum's default settings without changing your
 // custom settings, run `zed: open default settings` from the
 // command palette (cmd-shift-p / ctrl-shift-p)
 {

@@ -59,22 +59,16 @@ actions!(
         /// Opens the keymap editor.
         #[action(deprecated_aliases = ["zed_actions::OpenKeymapEditor"])]
         OpenKeymap,
-        /// Opens account settings.
-        OpenAccountSettings,
         /// Opens server settings.
         OpenServerSettings,
         /// Quits the application.
         Quit,
-        /// Shows information about Zed.
+        /// Shows information about Asylum.
         About,
         /// Opens the documentation website.
         OpenDocs,
         /// Views open source licenses.
         OpenLicenses,
-        /// Opens the Zed status page.
-        OpenStatusPage,
-        /// Opens the Zed merch store.
-        GetMerch,
         /// Sign in with Claude Pro/Max subscription (OAuth).
         ClaudeOAuthSignIn,
         /// Sign out of Claude Pro/Max subscription (OAuth).

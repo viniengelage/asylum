@@ -232,7 +232,6 @@ fn suggestions(cache: &SchemaCache, statement: &str, prefix: &str) -> Vec<Sugges
                 })
                 .collect();
         }
-        // `public.` → the tables of that schema.
         return cache
             .relations
             .iter()
@@ -301,7 +300,6 @@ impl CompletionProvider for SqlCompletionProvider {
             .last()
             .map_or(offset, |(index, _)| index);
         let prefix = &text[word_start..offset];
-        // Only the part after the last dot is replaced.
         let replace_start = prefix
             .rfind('.')
             .map_or(word_start, |dot| word_start + dot + 1);
@@ -394,7 +392,6 @@ mod tests {
             texts(suggestions(&cache(), statement, "a.")),
             ["id", "user_id"]
         );
-        // A table name works as its own qualifier.
         assert_eq!(
             texts(suggestions(
                 &cache(),

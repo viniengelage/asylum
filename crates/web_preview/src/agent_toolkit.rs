@@ -49,7 +49,12 @@ fn active_view(cx: &App) -> Option<Entity<WebPreviewView>> {
         .iter()
         .rev()
         .find(|view| !view.read(cx).hidden && view.read(cx).browser.is_some())
-        .or_else(|| views.iter().rev().find(|view| view.read(cx).browser.is_some()))
+        .or_else(|| {
+            views
+                .iter()
+                .rev()
+                .find(|view| view.read(cx).browser.is_some())
+        })
         .or_else(|| views.last())
         .cloned()
 }
@@ -64,7 +69,10 @@ struct PageInfo {
 
 fn page_info(view: &Entity<WebPreviewView>, cx: &App) -> PageInfo {
     let view = view.read(cx);
-    let state = view.browser.as_ref().and_then(|browser| browser.current_state());
+    let state = view
+        .browser
+        .as_ref()
+        .and_then(|browser| browser.current_state());
     PageInfo {
         url: state
             .as_ref()
@@ -98,7 +106,9 @@ async fn with_timeout_of<T>(
     futures::pin_mut!(future);
     match futures::future::select(future, timer).await {
         futures::future::Either::Left((result, _)) => result,
-        futures::future::Either::Right(_) => Err(anyhow!("{what}: o browser não respondeu a tempo")),
+        futures::future::Either::Right(_) => {
+            Err(anyhow!("{what}: o browser não respondeu a tempo"))
+        }
     }
 }
 
@@ -118,7 +128,9 @@ impl CdpSession {
     async fn connect(target_id: Option<&str>, page_url: &str) -> Result<Self> {
         let port = crate::runtime_discovery::remote_debugging_port();
         let targets = http_get_json(port, "/json/list").await?;
-        let targets = targets.as_array().context("a lista de páginas do CDP veio vazia")?;
+        let targets = targets
+            .as_array()
+            .context("a lista de páginas do CDP veio vazia")?;
         let pages = targets
             .iter()
             .filter(|target| target["type"] == "page")
@@ -225,7 +237,9 @@ impl CdpSession {
     /// Maps screenshot pixels back to CSS pixels: screenshots are taken in CSS pixels, scaled
     /// down so the longest side fits the model's image budget.
     async fn viewport(&mut self) -> Result<(f64, f64, f64)> {
-        let size = self.evaluate("[window.innerWidth, window.innerHeight]").await?;
+        let size = self
+            .evaluate("[window.innerWidth, window.innerHeight]")
+            .await?;
         let width = size[0].as_f64().unwrap_or(1280.0).max(1.0);
         let height = size[1].as_f64().unwrap_or(800.0).max(1.0);
         let scale = task_agents::screenshot_scale(width as u32, height as u32);
@@ -315,7 +329,10 @@ async fn wait_for_browser(view: &Entity<WebPreviewView>, cx: &mut AsyncApp) -> R
         let (has_browser, has_target, failure, needs_screen) = cx.update(|cx| {
             let view = view.read(cx);
             let failure = if let Some(error) = &view.error {
-                Some(format!("O browser não abriu: {} — {}", error.headline, error.detail))
+                Some(format!(
+                    "O browser não abriu: {} — {}",
+                    error.headline, error.detail
+                ))
             } else if !crate::cef_paths::is_installed() {
                 Some(
                     "O Chromium ainda não foi baixado. Peça para abrir a aba de Browser e baixar."
@@ -335,7 +352,8 @@ async fn wait_for_browser(view: &Entity<WebPreviewView>, cx: &mut AsyncApp) -> R
             anyhow::bail!(failure);
         }
         if has_browser {
-            let browser_started_at = *browser_started_at.get_or_insert_with(std::time::Instant::now);
+            let browser_started_at =
+                *browser_started_at.get_or_insert_with(std::time::Instant::now);
             if has_target || browser_started_at.elapsed() > TARGET_ID_GRACE {
                 return Ok(());
             }
@@ -351,7 +369,9 @@ async fn wait_for_browser(view: &Entity<WebPreviewView>, cx: &mut AsyncApp) -> R
                 "O Chromium não subiu a tempo; tente de novo em alguns segundos."
             });
         }
-        cx.background_executor().timer(Duration::from_millis(100)).await;
+        cx.background_executor()
+            .timer(Duration::from_millis(100))
+            .await;
     }
 }
 
@@ -427,7 +447,9 @@ async fn wait_until_loaded(navigating_to: &str, cx: &mut AsyncApp) -> Result<Pag
             let url = page[1].as_str().unwrap_or_default().to_string();
             let title = page[2].as_str().unwrap_or_default().to_string();
             if url.starts_with("chrome-error://") {
-                anyhow::bail!("A página {navigating_to} não carregou (erro de rede ou endereço inválido).");
+                anyhow::bail!(
+                    "A página {navigating_to} não carregou (erro de rede ou endereço inválido)."
+                );
             }
             let left_blank_page = url != "about:blank" || navigating_to == "about:blank";
             if ready_state == "complete" && left_blank_page {
@@ -518,7 +540,11 @@ fn tool<I>(
     title: &'static str,
     description: &'static str,
     access: ToolAccess,
-    run: impl AsyncFn(Entity<Project>, I, &mut AsyncApp) -> Result<ToolkitOutput> + Clone + Send + Sync + 'static,
+    run: impl AsyncFn(Entity<Project>, I, &mut AsyncApp) -> Result<ToolkitOutput>
+    + Clone
+    + Send
+    + Sync
+    + 'static,
 ) -> ToolkitTool
 where
     I: JsonSchema + serde::de::DeserializeOwned + 'static,
@@ -553,7 +579,10 @@ pub fn register_toolkit(cx: &mut App) {
                         cx,
                     )
                     .await?;
-                    if let Some(error) = navigation["errorText"].as_str().filter(|error| !error.is_empty()) {
+                    if let Some(error) = navigation["errorText"]
+                        .as_str()
+                        .filter(|error| !error.is_empty())
+                    {
                         anyhow::bail!("A página {} não carregou: {error}", input.url);
                     }
                 } else {
@@ -589,8 +618,10 @@ pub fn register_toolkit(cx: &mut App) {
              browser_click and browser_scroll are in the pixels of this image.",
             ToolAccess::Read,
             async |_project, _input: NoInput, cx| {
-                let (mut session, info) = session_for_active_page(PageUse::PaintOrInput, cx).await?;
-                let (width, height, scale) = with_timeout(session.viewport(), "medir a página", cx).await?;
+                let (mut session, info) =
+                    session_for_active_page(PageUse::PaintOrInput, cx).await?;
+                let (width, height, scale) =
+                    with_timeout(session.viewport(), "medir a página", cx).await?;
                 let result = with_timeout(
                     session.call(
                         "Page.captureScreenshot",
@@ -603,11 +634,14 @@ pub fn register_toolkit(cx: &mut App) {
                     cx,
                 )
                 .await?;
-                let data = result["data"].as_str().context("o CDP não devolveu a imagem")?;
+                let data = result["data"]
+                    .as_str()
+                    .context("o CDP não devolveu a imagem")?;
                 let png = base64::engine::general_purpose::STANDARD.decode(data)?;
                 let screenshot = cx
                     .background_spawn(async move {
-                        let image = image::load_from_memory_with_format(&png, image::ImageFormat::Png)?;
+                        let image =
+                            image::load_from_memory_with_format(&png, image::ImageFormat::Png)?;
                         scale_screenshot(image)
                     })
                     .await?;
@@ -697,7 +731,8 @@ pub fn register_toolkit(cx: &mut App) {
                         params["type"] = json!("keyDown");
                         params["text"] = json!("\r");
                     }
-                    with_timeout(session.call("Input.dispatchKeyEvent", params), "tecla", cx).await?;
+                    with_timeout(session.call("Input.dispatchKeyEvent", params), "tecla", cx)
+                        .await?;
                 }
                 Ok(ToolkitOutput::text(format!("Apertou {key}.")))
             },
@@ -709,7 +744,8 @@ pub fn register_toolkit(cx: &mut App) {
             ToolAccess::Act,
             async |_project, input: ScrollInput, cx| {
                 let (mut session, _) = session_for_active_page(PageUse::PaintOrInput, cx).await?;
-                let (width, height, scale) = with_timeout(session.viewport(), "medir a página", cx).await?;
+                let (width, height, scale) =
+                    with_timeout(session.viewport(), "medir a página", cx).await?;
                 let x = input.x.map_or(width / 2.0, |x| x / scale);
                 let y = input.y.map_or(height / 2.0, |y| y / scale);
                 with_timeout(
@@ -721,7 +757,10 @@ pub fn register_toolkit(cx: &mut App) {
                     cx,
                 )
                 .await?;
-                Ok(ToolkitOutput::text(format!("Rolou {:.0} px.", input.delta_y)))
+                Ok(ToolkitOutput::text(format!(
+                    "Rolou {:.0} px.",
+                    input.delta_y
+                )))
             },
         ),
         tool(
@@ -832,7 +871,9 @@ mod tests {
             anyhow::ensure!(png.starts_with(b"\x89PNG"), "not a PNG");
             let title = session.evaluate("document.title").await?;
             anyhow::ensure!(
-                title.as_str().is_some_and(|title| title.contains("Example")),
+                title
+                    .as_str()
+                    .is_some_and(|title| title.contains("Example")),
                 "unexpected title {title}"
             );
             for event_type in ["mouseMoved", "mousePressed", "mouseReleased"] {
@@ -843,7 +884,9 @@ mod tests {
                     )
                     .await?;
             }
-            session.call("Input.insertText", json!({ "text": "oi" })).await?;
+            session
+                .call("Input.insertText", json!({ "text": "oi" }))
+                .await?;
             session.evaluate("console.error('agent-test')").await?;
             // Enabling the console replays buffered messages before its own response.
             session.call("Console.enable", json!({})).await?;

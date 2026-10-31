@@ -3533,7 +3533,11 @@ fn model_id_to_selection(model_id: &AgentModelId, cx: &App) -> LanguageModelSele
     agent_settings::language_model_to_selection(&resolved, current_user_selection.as_ref())
 }
 
+/// Stays "Zed Agent" because it is persisted with every native thread; users see
+/// [`NATIVE_AGENT_DISPLAY_NAME`] instead.
 pub static ZED_AGENT_ID: LazyLock<AgentId> = LazyLock::new(|| AgentId::new("Zed Agent"));
+
+pub const NATIVE_AGENT_DISPLAY_NAME: &str = "Asylum Agent";
 
 pub fn available_native_agent(cx: &App) -> AvailableAgent {
     let registry = LanguageModelRegistry::read_global(cx);
@@ -3559,7 +3563,7 @@ pub fn available_native_agent(cx: &App) -> AvailableAgent {
 
     AvailableAgent {
         id: ZED_AGENT_ID.to_string(),
-        name: ZED_AGENT_ID.0.clone(),
+        name: NATIVE_AGENT_DISPLAY_NAME.into(),
         is_native: true,
         models,
     }
@@ -7881,7 +7885,6 @@ mod internal_tests {
             );
         });
 
-        // Markdown files under `/a/.zed/learnings` become learnings.
         fs.insert_tree(
             "/a/.zed/learnings",
             json!({

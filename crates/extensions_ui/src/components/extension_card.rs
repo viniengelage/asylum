@@ -369,7 +369,7 @@ impl ExtensionCard {
                             move |_, cx| {
                                 Tooltip::simple(
                                     format!(
-                                        "v{version} is not compatible with this version of Zed."
+                                        "v{version} is not compatible with this version of Asylum."
                                     ),
                                     cx,
                                 )

@@ -7,7 +7,7 @@ use std::{env, str::FromStr, sync::LazyLock};
 use gpui::{App, Global};
 use semver::Version;
 
-const ZED_DOCS_URL: &str = "https://zed.dev/docs";
+const ASYLUM_DOCS_URL: &str = "https://github.com/viniengelage/asylum/blob/main/docs/src";
 
 /// stable | dev | nightly | preview
 pub static RELEASE_CHANNEL_NAME: LazyLock<String> = LazyLock::new(|| {
@@ -107,6 +107,9 @@ impl AppCommitTimestamp {
         cx.set_global(GlobalAppCommitTimestamp(timestamp))
     }
 }
+
+/// Where Asylum's source code, releases and issues live.
+pub const ASYLUM_REPOSITORY_URL: &str = "https://github.com/viniengelage/asylum";
 
 /// Asylum's own version, shown to users. It is separate from [`AppVersion`], which stays Zed's
 /// because extensions check compatibility against it. The release workflow assigns each release
@@ -275,20 +278,22 @@ impl ReleaseChannel {
         }
     }
 
-    /// Returns the Zed docs URL for this [`ReleaseChannel`] for the given
-    /// `slug`.
+    /// Returns the docs URL for the given `slug`, which may end in a `#section` anchor. The
+    /// docs live as Markdown in Asylum's repository, the same for every channel.
     pub fn docs_url(&self, slug: &str) -> String {
-        let channel_path_segment = match self {
-            Self::Dev | Self::Nightly => Some("nightly"),
-            Self::Preview => Some("preview"),
-            Self::Stable => None,
+        let (path, anchor) = match slug.split_once('#') {
+            Some((path, anchor)) => (path, Some(anchor)),
+            None => (slug, None),
         };
-
-        match channel_path_segment {
-            Some(channel) if slug.is_empty() => format!("{ZED_DOCS_URL}/{channel}"),
-            Some(channel) => format!("{ZED_DOCS_URL}/{channel}/{slug}"),
-            None if slug.is_empty() => ZED_DOCS_URL.to_string(),
-            None => format!("{ZED_DOCS_URL}/{slug}"),
+        let path = path.trim_matches('/');
+        let page = if path.is_empty() {
+            ASYLUM_DOCS_URL.to_string()
+        } else {
+            format!("{ASYLUM_DOCS_URL}/{path}.md")
+        };
+        match anchor {
+            Some(anchor) => format!("{page}#{anchor}"),
+            None => page,
         }
     }
 }
@@ -316,22 +321,25 @@ mod tests {
     use super::ReleaseChannel;
 
     #[test]
-    fn test_docs_url_for_release_channel() {
+    fn test_docs_url_points_at_the_repository_docs() {
+        for channel in [
+            ReleaseChannel::Dev,
+            ReleaseChannel::Nightly,
+            ReleaseChannel::Preview,
+            ReleaseChannel::Stable,
+        ] {
+            assert_eq!(
+                channel.docs_url("tasks"),
+                "https://github.com/viniengelage/asylum/blob/main/docs/src/tasks.md"
+            );
+        }
         assert_eq!(
-            ReleaseChannel::Dev.docs_url("settings"),
-            "https://zed.dev/docs/nightly/settings"
+            ReleaseChannel::Stable.docs_url("ai/sandboxing#installing-bubblewrap"),
+            "https://github.com/viniengelage/asylum/blob/main/docs/src/ai/sandboxing.md#installing-bubblewrap"
         );
         assert_eq!(
-            ReleaseChannel::Nightly.docs_url("settings"),
-            "https://zed.dev/docs/nightly/settings"
-        );
-        assert_eq!(
-            ReleaseChannel::Preview.docs_url("settings"),
-            "https://zed.dev/docs/preview/settings"
-        );
-        assert_eq!(
-            ReleaseChannel::Stable.docs_url("settings"),
-            "https://zed.dev/docs/settings"
+            ReleaseChannel::Stable.docs_url(""),
+            "https://github.com/viniengelage/asylum/blob/main/docs/src"
         );
     }
 }

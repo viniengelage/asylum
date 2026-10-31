@@ -198,7 +198,7 @@ impl Render for KeyContextView {
                 }),
             )
             .child(Label::new("Keyboard Context").size(LabelSize::Large))
-            .child(Label::new("This view lets you determine the current context stack for creating custom key bindings in Zed. When a keyboard shortcut is triggered, it also shows all the possible contexts it could have triggered in, and which one matched."))
+            .child(Label::new("This view lets you determine the current context stack for creating custom key bindings in Asylum. When a keyboard shortcut is triggered, it also shows all the possible contexts it could have triggered in, and which one matched."))
             .child(
                 h_flex()
                     .mt_4()
@@ -206,7 +206,7 @@ impl Render for KeyContextView {
                     .child(
                         Button::new("open_documentation", "Open Documentation")
                             .style(ButtonStyle::Filled)
-                            .on_click(|_, _, cx| cx.open_url("https://zed.dev/docs/key-bindings")),
+                            .on_click(|_, _, cx| cx.open_url("https://github.com/viniengelage/asylum/blob/main/docs/src/key-bindings.md")),
                     )
                     .child(
                         Button::new("view_default_keymap", "View Default Keymap")

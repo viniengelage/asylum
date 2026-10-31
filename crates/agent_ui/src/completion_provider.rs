@@ -1353,8 +1353,6 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
 
         let skills = self.source.available_skills(cx);
 
-        // Past `/<skill> `, only that skill's subcommands are offered, matched
-        // against the subcommand name the user is typing.
         if let Some(argument) = argument {
             let candidates = skills
                 .iter()

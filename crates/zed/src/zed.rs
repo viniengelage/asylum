@@ -26,7 +26,6 @@ pub use app_menus::*;
 use assets::Assets;
 
 use breadcrumbs::Breadcrumbs;
-use client::zed_urls;
 use collections::VecDeque;
 use debugger_ui::debugger_panel::DebugPanel;
 use editor::{Editor, MultiBuffer};
@@ -72,7 +71,7 @@ use project::{
 use project_panel::ProjectPanel;
 use quick_action_bar::QuickActionBar;
 use recent_projects::open_remote_project;
-use release_channel::{AppCommitSha, AppVersion, ReleaseChannel};
+use release_channel::{ASYLUM_REPOSITORY_URL, AppCommitSha, AppVersion, ReleaseChannel};
 use rope::Rope;
 use search::project_search::ProjectSearchBar;
 use settings::{
@@ -110,14 +109,11 @@ use workspace::{
 use workspace::{CloseProject, CloseWindow, RestoreBanner, with_active_or_new_workspace};
 use workspace::{Pane, notifications::DetachAndPromptErr};
 use zed_actions::{
-    About, ClaudeOAuthSignIn, ClaudeOAuthSignOut, GetMerch, OpenAccountSettings, OpenBrowser,
-    OpenDocs, OpenProjectTasks, OpenServerSettings, OpenSettingsFile, OpenStatusPage, OpenZedUrl,
-    Quit,
+    About, ClaudeOAuthSignIn, ClaudeOAuthSignOut, OpenBrowser, OpenDocs, OpenProjectTasks,
+    OpenServerSettings, OpenSettingsFile, OpenZedUrl, Quit,
 };
 
-const DOCS_URL: &str = "https://zed.dev/docs/";
-const STATUS_URL: &str = "https://status.zed.dev";
-const MERCH_URL: &str = "https://merch.zed.dev/";
+const DOCS_URL: &str = "https://github.com/viniengelage/asylum/blob/main/docs/src";
 
 pub struct CrashHandler(pub Arc<crashes::Client>);
 
@@ -270,11 +266,6 @@ pub fn init(cx: &mut App) {
                 window,
                 cx,
             );
-        });
-    })
-    .on_action(|_: &OpenAccountSettings, cx| {
-        with_active_or_new_workspace(cx, |_, _, cx| {
-            cx.open_url(&zed_urls::account_url(cx));
         });
     })
     .on_action(|_: &OpenTasks, cx| {
@@ -714,7 +705,7 @@ fn initialize_file_watcher(fs: &dyn Fs, window: &mut Window, cx: &mut Context<Wo
             db::indoc! {r#"
             inotify_init returned {}
 
-            This may be due to system-wide limits on inotify instances. For troubleshooting see: https://zed.dev/docs/linux
+            This may be due to system-wide limits on inotify instances. For troubleshooting see: https://github.com/viniengelage/asylum/blob/main/docs/src/linux.md
             "#},
             e
         );
@@ -728,7 +719,7 @@ fn initialize_file_watcher(fs: &dyn Fs, window: &mut Window, cx: &mut Context<Wo
         cx.spawn(async move |_, cx| {
             if prompt.await == Ok(0) {
                 cx.update(|cx| {
-                    cx.open_url("https://zed.dev/docs/linux#could-not-start-inotify");
+                    cx.open_url("https://github.com/viniengelage/asylum/blob/main/docs/src/linux.md#could-not-start-inotify");
                     cx.quit();
                 });
             }
@@ -745,7 +736,7 @@ fn initialize_file_watcher(fs: &dyn Fs, window: &mut Window, cx: &mut Context<Wo
             db::indoc! {r#"
             ReadDirectoryChangesW initialization failed: {}
 
-            This may occur on network filesystems and WSL paths. For troubleshooting see: https://zed.dev/docs/windows
+            This may occur on network filesystems and WSL paths. For troubleshooting see: https://github.com/viniengelage/asylum/blob/main/docs/src/windows.md
             "#},
             e
         );
@@ -759,7 +750,9 @@ fn initialize_file_watcher(fs: &dyn Fs, window: &mut Window, cx: &mut Context<Wo
         cx.spawn(async move |_, cx| {
             if prompt.await == Ok(0) {
                 cx.update(|cx| {
-                    cx.open_url("https://zed.dev/docs/windows");
+                    cx.open_url(
+                        "https://github.com/viniengelage/asylum/blob/main/docs/src/windows.md",
+                    );
                     cx.quit()
                 });
             }
@@ -777,14 +770,14 @@ fn show_software_emulation_warning_if_needed(
         let (graphics_api, docs_url, open_url) = if cfg!(target_os = "windows") {
             (
                 "DirectX",
-                "https://zed.dev/docs/windows",
-                "https://zed.dev/docs/windows",
+                "https://github.com/viniengelage/asylum/blob/main/docs/src/windows.md",
+                "https://github.com/viniengelage/asylum/blob/main/docs/src/windows.md",
             )
         } else {
             (
                 "Vulkan",
-                "https://zed.dev/docs/linux",
-                "https://zed.dev/docs/linux#zed-fails-to-open-windows",
+                "https://github.com/viniengelage/asylum/blob/main/docs/src/linux.md",
+                "https://github.com/viniengelage/asylum/blob/main/docs/src/linux.md#zed-fails-to-open-windows",
             )
         };
         let message = format!(
@@ -824,8 +817,6 @@ fn initialize_panels(window: &mut Window, cx: &mut Context<Workspace>) -> Task<a
         let outline_panel = OutlinePanel::load(workspace_handle.clone(), cx.clone());
         let terminal_panel = TerminalPanel::load(workspace_handle.clone(), cx.clone());
         let git_panel = GitPanel::load(workspace_handle.clone(), cx.clone());
-        let channels_panel =
-            collab_ui::collab_panel::CollabPanel::load(workspace_handle.clone(), cx.clone());
         let debug_panel = DebugPanel::load(workspace_handle.clone(), cx);
 
         async fn add_panel_when_ready(
@@ -848,7 +839,6 @@ fn initialize_panels(window: &mut Window, cx: &mut Context<Workspace>) -> Task<a
             add_panel_when_ready(outline_panel, workspace_handle.clone(), cx.clone()),
             add_panel_when_ready(terminal_panel, workspace_handle.clone(), cx.clone()),
             add_panel_when_ready(git_panel, workspace_handle.clone(), cx.clone()),
-            add_panel_when_ready(channels_panel, workspace_handle.clone(), cx.clone()),
             add_panel_when_ready(debug_panel, workspace_handle.clone(), cx.clone()),
             initialize_agent_panel(workspace_handle.clone(), cx.clone()).map(|r| r.log_err()),
         );
@@ -988,8 +978,6 @@ fn register_actions(
 ) {
     workspace
         .register_action(|_, _: &OpenDocs, _, cx| cx.open_url(DOCS_URL))
-        .register_action(|_, _: &OpenStatusPage, _, cx| cx.open_url(STATUS_URL))
-        .register_action(|_, _: &GetMerch, _, cx| cx.open_url(MERCH_URL))
         .register_action(
             |workspace: &mut Workspace,
              _: &ClaudeOAuthSignIn,
@@ -997,7 +985,6 @@ fn register_actions(
              cx: &mut Context<Workspace>| {
                 struct ClaudeOAuthToast;
 
-                // If the clipboard contains a bearer token, use it directly.
                 let clipboard_token = cx
                     .read_from_clipboard()
                     .and_then(|item| item.text())
@@ -1036,7 +1023,6 @@ fn register_actions(
                     return;
                 }
 
-                // No clipboard token — start the OAuth PKCE flow via browser.
                 match language_models::claude_start_oauth_flow(cx) {
                     Ok(url) => {
                         cx.open_url(&url);
@@ -1480,14 +1466,6 @@ fn register_actions(
         )
         .register_action(
             |workspace: &mut Workspace,
-             _: &collab_ui::collab_panel::ToggleFocus,
-             window: &mut Window,
-             cx: &mut Context<Workspace>| {
-                workspace.toggle_panel_focus::<collab_ui::collab_panel::CollabPanel>(window, cx);
-            },
-        )
-        .register_action(
-            |workspace: &mut Workspace,
              _: &terminal_panel::ToggleFocus,
              window: &mut Window,
              cx: &mut Context<Workspace>| {
@@ -1747,11 +1725,11 @@ fn open_about_window(cx: &mut App) {
             let content = match self.commit.as_ref() {
                 Some(commit) => {
                     format!(
-                        "{}\nCommit: {}\nZed version: {}",
+                        "{}\nCommit: {}\nBased on Zed {}",
                         self.message, commit, self.full_version
                     )
                 }
-                None => format!("{}\nZed version: {}", self.message, self.full_version),
+                None => format!("{}\nBased on Zed {}", self.message, self.full_version),
             };
             cx.write_to_clipboard(ClipboardItem::new_string(content));
             window.remove_window();
@@ -1795,11 +1773,61 @@ fn open_about_window(cx: &mut App) {
                                 .child(Label::new(commit).size(LabelSize::Small))
                             })
                             .child(
-                                Label::new("Zed Version")
+                                Label::new(format!("Based on Zed {}", self.full_version))
                                     .color(Color::Muted)
                                     .size(LabelSize::XSmall),
+                            ),
+                    )
+                    .child(
+                        v_flex()
+                            .w_full()
+                            .gap_1()
+                            .items_center()
+                            .child(
+                                Label::new(
+                                    "Asylum is an independent fork of Zed. It is not affiliated \
+                                     with or endorsed by Zed Industries, Inc.",
+                                )
+                                .color(Color::Muted)
+                                .size(LabelSize::XSmall),
                             )
-                            .child(Label::new(self.full_version.clone()).size(LabelSize::Small)),
+                            .child(
+                                Label::new(
+                                    "Distributed under GPL-3.0-or-later (Apache-2.0 where marked) \
+                                     with ABSOLUTELY NO WARRANTY.",
+                                )
+                                .color(Color::Muted)
+                                .size(LabelSize::XSmall),
+                            )
+                            .child(
+                                h_flex()
+                                    .gap_2()
+                                    .child(
+                                        Button::new("about-source-code", "Source Code")
+                                            .label_size(LabelSize::XSmall)
+                                            .on_click(|_, _, cx| {
+                                                cx.open_url(ASYLUM_REPOSITORY_URL);
+                                            }),
+                                    )
+                                    .child(
+                                        Button::new("about-license", "License")
+                                            .label_size(LabelSize::XSmall)
+                                            .on_click(|_, _, cx| {
+                                                cx.open_url(&format!(
+                                                    "{ASYLUM_REPOSITORY_URL}/blob/main/LICENSE-GPL"
+                                                ));
+                                            }),
+                                    )
+                                    .child(
+                                        Button::new("about-notice", "Notice")
+                                            .label_size(LabelSize::XSmall)
+                                            .on_click(|_, _, cx| {
+                                                cx.open_url(&format!(
+                                                    "{ASYLUM_REPOSITORY_URL}/blob/main/NOTICE"
+                                                ));
+                                            }),
+                                    ),
+                            ),
                     )
                     .child(
                         h_flex()
@@ -1874,13 +1902,13 @@ fn open_about_window(cx: &mut App) {
 
     let window_size = Size {
         width: px(440.),
-        height: px(300.),
+        height: px(400.),
     };
 
     cx.open_window(
         WindowOptions {
             titlebar: Some(TitlebarOptions {
-                title: Some("About Zed".into()),
+                title: Some("About Asylum".into()),
                 appears_transparent: true,
                 traffic_light_position: Some(point(px(12.), px(12.))),
             }),

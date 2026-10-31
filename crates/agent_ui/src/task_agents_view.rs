@@ -1964,7 +1964,7 @@ impl TaskAgentsView {
                     cx,
                 )
                 .when(missing, |this| {
-                    this.tooltip(Tooltip::text("Não está configurado neste Zed"))
+                    this.tooltip(Tooltip::text("Não está configurado neste Asylum"))
                 })
                 .when(editable, |this| {
                     this.on_click(cx.listener(move |this, _, _window, cx| {

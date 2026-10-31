@@ -145,9 +145,8 @@ impl ReactNativeExpoDebugAdapter {
                 Self::discover_hermes_websocket_url(delegate, &metro_address, metro_port, executor)
                     .await
             {
-                delegate.output_to_console(format!(
-                    "Discovered Hermes inspector at {websocket_url}"
-                ));
+                delegate
+                    .output_to_console(format!("Discovered Hermes inspector at {websocket_url}"));
                 configuration.insert("websocketAddress".to_owned(), websocket_url.into());
                 configuration.remove("port");
                 configuration.remove("address");

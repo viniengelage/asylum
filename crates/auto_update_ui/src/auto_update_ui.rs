@@ -335,16 +335,16 @@ fn show_update_notification(cx: &mut App) {
                         format!("Updated to {app_name} {}", *release_channel::ASYLUM_VERSION),
                         cx,
                     )
-                        .primary_message("View Release Notes")
-                        .primary_on_click(move |window, cx| {
-                            if let Some(workspace) = workspace_handle.upgrade() {
-                                workspace.update(cx, |workspace, cx| {
-                                    crate::view_release_notes_locally(workspace, window, cx);
-                                })
-                            }
-                            cx.emit(DismissEvent);
-                        })
-                        .show_suppress_button(false)
+                    .primary_message("View Release Notes")
+                    .primary_on_click(move |window, cx| {
+                        if let Some(workspace) = workspace_handle.upgrade() {
+                            workspace.update(cx, |workspace, cx| {
+                                crate::view_release_notes_locally(workspace, window, cx);
+                            })
+                        }
+                        cx.emit(DismissEvent);
+                    })
+                    .show_suppress_button(false)
                 })
             },
         );

@@ -1089,7 +1089,6 @@ impl Dock {
 
             self.active_panel_index = Some(panel_ix);
 
-            // Apply the previous panel's width to the new panel.
             if let Some(size) = previous_size {
                 if let Some(entry) = self.panel_entries.get_mut(panel_ix) {
                     entry.size_state.size = Some(size);

@@ -269,16 +269,6 @@ async fn fetch_asylum_release(client: &HttpClientWithUrl) -> Result<AsylumReleas
     })
 }
 
-#[derive(Serialize, Debug)]
-pub struct AssetQuery<'a> {
-    asset: &'a str,
-    os: &'a str,
-    arch: &'a str,
-    metrics_id: Option<&'a str>,
-    system_id: Option<&'a str>,
-    is_staff: Option<bool>,
-}
-
 #[derive(Clone, Debug)]
 pub enum AutoUpdateStatus {
     Idle,
@@ -509,7 +499,10 @@ pub fn release_notes_url(cx: &mut App) -> Option<String> {
             format!("https://github.com/{}/releases", asylum_releases_repo())
         }
         ReleaseChannel::Nightly | ReleaseChannel::Dev => {
-            format!("https://github.com/{}/commits/main/", asylum_releases_repo())
+            format!(
+                "https://github.com/{}/commits/main/",
+                asylum_releases_repo()
+            )
         }
     };
     Some(url)
@@ -550,7 +543,7 @@ impl InstallerDir {
     async fn new() -> Result<Self> {
         let installer_dir = std::env::current_exe()?
             .parent()
-            .context("No parent dir for Zed.exe")?
+            .context("No parent dir for Asylum.exe")?
             .join("updates");
         if smol::fs::metadata(&installer_dir).await.is_ok() {
             smol::fs::remove_dir_all(&installer_dir).await?;
@@ -826,66 +819,29 @@ impl AutoUpdater {
         Ok(Some(release.url))
     }
 
+    /// Every Asylum release publishes the remote server it was built with, and the client and
+    /// the server have to come from the same build. Development builds have no release to
+    /// download from; they build the remote server locally instead.
     async fn get_release_asset(
-        this: &Entity<Self>,
-        release_channel: ReleaseChannel,
-        version: Option<Version>,
+        _this: &Entity<Self>,
+        _release_channel: ReleaseChannel,
+        _version: Option<Version>,
         asset: &str,
         os: &str,
         arch: &str,
-        cx: &mut AsyncApp,
+        _cx: &mut AsyncApp,
     ) -> Result<ReleaseAsset> {
-        let client = this.read_with(cx, |this, _| this.client.clone());
-
-        let (system_id, metrics_id, is_staff) = if client.telemetry().metrics_enabled() {
-            (
-                client.telemetry().system_id(),
-                client.telemetry().metrics_id(),
-                client.telemetry().is_staff(),
-            )
-        } else {
-            (None, None, None)
-        };
-
-        let version = if let Some(mut version) = version {
-            version.pre = semver::Prerelease::EMPTY;
-            version.build = semver::BuildMetadata::EMPTY;
-            version.to_string()
-        } else {
-            "latest".to_string()
-        };
-        let http_client = client.http_client();
-
-        let path = format!("/releases/{}/{}/asset", release_channel.dev_name(), version,);
-        let url = http_client.build_zed_cloud_url_with_query(
-            &path,
-            AssetQuery {
-                os,
-                arch,
-                asset,
-                metrics_id: metrics_id.as_deref(),
-                system_id: system_id.as_deref(),
-                is_staff,
-            },
-        )?;
-
-        let mut response = http_client
-            .get(url.as_str(), Default::default(), true)
-            .await?;
-        let mut body = Vec::new();
-        response.body_mut().read_to_end(&mut body).await?;
-
-        anyhow::ensure!(
-            response.status().is_success(),
-            "failed to fetch release: {:?}",
-            String::from_utf8_lossy(&body),
-        );
-
-        serde_json::from_slice(body.as_slice()).with_context(|| {
-            format!(
-                "error deserializing release {:?}",
-                String::from_utf8_lossy(&body),
-            )
+        let version = option_env!("ASYLUM_VERSION")
+            .map(str::trim)
+            .filter(|version| !version.is_empty())
+            .context("this build of Asylum was not published as a release, so it has no prebuilt remote server to download")?;
+        let asset = asset.strip_prefix("zed-").unwrap_or(asset);
+        Ok(ReleaseAsset {
+            version: version.to_string(),
+            url: format!(
+                "https://github.com/{}/releases/download/asylum-v{version}/asylum-{asset}-{os}-{arch}.gz",
+                asylum_releases_repo(),
+            ),
         })
     }
 
@@ -1395,7 +1351,7 @@ async fn install_release_linux(
 
     anyhow::ensure!(
         output.status.success(),
-        "failed to copy Zed update from {:?} to {:?}: {:?}",
+        "failed to copy Asylum update from {:?} to {:?}: {:?}",
         from,
         to,
         String::from_utf8_lossy(&output.stderr)
@@ -1514,7 +1470,7 @@ async fn cleanup_stale_installer_dirs() {
 async fn cleanup_windows() -> Result<()> {
     let parent = std::env::current_exe()?
         .parent()
-        .context("No parent dir for Zed.exe")?
+        .context("No parent dir for Asylum.exe")?
         .to_owned();
 
     // keep in sync with crates/auto_update_helper/src/updater.rs
@@ -1541,7 +1497,7 @@ async fn install_release_windows(downloaded_installer: &Path) -> Result<Option<P
     // deleting the old one, and launching the new binary.
     let helper_path = std::env::current_exe()?
         .parent()
-        .context("No parent dir for Zed.exe")?
+        .context("No parent dir for Asylum.exe")?
         .join("tools")
         .join("auto_update_helper.exe");
     Ok(Some(helper_path))

@@ -355,7 +355,6 @@ mod tests {
         let at = |offset| &source[statement_at(&statements, offset).unwrap().range.clone()];
         assert_eq!(at(0), "select 1");
         assert_eq!(at(8), "select 1");
-        // Blank line after the first statement still runs it.
         assert_eq!(at(10), "select 1");
         assert_eq!(at(13), "select 2");
         assert_eq!(at(source.len()), "select 2");

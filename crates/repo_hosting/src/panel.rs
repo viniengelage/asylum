@@ -2742,7 +2742,7 @@ impl RepoPanel {
                     "Buscando o commit no remoto…".to_string()
                 } else {
                     format!(
-                        "↑↓ navega · Enter abre no Zed · ⌘Enter no {}",
+                        "↑↓ navega · Enter abre no Asylum · ⌘Enter no {}",
                         self.hosting().name()
                     )
                 })
@@ -2789,7 +2789,7 @@ impl RepoPanel {
                 this.cursor_pointer()
                     .hover(|style| style.bg(cx.theme().colors().ghost_element_hover))
             })
-            .tooltip(Tooltip::text("Abrir o commit no Zed"))
+            .tooltip(Tooltip::text("Abrir o commit no Asylum"))
             .on_click(
                 cx.listener(move |this, _, window, cx| this.open_commit(hash.clone(), window, cx)),
             )
@@ -2869,7 +2869,7 @@ impl RepoPanel {
                 v_flex()
                     .flex_1()
                     .min_w_0()
-                    .child(Label::new("PR inteiro no Zed").size(LabelSize::Small))
+                    .child(Label::new("PR inteiro no Asylum").size(LabelSize::Small))
                     .child(
                         Label::new(format!(
                             "Mudanças desde {remote_name}/{} · {stats}",
@@ -2891,10 +2891,10 @@ impl RepoPanel {
                             self.hosting().name()
                         )
                     } else if is_checked_out {
-                        "Abre o diff no Zed".to_string()
+                        "Abre o diff no Asylum".to_string()
                     } else {
                         format!(
-                            "Faz checkout de {} e abre o diff no Zed",
+                            "Faz checkout de {} e abre o diff no Asylum",
                             open_pull_request.summary.source_branch
                         )
                     }))
@@ -4459,7 +4459,7 @@ impl RepoPanel {
             "COMMITS",
             Some(form.commits.len() + unpushed as usize),
             Some(
-                Label::new("clique abre no Zed")
+                Label::new("clique abre no Asylum")
                     .size(LabelSize::XSmall)
                     .color(Color::Disabled)
                     .into_any_element(),

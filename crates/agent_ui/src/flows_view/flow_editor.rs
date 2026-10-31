@@ -274,8 +274,8 @@ impl FlowView {
                 }
             }
             NewStep::GitHub(action) => {
-                // Waiting for checks goes back to the last agent before it with the failed
-                // check's log, as the boards draw it.
+                // Waiting for checks goes back to the last agent before it, with the failed
+                // check's log.
                 let on_fail = match action {
                     GitHubAction::WaitChecks { .. } => self.flow.steps
                         [..at.min(self.flow.steps.len())]
@@ -770,8 +770,6 @@ impl FlowView {
         self._subscriptions.push(subscription);
     }
 
-    // ---------- library ----------
-
     pub(super) fn render_library(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = cx.theme().colors().clone();
         let query = self.library_search.read(cx).text(cx).trim().to_lowercase();
@@ -1010,8 +1008,6 @@ impl FlowView {
             )
     }
 
-    // ---------- toolbar ----------
-
     pub(super) fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let running = self.is_running();
         let colors = cx.theme().colors();
@@ -1118,8 +1114,6 @@ impl FlowView {
                     .into_any_element()
             })
     }
-
-    // ---------- board ----------
 
     pub(super) fn render_board(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = cx.theme().colors().clone();
@@ -1936,8 +1930,6 @@ impl FlowView {
                 "A visão canvas desenha a mesma lista; Se / senão e Em paralelo ganham ramos aqui.",
             )))
     }
-
-    // ---------- inspector ----------
 
     pub(super) fn render_inspector(
         &self,

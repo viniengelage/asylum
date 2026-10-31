@@ -165,6 +165,12 @@ impl OpenRequest {
         }
 
         for url in request.urls {
+            // Asylum registers `asylum://` with the OS so it doesn't take Zed's links; the
+            // handlers below, and the links stored in existing threads, use `zed://`.
+            let url = match url.strip_prefix("asylum://") {
+                Some(rest) => format!("zed://{rest}"),
+                None => url,
+            };
             if let Some(server_name) = url.strip_prefix("zed-cli://") {
                 this.kind = Some(OpenRequestKind::CliConnection(connect_to_cli(server_name)?));
             } else if let Some(action_index) = url.strip_prefix("zed-dock-action://") {

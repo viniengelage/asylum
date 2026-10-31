@@ -1498,7 +1498,6 @@ paths:
             "tokens never go to the collection file"
         );
 
-        // The cookie the response set and the captured id go into the next request.
         assert_eq!(exchange.cookies_set.len(), 1);
         collection.update(cx, |collection, cx| {
             collection.set_capture_rules(

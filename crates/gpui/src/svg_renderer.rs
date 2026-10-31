@@ -411,7 +411,11 @@ mod tests {
 
         assert_eq!(size, params.size);
         assert_eq!(bytes.len(), 14 * 14 * 4);
-        assert_eq!(&bytes[..4], &[0, 0, 255, 255], "pixels are straight-alpha BGRA");
+        assert_eq!(
+            &bytes[..4],
+            &[0, 0, 255, 255],
+            "pixels are straight-alpha BGRA"
+        );
         Ok(())
     }
 

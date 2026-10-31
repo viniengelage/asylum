@@ -380,8 +380,8 @@ pub async fn list_open_pull_requests(
     credentials: &Credentials,
     repository: &RemoteRepository,
 ) -> Result<Vec<PullRequest>> {
-    // The list leaves participants out unless asked; without them "pedem sua revisão" can't be
-    // told apart from the rest.
+    // The list leaves participants out unless asked; without them the pull requests requesting
+    // your review can't be told apart from the rest.
     let url = format!(
         "{}/pullrequests?state=OPEN&pagelen=50&sort=-updated_on&fields=%2Bvalues.participants",
         repository_path(repository)

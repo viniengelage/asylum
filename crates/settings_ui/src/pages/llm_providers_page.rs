@@ -296,7 +296,7 @@ fn render_api_key_providers_item(
                         )
                         .child(
                             Label::new(format!(
-                                "Or set the {env_var_name} env var and restart Zed for it to take effect."
+                                "Or set the {env_var_name} env var and restart Asylum for it to take effect."
                             ))
                             .size(LabelSize::XSmall)
                             .color(Color::Muted),
@@ -1323,75 +1323,4 @@ fn parse_u64_field(value: &str, name: &str) -> Result<u64, SharedString> {
     value
         .parse::<u64>()
         .map_err(|_| format!("{name} must be a number").into())
-}
-
-#[cfg(test)]
-mod tests {
-    use gpui::{TestAppContext, VisualTestContext, size};
-    use language_models::provider::cloud;
-    use settings::SettingsStore;
-
-    use super::*;
-
-    struct YoungAccountProviderRow;
-
-    impl Render for YoungAccountProviderRow {
-        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-            div().size_full().p_4().child(
-                div()
-                    .w_full()
-                    .debug_selector(|| "provider-row".into())
-                    .child(render_inline_body(
-                        "Zed".into(),
-                        Some("Subscribed to Business".into()),
-                        Some(InlineDescription::Text(
-                            "You have access to Zed's hosted models through your organization."
-                                .into(),
-                        )),
-                        cloud::test_support::young_account_configuration(),
-                    )),
-            )
-        }
-    }
-
-    #[gpui::test]
-    fn young_account_configuration_stays_within_provider_row(cx: &mut TestAppContext) {
-        cx.update(|cx| {
-            let settings_store = SettingsStore::test(cx);
-            cx.set_global(settings_store);
-            theme::init(theme::LoadThemes::JustBase, cx);
-            theme_settings::init(theme::LoadThemes::JustBase, cx);
-        });
-
-        for width in [500., 600., 800.] {
-            let window = cx.open_window(size(px(width), px(400.)), |_window, _cx| {
-                YoungAccountProviderRow
-            });
-            cx.run_until_parked();
-
-            let mut visual_context = VisualTestContext::from_window(window.into(), cx);
-            let provider_row_bounds = visual_context
-                .debug_bounds("provider-row")
-                .expect("provider row should be rendered");
-            let description_bounds = visual_context
-                .debug_bounds("inline-provider-description")
-                .expect("provider description should be rendered");
-            let configuration_bounds = visual_context
-                .debug_bounds("zed-ai-configuration")
-                .expect("Zed AI configuration should be rendered");
-
-            assert!(
-                configuration_bounds.right() <= provider_row_bounds.right(),
-                "young account configuration extends past the provider row at {width}px"
-            );
-            assert!(
-                configuration_bounds.size.height >= px(80.),
-                "young account warning does not wrap at {width}px"
-            );
-            assert!(
-                description_bounds.size.width >= px(width / 3.),
-                "provider description collapsed at {width}px"
-            );
-        }
-    }
 }

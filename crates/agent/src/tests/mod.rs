@@ -6915,7 +6915,6 @@ async fn test_subagent_thread_model_selection(cx: &mut TestAppContext) {
         assert_eq!(subagent_thread.thinking_effort(), None);
     });
 
-    // An agent's own subagent model wins over the setting, for its subagents' subagents too.
     let task_agent = task_agents::parse_task_agent(
         std::path::Path::new("/test/.asylum/agents/pesado.md"),
         "---\nname: Pesado\nsubagent_model: fake-corp/explicit-model\n---\nTrabalhe.",

@@ -70,7 +70,7 @@ fn open_copilot_code_verification_window(copilot: &Entity<Copilot>, window: &Win
             is_resizable: false,
             is_movable: true,
             titlebar: Some(gpui::TitlebarOptions {
-                title: Some("Use GitHub Copilot in Zed".into()),
+                title: Some("Use GitHub Copilot in Asylum".into()),
                 appears_transparent: true,
                 ..Default::default()
             }),
@@ -283,7 +283,7 @@ impl CopilotCodeVerification {
             .items_center()
             .text_center()
             .child(
-                Headline::new("Use GitHub Copilot Edit Predictions in Zed")
+                Headline::new("Use GitHub Copilot Edit Predictions in Asylum")
                     .size(HeadlineSize::Large),
             )
             .child(
@@ -606,7 +606,7 @@ impl CopilotChatCodeVerification {
             .gap_2p5()
             .items_center()
             .text_center()
-            .child(Headline::new("Use GitHub Copilot Chat in Zed").size(HeadlineSize::Large))
+            .child(Headline::new("Use GitHub Copilot Chat in Asylum").size(HeadlineSize::Large))
             .child(
                 Label::new("Using Copilot Chat requires an active subscription on GitHub.")
                     .color(Color::Muted),
@@ -996,7 +996,7 @@ impl ConfigurationView {
     }
 
     fn render_for_chat(&self) -> impl IntoElement {
-        let start_label = "To use Zed's agent with GitHub Copilot Chat, you need to be logged in to GitHub. Note that your GitHub account must have an active Copilot Chat subscription.";
+        let start_label = "To use the Asylum Agent with GitHub Copilot Chat, you need to be logged in to GitHub. Note that your GitHub account must have an active Copilot Chat subscription.";
         let no_status_label = "Copilot Chat requires an active GitHub Copilot subscription. Please ensure Copilot Chat is configured and try again, or use a different LLM provider.";
 
         let (label, button) = if let Some(msg) = self.loading_message() {

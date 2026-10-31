@@ -8201,13 +8201,13 @@ impl ThreadView {
 
         let tooltip_label = if following {
             if self.agent_id.as_ref() == agent::ZED_AGENT_ID.as_ref() {
-                format!("Stop Following the {}", self.agent_id)
+                format!("Stop Following the {}", agent::NATIVE_AGENT_DISPLAY_NAME)
             } else {
                 format!("Stop Following {}", self.agent_id)
             }
         } else {
             if self.agent_id.as_ref() == agent::ZED_AGENT_ID.as_ref() {
-                format!("Follow the {}", self.agent_id)
+                format!("Follow the {}", agent::NATIVE_AGENT_DISPLAY_NAME)
             } else {
                 format!("Follow {}", self.agent_id)
             }
@@ -9502,6 +9502,16 @@ impl ThreadView {
     fn is_thread_feedback_enabled(&self, cx: &App) -> bool {
         util::maybe!({
             let project = self.thread.read(cx).project().read(cx);
+            // Ratings are submitted to the hosted server, which Asylum only has when one is
+            // self-hosted.
+            if project
+                .client()
+                .http_client()
+                .ensure_hosted_services_available()
+                .is_err()
+            {
+                return false;
+            }
             let user_store = project.user_store();
             if let Some(configuration) = user_store.read(cx).current_organization_configuration() {
                 if !configuration.is_agent_thread_feedback_enabled {
@@ -13898,7 +13908,7 @@ impl ThreadView {
             ThreadError::RateLimitExceeded { provider } => self.render_error_callout(
                 "Rate Limit Reached",
                 format!(
-                    "{provider}'s rate limit was reached. Zed will retry automatically. \
+                    "{provider}'s rate limit was reached. Asylum will retry automatically. \
                     You can also wait a moment and try again."
                 )
                 .into(),
@@ -13909,7 +13919,7 @@ impl ThreadView {
             ThreadError::ServerOverloaded { provider } => self.render_error_callout(
                 "Provider Unavailable",
                 format!(
-                    "{provider}'s servers are temporarily unavailable. Zed will retry \
+                    "{provider}'s servers are temporarily unavailable. Asylum will retry \
                     automatically. If the problem persists, check the provider's status page."
                 )
                 .into(),
@@ -13929,7 +13939,7 @@ impl ThreadView {
             ThreadError::StreamError { provider } => self.render_error_callout(
                 "Connection Interrupted",
                 format!(
-                    "The connection to {provider}'s API was interrupted. Zed will retry \
+                    "The connection to {provider}'s API was interrupted. Asylum will retry \
                     automatically. If the problem persists, check your network connection."
                 )
                 .into(),
@@ -13978,7 +13988,7 @@ impl ThreadView {
                 "API Error",
                 format!(
                     "{provider}'s API returned an unexpected error. \
-                    If the problem persists, try switching models or restarting Zed."
+                    If the problem persists, try switching models or restarting Asylum."
                 )
                 .into(),
                 true,
@@ -14282,7 +14292,7 @@ impl ThreadView {
     }
 
     fn current_model_name(&self, cx: &App) -> SharedString {
-        // For native agent (Zed Agent), use the specific model name (e.g., "Claude 3.5 Sonnet")
+        // For native agent (Asylum Agent), use the specific model name (e.g., "Claude 3.5 Sonnet")
         // For ACP agents, use the agent name (e.g., "Claude Agent", "Gemini CLI")
         // This provides better clarity about what refused the request
         if self.as_native_connection(cx).is_some() {

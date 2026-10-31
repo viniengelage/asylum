@@ -2562,15 +2562,16 @@ impl ManageProfilesModal {
                 if enabled {
                     enabled_count += 1;
                 }
-                let icon = toolkit
-                    .icon
-                    .parse::<IconName>()
-                    .unwrap_or(IconName::Wrench);
+                let icon = toolkit.icon.parse::<IconName>().unwrap_or(IconName::Wrench);
                 let detail: SharedString = match project_override {
                     Some(enabled) => format!(
                         "{} por .zed/settings.json deste projeto · perfil: {}",
                         if enabled { "ligado" } else { "desligado" },
-                        if toolkit.enabled { "ligado" } else { "desligado" },
+                        if toolkit.enabled {
+                            "ligado"
+                        } else {
+                            "desligado"
+                        },
                     )
                     .into(),
                     None if enabled => toolkit.detail.clone().into(),
@@ -2617,7 +2618,11 @@ impl ManageProfilesModal {
                 };
                 Self::render_row(
                     icon,
-                    if enabled { Color::Default } else { Color::Muted },
+                    if enabled {
+                        Color::Default
+                    } else {
+                        Color::Muted
+                    },
                     toolkit.name.clone(),
                     Some(detail),
                     Some(trailing),

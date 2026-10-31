@@ -743,7 +743,7 @@ async fn run_step_thread(
             .connection()
             .clone()
             .downcast::<NativeAgentConnection>()
-            .context("a thread do passo não é do Zed Agent")?;
+            .context("a thread do passo não é do Asylum Agent")?;
         let session_id = acp_thread.read(cx).session_id().clone();
         let native_thread = connection
             .thread(&session_id, cx)

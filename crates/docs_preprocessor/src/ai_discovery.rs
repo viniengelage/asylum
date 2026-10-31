@@ -306,7 +306,7 @@ fn split_fragment(path: &str) -> (&str, &str) {
 }
 
 pub(crate) fn rewrite_docs_links(contents: &str, site_url: &str) -> String {
-    const STABLE_DOCS_PREFIX: &str = "https://zed.dev/docs/";
+    const STABLE_DOCS_PREFIX: &str = "https://github.com/viniengelage/asylum/blob/main/docs/src";
     let channel_docs_prefix = absolute_docs_url(site_url, Path::new(""));
     if channel_docs_prefix == STABLE_DOCS_PREFIX {
         return contents.to_string();
@@ -430,10 +430,10 @@ mod tests {
     fn test_rewrite_docs_links_uses_channel_site_url() {
         assert_eq!(
             rewrite_docs_links(
-                "See [Code Actions](https://zed.dev/docs/configuring-languages#code-actions) and [Preview](https://zed.dev/docs/preview/ai/overview.html).",
+                "See [Code Actions](https://github.com/viniengelage/asylum/blob/main/docs/src/configuring-languages.md#code-actions) and [Preview](https://github.com/viniengelage/asylum/blob/main/docs/src/ai/overview.md).",
                 "/docs/preview/"
             ),
-            "See [Code Actions](https://zed.dev/docs/preview/configuring-languages#code-actions) and [Preview](https://zed.dev/docs/preview/ai/overview.html)."
+            "See [Code Actions](https://github.com/viniengelage/asylum/blob/main/docs/src/configuring-languages.md#code-actions) and [Preview](https://github.com/viniengelage/asylum/blob/main/docs/src/ai/overview.md)."
         );
     }
 
@@ -521,12 +521,12 @@ mod tests {
         let llms_txt = std::fs::read_to_string(destination.join("llms.txt"))?;
         assert!(llms_txt.contains("## Docs"));
         assert!(llms_txt.contains(
-            "- [Getting Started](https://zed.dev/docs/getting-started.md): Start using Zed."
+            "- [Getting Started](https://github.com/viniengelage/asylum/blob/main/docs/src/getting-started.md): Start using Zed."
         ));
         assert!(llms_txt.contains("## AI"));
         assert!(
             llms_txt.contains(
-                "- [MCP](https://zed.dev/docs/ai/mcp.md): Connect model context servers."
+                "- [MCP](https://github.com/viniengelage/asylum/blob/main/docs/src/ai/mcp.md): Connect model context servers."
             )
         );
 

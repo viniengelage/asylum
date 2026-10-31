@@ -382,8 +382,8 @@ impl WebPreviewView {
             loop {
                 cx.background_executor().timer(delay).await;
 
-                // Step 1: Flush input + pump CEF OUTSIDE entity update
-                // to avoid re-entrancy crashes
+                // Input is flushed and CEF pumped outside the entity update, because CEF
+                // re-enters our handlers synchronously and that would double-lease the entity.
                 #[cfg(target_os = "macos")]
                 {
                     // The browser is created the first time the element lays out, so
@@ -440,9 +440,8 @@ impl WebPreviewView {
                     }
                 }
 
-                // Step 2: Sync state inside entity update. This loop ticks up to a
-                // thousand times a second, so a tick that has nothing to hand the view
-                // must not touch the entity at all, let alone redraw the pane.
+                // This loop ticks up to a thousand times a second, so a tick that has nothing
+                // to hand the view must not touch the entity at all, let alone redraw the pane.
                 #[cfg(target_os = "macos")]
                 {
                     let Some(current_channel) = channel.as_ref() else {
@@ -1388,7 +1387,6 @@ impl Render for WebPreviewView {
                     .into_any_element()
             } else {
                 {
-                    // Use a canvas to measure real size, then render the frame
                     let entity = cx.entity().downgrade();
                     #[cfg(target_os = "macos")]
                     let paint_entity = cx.entity().downgrade();

@@ -11969,7 +11969,7 @@ pub fn join_channel(
                         let detail: SharedString = match err.error_code() {
                             ErrorCode::SignedOut => "Please sign in to continue.".into(),
                             ErrorCode::UpgradeRequired => concat!(
-                                "Your are running an unsupported version of Zed. ",
+                                "You are running an unsupported version of Asylum. ",
                                 "Please update to continue."
                             )
                             .into(),
@@ -18446,7 +18446,6 @@ mod tests {
             );
         });
 
-        // Reopening puts it back on screen.
         workspace.update_in(cx, |workspace, window, cx| {
             workspace.open_panel::<TestPanel>(window, cx);
         });

@@ -52,7 +52,7 @@ pub struct AnthropicProviderHandle {
     state: Entity<State>,
 }
 
-const SUBSCRIPTION_DESCRIPTION: &str = "Sign in with your Claude Pro, Max or Team subscription to use Anthropic models in Zed's agent.";
+const SUBSCRIPTION_DESCRIPTION: &str = "Sign in with your Claude Pro, Max or Team subscription to use Anthropic models in the Asylum Agent.";
 
 impl AnthropicProviderHandle {
     pub fn oauth_sign_out(&self, cx: &mut App) -> Task<Result<()>> {
@@ -207,8 +207,8 @@ impl State {
 
         log::info!("Claude OAuth: token expired, refreshing via Claude Code CLI");
 
-        // If we have a real refresh token, try the OAuth refresh endpoint first.
-        // Otherwise (CLI-imported tokens), re-run `claude auth token`.
+        // CLI-imported tokens have no refresh token; those are renewed by re-running
+        // `claude auth token` instead.
         if !auth.refresh_token.is_empty() {
             let http_client = self.http_client.clone();
             let auth_clone = auth.clone();
@@ -970,10 +970,6 @@ fn available_model_to_anthropic_model(available: &AvailableModel) -> anthropic::
     }
 }
 
-// ---------------------------------------------------------------------------
-// OAuth sign-in flow with localhost callback server
-// ---------------------------------------------------------------------------
-
 const OAUTH_CALLBACK_PORT: u16 = 8907;
 const OAUTH_CALLBACK_FALLBACK_PORT: u16 = 8909;
 
@@ -987,7 +983,6 @@ fn do_sign_in(state: &Entity<State>, http_client: &Arc<dyn HttpClient>, cx: &mut
 
     let task = cx.spawn(async move |cx| {
         let result: anyhow::Result<()> = async {
-            // Start localhost callback server.
             let (redirect_uri, callback_rx) =
                 oauth_callback_server::start_oauth_callback_server_with_config(
                     oauth_callback_server::OAuthCallbackServerConfig {

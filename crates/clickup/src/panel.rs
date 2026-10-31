@@ -7,6 +7,7 @@ use gpui::{
     Subscription, Task, px,
 };
 use gpui::{ClipboardItem, WeakEntity};
+use project::Project;
 use std::{
     collections::{HashMap, HashSet},
     hash::{DefaultHasher, Hash as _, Hasher as _},
@@ -20,7 +21,6 @@ use ui::{
 };
 use ui_input::{ErasedEditorEvent, InputField};
 use util::ResultExt as _;
-use project::Project;
 use workspace::dock::{DockPosition, Panel, PanelEvent};
 use workspace::{OpenOptions, Workspace};
 

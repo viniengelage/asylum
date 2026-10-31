@@ -314,7 +314,7 @@ fn native_connection(
         connected
             .connection
             .downcast::<NativeAgentConnection>()
-            .context("o Zed Agent não está disponível")
+            .context("o Asylum Agent não está disponível")
     }))
 }
 

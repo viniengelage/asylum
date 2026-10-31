@@ -94,7 +94,7 @@ fn build_application() -> Application {
 }
 
 fn files_not_created_on_launch(errors: HashMap<io::ErrorKind, Vec<&Path>>) {
-    let message = "Zed failed to launch";
+    let message = "Asylum failed to launch";
     let error_details = errors
         .into_iter()
         .flat_map(|(kind, paths)| {
@@ -156,7 +156,7 @@ fn fail_to_open_window_async(e: anyhow::Error, cx: &mut AsyncApp) {
 
 fn fail_to_open_window(e: anyhow::Error, _cx: &mut App) {
     eprintln!(
-        "Zed failed to open a window: {e:?}. See https://zed.dev/docs/linux for troubleshooting steps."
+        "Asylum failed to open a window: {e:?}. See https://github.com/viniengelage/asylum/blob/main/docs/src/linux.md for troubleshooting steps."
     );
     #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
     {
@@ -176,10 +176,10 @@ fn fail_to_open_window(e: anyhow::Error, _cx: &mut App) {
             proxy
                 .add_notification(
                     notification_id,
-                    Notification::new("Zed failed to launch")
+                    Notification::new("Asylum failed to launch")
                         .body(Some(
                             format!(
-                                "{e:?}. See https://zed.dev/docs/linux for troubleshooting steps."
+                                "{e:?}. See https://github.com/viniengelage/asylum/blob/main/docs/src/linux.md for troubleshooting steps."
                             )
                             .as_str(),
                         ))
@@ -259,6 +259,12 @@ fn main() {
         return;
     }
 
+    let directory_migration_failures = if args.user_data_dir.is_none() {
+        paths::migrate_legacy_directories()
+    } else {
+        Vec::new()
+    };
+
     // A profile launcher is its own bundle, so the Dock shows the profile's icon, and opening
     // it passes no arguments: the profile comes from the launcher's Info.plist.
     #[cfg(target_os = "macos")]
@@ -329,6 +335,10 @@ fn main() {
     }
     ztracing::init();
 
+    for failure in directory_migration_failures {
+        log::error!("{failure}");
+    }
+
     #[cfg(unix)]
     util::increase_open_file_limit().log_err();
 
@@ -345,7 +355,7 @@ fn main() {
             client::telemetry::os_name(),
             client::telemetry::os_version(),
         );
-        println!("Zed System Specs (from CLI):\n{}", system_specs);
+        println!("Asylum System Specs (from CLI):\n{}", system_specs);
         return;
     }
 
@@ -537,7 +547,7 @@ fn main() {
         handle_keymap_file_changes(user_keymap_file_rx, user_keymap_watcher, cx);
 
         let user_agent = format!(
-            "Zed/{} ({}; {})",
+            "Asylum/{} ({}; {})",
             AppVersion::global(cx),
             std::env::consts::OS,
             std::env::consts::ARCH
@@ -768,7 +778,7 @@ fn main() {
         prewarm_fonts(cx);
 
         editor::init(cx);
-        // After the editor, so `.flow.md` files open in the esteira editor instead of as text.
+        // After the editor, so `.flow.md` files open in the flow editor instead of as text.
         agent_ui::flows_view::register_project_item(cx);
         image_viewer::init(cx);
         repl::notebook::init(cx);
@@ -938,12 +948,6 @@ fn main() {
         initialize_workspace(app_state.clone(), cx);
 
         cx.activate(true);
-
-        cx.spawn({
-            let client = app_state.client.clone();
-            async move |cx| authenticate(client, cx).await
-        })
-        .detach_and_log_err(cx);
 
         let urls: Vec<_> = args
             .paths_or_urls
@@ -1526,20 +1530,6 @@ fn handle_open_request(request: OpenRequest, app_state: Arc<AppState>, cx: &mut 
         })
         .detach();
     }
-}
-
-async fn authenticate(client: Arc<Client>, cx: &AsyncApp) -> Result<()> {
-    if stdout_is_a_pty() {
-        if client::IMPERSONATE_LOGIN.is_some() {
-            client.sign_in_with_optional_connect(false, cx).await?;
-        } else if client.has_credentials(cx).await {
-            client.sign_in_with_optional_connect(true, cx).await?;
-        }
-    } else if client.has_credentials(cx).await {
-        client.sign_in_with_optional_connect(true, cx).await?;
-    }
-
-    Ok(())
 }
 
 async fn system_id() -> Result<IdType> {

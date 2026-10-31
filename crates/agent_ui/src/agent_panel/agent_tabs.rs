@@ -227,7 +227,7 @@ impl AgentPanel {
         }
     }
 
-    /// A Zed Agent thread whose composer starts with `/command`, which hands the thread to the
+    /// A Asylum Agent thread whose composer starts with `/command`, which hands the thread to the
     /// task agent on send.
     pub(super) fn new_task_agent_thread(
         &mut self,
@@ -495,7 +495,7 @@ impl AgentPanel {
                                 }
                             };
                         menu = menu.item(
-                            ui::ContextMenuEntry::new("Zed Agent")
+                            ui::ContextMenuEntry::new("Asylum Agent")
                                 .icon(IconName::ZedAgent)
                                 .icon_color(Color::Muted)
                                 .handler(open_with(ZED_AGENT_ID.clone(), panel.clone())),

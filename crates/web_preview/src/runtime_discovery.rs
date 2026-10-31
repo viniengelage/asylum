@@ -52,7 +52,9 @@ pub fn browser_cache_dir() -> PathBuf {
 /// Where the browser of `profile_id` keeps its cookies, storage and caches.
 #[cfg(target_os = "macos")]
 pub fn browser_cache_dir_for_profile(profile_id: &str) -> PathBuf {
-    crate::cef_paths::support_dir().join("Profiles").join(profile_id)
+    crate::cef_paths::support_dir()
+        .join("Profiles")
+        .join(profile_id)
 }
 
 /// Where the files other tools use to find and drive this browser live.
@@ -102,7 +104,9 @@ pub fn is_valid_request_id(request_id: &str) -> bool {
 }
 
 fn request_file_path(request_id: &str) -> PathBuf {
-    discovery_dir().join("requests").join(format!("{request_id}.json"))
+    discovery_dir()
+        .join("requests")
+        .join(format!("{request_id}.json"))
 }
 
 /// Answers a `zed://browser?id=...` request with the page it opened, which is how the

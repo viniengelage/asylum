@@ -34,7 +34,9 @@ use std::time::{Duration, SystemTime};
 use url::Url;
 
 /// The CIMD URL where Zed's OAuth client metadata document is hosted.
-pub const CIMD_URL: &str = "https://zed.dev/oauth/client-metadata.json";
+/// Asylum's OAuth Client ID Metadata Document, published with the extension registry from
+/// `site/oauth/client-metadata.json`.
+pub const CIMD_URL: &str = "https://viniengelage.github.io/asylum/oauth/client-metadata.json";
 
 /// Validate that a URL is safe to use as an OAuth endpoint.
 ///
@@ -507,18 +509,19 @@ pub enum ClientRegistrationStrategy {
     Unavailable,
 }
 
-/// Determine how to register with the authorization server, following the
-/// spec's recommended priority: CIMD first, DCR fallback.
+/// Determine how to register with the authorization server. Unlike the spec's recommended
+/// priority, DCR comes first: it needs nothing hosted, while CIMD depends on Asylum's metadata
+/// document being reachable at [`CIMD_URL`].
 pub fn determine_registration_strategy(
     auth_server_metadata: &AuthServerMetadata,
 ) -> ClientRegistrationStrategy {
-    if auth_server_metadata.client_id_metadata_document_supported {
-        ClientRegistrationStrategy::Cimd {
-            client_id: CIMD_URL.to_string(),
-        }
-    } else if let Some(ref endpoint) = auth_server_metadata.registration_endpoint {
+    if let Some(ref endpoint) = auth_server_metadata.registration_endpoint {
         ClientRegistrationStrategy::Dcr {
             registration_endpoint: endpoint.clone(),
+        }
+    } else if auth_server_metadata.client_id_metadata_document_supported {
+        ClientRegistrationStrategy::Cimd {
+            client_id: CIMD_URL.to_string(),
         }
     } else {
         ClientRegistrationStrategy::Unavailable
@@ -725,7 +728,7 @@ pub fn dcr_registration_body(
     };
 
     let mut body = serde_json::json!({
-        "client_name": "Zed",
+        "client_name": "Asylum",
         "redirect_uris": [redirect_uri],
         "grant_types": grant_types,
         "response_types": ["code"],
@@ -1667,12 +1670,12 @@ mod tests {
     // -- Client registration strategy tests ----------------------------------
 
     #[test]
-    fn test_registration_strategy_prefers_cimd() {
+    fn test_registration_strategy_uses_cimd_without_dcr() {
         let metadata = AuthServerMetadata {
             issuer: Url::parse("https://auth.example.com").unwrap(),
             authorization_endpoint: Url::parse("https://auth.example.com/authorize").unwrap(),
             token_endpoint: Url::parse("https://auth.example.com/token").unwrap(),
-            registration_endpoint: Some(Url::parse("https://auth.example.com/register").unwrap()),
+            registration_endpoint: None,
             scopes_supported: None,
             code_challenge_methods_supported: Some(vec!["S256".into()]),
             client_id_metadata_document_supported: true,
@@ -1782,7 +1785,7 @@ mod tests {
         };
         let url = build_authorization_url(
             &metadata,
-            "https://zed.dev/oauth/client-metadata.json",
+            "https://viniengelage.github.io/asylum/oauth/client-metadata.json",
             "http://127.0.0.1:12345/callback",
             &["files:read".into(), "files:write".into()],
             "https://mcp.example.com",
@@ -1794,7 +1797,7 @@ mod tests {
         assert_eq!(pairs.get("response_type").unwrap(), "code");
         assert_eq!(
             pairs.get("client_id").unwrap(),
-            "https://zed.dev/oauth/client-metadata.json"
+            "https://viniengelage.github.io/asylum/oauth/client-metadata.json"
         );
         assert_eq!(
             pairs.get("redirect_uri").unwrap(),
@@ -1909,7 +1912,7 @@ mod tests {
     fn test_dcr_registration_body_without_server_metadata() {
         // When server metadata is unavailable, include all supported grant types.
         let body = dcr_registration_body("http://127.0.0.1:12345/callback", None, &[]);
-        assert_eq!(body["client_name"], "Zed");
+        assert_eq!(body["client_name"], "Asylum");
         assert_eq!(body["redirect_uris"][0], "http://127.0.0.1:12345/callback");
         assert_eq!(body["grant_types"][0], "authorization_code");
         assert_eq!(body["grant_types"][1], "refresh_token");

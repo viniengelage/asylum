@@ -294,12 +294,13 @@ mod tests {
 
     #[test]
     fn keeps_only_the_framework_and_strips_the_archive_prefix() {
-        let framework = format!("cef_binary_{}_macosarm64_minimal/Release/Chromium Embedded Framework.framework", cef_paths::CEF_VERSION);
+        let framework = format!(
+            "cef_binary_{}_macosarm64_minimal/Release/Chromium Embedded Framework.framework",
+            cef_paths::CEF_VERSION
+        );
 
         assert_eq!(
-            framework_relative_path(Path::new(&format!(
-                "{framework}/Resources/icudtl.dat"
-            ))),
+            framework_relative_path(Path::new(&format!("{framework}/Resources/icudtl.dat"))),
             Some(PathBuf::from(
                 "Chromium Embedded Framework.framework/Resources/icudtl.dat"
             ))

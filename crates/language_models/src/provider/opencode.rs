@@ -541,7 +541,7 @@ impl LanguageModelProvider for OpenCodeLanguageModelProvider {
                     .into()
             })
             .description(InlineDescription::Text(
-                "To use OpenCode models in Zed, you need an API key.".into(),
+                "To use OpenCode models in Asylum, you need an API key.".into(),
             )),
         ))
     }
@@ -887,7 +887,7 @@ impl Render for ConfigurationView {
         let api_key_section = v_flex()
             .on_action(cx.listener(Self::save_api_key))
             .child(Label::new(
-                "To use OpenCode models in Zed, you need an API key:",
+                "To use OpenCode models in Asylum, you need an API key:",
             ).color(Color::Muted))
             .child(
                 List::new()
@@ -908,7 +908,7 @@ impl Render for ConfigurationView {
             .child(api_key_control)
             .child(
                 Label::new(format!(
-                    "You can also set the {API_KEY_ENV_VAR_NAME} environment variable and restart Zed."
+                    "You can also set the {API_KEY_ENV_VAR_NAME} environment variable and restart Asylum."
                 ))
                 .size(LabelSize::Small)
                 .color(Color::Muted).mt_1p5(),

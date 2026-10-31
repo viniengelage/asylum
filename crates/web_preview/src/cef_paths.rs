@@ -87,9 +87,7 @@ pub fn running_from_bundle() -> bool {
 }
 
 fn framework_in(dir: &Path) -> Option<PathBuf> {
-    dir.join(FRAMEWORK_NAME)
-        .is_dir()
-        .then(|| dir.to_path_buf())
+    dir.join(FRAMEWORK_NAME).is_dir().then(|| dir.to_path_buf())
 }
 
 fn scan_build_dir(build_dir: &Path) -> Option<PathBuf> {
