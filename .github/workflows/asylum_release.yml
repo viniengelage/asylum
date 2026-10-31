@@ -217,6 +217,9 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The changelog walks the commits since the previous release's tag.
+          fetch-depth: 0
 
       - uses: actions/download-artifact@v4
         with:
@@ -248,6 +251,36 @@ jobs:
           cat artifacts/asylum-release.json
           echo "zed_version=$zed_version" >> "$GITHUB_OUTPUT"
 
+      - name: Write the release notes
+        env:
+          ZED_VERSION: ${{ steps.manifest.outputs.zed_version }}
+        run: |
+          {
+            echo "## O que mudou"
+            echo
+            script/asylum-changelog
+            echo
+            echo "---"
+            echo
+            cat <<EOF
+          Built from ${GITHUB_SHA}, based on Zed ${ZED_VERSION}.
+          Installed copies of Asylum update to this release by themselves.
+
+          Builds are not notarized.
+
+          **macOS:** open the DMG, drag Asylum to Applications, then clear the quarantine flag
+          once so Gatekeeper lets it start:
+
+          \`\`\`sh
+          xattr -dr com.apple.quarantine /Applications/Asylum.app
+          \`\`\`
+
+          **Windows:** run the installer; on the SmartScreen prompt choose
+          "More info" → "Run anyway".
+          EOF
+          } > release-notes.md
+          cat release-notes.md
+
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.version.outputs.tag }}
@@ -259,18 +292,4 @@ jobs:
             artifacts/asylum-release.json
             artifacts/Asylum-aarch64.dmg
             artifacts/Asylum-x86_64.exe
-          body: |
-            Built from ${{ github.sha }}, based on Zed ${{ steps.manifest.outputs.zed_version }}.
-            Installed copies of Asylum update to this release by themselves.
-
-            Builds are not notarized.
-
-            **macOS:** open the DMG, drag Asylum to Applications, then clear the quarantine flag
-            once so Gatekeeper lets it start:
-
-            ```sh
-            xattr -dr com.apple.quarantine /Applications/Asylum.app
-            ```
-
-            **Windows:** run the installer; on the SmartScreen prompt choose
-            "More info" → "Run anyway".
+          body_path: release-notes.md

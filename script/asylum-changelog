@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""Print the changelog of an Asylum release as Markdown: the fork's own commits since the
+previous release, grouped into Adicionado, Corrigido and Mudado.
+
+Only first-parent commits count, so the upstream commits a `Merge upstream/main` brings in
+stay out; the merge itself becomes one line saying which Zed the release is based on.
+
+A commit lands in a group by the verb its subject starts with (`docker: Add the Docker dock`
+is added, `Fix …` is fixed, anything else changed). A `Changelog:` trailer in the body
+overrides that: `Changelog: added`, `fixed`, `changed`, or `skip` to leave the commit out.
+
+Usage: script/asylum-changelog [FROM] [TO]
+FROM defaults to the latest `asylum-v*` tag reachable from TO, TO to HEAD.
+"""
+
+from __future__ import annotations
+
+import re
+import subprocess
+import sys
+
+GROUPS = [("added", "Adicionado"), ("fixed", "Corrigido"), ("changed", "Mudado")]
+ADDED_VERBS = {"add", "adds", "added", "introduce", "support", "show", "let", "allow", "enable", "create", "manage"}
+FIXED_VERBS = {"fix", "fixes", "fixed", "restore", "prevent", "avoid", "repair", "recover", "correct", "handle"}
+# Housekeeping nobody using the app would notice.
+CHORE = re.compile(r"^(Run cargo fmt|Format the code|Bump )")
+MERGE_UPSTREAM = re.compile(r"^Merge upstream/main(?: \((?P<zed>[^)]*)\))?")
+SEPARATOR = "\x1e"
+
+
+def git(*args: str) -> str:
+    return subprocess.run(["git", *args], check=True, capture_output=True, text=True).stdout
+
+
+def previous_tag(to_ref: str) -> str | None:
+    try:
+        return git("describe", "--tags", "--abbrev=0", "--match", "asylum-v*", to_ref).strip()
+    except subprocess.CalledProcessError:
+        return None
+
+
+def classify(subject: str, body: str) -> str:
+    trailer = re.search(r"^Changelog:\s*(\w+)\s*$", body, re.MULTILINE | re.IGNORECASE)
+    if trailer:
+        return trailer.group(1).lower()
+    description = subject.split(": ", 1)[-1]
+    verb = description.split(" ", 1)[0].lower()
+    if verb in ADDED_VERBS:
+        return "added"
+    if verb in FIXED_VERBS:
+        return "fixed"
+    return "changed"
+
+
+def entry(subject: str) -> str:
+    scope, separator, description = subject.partition(": ")
+    if separator and " " not in scope:
+        return f"- **{scope}**: {description}"
+    return f"- {subject}"
+
+
+def changelog(from_ref: str | None, to_ref: str) -> str:
+    revision = f"{from_ref}..{to_ref}" if from_ref else to_ref
+    log = git("log", "--first-parent", f"--format=%s%n%b{SEPARATOR}", revision)
+    groups: dict[str, list[str]] = {key: [] for key, _ in GROUPS}
+    upstream: list[str] = []
+    for commit in log.split(SEPARATOR):
+        commit = commit.strip("\n")
+        if not commit:
+            continue
+        subject, _, body = commit.partition("\n")
+        merge = MERGE_UPSTREAM.match(subject)
+        if merge:
+            upstream.append(merge.group("zed") or "a versão mais nova do Zed")
+            continue
+        if subject.startswith("Merge ") or CHORE.match(subject):
+            continue
+        group = classify(subject, body)
+        if group in groups:
+            groups[group].append(entry(subject))
+
+    sections = []
+    for key, title in GROUPS:
+        if groups[key]:
+            sections.append(f"### {title}\n\n" + "\n".join(groups[key]))
+    if upstream:
+        sections.append(f"### Base\n\n- Atualizado para {upstream[0]}.")
+    if not sections:
+        return "Sem mudanças do Asylum desde a release anterior."
+    return "\n\n".join(sections)
+
+
+def main() -> None:
+    to_ref = sys.argv[2] if len(sys.argv) > 2 else "HEAD"
+    from_ref = sys.argv[1] if len(sys.argv) > 1 else previous_tag(to_ref)
+    print(changelog(from_ref, to_ref))
+
+
+if __name__ == "__main__":
+    main()
