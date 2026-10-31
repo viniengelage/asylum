@@ -59,6 +59,7 @@ use super::subagent_card::{SubagentCardId, SubagentCardState, SubagentStatus, ac
 use super::*;
 
 mod database_card;
+mod docker_card;
 mod elastic_card;
 mod project_card;
 mod repo_card;
@@ -10883,6 +10884,9 @@ impl ThreadView {
                         })
                         .when_some(project_card::project_card(tool_call), |this, card| {
                             this.child(self.render_project_card(entry_ix, card, layout, cx))
+                        })
+                        .when_some(docker_card::docker_card(tool_call), |this, card| {
+                            this.child(self.render_docker_card(entry_ix, card, layout, cx))
                         })
                         .when_some(
                             elastic_card::elastic_card(tool_call),

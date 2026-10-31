@@ -111,6 +111,7 @@ impl SessionCapabilities {
                 PromptContextType::PullRequest,
                 PromptContextType::ProjectItem,
                 PromptContextType::Logs,
+                PromptContextType::Container,
             ]);
         }
         supported

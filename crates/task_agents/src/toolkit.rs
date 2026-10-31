@@ -19,6 +19,7 @@ pub mod toolkit_ids {
     pub const CLICKUP: &str = "clickup";
     pub const DATABASE: &str = "database";
     pub const DEVICES: &str = "devices";
+    pub const DOCKER: &str = "docker";
     pub const ELASTIC: &str = "elastic";
     pub const GITHUB_PROJECTS: &str = "github_projects";
     pub const REPO: &str = "repo";
@@ -463,6 +464,9 @@ pub fn describe_log_mention(
     id: &str,
     cx: &mut App,
 ) -> Task<Result<String>> {
+    if id.starts_with(CONTAINER_MENTION_PREFIX) {
+        return describe_container_mention(project, id, cx);
+    }
     if !toolkit_enabled(toolkit_ids::ELASTIC, project, cx) {
         return Task::ready(Err(toolkit_disabled_error(toolkit_ids::ELASTIC, cx)));
     }
@@ -481,6 +485,13 @@ pub fn open_log_mention(
     window: &mut Window,
     cx: &mut App,
 ) -> Result<()> {
+    if id.starts_with(CONTAINER_MENTION_PREFIX) {
+        let open = cx
+            .try_global::<ContainerSource>()
+            .map(|source| source.open.clone())
+            .ok_or_else(|| anyhow::anyhow!("This build has no Docker dock."))?;
+        return open(project, id, window, cx);
+    }
     let open = cx
         .try_global::<LogSource>()
         .map(|source| source.open.clone())
@@ -513,6 +524,78 @@ pub fn follow_logs(
         .map(|source| source.follow.clone())
         .ok_or_else(|| anyhow::anyhow!("This build has no Elastic dock."))?;
     follow(project, source, window, cx)
+}
+
+/// Container mentions travel as log mentions whose id starts with this, so the thread keeps one
+/// kind of mention for "things the docks resolve".
+pub const CONTAINER_MENTION_PREFIX: &str = "container:";
+
+/// Installed by the Docker dock, so the agent can offer and read containers without depending
+/// on it.
+#[derive(Clone)]
+pub struct ContainerSource {
+    /// The machine's containers, the project's compose services first.
+    pub list: ListLogMentions,
+    /// State, image, ports and the last log lines, with env values masked.
+    pub describe: DescribeLogMention,
+    /// Focuses the container in the Docker dock.
+    pub open: OpenLogMention,
+    /// The thread card's buttons: `logs`, `terminal` or `inspect` for a container id.
+    pub act: ContainerAct,
+}
+
+pub type ContainerAct = Arc<dyn Fn(&Entity<Project>, &str, ContainerAction, &mut Window, &mut App)>;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContainerAction {
+    Logs,
+    Terminal,
+    Inspect,
+}
+
+impl Global for ContainerSource {}
+
+pub fn register_container_source(source: ContainerSource, cx: &mut App) {
+    cx.set_global(source);
+}
+
+pub fn container_mentions(project: &Entity<Project>, cx: &App) -> Vec<LogMention> {
+    if !toolkit_enabled(toolkit_ids::DOCKER, project, cx) {
+        return Vec::new();
+    }
+    cx.try_global::<ContainerSource>()
+        .map(|source| (source.list)(project, cx))
+        .unwrap_or_default()
+}
+
+fn describe_container_mention(
+    project: &Entity<Project>,
+    id: &str,
+    cx: &mut App,
+) -> Task<Result<String>> {
+    if !toolkit_enabled(toolkit_ids::DOCKER, project, cx) {
+        return Task::ready(Err(toolkit_disabled_error(toolkit_ids::DOCKER, cx)));
+    }
+    match cx.try_global::<ContainerSource>() {
+        Some(source) => {
+            let describe = source.describe.clone();
+            describe(project, id, cx)
+        }
+        None => Task::ready(Err(anyhow::anyhow!("This build has no Docker dock."))),
+    }
+}
+
+pub fn act_on_container(
+    project: &Entity<Project>,
+    container_id: &str,
+    action: ContainerAction,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if let Some(source) = cx.try_global::<ContainerSource>() {
+        let act = source.act.clone();
+        act(project, container_id, action, window, cx);
+    }
 }
 
 pub const DATABASE_QUERY_TOOL: &str = "database_query";
@@ -592,6 +675,31 @@ pub struct ElasticColumn {
     pub name: String,
     /// The ES|QL type (`long`, `keyword`, `date`…).
     pub kind: String,
+}
+
+pub const DOCKER_LOGS_TOOL: &str = "docker_logs";
+pub const DOCKER_INSPECT_TOOL: &str = "docker_inspect";
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct DockerLogLine {
+    /// `14:09:41`, local time.
+    pub time: String,
+    pub text: String,
+    pub error: bool,
+}
+
+/// What `docker_logs` and `docker_inspect` keep for the thread: the container as the dock shows
+/// its row, and the last log lines for the card's excerpt.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct DockerContainerResult {
+    pub id: String,
+    pub name: String,
+    pub image: String,
+    /// `running`, `paused`, `restarting`, `exited`…
+    pub state: String,
+    /// The state as the dock writes it: "reiniciando · 14×", "0,4% · 182 MB".
+    pub state_label: String,
+    pub log_lines: Vec<DockerLogLine>,
 }
 
 /// What `elastic_esql` and `elastic_recent_errors` keep for the thread: the rows as the dock

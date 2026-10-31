@@ -168,6 +168,7 @@ pub(crate) enum PromptContextType {
     PullRequest,
     ProjectItem,
     Logs,
+    Container,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -256,6 +257,7 @@ impl TryFrom<&str> for PromptContextType {
             "pr" => Ok(Self::PullRequest),
             "item" => Ok(Self::ProjectItem),
             "log" => Ok(Self::Logs),
+            "container" => Ok(Self::Container),
             _ => Err(format!("Invalid context picker mode: {}", value)),
         }
     }
@@ -275,6 +277,7 @@ impl PromptContextType {
             Self::PullRequest => "pr",
             Self::ProjectItem => "item",
             Self::Logs => "log",
+            Self::Container => "container",
         }
     }
 
@@ -291,6 +294,7 @@ impl PromptContextType {
             Self::PullRequest => "Pull Request",
             Self::ProjectItem => "Itens do projeto",
             Self::Logs => "Logs (Elastic)",
+            Self::Container => "Containers (Docker)",
         }
     }
 
@@ -307,6 +311,7 @@ impl PromptContextType {
             Self::PullRequest => IconName::PullRequest,
             Self::ProjectItem => IconName::ListTodo,
             Self::Logs => IconName::CloudPulse,
+            Self::Container => IconName::Box,
         }
     }
 }
@@ -1232,6 +1237,21 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
         task_agents::log_mentions(workspace.read(cx).project(), cx)
     }
 
+    /// Containers travel as log mentions, so they share the logs' completion and mention.
+    fn container_mentions(
+        &self,
+        workspace: &Entity<Workspace>,
+        cx: &App,
+    ) -> Vec<task_agents::LogMention> {
+        if !self
+            .source
+            .supports_context(PromptContextType::Container, cx)
+        {
+            return Vec::new();
+        }
+        task_agents::container_mentions(workspace.read(cx).project(), cx)
+    }
+
     fn project_item_entries(
         &self,
         workspace: &Entity<Workspace>,
@@ -1514,6 +1534,21 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
                     .collect(),
             ),
 
+            Some(PromptContextType::Container) => {
+                let query = query.to_lowercase();
+                Task::ready(
+                    self.container_mentions(&workspace, cx)
+                        .into_iter()
+                        .filter(|entry| {
+                            query.is_empty()
+                                || entry.title.to_lowercase().contains(&query)
+                                || entry.detail.to_lowercase().contains(&query)
+                        })
+                        .map(Match::Logs)
+                        .collect(),
+                )
+            }
+
             Some(PromptContextType::PullRequest) => {
                 let entries = self.pull_request_entries(&workspace, cx);
                 if query.is_empty() {
@@ -1658,19 +1693,21 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
                         )
                     })
                     .collect::<Vec<_>>();
-                let log_mentions = self.log_mentions(&workspace, cx);
+                let mut log_mentions = self.log_mentions(&workspace, cx);
+                log_mentions.extend(self.container_mentions(&workspace, cx));
                 let log_candidates = log_mentions
                     .iter()
                     .enumerate()
                     .map(|(ix, entry)| {
+                        let keyword = if entry.id.starts_with(task_agents::CONTAINER_MENTION_PREFIX)
+                        {
+                            PromptContextType::Container.keyword()
+                        } else {
+                            PromptContextType::Logs.keyword()
+                        };
                         StringMatchCandidate::new(
                             ix,
-                            &format!(
-                                "{} {} {}",
-                                PromptContextType::Logs.keyword(),
-                                entry.title,
-                                entry.detail
-                            ),
+                            &format!("{} {} {}", keyword, entry.title, entry.detail),
                         )
                     })
                     .collect::<Vec<_>>();
@@ -1933,6 +1970,10 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
 
         if !self.log_mentions(workspace, cx).is_empty() {
             entries.push(PromptContextEntry::Mode(PromptContextType::Logs));
+        }
+
+        if !self.container_mentions(workspace, cx).is_empty() {
+            entries.push(PromptContextEntry::Mode(PromptContextType::Container));
         }
 
         if self

@@ -598,6 +598,10 @@ impl MentionUri {
             MentionUri::SqlQuery { .. } => IconName::Database.path().into(),
             MentionUri::PullRequest { .. } => IconName::PullRequest.path().into(),
             MentionUri::ProjectItem { .. } => IconName::ListTodo.path().into(),
+            // Containers travel as log mentions; see `task_agents::CONTAINER_MENTION_PREFIX`.
+            MentionUri::Logs { id, .. } if id.starts_with("container:") => {
+                IconName::Box.path().into()
+            }
             MentionUri::Logs { .. } => IconName::CloudPulse.path().into(),
             MentionUri::Skill { .. } => IconName::Sparkle.path().into(),
         }
