@@ -68,12 +68,13 @@ drive all of them. It is free, has no account, no subscription and no hosted ser
 ## Install
 
 Download the latest build from the
-[releases page](https://github.com/viniengelage/asylum/releases/latest).
+[releases page](https://github.com/viniengelage/asylum/releases/latest) or the
+[project page](https://viniengelage.github.io/asylum/).
 
 | Platform | Status |
 |---|---|
 | macOS (Apple Silicon) | Supported |
-| Windows (x86_64) | Preview: the iOS Simulator is not available, and the Android emulator and Web Preview are still being ported |
+| Windows (x86_64) | Preview: the Android emulator works; the iOS Simulator and Web Preview are macOS-only |
 | Linux | Builds from source; no packaged release yet |
 
 Builds are not notarized yet. On macOS, the first time you open Asylum right-click the app and

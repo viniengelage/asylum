@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Asylum</title>
+  <meta name="description" content="A free and open-source code editor for mobile and full-stack development, built on top of Zed.">
+  <link rel="icon" href="asylum-app-icon.svg" type="image/svg+xml">
+  <style>
+    :root {
+      --background: #08070c;
+      --surface: #0e0d14;
+      --surface-raised: #15131d;
+      --border: #1f1c2b;
+      --text: #edeaf5;
+      --text-muted: #9c96ae;
+      --accent: #c084fc;
+      --accent-strong: #7c3aed;
+      --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+      --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --background: #faf9fc;
+        --surface: #ffffff;
+        --surface-raised: #f3f0f8;
+        --border: #e4dfee;
+        --text: #17141f;
+        --text-muted: #5f5873;
+        --accent: #6d28d9;
+        --accent-strong: #6d28d9;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--background);
+      color: var(--text);
+      font-family: var(--font-sans);
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .page { max-width: 1040px; margin: 0 auto; padding: 0 20px; }
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 20px 0; border-bottom: 1px solid var(--border);
+    }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; color: var(--text); }
+    .brand img { width: 28px; height: 28px; }
+    nav { display: flex; gap: 20px; font-size: 14px; }
+    nav a { color: var(--text-muted); }
+    .hero { padding: 72px 0 56px; display: grid; gap: 40px; grid-template-columns: 1.2fr 0.8fr; align-items: center; }
+    .hero h1 { font-size: clamp(34px, 5vw, 52px); line-height: 1.1; margin: 0 0 16px; letter-spacing: -0.02em; }
+    .hero p { font-size: 18px; color: var(--text-muted); margin: 0 0 28px; max-width: 34em; }
+    .hero-icon { justify-self: center; width: min(260px, 70vw); filter: drop-shadow(0 24px 48px rgba(124, 58, 237, 0.35)); }
+    .actions { display: flex; flex-wrap: wrap; gap: 12px; }
+    .button {
+      display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; border-radius: 10px;
+      font-weight: 600; font-size: 15px; border: 1px solid var(--border); color: var(--text); background: var(--surface-raised);
+    }
+    .button.primary { background: var(--accent-strong); border-color: var(--accent-strong); color: #ffffff; }
+    .button:hover { text-decoration: none; filter: brightness(1.08); }
+    .note { font-size: 13px; color: var(--text-muted); margin-top: 14px; }
+    section { padding: 48px 0; border-top: 1px solid var(--border); }
+    h2 { font-size: 24px; margin: 0 0 24px; letter-spacing: -0.01em; }
+    .features { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+    .feature { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; }
+    .feature h3 { font-size: 16px; margin: 0 0 8px; }
+    .feature p { margin: 0; font-size: 14px; color: var(--text-muted); }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    th { color: var(--text-muted); font-weight: 600; }
+    code { font-family: var(--font-mono); font-size: 13px; background: var(--surface-raised); padding: 2px 6px; border-radius: 6px; }
+    pre { font-family: var(--font-mono); font-size: 13px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; overflow-x: auto; }
+    footer { padding: 32px 0 48px; border-top: 1px solid var(--border); font-size: 13px; color: var(--text-muted); }
+    footer p { margin: 0 0 8px; }
+    @media (max-width: 760px) {
+      .hero { grid-template-columns: 1fr; padding-top: 48px; }
+      .hero-icon { order: -1; width: 140px; justify-self: start; }
+      nav { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <a class="brand" href="./"><img src="asylum-app-icon.svg" alt="">Asylum</a>
+      <nav>
+        <a href="#features">Features</a>
+        <a href="#download">Download</a>
+        <a href="https://github.com/viniengelage/asylum/tree/main/docs/src">Docs</a>
+        <a href="https://github.com/viniengelage/asylum">GitHub</a>
+      </nav>
+    </header>
+
+    <div class="hero">
+      <div>
+        <h1>The editor for mobile and full-stack work.</h1>
+        <p>Asylum keeps everything that makes Zed fast and adds the tools you usually keep in other windows: device emulators, a browser, an API client, a database client and an agent that can drive all of them. Free and open source, with no account or subscription.</p>
+        <div class="actions">
+          <a class="button primary" href="https://github.com/viniengelage/asylum/releases/latest">Download for macOS</a>
+          <a class="button" href="https://github.com/viniengelage/asylum/releases/latest">Windows (preview)</a>
+          <a class="button" href="https://github.com/viniengelage/asylum">Source code</a>
+        </div>
+        <p class="note">Apple Silicon and Windows x86_64. GPL-3.0-or-later.</p>
+      </div>
+      <img class="hero-icon" src="asylum-app-icon.svg" alt="Asylum app icon">
+    </div>
+
+    <section id="features">
+      <h2>Everything in one window</h2>
+      <div class="features">
+        <div class="feature">
+          <h3>iOS Simulator, embedded</h3>
+          <p>Run and drive the simulator inside the editor on macOS, with touch, keyboard and rotation, plus a manager to download runtimes and create devices.</p>
+        </div>
+        <div class="feature">
+          <h3>Android emulator, embedded</h3>
+          <p>Asylum downloads the JDK, the SDK and the system images on demand and creates the virtual devices for you.</p>
+        </div>
+        <div class="feature">
+          <h3>Web Preview</h3>
+          <p>A Chromium tab in the workspace, with DevTools protocol access so the agent can open, inspect and interact with pages.</p>
+        </div>
+        <div class="feature">
+          <h3>API client</h3>
+          <p>Postman collections and OpenAPI specs, environments, captures, cookies and code lenses that send requests straight from your spec.</p>
+        </div>
+        <div class="feature">
+          <h3>Database client</h3>
+          <p>PostgreSQL query editor, result grid and schema browser, with results the agent can read and explain.</p>
+        </div>
+        <div class="feature">
+          <h3>Docker and Elasticsearch</h3>
+          <p>Containers, logs and actions, ES|QL queries, live tail and traces, each in its own dock.</p>
+        </div>
+        <div class="feature">
+          <h3>Asylum Agent</h3>
+          <p>An agent tuned to spend fewer tokens, with tools for every dock, task agents, pipelines with acceptance criteria and plan mode. Bring your own model or any ACP agent.</p>
+        </div>
+        <div class="feature">
+          <h3>Settings sync through GitHub</h3>
+          <p>Settings, keymap, snippets, themes, agents and flows follow you in a private gist on your own account. There is no Asylum server.</p>
+        </div>
+        <div class="feature">
+          <h3>Made for ultrawide</h3>
+          <p>A unified pane layout, profiles with their own icon and data, and Asylum's own icon family and Polar theme.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="download">
+      <h2>Download</h2>
+      <table>
+        <tr><th>Platform</th><th>Status</th></tr>
+        <tr><td>macOS (Apple Silicon)</td><td>Supported. <a href="https://github.com/viniengelage/asylum/releases/latest">Download the DMG</a>.</td></tr>
+        <tr><td>Windows (x86_64)</td><td>Preview. The iOS Simulator and Web Preview are macOS-only.</td></tr>
+        <tr><td>Linux</td><td>Builds from source.</td></tr>
+      </table>
+      <p class="note">Builds are not notarized yet. On macOS, clear the quarantine flag once after installing:</p>
+      <pre>xattr -dr com.apple.quarantine /Applications/Asylum.app</pre>
+      <p class="note">Installed copies update themselves from GitHub Releases.</p>
+    </section>
+
+    <footer>
+      <p>Asylum is an independent fork of <a href="https://github.com/zed-industries/zed">Zed</a>. It is not affiliated with or endorsed by Zed Industries, Inc. "Zed" is a trademark of Zed Industries, Inc.</p>
+      <p>Distributed under GPL-3.0-or-later, with Apache-2.0 components where marked. <a href="https://github.com/viniengelage/asylum/blob/main/NOTICE">Notice</a> · <a href="https://github.com/viniengelage/asylum/blob/main/LICENSE-GPL">License</a> · <a href="https://github.com/viniengelage/asylum/issues">Report an issue</a></p>
+    </footer>
+  </div>
+</body>
+</html>
