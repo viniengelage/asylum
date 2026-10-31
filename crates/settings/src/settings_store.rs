@@ -46,15 +46,7 @@ use settings_json::{infer_json_indent_size, update_value_in_json_text};
 pub const LSP_SETTINGS_SCHEMA_URL_PREFIX: &str = "zed://schemas/settings/lsp/";
 
 // GPUI resolves these aliases, but they are not part of the platform font inventory.
-const VIRTUAL_FONT_NAMES: [&str; 7] = [
-    ".SystemUIFont",
-    ".AsylumMono",
-    ".AsylumSans",
-    ".ZedMono",
-    ".ZedSans",
-    "Zed Plex Mono",
-    "Zed Plex Sans",
-];
+const VIRTUAL_FONT_NAMES: [&str; 3] = [".SystemUIFont", ".AsylumMono", ".AsylumSans"];
 
 pub trait SettingsKey: 'static + Send + Sync {
     /// The name of a key within the JSON file from which this setting should

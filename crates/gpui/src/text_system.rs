@@ -1260,11 +1260,10 @@ impl FontMetrics {
 /// Maps well-known virtual font names to their concrete equivalents.
 #[allow(unused)]
 pub fn font_name_with_fallbacks<'a>(name: &'a str, system: &'a str) -> &'a str {
-    // The Zed names are kept so settings written for Zed keep resolving to the bundled fonts.
     match name {
         ".SystemUIFont" => system,
-        ".AsylumSans" | ".ZedSans" | "Zed Plex Sans" => "IBM Plex Sans",
-        ".AsylumMono" | ".ZedMono" | "Zed Plex Mono" => "IBM Plex Mono",
+        ".AsylumSans" => "IBM Plex Sans",
+        ".AsylumMono" => "IBM Plex Mono",
         _ => name,
     }
 }
@@ -1275,15 +1274,10 @@ pub fn font_name_with_fallbacks_shared<'a>(
     name: &'a SharedString,
     system: &'a SharedString,
 ) -> &'a SharedString {
-    // The Zed names are kept so settings written for Zed keep resolving to the bundled fonts.
     match name.as_str() {
         ".SystemUIFont" => system,
-        ".AsylumSans" | ".ZedSans" | "Zed Plex Sans" => {
-            const { &SharedString::new_static("IBM Plex Sans") }
-        }
-        ".AsylumMono" | ".ZedMono" | "Zed Plex Mono" => {
-            const { &SharedString::new_static("IBM Plex Mono") }
-        }
+        ".AsylumSans" => const { &SharedString::new_static("IBM Plex Sans") },
+        ".AsylumMono" => const { &SharedString::new_static("IBM Plex Mono") },
         _ => name,
     }
 }
@@ -1325,7 +1319,7 @@ mod line_wrapper_pool_tests {
         let text_system = Arc::new(TextSystem::new(Arc::new(NoopTextSystem::new())));
         let weak_text_system = Arc::downgrade(&text_system);
 
-        let mut wrapper = text_system.line_wrapper(font(".ZedMono"), px(16.));
+        let mut wrapper = text_system.line_wrapper(font(".AsylumMono"), px(16.));
         let fragments = [LineFragment::text("hello world")];
         wrapper
             .wrap_line(&fragments, px(40.), IndentAdjustment::default())
