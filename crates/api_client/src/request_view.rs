@@ -13,8 +13,8 @@ use crate::{
 };
 use editor::{Editor, EditorEvent, HighlightKey, MultiBufferOffset};
 use gpui::{
-    AnyElement, ClipboardItem, Div, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
-    HighlightStyle, Hsla, Subscription, Task, WeakEntity,
+    AnyElement, ClipboardItem, Div, DragMoveEvent, Empty, Entity, EventEmitter, FocusHandle,
+    Focusable, FontWeight, HighlightStyle, Hsla, Pixels, Subscription, Task, WeakEntity,
 };
 use language::LanguageRegistry;
 use std::{sync::Arc, time::Duration};
@@ -64,6 +64,11 @@ struct CaptureRow {
 
 /// Capture rules are written to the collection file this long after the last keystroke.
 const CAPTURE_SAVE_DELAY: Duration = Duration::from_millis(600);
+const MIN_REQUEST_AREA_HEIGHT: Pixels = px(200.);
+const MIN_RESPONSE_HEIGHT: Pixels = px(120.);
+
+/// Dragged by the bar between the request and the response.
+struct DraggedResponseDivider;
 
 pub struct ApiRequestView {
     workspace: WeakEntity<Workspace>,
@@ -89,6 +94,8 @@ pub struct ApiRequestView {
     exchange: Option<Exchange>,
     body_validation: Option<Validation>,
     send_task: Option<Task<()>>,
+    /// Set once the divider is dragged; until then both halves share the space.
+    response_height: Option<Pixels>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -330,6 +337,7 @@ impl ApiRequestView {
             exchange: None,
             body_validation: None,
             send_task: None,
+            response_height: None,
             _subscriptions: Vec::new(),
         };
         for parameter in &draft.path_params {
@@ -1865,7 +1873,7 @@ impl ApiRequestView {
                 return div()
                     .flex_1()
                     .min_h_0()
-                    .max_h(px(320.))
+                    .when(self.response_height.is_none(), |this| this.max_h(px(320.)))
                     .px_3()
                     .pt_2p5()
                     .pb_2()
@@ -1880,7 +1888,7 @@ impl ApiRequestView {
             .id("api-request-content")
             .flex_1()
             .min_h_0()
-            .max_h(px(320.))
+            .when(self.response_height.is_none(), |this| this.max_h(px(320.)))
             .overflow_y_scroll()
             .px_3()
             .pt_2p5()
@@ -2009,6 +2017,35 @@ impl ApiRequestView {
                 })
                 .into_any_element(),
         )
+    }
+
+    fn render_response_divider(&self, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .id("api-response-resize-handle")
+            .group("api-response-resize-handle")
+            .flex_none()
+            .h(px(7.))
+            .w_full()
+            .flex()
+            .items_center()
+            .cursor_row_resize()
+            .child(
+                div()
+                    .h_px()
+                    .w_full()
+                    .bg(cx.theme().colors().border)
+                    .group_hover("api-response-resize-handle", |this| {
+                        this.bg(cx.theme().colors().border_selected)
+                    }),
+            )
+            .on_drag(DraggedResponseDivider, |_, _, _, cx| cx.new(|_| Empty))
+            .on_click(cx.listener(|this, event: &gpui::ClickEvent, _, cx| {
+                if event.click_count() >= 2 {
+                    this.response_height = None;
+                    cx.notify();
+                }
+            }))
+            .into_any_element()
     }
 
     fn render_response(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -2825,14 +2862,33 @@ impl Render for ApiRequestView {
             .key_context("ApiRequestView")
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(|this, _: &SendRequest, window, cx| this.send(window, cx)))
+            .on_drag_move(cx.listener(
+                |this, event: &DragMoveEvent<DraggedResponseDivider>, _, cx| {
+                    let bounds = event.bounds;
+                    let max_height =
+                        (bounds.size.height - MIN_REQUEST_AREA_HEIGHT).max(MIN_RESPONSE_HEIGHT);
+                    let height = (bounds.bottom() - event.event.position.y)
+                        .clamp(MIN_RESPONSE_HEIGHT, max_height);
+                    this.response_height = Some(height);
+                    cx.notify();
+                },
+            ))
             .size_full()
             .bg(cx.theme().colors().editor_background)
             .child(self.render_request_bar(cx))
             .child(self.render_meta(cx))
             .child(self.render_request_tabs(cx))
             .child(self.render_request_content(cx))
-            .child(div().h_px().w_full().bg(cx.theme().colors().border))
-            .child(self.render_response(cx))
+            .child(self.render_response_divider(cx))
+            .map(|this| match self.response_height {
+                Some(height) => this.child(
+                    v_flex()
+                        .flex_none()
+                        .h(height)
+                        .child(self.render_response(cx)),
+                ),
+                None => this.child(self.render_response(cx)),
+            })
     }
 }
 
