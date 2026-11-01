@@ -16,6 +16,8 @@ enum CliCommand {
     /// Runs `cargo clippy`.
     Clippy(tasks::clippy::ClippyArgs),
     Compliance(tasks::compliance::ComplianceArgs),
+    /// Manages translations of Zed's interface across upstream merges.
+    I18n(tasks::i18n::I18nArgs),
     Licenses(tasks::licenses::LicensesArgs),
     /// Checks that packages conform to a set of standards.
     PackageConformity(tasks::package_conformity::PackageConformityArgs),
@@ -40,6 +42,7 @@ fn main() -> Result<()> {
     match args.command {
         CliCommand::Clippy(args) => tasks::clippy::run_clippy(args),
         CliCommand::Compliance(args) => tasks::compliance::check_compliance(args),
+        CliCommand::I18n(args) => tasks::i18n::run_i18n(args),
         CliCommand::Licenses(args) => tasks::licenses::run_licenses(args),
         CliCommand::PackageConformity(args) => {
             tasks::package_conformity::run_package_conformity(args)
