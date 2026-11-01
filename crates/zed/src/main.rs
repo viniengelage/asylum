@@ -546,6 +546,7 @@ fn main() {
         }
         settings::init(cx);
         zlog_settings::init(cx);
+        i18n::init(cx);
         zed::watch_settings_files(fs.clone(), cx);
         handle_keymap_file_changes(user_keymap_file_rx, user_keymap_watcher, cx);
 

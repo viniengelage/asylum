@@ -133,6 +133,23 @@ fn general_page(cx: &App) -> SettingsPage {
         vec![
             SettingsPageItem::SectionHeader("General Settings"),
             SettingsPageItem::SettingItem(SettingItem {
+                title: "Interface Language",
+                description: "The language of Asylum's own panels, docks and dialogs. System follows the operating system's language.",
+                field: Box::new(SettingField {
+                    organization_override: None,
+                    json_path: Some("ui_language"),
+                    pick: |settings_content| settings_content.ui_language.as_ref(),
+                    write: |settings_content, value, _| {
+                        settings_content.ui_language = value;
+                    },
+                }),
+                metadata: Some(Box::new(SettingsFieldMetadata {
+                    should_do_titlecase: Some(false),
+                    ..Default::default()
+                })),
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
                 title: "Accessible Mode",
                 description: "Optimize Asylum's interface for assistive technology such as screen readers. When enabled, otherwise-collapsed controls stay expanded and keyboard-reachable.",
                 field: Box::new(SettingField {

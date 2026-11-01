@@ -225,6 +225,12 @@ pub struct SettingsContent {
     /// Default: VSCode
     pub base_keymap: Option<BaseKeymapContent>,
 
+    /// The language of Asylum's own interface. "system" follows the operating system's
+    /// preferred language, falling back to English when it isn't supported.
+    ///
+    /// Default: system
+    pub ui_language: Option<UiLanguageContent>,
+
     /// Configuration for the collab panel visual settings.
     pub collaboration_panel: Option<PanelSettingsContent>,
 
@@ -406,7 +412,7 @@ fallible_options::flattened_deserialize!(SettingsContent {
     sections: { project, theme, extension, workspace, editor, remote },
     options: {
         call_hierarchy, command_palette, file_finder, git_panel, tabs, tab_bar, tab_switcher, status_bar, preview_tabs, agent,
-        agent_servers, audio, auto_update, base_keymap, collaboration_panel, debugger, diagnostics,
+        agent_servers, audio, auto_update, base_keymap, ui_language, collaboration_panel, debugger, diagnostics,
         git,
         global_lsp_settings, image_viewer, markdown_preview, repl, helix_mode, hide_mouse,
         journal, log, line_indicator_format, language_models, copilot, outline_panel, project_panel,
@@ -515,6 +521,36 @@ pub struct UserSettingsContent {
 
 pub struct ExtensionsSettingsContent {
     pub all_languages: AllLanguageSettingsContent,
+}
+
+/// The language of Asylum's interface.
+///
+/// Default: system
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    MergeFrom,
+    PartialEq,
+    Eq,
+    Default,
+    strum::VariantArray,
+)]
+pub enum UiLanguageContent {
+    #[default]
+    #[serde(rename = "system")]
+    System,
+    #[serde(rename = "en")]
+    English,
+    #[serde(rename = "pt-BR")]
+    PortugueseBrazil,
+}
+
+impl strum::VariantNames for UiLanguageContent {
+    const VARIANTS: &'static [&'static str] = &["System", "English", "Português (Brasil)"];
 }
 
 /// Base key bindings scheme. Base keymaps can be overridden with user keymaps.

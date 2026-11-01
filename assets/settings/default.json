@@ -25,6 +25,8 @@
   // 8. "Cursor"
   // 9. "None"
   "base_keymap": "Asylum",
+  // The language of Asylum's own interface: "system" (follows the OS), "en" or "pt-BR".
+  "ui_language": "system",
   // The name of a font to use for rendering text in the editor
   // ".AsylumMono" currently aliases to "IBM Plex Mono",
   // but this may change in the future.
