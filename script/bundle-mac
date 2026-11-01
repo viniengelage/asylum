@@ -148,6 +148,12 @@ fi
 # to the next. Ad-hoc signatures pin the requirement to the binary's hash instead, so every
 # update asks for the keychain password again. Notarization additionally needs a Developer ID
 # certificate and the App Store Connect API key.
+# Only one of the two being set means a secret was saved empty by mistake; falling back to an
+# ad-hoc signature would publish a release that loses keychain access on update.
+if [[ -n "${MACOS_CERTIFICATE:-}" && -z "${MACOS_CERTIFICATE_PASSWORD:-}" ]] || [[ -z "${MACOS_CERTIFICATE:-}" && -n "${MACOS_CERTIFICATE_PASSWORD:-}" ]]; then
+    echo "MACOS_CERTIFICATE and MACOS_CERTIFICATE_PASSWORD must be set together"
+    exit 1
+fi
 if [[ -n "${MACOS_CERTIFICATE:-}" && -n "${MACOS_CERTIFICATE_PASSWORD:-}" ]]; then
     can_code_sign=true
     if [[ -n "${APPLE_NOTARIZATION_KEY:-}" && -n "${APPLE_NOTARIZATION_KEY_ID:-}" && -n "${APPLE_NOTARIZATION_ISSUER_ID:-}" ]]; then
