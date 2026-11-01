@@ -172,7 +172,14 @@ if [[ -n "${MACOS_CERTIFICATE:-}" && -n "${MACOS_CERTIFICATE_PASSWORD:-}" ]]; th
         echo "MACOS_CERTIFICATE holds no code signing identity"
         exit 1
     fi
-    echo "Signing with $(security find-identity -p codesigning zed.keychain | awk '/^ *1\)/ { $1 = ""; $2 = ""; print; exit }')"
+    identity_name=$(security find-identity -p codesigning zed.keychain | awk '/^ *1\)/ { $1 = ""; $2 = ""; print; exit }')
+    echo "Signing with ${identity_name}"
+    # Apple rejects notarization submissions signed with anything other than a Developer ID
+    # Application certificate (e.g. "Apple Development"), so try only when it would succeed.
+    if [[ $can_notarize = true && "$identity_name" != *"Developer ID Application"* ]]; then
+        echo "::warning::Skipping notarization: the signing certificate is not a Developer ID Application certificate"
+        can_notarize=false
+    fi
 
     function cleanup() {
         echo "Cleaning up keychain"
@@ -405,7 +412,16 @@ function sign_app_binaries() {
             echo "Notarizing DMG with Apple"
             /usr/bin/codesign --deep --force --timestamp --options runtime --sign "$IDENTITY" "$(pwd)/${dmg_file_path}" -v
             echo "$APPLE_NOTARIZATION_KEY" > "$notarization_key_file"
-            "${xcode_bin_dir_path}/notarytool" submit --wait --key "$notarization_key_file" --key-id "$APPLE_NOTARIZATION_KEY_ID" --issuer "$APPLE_NOTARIZATION_ISSUER_ID" "${dmg_file_path}"
+            notarization_output=$("${xcode_bin_dir_path}/notarytool" submit --wait --output-format json --key "$notarization_key_file" --key-id "$APPLE_NOTARIZATION_KEY_ID" --issuer "$APPLE_NOTARIZATION_ISSUER_ID" "${dmg_file_path}")
+            echo "$notarization_output"
+            notarization_status=$(echo "$notarization_output" | jq -r '.status')
+            if [[ "$notarization_status" != "Accepted" ]]; then
+                # `submit --wait` exits successfully even when Apple rejects the DMG; the reason is only in the log.
+                "${xcode_bin_dir_path}/notarytool" log --key "$notarization_key_file" --key-id "$APPLE_NOTARIZATION_KEY_ID" --issuer "$APPLE_NOTARIZATION_ISSUER_ID" "$(echo "$notarization_output" | jq -r '.id')"
+                rm "$notarization_key_file"
+                echo "Notarization finished with status ${notarization_status}"
+                exit 1
+            fi
             rm "$notarization_key_file"
             "${xcode_bin_dir_path}/stapler" staple "${dmg_file_path}"
         fi
