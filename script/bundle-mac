@@ -429,7 +429,17 @@ function sign_app_binaries() {
                 exit 1
             fi
             rm "$notarization_key_file"
-            "${xcode_bin_dir_path}/stapler" staple "${dmg_file_path}"
+            # The ticket comes from Apple's CloudKit, which drops connections now and then.
+            for attempt in 1 2 3 4 5; do
+                if "${xcode_bin_dir_path}/stapler" staple "${dmg_file_path}"; then
+                    break
+                fi
+                if [[ $attempt -eq 5 ]]; then
+                    echo "Stapling the notarization ticket failed after ${attempt} attempts"
+                    exit 1
+                fi
+                sleep $((attempt * 15))
+            done
         fi
 
         if [ "$open_result" = true ]; then
