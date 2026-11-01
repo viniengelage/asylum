@@ -18,6 +18,7 @@ use gpui::{
     Action as _, AnyElement, AsyncApp, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
     Pixels, Subscription, Task, WeakEntity, px, uniform_list,
 };
+use i18n::t;
 use project::Project;
 use std::{
     ops::Range,
@@ -81,7 +82,7 @@ enum TreeRow {
     },
     Group {
         key: String,
-        label: &'static str,
+        label: SharedString,
         icon: IconName,
         count: usize,
         expanded: bool,
@@ -146,7 +147,7 @@ impl DatabasePanel {
     pub fn new(workspace: &Workspace, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let project = workspace.project().clone();
         let filter_input = cx.new(|cx| {
-            InputField::new(window, cx, "Filtrar tabelas, colunas, funções…")
+            InputField::new(window, cx, &t!("database_client.panel.filter_placeholder"))
                 .start_icon(IconName::MagnifyingGlass)
         });
         let mut subscriptions = Vec::new();
@@ -406,7 +407,10 @@ impl DatabasePanel {
         cx: &mut Context<Self>,
     ) -> Task<anyhow::Result<()>> {
         let Some(root) = self.root.clone() else {
-            return Task::ready(Err(anyhow::anyhow!("abra uma pasta de projeto primeiro")));
+            return Task::ready(Err(anyhow::anyhow!(
+                "{}",
+                t!("database_client.panel.error_no_project_folder")
+            )));
         };
         let mut project = self.connections_in(Scope::Project);
         let mut profile = self.connections_in(Scope::Profile);
@@ -513,11 +517,12 @@ impl DatabasePanel {
     ) -> anyhow::Result<()> {
         let (connection, _) = self
             .session()
-            .context("Nenhum banco conectado no painel Banco.")?;
+            .with_context(|| t!("database_client.panel.error_not_connected").to_string())?;
         let header = format!(
-            "-- {} · {} · consulta do agente",
+            "-- {} · {} · {}",
             connection.name,
-            connection.environment.label()
+            connection.environment.label(),
+            t!("database_client.panel.agent_query_header")
         );
         self.open_query_with(header, sql, true, window, cx)
     }
@@ -536,10 +541,10 @@ impl DatabasePanel {
         let root = self
             .root
             .clone()
-            .context("O projeto não tem pasta para guardar a query.")?;
+            .with_context(|| t!("database_client.panel.error_no_query_folder").to_string())?;
         let (connection, session) = self
             .session()
-            .context("Nenhum banco conectado no painel Banco.")?;
+            .with_context(|| t!("database_client.panel.error_not_connected").to_string())?;
         let fs = self.fs.clone();
         let workspace = self.workspace.clone();
         let project = self.project.clone();
@@ -577,7 +582,7 @@ impl DatabasePanel {
                 active.connection.name,
                 active.connection.environment.label()
             ),
-            None => "-- nova query".to_owned(),
+            None => format!("-- {}", t!("database_client.panel.new_query_header")),
         };
         let fs = self.fs.clone();
         cx.spawn_in(window, async move |this, cx| {
@@ -715,18 +720,26 @@ impl DatabasePanel {
             if !expanded {
                 continue;
             }
-            let groups: [(&str, &'static str, IconName, fn(RelationKind) -> bool); 2] = [
-                ("tables", "Tabelas", IconName::Table, |kind| {
-                    matches!(
-                        kind,
-                        RelationKind::Table
-                            | RelationKind::PartitionedTable
-                            | RelationKind::ForeignTable
-                    )
-                }),
-                ("views", "Views", IconName::Eye, |kind| {
-                    matches!(kind, RelationKind::View | RelationKind::MaterializedView)
-                }),
+            let groups: [(&str, SharedString, IconName, fn(RelationKind) -> bool); 2] = [
+                (
+                    "tables",
+                    t!("database_client.panel.group_tables"),
+                    IconName::Table,
+                    |kind| {
+                        matches!(
+                            kind,
+                            RelationKind::Table
+                                | RelationKind::PartitionedTable
+                                | RelationKind::ForeignTable
+                        )
+                    },
+                ),
+                (
+                    "views",
+                    t!("database_client.panel.group_views"),
+                    IconName::Eye,
+                    |kind| matches!(kind, RelationKind::View | RelationKind::MaterializedView),
+                ),
             ];
             for (group, label, icon, belongs) in groups {
                 let members: Vec<&&Relation> = list
@@ -773,14 +786,24 @@ impl DatabasePanel {
                 }
             }
             let object_groups = [
-                (ObjectKind::Function, "functions", "Funções", IconName::Code),
+                (
+                    ObjectKind::Function,
+                    "functions",
+                    t!("database_client.panel.group_functions"),
+                    IconName::Code,
+                ),
                 (
                     ObjectKind::Sequence,
                     "sequences",
-                    "Sequências",
+                    t!("database_client.panel.group_sequences"),
                     IconName::Hash,
                 ),
-                (ObjectKind::Enum, "enums", "Enums", IconName::List),
+                (
+                    ObjectKind::Enum,
+                    "enums",
+                    t!("database_client.panel.group_enums"),
+                    IconName::List,
+                ),
             ];
             for (kind, group, label, icon) in object_groups {
                 let members: Vec<&&SchemaObject> = schema_objects
@@ -950,7 +973,7 @@ impl DatabasePanel {
                     .when_some(estimated_rows, |this, rows| {
                         this.child(count(format_count(rows)))
                     })
-                    .tooltip(Tooltip::text("Abrir tabela"))
+                    .tooltip(Tooltip::text(t!("database_client.panel.open_table")))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.open_table(
                             schema.clone(),
@@ -994,7 +1017,7 @@ impl DatabasePanel {
                 )
                 .when(column.unique, |this| {
                     this.child(
-                        Label::new("único")
+                        Label::new(t!("database_client.panel.unique"))
                             .size(LabelSize::XSmall)
                             .buffer_font(cx)
                             .color(Color::Accent),
@@ -1033,7 +1056,7 @@ impl DatabasePanel {
             TreeRow::ColumnsLoading => base
                 .pl(px(90.))
                 .child(
-                    Label::new("Lendo colunas…")
+                    Label::new(t!("database_client.panel.reading_columns"))
                         .size(LabelSize::XSmall)
                         .color(Color::Muted),
                 )
@@ -1054,7 +1077,7 @@ impl DatabasePanel {
                 .gap_1p5()
                 .border_t_1()
                 .border_color(cx.theme().colors().border)
-                .child(section_label("QUERIES SALVAS"))
+                .child(section_label(t!("database_client.panel.saved_queries")))
                 .child(div().flex_1())
                 .child(
                     Label::new(QUERIES_DIR)
@@ -1088,7 +1111,7 @@ impl DatabasePanel {
                                 .truncate(),
                         ),
                     )
-                    .when_some(age, |this, age| this.child(count(age)))
+                    .when_some(age, |this, age| this.child(count(age.to_string())))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.open_query(path.clone(), window, cx)
                     }))
@@ -1184,7 +1207,7 @@ impl DatabasePanel {
                 let current = current.clone();
                 Some(ContextMenu::build(window, cx, move |mut menu, _, _| {
                     if !others.is_empty() {
-                        menu = menu.header("Trocar de conexão");
+                        menu = menu.header(t!("database_client.panel.switch_connection"));
                         for other in others.iter().cloned() {
                             let this = this.clone();
                             let label = format!("{} · {}", other.name, other.environment.label());
@@ -1197,7 +1220,7 @@ impl DatabasePanel {
                     }
                     let edit = current.clone();
                     let reconnect = current.clone();
-                    menu.entry("Reconectar", None, {
+                    menu.entry(t!("database_client.panel.reconnect"), None, {
                         let this = this.clone();
                         move |_, cx| {
                             this.update(cx, |this, cx| this.connect(reconnect.clone(), cx))
@@ -1206,18 +1229,22 @@ impl DatabasePanel {
                     })
                     .when_some(scope, |menu, scope| {
                         let this = this.clone();
-                        menu.entry("Editar conexão…", None, move |window, cx| {
-                            this.update(cx, |this, cx| {
-                                this.open_connect_view(
-                                    Prefill::Edit(edit.clone(), scope),
-                                    window,
-                                    cx,
-                                )
-                            })
-                            .log_err();
-                        })
+                        menu.entry(
+                            t!("database_client.panel.edit_connection_ellipsis"),
+                            None,
+                            move |window, cx| {
+                                this.update(cx, |this, cx| {
+                                    this.open_connect_view(
+                                        Prefill::Edit(edit.clone(), scope),
+                                        window,
+                                        cx,
+                                    )
+                                })
+                                .log_err();
+                            },
+                        )
                     })
-                    .entry("Nova conexão…", None, {
+                    .entry(t!("database_client.panel.new_connection_ellipsis"), None, {
                         let this = this.clone();
                         move |window, cx| {
                             this.update(cx, |this, cx| {
@@ -1227,9 +1254,13 @@ impl DatabasePanel {
                         }
                     })
                     .separator()
-                    .entry("Desconectar", None, move |_, cx| {
-                        this.update(cx, |this, cx| this.disconnect(cx)).log_err();
-                    })
+                    .entry(
+                        t!("database_client.panel.disconnect"),
+                        None,
+                        move |_, cx| {
+                            this.update(cx, |this, cx| this.disconnect(cx)).log_err();
+                        },
+                    )
                 }))
             })
             .into_any_element()
@@ -1237,12 +1268,17 @@ impl DatabasePanel {
 
     fn render_status_row(&self, active: &Active, cx: &mut Context<Self>) -> AnyElement {
         let (dot, status) = match &active.state {
-            ActiveState::Connecting => (Color::Muted, "conectando…".to_string()),
+            ActiveState::Connecting => {
+                (Color::Muted, t!("database_client.panel.status_connecting"))
+            }
             ActiveState::Connected { latency, .. } => (
                 Color::Success,
-                format!("conectado · {} ms", latency.as_millis()),
+                t!(
+                    "database_client.panel.status_connected",
+                    milliseconds = latency.as_millis()
+                ),
             ),
-            ActiveState::Failed(_) => (Color::Error, "falhou".to_string()),
+            ActiveState::Failed(_) => (Color::Error, t!("database_client.panel.status_failed")),
         };
         let read_only = active.connection.read_only;
         h_flex()
@@ -1267,9 +1303,9 @@ impl DatabasePanel {
                     )
                     .child(
                         Label::new(if read_only {
-                            "somente leitura"
+                            t!("database_client.panel.read_only")
                         } else {
-                            "leitura e escrita"
+                            t!("database_client.panel.read_write")
                         })
                         .size(LabelSize::XSmall),
                     ),
@@ -1279,7 +1315,7 @@ impl DatabasePanel {
                 IconButton::new("db-refresh", IconName::RotateCw)
                     .icon_size(IconSize::Small)
                     .icon_color(Color::Muted)
-                    .tooltip(Tooltip::text("Recarregar o catálogo"))
+                    .tooltip(Tooltip::text(t!("database_client.panel.reload_catalog")))
                     .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
             )
             .into_any_element()
@@ -1308,11 +1344,17 @@ impl DatabasePanel {
                         )
                     })
                     .count();
-                let mut summary = format!(
-                    "{tables} {} · {schemas} {}",
-                    if tables == 1 { "tabela" } else { "tabelas" },
-                    if schemas == 1 { "schema" } else { "schemas" }
-                );
+                let tables_text = if tables == 1 {
+                    t!("database_client.panel.table_count.one")
+                } else {
+                    t!("database_client.panel.table_count.other", count = tables)
+                };
+                let schemas_text = if schemas == 1 {
+                    t!("database_client.panel.schema_count.one")
+                } else {
+                    t!("database_client.panel.schema_count.other", count = schemas)
+                };
+                let mut summary = format!("{tables_text} · {schemas_text}");
                 if let Some(size) = database_size {
                     summary.push_str(&format!(" · {size}"));
                 }
@@ -1332,7 +1374,7 @@ impl DatabasePanel {
             .map(|this| match &active.state {
                 ActiveState::Connecting => this.child(
                     div().flex_1().flex().items_center().justify_center().child(
-                        Label::new("Conectando…")
+                        Label::new(t!("database_client.panel.connecting"))
                             .size(LabelSize::Small)
                             .color(Color::Muted),
                     ),
@@ -1359,7 +1401,7 @@ impl DatabasePanel {
                                             .color(Color::Error),
                                     )
                                     .child(
-                                        Label::new("Não deu para conectar")
+                                        Label::new(t!("database_client.panel.connect_failed"))
                                             .size(LabelSize::Small)
                                             .weight(FontWeight::SEMIBOLD),
                                     ),
@@ -1377,7 +1419,7 @@ impl DatabasePanel {
                                         primary_button(
                                             "db-retry",
                                             Some(IconName::RotateCw),
-                                            "Tentar de novo",
+                                            t!("database_client.panel.retry"),
                                             None,
                                             cx,
                                         )
@@ -1392,7 +1434,7 @@ impl DatabasePanel {
                                             ui::secondary_button(
                                                 "db-edit",
                                                 None,
-                                                "Editar conexão",
+                                                t!("database_client.connect.edit_title"),
                                                 true,
                                                 cx,
                                             )
@@ -1488,18 +1530,18 @@ impl DatabasePanel {
                             .color(Color::Muted),
                     )
                     .child(
-                        Label::new(format!("Nenhuma tabela em {database}"))
+                        Label::new(t!("database_client.panel.no_tables", database = database))
                             .size(LabelSize::Small)
                             .weight(FontWeight::SEMIBOLD),
                     ),
             )
             .child(
                 Label::new(if other_databases.is_empty() {
-                    "O banco não tem tabelas nem views fora dos schemas do sistema.".to_owned()
+                    t!("database_client.panel.no_tables_description")
                 } else {
-                    format!(
-                        "Outros bancos neste servidor: {}. Edite a conexão para trocar de banco.",
-                        other_databases.join(", ")
+                    t!(
+                        "database_client.panel.other_databases",
+                        databases = other_databases.join(", ")
                     )
                 })
                 .size(LabelSize::XSmall)
@@ -1531,7 +1573,7 @@ impl DatabasePanel {
                         .gap_1p5()
                         .cursor_pointer()
                         .child(
-                            Label::new("Nova query")
+                            Label::new(t!("database_client.panel.new_query"))
                                 .size(LabelSize::XSmall)
                                 .weight(FontWeight::MEDIUM)
                                 .color(Color::Accent),
@@ -1565,9 +1607,11 @@ impl DatabasePanel {
             ),
         };
         let password = match (&suggestion.source, &suggestion.password) {
-            (_, None) => "sem senha no arquivo",
-            (Source::Env { .. }, Some(_)) => "senha: do .env",
-            (Source::Compose { .. }, Some(_)) => "senha: POSTGRES_PASSWORD",
+            (_, None) => t!("database_client.panel.suggestion_no_password"),
+            (Source::Env { .. }, Some(_)) => t!("database_client.panel.suggestion_password_env"),
+            (Source::Compose { .. }, Some(_)) => {
+                t!("database_client.panel.suggestion_password_compose")
+            }
         };
         let chosen = suggestion.clone();
         let accent = cx.theme().colors().border_focused;
@@ -1601,7 +1645,7 @@ impl DatabasePanel {
                         ),
                     )
                     .child(
-                        Label::new("Usar")
+                        Label::new(t!("database_client.panel.use_suggestion"))
                             .size(LabelSize::XSmall)
                             .weight(FontWeight::MEDIUM)
                             .color(Color::Accent),
@@ -1627,7 +1671,7 @@ impl DatabasePanel {
 
     fn render_idle(&self, cx: &mut Context<Self>) -> AnyElement {
         let has_connections = !self.connections.is_empty();
-        let section = |title: &'static str, count: usize| {
+        let section = |title: SharedString, count: usize| {
             h_flex()
                 .pt_1()
                 .pb_1p5()
@@ -1671,20 +1715,17 @@ impl DatabasePanel {
                     )
                     .child(
                         Label::new(if has_connections {
-                            "Nenhuma conexão aberta"
+                            t!("database_client.panel.no_open_connection")
                         } else {
-                            "Nenhuma conexão neste projeto"
+                            t!("database_client.panel.no_project_connection")
                         })
                         .weight(FontWeight::SEMIBOLD),
                     )
                     .child(
                         div().max_w(px(320.)).text_center().child(
-                            Label::new(
-                                "Conecte um Postgres para listar schemas, abrir tabelas e rodar \
-                                 queries sem sair do editor.",
-                            )
-                            .size(LabelSize::Small)
-                            .color(Color::Muted),
+                            Label::new(t!("database_client.panel.idle_description"))
+                                .size(LabelSize::Small)
+                                .color(Color::Muted),
                         ),
                     )
                     .child(
@@ -1692,7 +1733,7 @@ impl DatabasePanel {
                             primary_button(
                                 "db-new-connection",
                                 Some(IconName::Plus),
-                                "Nova conexão",
+                                t!("database_client.connect.new_title"),
                                 None,
                                 cx,
                             )
@@ -1719,7 +1760,10 @@ impl DatabasePanel {
             .when(has_connections, |this| {
                 this.child(
                     v_flex()
-                        .child(section("CONEXÕES SALVAS", self.connections.len()))
+                        .child(section(
+                            t!("database_client.panel.saved_connections"),
+                            self.connections.len(),
+                        ))
                         .children(self.connections.iter().enumerate().map(|(index, stored)| {
                             let connection = stored.connection.clone();
                             h_flex()
@@ -1747,7 +1791,7 @@ impl DatabasePanel {
                                     ),
                                 )
                                 .child(
-                                    Label::new("Conectar")
+                                    Label::new(t!("database_client.panel.connect"))
                                         .size(LabelSize::XSmall)
                                         .color(Color::Accent),
                                 )
@@ -1760,7 +1804,10 @@ impl DatabasePanel {
             .when(!self.suggestions.is_empty(), |this| {
                 this.child(
                     v_flex()
-                        .child(section("ENCONTRADAS NO PROJETO", self.suggestions.len()))
+                        .child(section(
+                            t!("database_client.panel.found_in_project"),
+                            self.suggestions.len(),
+                        ))
                         .child(
                             v_flex()
                                 .gap_2()
@@ -1772,12 +1819,9 @@ impl DatabasePanel {
                         )
                         .child(
                             div().pt_3().child(
-                                Label::new(
-                                    "Sugestões nunca conectam sozinhas. Nada é gravado no \
-                                     repositório sem você pedir.",
-                                )
-                                .size(LabelSize::XSmall)
-                                .color(Color::Muted),
+                                Label::new(t!("database_client.panel.suggestions_note"))
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted),
                             ),
                         ),
                 )
@@ -1908,15 +1952,23 @@ fn short_version(version: &str) -> Option<String> {
 }
 
 /// `48213` → `48.213`, `1234567` → `1,2 M`, as the dock shows row estimates.
+pub(crate) fn number_separators() -> (char, char) {
+    match i18n::current_language() {
+        i18n::Language::PortugueseBrazil => (',', '.'),
+        i18n::Language::English => ('.', ','),
+    }
+}
+
 pub(crate) fn format_count(count: i64) -> String {
+    let (decimal_separator, thousands_separator) = number_separators();
     if count >= 1_000_000 {
-        format!("{:.1} M", count as f64 / 1_000_000.0).replace('.', ",")
+        format!("{:.1} M", count as f64 / 1_000_000.0).replace('.', &decimal_separator.to_string())
     } else {
         let digits = count.to_string();
         let mut result = String::new();
         for (index, digit) in digits.chars().enumerate() {
             if index > 0 && (digits.len() - index).is_multiple_of(3) {
-                result.push('.');
+                result.push(thousands_separator);
             }
             result.push(digit);
         }
@@ -1940,22 +1992,22 @@ fn active_item_of(workspace: &Workspace, cx: &App) -> Option<ActiveItem> {
 }
 
 /// `há 5 min`, `há 3 h`, `ontem`, `há 5 d`, for the saved queries.
-fn relative_age(modified: SystemTime) -> String {
+fn relative_age(modified: SystemTime) -> SharedString {
     let seconds = SystemTime::now()
         .duration_since(modified)
         .unwrap_or_default()
         .as_secs();
     match seconds {
-        0..60 => "agora".to_owned(),
-        60..3_600 => format!("há {} min", seconds / 60),
-        3_600..86_400 => format!("há {} h", seconds / 3_600),
-        86_400..172_800 => "ontem".to_owned(),
-        _ => format!("há {} d", seconds / 86_400),
+        0..60 => t!("database_client.panel.age_now"),
+        60..3_600 => t!("database_client.panel.age_minutes", count = seconds / 60),
+        3_600..86_400 => t!("database_client.panel.age_hours", count = seconds / 3_600),
+        86_400..172_800 => t!("database_client.panel.age_yesterday"),
+        _ => t!("database_client.panel.age_days", count = seconds / 86_400),
     }
 }
 
 /// The uppercase heading over a group in the dock (SCHEMAS, QUERIES SALVAS).
-pub(crate) fn section_label(text: &'static str) -> Label {
+pub(crate) fn section_label(text: impl Into<SharedString>) -> Label {
     Label::new(text)
         .size(LabelSize::XSmall)
         .weight(FontWeight::SEMIBOLD)
@@ -2144,7 +2196,7 @@ impl Render for DatabasePanel {
                 .items_center()
                 .justify_center()
                 .child(
-                    Label::new("Procurando conexões no projeto…")
+                    Label::new(t!("database_client.panel.searching_connections"))
                         .size(LabelSize::Small)
                         .color(Color::Muted),
                 )
@@ -2155,7 +2207,7 @@ impl Render for DatabasePanel {
                 .items_center()
                 .justify_center()
                 .child(
-                    Label::new("Abra uma pasta de projeto para conectar a um banco.")
+                    Label::new(t!("database_client.panel.open_project_folder"))
                         .size(LabelSize::Small)
                         .color(Color::Muted),
                 )
@@ -2245,9 +2297,9 @@ mod tests {
     #[test]
     fn counts_read_like_the_dock() {
         assert_eq!(format_count(3), "3");
-        assert_eq!(format_count(48213), "48.213");
-        assert_eq!(format_count(380_000), "380.000");
-        assert_eq!(format_count(1_234_567), "1,2 M");
+        assert_eq!(format_count(48213), "48,213");
+        assert_eq!(format_count(380_000), "380,000");
+        assert_eq!(format_count(1_234_567), "1.2 M");
         assert_eq!(
             short_version("16.15 (Debian 16.15-1.pgdg13+2)").as_deref(),
             Some("16.15")

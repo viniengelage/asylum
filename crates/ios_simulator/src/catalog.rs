@@ -1,4 +1,6 @@
 use anyhow::{Context as _, Result};
+use gpui::SharedString;
+use i18n::t;
 use serde::Deserialize;
 use std::{cmp::Ordering, collections::HashMap, path::PathBuf};
 
@@ -242,7 +244,7 @@ struct SimctlDeviceType {
 /// simctl's order; screens are read separately from each bundle.
 pub fn parse_simctl_list(json: &[u8]) -> Result<SimctlInventory> {
     let list: SimctlList =
-        serde_json::from_slice(json).context("xcrun simctl devolveu um JSON inesperado")?;
+        serde_json::from_slice(json).context(t!("ios_simulator.error.unexpected_simctl_json"))?;
     let mut devices: Vec<SimDevice> = list
         .devices
         .into_iter()
@@ -354,7 +356,7 @@ struct SimctlRuntimeImage {
 
 pub fn parse_runtime_images(json: &[u8]) -> Result<Vec<RuntimeImage>> {
     let images: HashMap<String, SimctlRuntimeImage> = serde_json::from_slice(json)
-        .context("xcrun simctl runtime list devolveu um JSON inesperado")?;
+        .context(t!("ios_simulator.error.unexpected_runtime_list_json"))?;
     Ok(images
         .into_values()
         .filter(|image| image.platform_identifier == "com.apple.platform.iphonesimulator")
@@ -388,7 +390,7 @@ struct SimctlRuntimeMatch {
 
 pub fn parse_runtime_match(json: &[u8]) -> Result<Option<SdkRequest>> {
     let matches: HashMap<String, SimctlRuntimeMatch> = serde_json::from_slice(json)
-        .context("xcrun simctl runtime match list devolveu um JSON inesperado")?;
+        .context(t!("ios_simulator.error.unexpected_runtime_match_json"))?;
     Ok(matches
         .into_iter()
         .find(|(_, entry)| entry.platform == "com.apple.platform.iphoneos")
@@ -495,8 +497,8 @@ struct IndexSdkMapping {
 /// The iOS runtimes of Apple's index. Recent runtimes come once per architecture variant; on
 /// Apple silicon the arm64-only one is what `-architectureVariant arm64` downloads.
 pub fn parse_catalog(bytes: &[u8], apple_silicon: bool) -> Result<Catalog> {
-    let index: DownloadableIndex = plist::from_bytes(bytes)
-        .context("o índice de runtimes da Apple veio num formato inesperado")?;
+    let index: DownloadableIndex =
+        plist::from_bytes(bytes).context(t!("ios_simulator.error.unexpected_runtime_index"))?;
     let mut runtimes: Vec<CatalogRuntime> = Vec::new();
     let mut is_arm64_only: Vec<bool> = Vec::new();
     for downloadable in index.downloadables {
@@ -645,10 +647,10 @@ pub enum Appearance {
 }
 
 impl Appearance {
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> SharedString {
         match self {
-            Self::Light => "Claro",
-            Self::Dark => "Escuro",
+            Self::Light => t!("ios_simulator.appearance.light"),
+            Self::Dark => t!("ios_simulator.appearance.dark"),
         }
     }
 

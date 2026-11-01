@@ -20,6 +20,7 @@ use gpui::{
     Entity, EntityId, EventEmitter, FocusHandle, Focusable, FontWeight, Global, Pixels,
     Subscription, Task, WeakEntity, px, relative,
 };
+use i18n::t;
 use project::Project;
 use std::{
     cell::RefCell,
@@ -242,9 +243,20 @@ fn outcome_summary(planned: &Planned, outcome: &QueryOutcome) -> String {
     let count = result_set.and_then(|result_set| result_set.rows_affected);
     let truncated = result_set.is_some_and(|result_set| result_set.truncated);
     match count {
-        Some(count) if truncated => format!("{verb} · {count}+ linhas (limite de {ROW_LIMIT})"),
-        Some(1) => format!("{verb} · 1 linha"),
-        Some(count) => format!("{verb} · {count} linhas"),
+        Some(count) if truncated => t!(
+            "database_client.query.summary_rows_truncated",
+            verb = verb,
+            count = count,
+            limit = ROW_LIMIT
+        )
+        .to_string(),
+        Some(1) => t!("database_client.query.summary_rows.one", verb = verb).to_string(),
+        Some(count) => t!(
+            "database_client.query.summary_rows.other",
+            verb = verb,
+            count = count
+        )
+        .to_string(),
         None => verb,
     }
 }
@@ -558,7 +570,7 @@ impl SqlQueryView {
         let plan = self.plan(scope, cx);
         if plan.is_empty() {
             self.state = RunState::Failed(Failure {
-                message: "Nada para rodar: o cursor não está em um statement.".into(),
+                message: t!("database_client.query.nothing_to_run"),
                 server: None,
                 range: None,
                 line: None,
@@ -613,7 +625,7 @@ impl SqlQueryView {
         });
         if opened.is_err() {
             self.state = RunState::Failed(Failure {
-                message: "A confirmação não abriu: a janela deste workspace foi fechada.".into(),
+                message: t!("database_client.query.confirmation_window_closed"),
                 server: None,
                 range: None,
                 line: None,
@@ -692,7 +704,10 @@ impl SqlQueryView {
                 Err(error) => {
                     this.update(cx, |this, cx| {
                         this.state = RunState::Failed(Failure {
-                            message: format!("Não deu para abrir a sessão: {error:#}").into(),
+                            message: t!(
+                                "database_client.query.session_failed",
+                                error = format!("{error:#}")
+                            ),
                             server: None,
                             range: None,
                             line: None,
@@ -850,7 +865,7 @@ impl SqlQueryView {
             return;
         }
         let Some(session) = self.session.clone() else {
-            self.abandon_run("Cancelado antes de a sessão abrir.", cx);
+            self.abandon_run(t!("database_client.query.cancelled_before_session"), cx);
             return;
         };
         cx.background_spawn(async move { session.cancel().await })
@@ -863,11 +878,7 @@ impl SqlQueryView {
             cx.background_executor().timer(CANCEL_GRACE).await;
             this.update(cx, |this, cx| {
                 if this.is_running() {
-                    this.abandon_run(
-                        "O servidor não respondeu ao cancelamento. A conexão desta aba foi \
-                         descartada; a próxima execução abre outra.",
-                        cx,
-                    );
+                    this.abandon_run(t!("database_client.query.cancel_unanswered"), cx);
                 }
             })
             .log_err();
@@ -1000,7 +1011,10 @@ impl SqlQueryView {
         let receiver = cx.prompt_for_new_path(&directory, Some(&format!("{stem}.{extension}")));
         cx.spawn(async move |this, cx| {
             let result = async {
-                let Some(path) = receiver.await.map_err(|_| anyhow::anyhow!("cancelado"))?? else {
+                let Some(path) = receiver.await.map_err(|_| {
+                    anyhow::anyhow!("{}", t!("database_client.query.export_cancelled"))
+                })??
+                else {
                     return anyhow::Ok(None);
                 };
                 fs.atomic_write(path.clone(), content).await?;
@@ -1009,11 +1023,19 @@ impl SqlQueryView {
             .await;
             this.update(cx, |this, cx| {
                 let (text, color) = match result {
-                    Ok(Some(path)) => {
-                        (format!("Exportado para {}", path.display()), Color::Default)
-                    }
+                    Ok(Some(path)) => (
+                        t!("database_client.query.exported_to", path = path.display()).to_string(),
+                        Color::Default,
+                    ),
                     Ok(None) => return,
-                    Err(error) => (format!("Não deu para exportar: {error:#}"), Color::Error),
+                    Err(error) => (
+                        t!(
+                            "database_client.query.export_failed",
+                            error = format!("{error:#}")
+                        )
+                        .to_string(),
+                        Color::Error,
+                    ),
                 };
                 this.messages.push(Message { text, color });
                 cx.notify();
@@ -1030,7 +1052,12 @@ impl SqlQueryView {
             .path
             .to_string_lossy()
             .split_once(".asylum/")
-            .map(|(_, rest)| format!("salvo em .asylum/{rest}"));
+            .map(|(_, rest)| {
+                t!(
+                    "database_client.query.saved_in",
+                    path = format!(".asylum/{rest}")
+                )
+            });
         h_flex()
             .h(px(52.))
             .flex_none()
@@ -1059,9 +1086,9 @@ impl SqlQueryView {
             .child(
                 chip(cx).child(
                     Label::new(if self.in_transaction {
-                        "transação aberta"
+                        t!("database_client.query.transaction_open")
                     } else {
-                        "auto-commit"
+                        t!("database_client.query.auto_commit")
                     })
                     .size(LabelSize::XSmall)
                     .color(if self.in_transaction {
@@ -1072,10 +1099,15 @@ impl SqlQueryView {
                 ),
             )
             .when(connection.read_only, |this| {
-                this.child(chip(cx).child(Label::new("somente leitura").size(LabelSize::XSmall)))
+                this.child(chip(cx).child(
+                    Label::new(t!("database_client.panel.read_only")).size(LabelSize::XSmall),
+                ))
             })
             .child(
-                chip(cx).child(Label::new(format!("limite {ROW_LIMIT}")).size(LabelSize::XSmall)),
+                chip(cx).child(
+                    Label::new(t!("database_client.query.limit_chip", limit = ROW_LIMIT))
+                        .size(LabelSize::XSmall),
+                ),
             )
             .when_some(saved_in, |this, saved_in| {
                 this.child(
@@ -1142,7 +1174,7 @@ impl SqlQueryView {
                             .rounded(px(2.))
                             .bg(cx.theme().colors().text),
                     )
-                    .child(Label::new("Cancelar").size(LabelSize::Small))
+                    .child(Label::new(t!("database_client.query.cancel")).size(LabelSize::Small))
                     .child(
                         KeyBinding::for_action_in(&CancelQuery, &self.editor.focus_handle(cx), cx)
                             .size(rems_from_px(12_f32)),
@@ -1155,7 +1187,7 @@ impl SqlQueryView {
                 primary_button(
                     "db-run",
                     Some(IconName::PlayFilled),
-                    "Executar",
+                    t!("database_client.query.run"),
                     Some(KeyBinding::for_action_in(
                         &RunStatement,
                         &self.editor.focus_handle(cx),
@@ -1193,9 +1225,9 @@ impl SqlQueryView {
                 IconName::LoadCircle,
                 match statement {
                     Some(number) => {
-                        format!("Rodando o statement {number} · o editor continua livre")
+                        t!("database_client.query.running_statement", number = number)
                     }
-                    None => "Rodando · o editor continua livre".to_owned(),
+                    None => t!("database_client.query.running"),
                 },
                 Color::Warning,
             ),
@@ -1206,20 +1238,26 @@ impl SqlQueryView {
                     .as_ref()
                     .and_then(|range| number_at(range.start))
                 {
-                    Some(number) => format!("1 erro no statement {number}"),
-                    None => "1 erro".to_owned(),
+                    Some(number) => {
+                        t!("database_client.query.error_in_statement", number = number)
+                    }
+                    None => t!("database_client.query.one_error"),
                 },
                 Color::Error,
             ),
             _ => match number_at(cursor) {
                 Some(number) => (
                     IconName::Check,
-                    format!("Statement {number} de {} sob o cursor", all.len()),
+                    t!(
+                        "database_client.query.statement_under_cursor",
+                        number = number,
+                        total = all.len()
+                    ),
                     Color::Success,
                 ),
                 None => (
                     IconName::Info,
-                    "Nenhum statement sob o cursor".to_owned(),
+                    t!("database_client.query.no_statement_under_cursor"),
                     Color::Muted,
                 ),
             },
@@ -1237,7 +1275,7 @@ impl SqlQueryView {
             .when(!self.is_running(), |this| {
                 this.child(
                     div().pl_4().child(
-                        Label::new("⌘↵ roda o statement · ⌘⇧↵ roda o arquivo · ⌥↵ EXPLAIN ANALYZE")
+                        Label::new(t!("database_client.query.shortcuts_hint"))
                             .size(LabelSize::XSmall)
                             .color(Color::Muted),
                     ),
@@ -1258,7 +1296,7 @@ impl SqlQueryView {
             RunState::Idle => return Empty.into_any_element(),
             RunState::Running { .. } => (
                 Some(IconName::LoadCircle),
-                "rodando".to_owned(),
+                t!("database_client.query.chip_running"),
                 Color::Warning,
                 false,
             ),
@@ -1269,21 +1307,26 @@ impl SqlQueryView {
             } => (
                 None,
                 match (rows, truncated) {
-                    (_, true) => format!("{rows}+ linhas"),
-                    (1, false) => "1 linha".to_owned(),
-                    (rows, false) => format!("{rows} linhas"),
+                    (_, true) => t!("database_client.query.rows_truncated", count = rows),
+                    (1, false) => t!("database_client.query.rows.one"),
+                    (rows, false) => t!("database_client.query.rows.other", count = rows),
                 },
                 Color::Success,
                 false,
             ),
-            RunState::Done { .. } => (None, "ok".to_owned(), Color::Success, false),
+            RunState::Done { .. } => (
+                None,
+                t!("database_client.query.chip_ok"),
+                Color::Success,
+                false,
+            ),
             RunState::Failed(failure) => (
                 None,
                 failure
                     .server
                     .as_ref()
-                    .map(|server| format!("erro {}", server.code))
-                    .unwrap_or_else(|| "erro".to_owned()),
+                    .map(|server| t!("database_client.query.chip_error_code", code = server.code))
+                    .unwrap_or_else(|| t!("database_client.query.chip_error")),
                 Color::Error,
                 true,
             ),
@@ -1308,26 +1351,26 @@ impl SqlQueryView {
             .into_any_element()
     }
 
-    fn render_state_detail(&self) -> String {
+    fn render_state_detail(&self) -> SharedString {
         match &self.state {
-            RunState::Idle => String::new(),
-            RunState::Running { started, .. } => format!(
-                "{:.1} s · aguardando o servidor",
-                started.elapsed().as_secs_f32()
-            )
-            .replace('.', ","),
+            RunState::Idle => SharedString::default(),
+            RunState::Running { started, .. } => t!(
+                "database_client.query.detail_waiting",
+                seconds = format_decimal(started.elapsed().as_secs_f32())
+            ),
             RunState::Done {
                 elapsed, finished, ..
-            } => format!(
-                "{} ms · rodou {}",
-                elapsed.as_millis(),
-                elapsed_label(finished.elapsed())
+            } => t!(
+                "database_client.query.detail_done",
+                milliseconds = elapsed.as_millis(),
+                when = elapsed_label(finished.elapsed())
             ),
             RunState::Failed(failure) => match failure.elapsed {
-                Some(elapsed) => {
-                    format!("falhou em {} ms · nada foi alterado", elapsed.as_millis())
-                }
-                None => "nada foi alterado".to_owned(),
+                Some(elapsed) => t!(
+                    "database_client.query.detail_failed",
+                    milliseconds = elapsed.as_millis()
+                ),
+                None => t!("database_client.query.detail_nothing_changed"),
             },
         }
     }
@@ -1351,11 +1394,11 @@ impl SqlQueryView {
                 before_caret,
             ))
         });
-        let context = format!(
-            "rodou como {} em {} {}",
-            self.connection.user,
-            self.connection.name,
-            self.connection.environment.label()
+        let context = t!(
+            "database_client.query.ran_as",
+            user = self.connection.user,
+            connection = self.connection.name,
+            environment = self.connection.environment.label()
         );
         v_flex()
             .rounded_lg()
@@ -1446,12 +1489,9 @@ impl SqlQueryView {
                             })
                             .when(self.in_transaction, |this| {
                                 this.child(
-                                    Label::new(
-                                        "A transação desta aba foi abortada: rode Rollback para \
-                                         continuar.",
-                                    )
-                                    .size(LabelSize::Small)
-                                    .color(Color::Warning),
+                                    Label::new(t!("database_client.query.transaction_aborted"))
+                                        .size(LabelSize::Small)
+                                        .color(Color::Warning),
                                 )
                             }),
                     ),
@@ -1468,7 +1508,10 @@ impl SqlQueryView {
                                 primary_button(
                                     "db-apply-suggestion",
                                     Some(IconName::Check),
-                                    format!("Trocar por {suggestion}"),
+                                    t!(
+                                        "database_client.query.replace_with",
+                                        suggestion = suggestion
+                                    ),
                                     None,
                                     cx,
                                 )
@@ -1483,8 +1526,10 @@ impl SqlQueryView {
                                     "db-go-to-error",
                                     None,
                                     match failure.line {
-                                        Some(line) => format!("Ir para a linha {line}"),
-                                        None => "Ir para o erro".to_owned(),
+                                        Some(line) => {
+                                            t!("database_client.query.go_to_line", line = line)
+                                        }
+                                        None => t!("database_client.query.go_to_error"),
                                     },
                                     true,
                                     cx,
@@ -1497,12 +1542,9 @@ impl SqlQueryView {
                         .when(failure.server.is_some(), |this| {
                             this.child(
                                 div().pl_3().child(
-                                    Label::new(
-                                        "O texto original do Postgres fica aqui, sem tradução, \
-                                         para dar para buscar.",
-                                    )
-                                    .size(LabelSize::XSmall)
-                                    .color(Color::Muted),
+                                    Label::new(t!("database_client.query.original_text_note"))
+                                        .size(LabelSize::XSmall)
+                                        .color(Color::Muted),
                                 ),
                             )
                         }),
@@ -1524,11 +1566,11 @@ impl SqlQueryView {
         let colors = cx.theme().colors();
         let warning = Color::Warning.color(cx);
         let explanation = if self.in_transaction {
-            "Dentro da transação aberta: cancelar aborta a transação."
+            t!("database_client.query.cancel_in_transaction")
         } else if *reads_only {
-            "Nada muda: está em auto-commit e é SELECT."
+            t!("database_client.query.cancel_read_only")
         } else {
-            "Em auto-commit: o que já terminou fica gravado."
+            t!("database_client.query.cancel_auto_commit")
         };
         Some(
             div()
@@ -1560,13 +1602,11 @@ impl SqlQueryView {
                                                 .color(Color::Warning),
                                         )
                                         .child(
-                                            Label::new(
-                                                format!(
-                                                    "Rodando há {:.1} s",
-                                                    started.elapsed().as_secs_f32()
-                                                )
-                                                .replace('.', ","),
-                                            )
+                                            Label::new(t!(
+                                                "database_client.query.running_for",
+                                                seconds =
+                                                    format_decimal(started.elapsed().as_secs_f32())
+                                            ))
                                             .weight(FontWeight::SEMIBOLD),
                                         ),
                                 )
@@ -1621,7 +1661,10 @@ impl SqlQueryView {
                                         .border_color(colors.border_selected)
                                         .hover(|style| style.bg(colors.element_hover))
                                         .child(div().size(px(9.)).rounded(px(2.)).bg(colors.text))
-                                        .child(Label::new("Cancelar query").size(LabelSize::Small))
+                                        .child(
+                                            Label::new(t!("database_client.query.cancel_query"))
+                                                .size(LabelSize::Small),
+                                        )
                                         .child(
                                             KeyBinding::for_action_in(
                                                 &CancelQuery,
@@ -1639,8 +1682,10 @@ impl SqlQueryView {
                                         .flex_1()
                                         .gap_0p5()
                                         .child(
-                                            Label::new("Cancela no servidor, não só na tela.")
-                                                .size(LabelSize::Small),
+                                            Label::new(t!(
+                                                "database_client.query.cancel_on_server"
+                                            ))
+                                            .size(LabelSize::Small),
                                         )
                                         .child(
                                             Label::new(explanation)
@@ -1656,10 +1701,13 @@ impl SqlQueryView {
 
     fn render_results(&self, cx: &mut Context<Self>) -> AnyElement {
         let tabs = [
-            (ResultTab::Result, "Resultado"),
-            (ResultTab::Messages, "Mensagens"),
-            (ResultTab::Plan, "Plano"),
-            (ResultTab::History, "Histórico"),
+            (ResultTab::Result, t!("database_client.query.tab_result")),
+            (
+                ResultTab::Messages,
+                t!("database_client.query.tab_messages"),
+            ),
+            (ResultTab::Plan, t!("database_client.query.tab_plan")),
+            (ResultTab::History, t!("database_client.query.tab_history")),
         ];
         let failure = match &self.state {
             RunState::Failed(failure) => Some(failure),
@@ -1675,10 +1723,10 @@ impl SqlQueryView {
                 .p_3()
                 .child(
                     Label::new(match &self.state {
-                        RunState::Running { .. } => "Aguardando o servidor…",
-                        RunState::Failed(_) => "O statement falhou: veja em Mensagens.",
-                        RunState::Done { .. } => "O statement não devolveu linhas.",
-                        RunState::Idle => "Rode um statement para ver o resultado aqui.",
+                        RunState::Running { .. } => t!("database_client.query.empty_waiting"),
+                        RunState::Failed(_) => t!("database_client.query.empty_failed"),
+                        RunState::Done { .. } => t!("database_client.query.empty_no_rows"),
+                        RunState::Idle => t!("database_client.query.empty_idle"),
                     })
                     .size(LabelSize::Small)
                     .color(Color::Muted),
@@ -1715,7 +1763,7 @@ impl SqlQueryView {
             ResultTab::Plan if self.plan_lines.is_empty() => div()
                 .p_3()
                 .child(
-                    Label::new("Rode ⌥↵ para ver o plano do statement sob o cursor.")
+                    Label::new(t!("database_client.query.plan_empty"))
                         .size(LabelSize::Small)
                         .color(Color::Muted),
                 )
@@ -1751,7 +1799,7 @@ impl SqlQueryView {
                         .rounded_md()
                         .cursor_pointer()
                         .hover(|style| style.bg(cx.theme().colors().element_hover))
-                        .tooltip(Tooltip::text("Copiar o SQL"))
+                        .tooltip(Tooltip::text(t!("database_client.query.copy_sql")))
                         .child(
                             Label::new(sql.lines().next().unwrap_or_default().to_owned())
                                 .size(LabelSize::Small)
@@ -1784,13 +1832,23 @@ impl SqlQueryView {
                     }
                 );
                 Some(if self.is_running() {
-                    "Abaixo, o resultado anterior, apagado até o novo chegar.".to_owned()
+                    t!("database_client.query.footer_previous")
                 } else if truncated {
-                    format!("{rows} linhas · parou no limite de {ROW_LIMIT}")
+                    t!(
+                        "database_client.query.footer_truncated",
+                        count = rows,
+                        limit = ROW_LIMIT
+                    )
+                } else if rows == 1 {
+                    t!(
+                        "database_client.query.footer_complete.one",
+                        limit = ROW_LIMIT
+                    )
                 } else {
-                    format!(
-                        "{rows} {} · resultado completo (abaixo do limite de {ROW_LIMIT})",
-                        if rows == 1 { "linha" } else { "linhas" }
+                    t!(
+                        "database_client.query.footer_complete.other",
+                        count = rows,
+                        limit = ROW_LIMIT
                     )
                 })
             }
@@ -1834,7 +1892,10 @@ impl SqlQueryView {
                     .flex_none()
                     .px_3()
                     .gap_2p5()
-                    .child(Label::new("Resultados").weight(FontWeight::SEMIBOLD))
+                    .child(
+                        Label::new(t!("database_client.query.results"))
+                            .weight(FontWeight::SEMIBOLD),
+                    )
                     .child(self.render_state_chip(cx))
                     .child(
                         Label::new(self.render_state_detail())
@@ -1854,7 +1915,7 @@ impl SqlQueryView {
                             .icon_size(IconSize::Small)
                             .icon_color(Color::Muted)
                             .disabled(!export)
-                            .tooltip(Tooltip::text("Copiar o resultado como CSV"))
+                            .tooltip(Tooltip::text(t!("database_client.query.copy_csv")))
                             .on_click(cx.listener(|this, _, _, cx| this.copy_as_csv(cx))),
                     )
                     .child(
@@ -1862,7 +1923,7 @@ impl SqlQueryView {
                             .icon_size(IconSize::Small)
                             .icon_color(Color::Muted)
                             .disabled(!export)
-                            .tooltip(Tooltip::text("Exportar CSV"))
+                            .tooltip(Tooltip::text(t!("database_client.query.export_csv")))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.export(Export::Csv, window, cx)
                             })),
@@ -1892,24 +1953,26 @@ impl SqlQueryView {
                         )
                         .child(div().flex_1())
                         .when(export, |this| {
-                            let link = |id: &'static str, label: &'static str| {
+                            let link = |id: &'static str, label: SharedString| {
                                 Button::new(id, label)
                                     .style(ButtonStyle::Subtle)
                                     .label_size(LabelSize::XSmall)
                                     .color(Color::Accent)
                             };
-                            this.child(link("db-export-csv-link", "Exportar CSV").on_click(
-                                cx.listener(|this, _, window, cx| {
-                                    this.export(Export::Csv, window, cx)
-                                }),
-                            ))
-                            .child(link("db-export-json", "JSON").on_click(cx.listener(
+                            this.child(
+                                link("db-export-csv-link", t!("database_client.query.export_csv"))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.export(Export::Csv, window, cx)
+                                    })),
+                            )
+                            .child(link("db-export-json", "JSON".into()).on_click(cx.listener(
                                 |this, _, window, cx| this.export(Export::Json, window, cx),
                             )))
                             .child(
-                                link("db-copy-insert", "Copiar como INSERT").on_click(
-                                    cx.listener(|this, _, _, cx| this.copy_as_insert(cx)),
-                                ),
+                                link("db-copy-insert", t!("database_client.query.copy_insert"))
+                                    .on_click(
+                                        cx.listener(|this, _, _, cx| this.copy_as_insert(cx)),
+                                    ),
                             )
                         }),
                 )
@@ -1920,12 +1983,21 @@ impl SqlQueryView {
 }
 
 /// `há 12 s`, `há 3 min`, for when the shown result ran.
-fn elapsed_label(elapsed: Duration) -> String {
+fn elapsed_label(elapsed: Duration) -> SharedString {
     match elapsed.as_secs() {
-        0..5 => "agora".to_owned(),
-        seconds @ 5..60 => format!("há {seconds} s"),
-        seconds @ 60..3_600 => format!("há {} min", seconds / 60),
-        seconds => format!("há {} h", seconds / 3_600),
+        0..5 => t!("database_client.panel.age_now"),
+        seconds @ 5..60 => t!("database_client.connect.seconds_ago", seconds = seconds),
+        seconds @ 60..3_600 => t!("database_client.panel.age_minutes", count = seconds / 60),
+        seconds => t!("database_client.panel.age_hours", count = seconds / 3_600),
+    }
+}
+
+/// One decimal place, with the decimal separator of the interface language.
+fn format_decimal(value: f32) -> String {
+    let text = format!("{value:.1}");
+    match i18n::current_language() {
+        i18n::Language::PortugueseBrazil => text.replace('.', ","),
+        i18n::Language::English => text,
     }
 }
 

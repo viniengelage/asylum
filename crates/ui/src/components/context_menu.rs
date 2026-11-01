@@ -1901,7 +1901,10 @@ impl ContextMenu {
                             .min_w_0()
                             .child(Label::new(self.filter_query.clone()).truncate()),
                     )
-                    .child(KeyboardHint::new("Clear").icon_key(IconName::Escape)),
+                    .child(
+                        KeyboardHint::new(i18n::t!("ui.context_menu.clear"))
+                            .icon_key(IconName::Escape),
+                    ),
             )
             .child(ListSeparator)
             .when(!has_matches, |this| {
@@ -1909,7 +1912,9 @@ impl ContextMenu {
                     div()
                         .px(DynamicSpacing::Base08.rems(cx))
                         .py(DynamicSpacing::Base04.rems(cx))
-                        .child(Label::new("No matches").color(Color::Muted)),
+                        .child(
+                            Label::new(i18n::t!("ui.context_menu.no_matches")).color(Color::Muted),
+                        ),
                 )
             })
     }
@@ -1923,14 +1928,14 @@ impl ContextMenu {
             .border_t_1()
             .border_color(cx.theme().colors().border_variant)
             .child(
-                KeyboardHint::new("Navigate")
+                KeyboardHint::new(i18n::t!("ui.context_menu.navigate"))
                     .icon_key(IconName::ArrowUp)
                     .icon_key(IconName::ArrowDown),
             )
-            .child(KeyboardHint::new("Open").icon_key(IconName::Return))
+            .child(KeyboardHint::new(i18n::t!("ui.context_menu.open")).icon_key(IconName::Return))
             .child(div().flex_1())
             .child(
-                Label::new("Type to filter")
+                Label::new(i18n::t!("ui.context_menu.type_to_filter"))
                     .size(LabelSize::XSmall)
                     .color(Color::Muted),
             )

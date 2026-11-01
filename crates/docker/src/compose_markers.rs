@@ -1,9 +1,9 @@
-//! The state of each service at the end of its line in docker-compose.yml: "● rodando · :3000 ·
-//! 0,4%". Clicking one focuses the container in the dock.
+//! The state of each service at the end of its line in docker-compose.yml: "● running · :3000 ·
+//! 0.4%". Clicking one focuses the container in the dock.
 
 use crate::{
     DockerPanel,
-    client::{Container, ContainerState},
+    client::{Container, ContainerState, health_label},
     format_percent,
     store::DockerStore,
 };
@@ -15,6 +15,7 @@ use editor::{
 use gpui::{
     App, AppContext as _, Context, Entity, MouseButton, Subscription, Task, WeakEntity, px,
 };
+use i18n::t;
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -223,7 +224,13 @@ pub(crate) fn marker_text(container: &Container, store: &DockerStore) -> (Color,
     let mut parts: Vec<String> = Vec::new();
     let color = match container.state {
         ContainerState::Running => {
-            parts.push(container.health().unwrap_or("rodando").to_string());
+            parts.push(
+                container
+                    .health()
+                    .map(health_label)
+                    .unwrap_or_else(|| t!("docker.state.running"))
+                    .to_string(),
+            );
             parts.extend(port);
             if container.health().is_none()
                 && let Some(stats) = store.stats(&container.id)
@@ -237,7 +244,7 @@ pub(crate) fn marker_text(container: &Container, store: &DockerStore) -> (Color,
             }
         }
         ContainerState::Restarting => {
-            parts.push("reiniciando".into());
+            parts.push(t!("docker.state.restarting").to_string());
             if let Some(count) = store
                 .restart_count(&container.id)
                 .filter(|count| *count > 0)
@@ -247,18 +254,18 @@ pub(crate) fn marker_text(container: &Container, store: &DockerStore) -> (Color,
             Color::Error
         }
         ContainerState::Paused => {
-            parts.push("pausado".into());
+            parts.push(t!("docker.state.paused").to_string());
             Color::Warning
         }
         ContainerState::Exited | ContainerState::Dead => {
-            parts.push("parado".into());
+            parts.push(t!("docker.state.exited").to_string());
             if let Some(code) = container.exit_code() {
-                parts.push(format!("saiu ({code})"));
+                parts.push(t!("docker.state.exited_with_code", code = code).to_string());
             }
             Color::Placeholder
         }
         ContainerState::Created | ContainerState::Removing => {
-            parts.push(container.state.label().into());
+            parts.push(container.state.label().to_string());
             Color::Placeholder
         }
     };

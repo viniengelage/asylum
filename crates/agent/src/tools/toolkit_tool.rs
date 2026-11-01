@@ -110,7 +110,7 @@ impl AnyAgentTool for ToolkitToolAdapter {
             futures::select! {
                 result = authorization.fuse() => result?,
                 _ = event_stream.cancelled_by_user().fuse() => {
-                    return Err(anyhow!("Cancelado pelo usuário").into());
+                    return Err(anyhow!(i18n::t!("agent.toolkit_tool.cancelled_by_user")).into());
                 }
             }
 
@@ -126,7 +126,7 @@ impl AnyAgentTool for ToolkitToolAdapter {
             let output = futures::select! {
                 output = run.fuse() => output?,
                 _ = event_stream.cancelled_by_user().fuse() => {
-                    return Err(anyhow!("Cancelado pelo usuário").into());
+                    return Err(anyhow!(i18n::t!("agent.toolkit_tool.cancelled_by_user")).into());
                 }
             };
 

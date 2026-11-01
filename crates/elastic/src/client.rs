@@ -4,6 +4,7 @@ use anyhow::Context as _;
 use base64::Engine as _;
 use futures::AsyncReadExt as _;
 use http_client::{AsyncBody, HttpClient, Method, Request, Url};
+use i18n::t;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -59,17 +60,18 @@ impl Auth {
     }
 }
 
+/// `via` names the service that answered, `Elasticsearch` or `Kibana`.
 #[derive(Debug, thiserror::Error)]
 pub enum ElasticError {
-    #[error("{via} recusou o login: {message}")]
+    #[error("{}", t!("elastic.client.error_unauthorized", via = via, message = message))]
     Unauthorized { via: &'static str, message: String },
-    #[error("sem permissão: {message}")]
+    #[error("{}", t!("elastic.client.error_forbidden", message = message))]
     Forbidden { message: String },
-    #[error("não encontrado: {message}")]
+    #[error("{}", t!("elastic.client.error_not_found", message = message))]
     NotFound { message: String },
     #[error("{message}")]
     BadRequest { kind: String, message: String },
-    #[error("{via} respondeu {status}: {message}")]
+    #[error("{}", t!("elastic.client.error_status", via = via, status = status, message = message))]
     Status {
         via: &'static str,
         status: u16,
@@ -193,7 +195,8 @@ impl Elastic {
                 let user = self.current_user().await?;
                 let version = self.kibana_version().await.ok().flatten();
                 Ok(ClusterInfo {
-                    cluster_name: format!("sem monitor · {}", user.username),
+                    cluster_name: t!("elastic.client.no_monitor_cluster", user = user.username)
+                        .to_string(),
                     version: ClusterVersion {
                         number: version.unwrap_or_else(|| "?".to_string()),
                     },
@@ -248,7 +251,7 @@ impl Elastic {
         let streams = response
             .get("data_streams")
             .and_then(Value::as_array)
-            .context("resposta sem data_streams")?;
+            .context(t!("elastic.client.missing_data_streams"))?;
         Ok(streams
             .iter()
             .filter_map(|stream| {
@@ -352,7 +355,7 @@ impl Elastic {
         match &self.endpoint {
             Endpoint::Direct(base) => {
                 let url = join(base, path_and_query.trim_start_matches('/'))?;
-                self.send(method, url, body, "O Elasticsearch", &[]).await
+                self.send(method, url, body, "Elasticsearch", &[]).await
             }
             Endpoint::Kibana(kibana) => {
                 let url = kibana_proxy_url(kibana, &method, path_and_query)?;
@@ -373,7 +376,7 @@ impl Elastic {
             ("kbn-xsrf", "asylum"),
             ("x-elastic-internal-origin", "Kibana"),
         ];
-        self.send(method, url, body, "O Kibana", &headers).await
+        self.send(method, url, body, "Kibana", &headers).await
     }
 
     async fn send(
@@ -397,23 +400,27 @@ impl Elastic {
         let body = match body {
             Some(body) => {
                 builder = builder.header("Content-Type", "application/json");
-                AsyncBody::from(serde_json::to_string(&body).context("corpo da requisição")?)
+                AsyncBody::from(
+                    serde_json::to_string(&body).context(t!("elastic.client.request_body"))?,
+                )
             }
             None => AsyncBody::default(),
         };
-        let request = builder.body(body).context("requisição inválida")?;
+        let request = builder
+            .body(body)
+            .context(t!("elastic.client.invalid_request"))?;
 
         let mut response = self
             .http
             .send(request)
             .await
-            .with_context(|| format!("falha ao chamar {}", redacted(&url)))?;
+            .with_context(|| t!("elastic.client.call_failed", url = redacted(&url)))?;
         let mut text = String::new();
         response
             .body_mut()
             .read_to_string(&mut text)
             .await
-            .context("falha ao ler a resposta")?;
+            .context(t!("elastic.client.read_failed"))?;
         // Kibana's console proxy answers 200 and carries the cluster's status in a header.
         let status = response
             .headers()
@@ -426,10 +433,10 @@ impl Elastic {
                 return Ok(Value::Null);
             }
             let value: Value = serde_json::from_str(&text).with_context(|| {
-                format!(
-                    "resposta que não é JSON de {}: {}",
-                    redacted(&url),
-                    snippet(&text)
+                t!(
+                    "elastic.client.not_json",
+                    url = redacted(&url),
+                    body = snippet(&text)
                 )
             })?;
             // An Elasticsearch error body that still came with a success status.
@@ -453,7 +460,12 @@ impl Elastic {
         let shown = snippet(&value.to_string());
         serde_json::from_value(value).map_err(|error| {
             ElasticError::Other(anyhow::anyhow!(
-                "resposta inesperada do Elasticsearch ({error}): {shown}"
+                "{}",
+                t!(
+                    "elastic.client.unexpected_response",
+                    error = error,
+                    body = shown
+                )
             ))
         })
     }
@@ -466,7 +478,7 @@ fn join(base: &Url, path: &str) -> Result<Url, ElasticError> {
         base.set_path(&format!("{}/", base.path()));
     }
     base.join(path)
-        .with_context(|| format!("caminho inválido: {path}"))
+        .with_context(|| t!("elastic.client.invalid_path", path = path))
         .map_err(ElasticError::from)
 }
 
@@ -517,7 +529,7 @@ fn error_from_response(status: u16, text: &str, via: &'static str) -> ElasticErr
         .unwrap_or_else(|| text.chars().take(300).collect());
     // A 401 relayed by the proxy comes from the cluster, with Elasticsearch's error shape.
     let via = if elastic_error.is_some() {
-        "O Elasticsearch"
+        "Elasticsearch"
     } else {
         via
     };
@@ -752,10 +764,7 @@ mod tests {
         let error = futures::executor::block_on(elastic.info()).expect_err("login recusado");
         assert!(matches!(
             error,
-            ElasticError::Unauthorized {
-                via: "O Kibana",
-                ..
-            }
+            ElasticError::Unauthorized { via: "Kibana", .. }
         ));
     }
 

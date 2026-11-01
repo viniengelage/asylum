@@ -1000,7 +1000,7 @@ fn register_actions(
                                     workspace.show_toast(
                                         Toast::new(
                                             NotificationId::unique::<ClaudeOAuthToast>(),
-                                            "Claude subscription connected successfully.",
+                                            i18n::t!("zed.claude.connected").to_string(),
                                         ),
                                         cx,
                                     );
@@ -1012,7 +1012,7 @@ fn register_actions(
                                     workspace.show_toast(
                                         Toast::new(
                                             NotificationId::unique::<ClaudeOAuthToast>(),
-                                            format!("Claude sign-in failed: {error}"),
+                                            i18n::t!("zed.claude.sign_in_failed", error = error).to_string(),
                                         ),
                                         cx,
                                     );
@@ -1029,9 +1029,7 @@ fn register_actions(
                         workspace.show_toast(
                             Toast::new(
                                 NotificationId::unique::<ClaudeOAuthToast>(),
-                                "Browser opened for Claude sign-in. After authorizing, \
-                                 copy the code from the page and paste it into the \
-                                 Anthropic API key field in settings.",
+                                i18n::t!("zed.claude.browser_opened").to_string(),
                             ),
                             cx,
                         );
@@ -1041,7 +1039,7 @@ fn register_actions(
                         workspace.show_toast(
                             Toast::new(
                                 NotificationId::unique::<ClaudeOAuthToast>(),
-                                format!("Claude sign-in failed: {error}"),
+                                i18n::t!("zed.claude.sign_in_failed", error = error).to_string(),
                             ),
                             cx,
                         );
@@ -1062,7 +1060,7 @@ fn register_actions(
                         workspace.show_toast(
                             Toast::new(
                                 NotificationId::unique::<ClaudeOAuthSignOutToast>(),
-                                "Claude subscription disconnected.",
+                                i18n::t!("zed.claude.disconnected").to_string(),
                             ),
                             cx,
                         );
@@ -1773,9 +1771,12 @@ fn open_about_window(cx: &mut App) {
                                 .child(Label::new(commit).size(LabelSize::Small))
                             })
                             .child(
-                                Label::new(format!("Based on Zed {}", self.full_version))
-                                    .color(Color::Muted)
-                                    .size(LabelSize::XSmall),
+                                Label::new(i18n::t!(
+                                    "zed.about.based_on",
+                                    version = self.full_version
+                                ))
+                                .color(Color::Muted)
+                                .size(LabelSize::XSmall),
                             ),
                     )
                     .child(
@@ -1784,33 +1785,32 @@ fn open_about_window(cx: &mut App) {
                             .gap_1()
                             .items_center()
                             .child(
-                                Label::new(
-                                    "Asylum is an independent fork of Zed. It is not affiliated \
-                                     with or endorsed by Zed Industries, Inc.",
-                                )
-                                .color(Color::Muted)
-                                .size(LabelSize::XSmall),
+                                Label::new(i18n::t!("zed.about.fork_notice"))
+                                    .color(Color::Muted)
+                                    .size(LabelSize::XSmall),
                             )
                             .child(
-                                Label::new(
-                                    "Distributed under GPL-3.0-or-later (Apache-2.0 where marked) \
-                                     with ABSOLUTELY NO WARRANTY.",
-                                )
-                                .color(Color::Muted)
-                                .size(LabelSize::XSmall),
+                                Label::new(i18n::t!("zed.about.license_notice"))
+                                    .color(Color::Muted)
+                                    .size(LabelSize::XSmall),
                             )
                             .child(
                                 h_flex()
                                     .gap_2()
                                     .child(
-                                        Button::new("about-source-code", "Source Code")
-                                            .label_size(LabelSize::XSmall)
-                                            .on_click(|_, _, cx| {
+                                        Button::new(
+                                            "about-source-code",
+                                            i18n::t!("zed.about.source_code"),
+                                        )
+                                        .label_size(LabelSize::XSmall)
+                                        .on_click(
+                                            |_, _, cx| {
                                                 cx.open_url(ASYLUM_REPOSITORY_URL);
-                                            }),
+                                            },
+                                        ),
                                     )
                                     .child(
-                                        Button::new("about-license", "License")
+                                        Button::new("about-license", i18n::t!("zed.about.license"))
                                             .label_size(LabelSize::XSmall)
                                             .on_click(|_, _, cx| {
                                                 cx.open_url(&format!(
@@ -1819,7 +1819,7 @@ fn open_about_window(cx: &mut App) {
                                             }),
                                     )
                                     .child(
-                                        Button::new("about-notice", "Notice")
+                                        Button::new("about-notice", i18n::t!("zed.about.notice"))
                                             .label_size(LabelSize::XSmall)
                                             .on_click(|_, _, cx| {
                                                 cx.open_url(&format!(

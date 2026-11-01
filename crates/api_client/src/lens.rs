@@ -11,6 +11,7 @@ use editor::{
 use gpui::{
     App, AppContext as _, Context, Entity, Global, MouseButton, Subscription, Task, WeakEntity,
 };
+use i18n::t;
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -185,7 +186,7 @@ fn render_lens(
         let colors = cx.app.theme().colors();
         let accent = colors.text_accent;
         let muted = colors.text_muted;
-        let action = |id: &'static str, label: &'static str, send: bool| {
+        let action = |id: &'static str, label: SharedString, send: bool| {
             let operation_key = operation_key.clone();
             let collection = collection.clone();
             let editor = editor.clone();
@@ -217,9 +218,13 @@ fn render_lens(
             .gap_1p5()
             .font(font)
             .text_size(font_size)
-            .child(action("api-lens-send", "▶ Enviar", true))
+            .child(action("api-lens-send", t!("api_client.lens.send"), true))
             .child(div().text_color(muted).child("·"))
-            .child(action("api-lens-open", "Abrir no painel API", false))
+            .child(action(
+                "api-lens-open",
+                t!("api_client.lens.open_in_panel"),
+                false,
+            ))
             .into_any_element()
     })
 }

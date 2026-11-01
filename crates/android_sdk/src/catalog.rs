@@ -6,6 +6,8 @@
 
 use anyhow::{Context as _, Result};
 use futures::AsyncReadExt as _;
+use gpui::SharedString;
+use i18n::t;
 use quick_xml::events::Event;
 use std::path::{Path, PathBuf};
 
@@ -382,7 +384,7 @@ fn parse_remote_packages(xml: &str) -> Result<Vec<RemotePackage>> {
     loop {
         match reader
             .read_event()
-            .context("lendo o XML do repositório Android")?
+            .context(t!("android_sdk.error.reading_repository_xml"))?
         {
             Event::Start(element) => {
                 let name = String::from_utf8_lossy(element.local_name().as_ref()).into_owned();
@@ -575,13 +577,13 @@ impl DeviceCategory {
         Self::Wear,
     ];
 
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> SharedString {
         match self {
-            Self::Phone => "Celular",
-            Self::Tablet => "Tablet",
-            Self::Foldable => "Dobrável",
-            Self::Tv => "TV",
-            Self::Wear => "Wear OS",
+            Self::Phone => t!("android_sdk.device_category.phone"),
+            Self::Tablet => t!("android_sdk.device_category.tablet"),
+            Self::Foldable => t!("android_sdk.device_category.foldable"),
+            Self::Tv => t!("android_sdk.device_category.tv"),
+            Self::Wear => SharedString::new_static("Wear OS"),
         }
     }
 }
@@ -599,14 +601,14 @@ pub struct AndroidDeviceProfile {
 }
 
 impl AndroidDeviceProfile {
-    /// `6,3" · 1080×2424`, with the decimal comma the rest of the UI uses.
+    /// `6.3" · 1080×2424`, with the current language's decimal separator.
     pub fn screen_label(&self) -> Option<String> {
         let (width, height) = self.resolution?;
         let resolution = format!("{width}×{height}");
         Some(match self.diagonal_inches {
             Some(inches) => format!(
                 "{}\" · {resolution}",
-                format!("{inches:.1}").replace('.', ",")
+                format!("{inches:.1}").replace('.', &t!("android_sdk.format.decimal_separator"))
             ),
             None => resolution,
         })
@@ -628,11 +630,11 @@ pub(crate) async fn read_device_definitions(
     let jar = cmdline_tools_dir.join("lib/sdklib/sdklib.core.jar");
     let file = smol::fs::File::open(&jar)
         .await
-        .with_context(|| format!("abrindo {}", jar.display()))?;
+        .with_context(|| t!("android_sdk.error.opening", path = jar.display()))?;
     let mut reader =
         async_zip::base::read::seek::ZipFileReader::new(futures::io::BufReader::new(file))
             .await
-            .context("lendo o jar do sdklib")?;
+            .context(t!("android_sdk.error.reading_sdklib_jar"))?;
     let entries: Vec<(usize, String)> = reader
         .file()
         .entries()
@@ -648,18 +650,20 @@ pub(crate) async fn read_device_definitions(
         let mut entry = reader
             .reader_with_entry(*index)
             .await
-            .with_context(|| format!("lendo {file_name}"))?;
+            .with_context(|| t!("android_sdk.error.reading", path = file_name))?;
         let mut xml = String::new();
         entry
             .read_to_string(&mut xml)
             .await
-            .with_context(|| format!("lendo {file_name}"))?;
+            .with_context(|| t!("android_sdk.error.reading", path = file_name))?;
         profiles.extend(parse_device_definitions(&xml)?);
     }
     anyhow::ensure!(
         !profiles.is_empty(),
-        "nenhuma definição de dispositivo em {}",
-        jar.display()
+        t!(
+            "android_sdk.error.no_device_definitions",
+            path = jar.display()
+        )
     );
     Ok(profiles)
 }
@@ -687,7 +691,7 @@ pub(crate) fn parse_device_definitions(xml: &str) -> Result<Vec<AndroidDevicePro
     loop {
         match reader
             .read_event()
-            .context("lendo as definições de dispositivo")?
+            .context(t!("android_sdk.error.reading_device_definitions"))?
         {
             Event::Start(element) => {
                 let name = String::from_utf8_lossy(element.local_name().as_ref()).into_owned();
@@ -1004,17 +1008,17 @@ mod tests {
                 (
                     "pixel_9",
                     DeviceCategory::Phone,
-                    Some("6,2\" · 1080×2424".to_string())
+                    Some("6.2\" · 1080×2424".to_string())
                 ),
                 (
                     "pixel_tablet",
                     DeviceCategory::Tablet,
-                    Some("10,9\" · 1600×2560".to_string())
+                    Some("10.9\" · 1600×2560".to_string())
                 ),
                 (
                     "pixel_fold",
                     DeviceCategory::Foldable,
-                    Some("7,6\" · 1840×2208".to_string())
+                    Some("7.6\" · 1840×2208".to_string())
                 ),
                 ("wearos_large_round", DeviceCategory::Wear, None),
             ]

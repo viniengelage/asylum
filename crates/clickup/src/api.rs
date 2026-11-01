@@ -1,22 +1,40 @@
 use anyhow::{Context as _, Result};
 use futures::AsyncReadExt as _;
+use gpui::SharedString;
 use http_client::{AsyncBody, HttpClient, Request};
+use i18n::t;
 use serde::{Deserialize, de::DeserializeOwned};
 use std::sync::Arc;
 
 const API_URL: &str = "https://api.clickup.com/api/v2";
 
 /// The failures the UI reacts to differently. Anything else surfaces as a plain error.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum ApiError {
     /// The token was regenerated, revoked or mistyped.
-    #[error("O ClickUp recusou o token")]
     Unauthorized,
-    #[error("Limite de requisições do ClickUp atingido; tente de novo em instantes")]
     RateLimited,
-    #[error("O ClickUp respondeu {status}: {body}")]
-    Status { status: u16, body: String },
+    Status {
+        status: u16,
+        body: String,
+    },
 }
+
+impl std::fmt::Display for ApiError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unauthorized => write!(formatter, "{}", t!("clickup.api.unauthorized")),
+            Self::RateLimited => write!(formatter, "{}", t!("clickup.api.rate_limited")),
+            Self::Status { status, body } => write!(
+                formatter,
+                "{}",
+                t!("clickup.api.status", status = status, body = body)
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ApiError {}
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct User {
@@ -370,8 +388,11 @@ impl CommentAttachment {
             .then_some(extension)
     }
 
-    pub fn display_name(&self) -> &str {
-        self.name.as_deref().unwrap_or("anexo")
+    pub fn display_name(&self) -> SharedString {
+        match &self.name {
+            Some(name) => name.clone().into(),
+            None => t!("clickup.api.attachment"),
+        }
     }
 }
 
@@ -578,13 +599,14 @@ pub async fn download_attachment(
     let mut response = client
         .send(request.body(AsyncBody::default())?)
         .await
-        .context("falha ao baixar o anexo do ClickUp")?;
+        .with_context(|| t!("clickup.api.attachment_download_failed"))?;
     let status = response.status();
     let mut bytes = Vec::new();
     response.body_mut().read_to_end(&mut bytes).await?;
     anyhow::ensure!(
         status.is_success(),
-        "o ClickUp respondeu {status} ao baixar o anexo"
+        "{}",
+        t!("clickup.api.attachment_status", status = status)
     );
     Ok(bytes)
 }
@@ -639,7 +661,7 @@ async fn execute<T: DeserializeOwned>(
     let mut response = client
         .send(request)
         .await
-        .with_context(|| format!("falha ao chamar o ClickUp em {path}"))?;
+        .with_context(|| t!("clickup.api.request_failed", path = path))?;
 
     let mut body = String::new();
     response.body_mut().read_to_string(&mut body).await?;
@@ -659,7 +681,7 @@ async fn execute<T: DeserializeOwned>(
         .into());
     }
 
-    serde_json::from_str(&body).with_context(|| format!("resposta inesperada do ClickUp em {path}"))
+    serde_json::from_str(&body).with_context(|| t!("clickup.api.unexpected_response", path = path))
 }
 
 #[cfg(test)]
@@ -809,16 +831,16 @@ mod tests {
         )
         .unwrap();
         let attachments = comment.attachments();
-        let names: Vec<(&str, bool)> = attachments
+        let names: Vec<(String, bool)> = attachments
             .iter()
-            .map(|attachment| (attachment.display_name(), attachment.is_image()))
+            .map(|attachment| (attachment.display_name().to_string(), attachment.is_image()))
             .collect();
         assert_eq!(
             names,
             [
-                ("print.png", true),
-                ("diagrama", true),
-                ("foto final.jpg", true)
+                ("print.png".to_string(), true),
+                ("diagrama".to_string(), true),
+                ("foto final.jpg".to_string(), true)
             ]
         );
         assert_eq!(attachments[0].extension(), Some("png"));

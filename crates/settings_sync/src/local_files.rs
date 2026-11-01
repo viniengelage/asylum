@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result};
+use i18n::t;
 use serde::{Deserialize, Serialize};
 
 use crate::sync_plan::Hashes;
@@ -94,7 +95,7 @@ pub fn read_local_files() -> Result<BTreeMap<String, String>> {
                     Ok(entries) => entries,
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
                     Err(error) => {
-                        return Err(error).with_context(|| format!("reading {}", path.display()));
+                        return Err(error).with_context(|| reading_error(&path));
                     }
                 };
                 for entry in entries {
@@ -126,7 +127,7 @@ fn read_text_file(path: &Path) -> Result<Option<String>> {
     let metadata = match std::fs::metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error).with_context(|| format!("reading {}", path.display())),
+        Err(error) => return Err(error).with_context(|| reading_error(path)),
     };
     if metadata.len() > MAX_FILE_SIZE {
         log::warn!(
@@ -135,7 +136,7 @@ fn read_text_file(path: &Path) -> Result<Option<String>> {
         );
         return Ok(None);
     }
-    let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+    let bytes = std::fs::read(path).with_context(|| reading_error(path))?;
     let Ok(content) = String::from_utf8(bytes) else {
         log::warn!(
             "settings sync: skipping {} because it isn't UTF-8",
@@ -178,23 +179,33 @@ pub fn local_path(name: &str) -> Option<PathBuf> {
 /// Writes through a temporary file and a rename, so the settings watchers never read a
 /// half-written file.
 pub fn write_local_file(path: &Path, content: &str) -> Result<()> {
-    let parent = path
-        .parent()
-        .with_context(|| format!("{} has no parent folder", path.display()))?;
+    let parent = path.parent().with_context(|| {
+        t!(
+            "settings_sync.error.no_parent_folder",
+            path = path.display()
+        )
+        .to_string()
+    })?;
     std::fs::create_dir_all(parent)?;
     let mut temporary_name = path.file_name().unwrap_or_default().to_os_string();
     temporary_name.push(".sync-tmp");
     let temporary_path = path.with_file_name(temporary_name);
-    std::fs::write(&temporary_path, content)
-        .with_context(|| format!("writing {}", temporary_path.display()))?;
-    std::fs::rename(&temporary_path, path).with_context(|| format!("writing {}", path.display()))
+    std::fs::write(&temporary_path, content).with_context(|| writing_error(&temporary_path))?;
+    std::fs::rename(&temporary_path, path).with_context(|| writing_error(path))
+}
+
+fn reading_error(path: &Path) -> String {
+    t!("settings_sync.error.reading", path = path.display()).to_string()
+}
+
+fn writing_error(path: &Path) -> String {
+    t!("settings_sync.error.writing", path = path.display()).to_string()
 }
 
 pub fn delete_local_file(path: &Path) -> Result<()> {
     match std::fs::remove_file(path) {
-        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
-            Err(error).with_context(|| format!("deleting {}", path.display()))
-        }
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error)
+            .with_context(|| t!("settings_sync.error.deleting", path = path.display()).to_string()),
         _ => Ok(()),
     }
 }
@@ -224,9 +235,10 @@ fn record_path() -> PathBuf {
 
 pub fn read_record() -> Result<SyncRecord> {
     match std::fs::read_to_string(record_path()) {
-        Ok(content) => serde_json::from_str(&content).context("reading the settings sync state"),
+        Ok(content) => serde_json::from_str(&content)
+            .with_context(|| t!("settings_sync.error.read_state").to_string()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(SyncRecord::default()),
-        Err(error) => Err(error).context("reading the settings sync state"),
+        Err(error) => Err(error).with_context(|| t!("settings_sync.error.read_state").to_string()),
     }
 }
 

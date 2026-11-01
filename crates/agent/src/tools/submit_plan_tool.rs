@@ -84,7 +84,7 @@ impl AgentTool for SubmitPlanTool {
     ) -> SharedString {
         match input {
             Ok(input) if !input.title.is_empty() => SharedString::from(input.title),
-            _ => "Writing plan".into(),
+            _ => i18n::t!("agent.submit_plan_tool.title"),
         }
     }
 

@@ -92,9 +92,9 @@ impl AgentTool for RepoMapTool {
     ) -> SharedString {
         if let Ok(input) = input {
             let path = MarkdownInlineCode(&input.path);
-            format!("Map {path}").into()
+            i18n::t!("agent.repo_map_tool.title_path", path = path)
         } else {
-            "Map directory".into()
+            i18n::t!("agent.repo_map_tool.title")
         }
     }
 

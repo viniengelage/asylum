@@ -2,25 +2,50 @@
 //! its own API responses into these types.
 
 use chrono::{DateTime, Utc};
+use i18n::t;
 
 /// The failures the UI reacts to differently. Anything else surfaces as a plain error.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum ApiError {
     /// The token was revoked, expired or mistyped, or the e-mail does not match it.
-    #[error("{host} recusou as credenciais")]
-    Unauthorized { host: &'static str },
+    Unauthorized {
+        host: &'static str,
+    },
     /// The token works but lacks a scope this request needs.
-    #[error("{host} negou acesso: falta um escopo no token ({body})")]
-    Forbidden { host: &'static str, body: String },
-    #[error("Limite de requisições de {host} atingido; tente de novo em instantes")]
-    RateLimited { host: &'static str },
-    #[error("{host} respondeu {status}: {body}")]
+    Forbidden {
+        host: &'static str,
+        body: String,
+    },
+    RateLimited {
+        host: &'static str,
+    },
     Status {
         host: &'static str,
         status: u16,
         body: String,
     },
 }
+
+impl std::fmt::Display for ApiError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let message = match self {
+            ApiError::Unauthorized { host } => t!("repo_hosting.error.unauthorized", host = host),
+            ApiError::Forbidden { host, body } => {
+                t!("repo_hosting.error.forbidden", host = host, body = body)
+            }
+            ApiError::RateLimited { host } => t!("repo_hosting.error.rate_limited", host = host),
+            ApiError::Status { host, status, body } => t!(
+                "repo_hosting.error.status",
+                host = host,
+                status = status,
+                body = body
+            ),
+        };
+        formatter.write_str(&message)
+    }
+}
+
+impl std::error::Error for ApiError {}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Hosting {

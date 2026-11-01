@@ -1,6 +1,7 @@
 use super::{ThreadView, ToolCallLayout};
 use acp_thread::{ToolCall, ToolCallStatus};
 use gpui::{AnyElement, ClipboardItem, Empty, px, relative};
+use i18n::t;
 use task_agents::{
     DATABASE_QUERY_TOOL, DATABASE_WRITE_QUERY_TOOL, DatabaseConnectionInfo, DatabaseQueryResult,
     DatabaseWriteResult,
@@ -219,9 +220,13 @@ fn one_line(sql: &str, max_chars: usize) -> String {
 
 fn rows_label(count: usize) -> String {
     if count == 1 {
-        "1 linha".to_owned()
+        t!("agent_ui.database_card.rows.one").to_string()
     } else {
-        format!("{} linhas", format_number(&count.to_string()))
+        t!(
+            "agent_ui.database_card.rows.other",
+            count = format_number(&count.to_string())
+        )
+        .to_string()
     }
 }
 
@@ -315,14 +320,17 @@ impl ThreadView {
             .clone()
             .unwrap_or_else(|| result.connection.database.clone());
         let presentation = presentation(&result);
-        let limit_badge = result
-            .truncated
-            .then(|| (format!("limite {}", result.limit), Color::Warning));
+        let limit_badge = result.truncated.then(|| {
+            (
+                t!("agent_ui.database_card.limit_badge", limit = result.limit).to_string(),
+                Color::Warning,
+            )
+        });
         let (icon, icon_color, title, badge_for_header) = match presentation {
             Presentation::Empty => (
                 IconName::XCircle,
                 Color::Error,
-                format!("{source} · 0 linhas"),
+                t!("agent_ui.database_card.title_no_rows", source = source).to_string(),
                 None,
             ),
             Presentation::Number => (IconName::Hash, Color::Accent, source, None),
@@ -333,15 +341,30 @@ impl ThreadView {
                     .position(|column| column.name == "id")
                     .and_then(|index| result.rows.first()?.get(index)?.clone());
                 let title = match id {
-                    Some(id) => format!("{source} · id {id}"),
-                    None => format!("{source} · 1 linha"),
+                    Some(id) => t!(
+                        "agent_ui.database_card.title_record_id",
+                        source = source,
+                        id = id
+                    )
+                    .to_string(),
+                    None => t!(
+                        "agent_ui.database_card.title_with_rows",
+                        source = source,
+                        rows = rows_label(1)
+                    )
+                    .to_string(),
                 };
                 (IconName::Check, Color::Success, title, None)
             }
             Presentation::Series | Presentation::Table => (
                 IconName::Table,
                 Color::Muted,
-                format!("{source} · {}", rows_label(result.total_rows)),
+                t!(
+                    "agent_ui.database_card.title_with_rows",
+                    source = source,
+                    rows = rows_label(result.total_rows)
+                )
+                .to_string(),
                 limit_badge,
             ),
         };
@@ -361,8 +384,8 @@ impl ThreadView {
             Presentation::Table => self.render_table(&result, cx),
         };
         let copy_label = match presentation {
-            Presentation::Record => "Copiar",
-            _ => "Copiar CSV",
+            Presentation::Record => t!("agent_ui.database_card.copy"),
+            _ => t!("agent_ui.database_card.copy_csv"),
         };
         let copy_text = match presentation {
             Presentation::Record => result
@@ -390,9 +413,9 @@ impl ThreadView {
                 Button::new(
                     ("database-card-sql", entry_ix),
                     if sql_expanded {
-                        "Esconder SQL"
+                        t!("agent_ui.database_card.hide_sql")
                     } else {
-                        "Ver SQL"
+                        t!("agent_ui.database_card.show_sql")
                     },
                 )
                 .label_size(LabelSize::Small)
@@ -410,17 +433,20 @@ impl ThreadView {
                 })),
             )
             .child(
-                Button::new(("database-card-open", entry_ix), "Abrir no Banco")
-                    .label_size(LabelSize::Small)
-                    .color(Color::Muted)
-                    .start_icon(
-                        Icon::new(IconName::ArrowUpRight)
-                            .size(IconSize::XSmall)
-                            .color(Color::Muted),
-                    )
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.open_query_in_database(sql.clone(), window, cx);
-                    })),
+                Button::new(
+                    ("database-card-open", entry_ix),
+                    t!("agent_ui.database_card.open_in_database"),
+                )
+                .label_size(LabelSize::Small)
+                .color(Color::Muted)
+                .start_icon(
+                    Icon::new(IconName::ArrowUpRight)
+                        .size(IconSize::XSmall)
+                        .color(Color::Muted),
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.open_query_in_database(sql.clone(), window, cx);
+                })),
             )
             .when(has_rows, |this| {
                 this.child(
@@ -505,7 +531,7 @@ impl ThreadView {
             .when(hidden > 0, |this| {
                 this.child(
                     div().px_2().py_0p5().child(
-                        Label::new(format!("+ {hidden} colunas"))
+                        Label::new(t!("agent_ui.database_card.more_columns", count = hidden))
                             .size(LabelSize::XSmall)
                             .color(Color::Muted),
                     ),
@@ -593,13 +619,19 @@ impl ThreadView {
         });
         let mut notes = Vec::new();
         if hidden_rows > 0 {
-            notes.push(format!("+ {} no resultado", rows_label(hidden_rows)));
+            notes.push(t!(
+                "agent_ui.database_card.more_in_result",
+                rows = rows_label(hidden_rows)
+            ));
         }
         if hidden_columns > 0 {
-            notes.push(format!("+ {hidden_columns} colunas"));
+            notes.push(t!(
+                "agent_ui.database_card.more_columns",
+                count = hidden_columns
+            ));
         }
         if result.truncated {
-            notes.push(format!("o limite de {} cortou o resto", result.limit));
+            notes.push(t!("agent_ui.database_card.limit_cut", limit = result.limit));
         }
         v_flex()
             .w_full()
@@ -639,7 +671,10 @@ impl ThreadView {
             IconName::FileCode,
             Color::Warning,
             file_name,
-            Some(("não executado".to_owned(), Color::Warning)),
+            Some((
+                t!("agent_ui.database_card.not_executed").to_string(),
+                Color::Warning,
+            )),
             &result.connection,
             cx,
         );
@@ -652,30 +687,36 @@ impl ThreadView {
             .border_t_1()
             .border_color(self.tool_card_border_color(cx))
             .child(
-                Button::new(("database-card-focus", entry_ix), "Abrir no editor")
-                    .label_size(LabelSize::Small)
-                    .color(Color::Muted)
-                    .start_icon(
-                        Icon::new(IconName::ArrowUpRight)
-                            .size(IconSize::XSmall)
-                            .color(Color::Muted),
-                    )
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        let Some(project) = this.project.upgrade() else {
-                            return;
-                        };
-                        if let Err(error) =
-                            task_agents::focus_sql_editor(&project, &abs_path, window, cx)
-                        {
-                            this.show_workspace_error(error, cx);
-                        }
-                    })),
+                Button::new(
+                    ("database-card-focus", entry_ix),
+                    t!("agent_ui.database_card.open_in_editor"),
+                )
+                .label_size(LabelSize::Small)
+                .color(Color::Muted)
+                .start_icon(
+                    Icon::new(IconName::ArrowUpRight)
+                        .size(IconSize::XSmall)
+                        .color(Color::Muted),
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    let Some(project) = this.project.upgrade() else {
+                        return;
+                    };
+                    if let Err(error) =
+                        task_agents::focus_sql_editor(&project, &abs_path, window, cx)
+                    {
+                        this.show_workspace_error(error, cx);
+                    }
+                })),
             )
             .child(div().flex_1())
             .child(
-                Label::new(format!("linha {} · roda com ⌘↵", result.line))
-                    .size(LabelSize::XSmall)
-                    .color(Color::Muted),
+                Label::new(t!(
+                    "agent_ui.database_card.line_run_hint",
+                    line = result.line
+                ))
+                .size(LabelSize::XSmall)
+                .color(Color::Muted),
             )
             .into_any_element();
         vec![header, self.render_sql_block(&sql, cx), footer]
@@ -708,7 +749,7 @@ impl ThreadView {
                         .min_w_0()
                         .gap_1()
                         .child(
-                            Label::new("Nenhum banco conectado")
+                            Label::new(t!("agent_ui.database_card.not_connected"))
                                 .size(LabelSize::Small)
                                 .weight(gpui::FontWeight::SEMIBOLD),
                         )
@@ -733,7 +774,7 @@ impl ThreadView {
                                             .color(Color::Accent),
                                     )
                                     .child(
-                                        Label::new("Conectar no painel Banco")
+                                        Label::new(t!("agent_ui.database_card.connect_in_panel"))
                                             .size(LabelSize::XSmall)
                                             .weight(gpui::FontWeight::MEDIUM)
                                             .color(Color::Accent),
@@ -814,7 +855,7 @@ fn render_empty(result: &DatabaseQueryResult, cx: &App) -> AnyElement {
         .gap_0p5()
         .px_2()
         .py_1p5()
-        .child(Label::new("Nenhuma linha.").size(LabelSize::Small))
+        .child(Label::new(t!("agent_ui.database_card.no_rows")).size(LabelSize::Small))
         .child(
             Label::new(one_line(&result.sql, 140))
                 .size(LabelSize::XSmall)

@@ -53,6 +53,7 @@ use gpui::{
     TaskExt, WeakEntity, Window, WindowBackgroundAppearance, WindowHandle, canvas, img,
     linear_color_stop, linear_gradient, list, prelude::*, px,
 };
+use i18n::t;
 use itertools::Itertools;
 use language_model::LanguageModelRegistry;
 use menu::{
@@ -266,14 +267,14 @@ pub(crate) enum DeviceStatus {
 }
 
 impl DeviceStatus {
-    fn label(self) -> &'static str {
+    fn label(self) -> SharedString {
         match self {
-            DeviceStatus::Running => "Rodando",
-            DeviceStatus::Booting => "Iniciando",
-            DeviceStatus::Shutdown => "Desligado",
-            DeviceStatus::ImageMissing => "Imagem ausente",
-            DeviceStatus::Preparing => "Preparando",
-            DeviceStatus::RuntimeMissing => "Runtime ausente",
+            DeviceStatus::Running => t!("sidebar.device_status.running"),
+            DeviceStatus::Booting => t!("sidebar.device_status.booting"),
+            DeviceStatus::Shutdown => t!("sidebar.device_status.shutdown"),
+            DeviceStatus::ImageMissing => t!("sidebar.device_status.image_missing"),
+            DeviceStatus::Preparing => t!("sidebar.device_status.preparing"),
+            DeviceStatus::RuntimeMissing => t!("sidebar.device_status.runtime_missing"),
         }
     }
 
@@ -378,7 +379,7 @@ fn sidebar_row_frame(row: AnyElement, is_selected: bool, is_focused: bool, cx: &
 /// what picking it does. A platform already open elsewhere stays pickable but recedes.
 fn instance_menu_entry(
     kind: DeviceInstanceKind,
-    description: &'static str,
+    description: SharedString,
     dimmed: bool,
     cx: &App,
 ) -> AnyElement {
@@ -496,9 +497,9 @@ pub(crate) fn render_device_status_chip(status: DeviceStatus, cx: &App) -> Div {
 /// is up, with the list of devices behind it.
 fn render_device_picker(
     id: &'static str,
-    aria_label: &'static str,
+    aria_label: SharedString,
     summary: Option<DevicePickerSummary>,
-    placeholder: &'static str,
+    placeholder: SharedString,
     menu: Entity<ContextMenu>,
     disabled: bool,
     cx: &App,
@@ -8338,15 +8339,15 @@ impl Sidebar {
         let start_expo = primary_action_button("device-start-expo", device_ready, cx)
             .h(DEVICE_TOOL_SIZE)
             .px(DynamicSpacing::Base12.px(cx))
-            .aria_label("Iniciar Expo")
-            .tooltip(Tooltip::text("Iniciar Expo"))
+            .aria_label(t!("sidebar.device_toolbar.start_expo"))
+            .tooltip(Tooltip::text(t!("sidebar.device_toolbar.start_expo")))
             .child(
                 Icon::new(IconName::PlayFilled)
                     .size(IconSize::XSmall)
                     .color(Color::Custom(cx.theme().colors().text)),
             )
             .child(
-                Label::new("Run")
+                Label::new(t!("sidebar.device_toolbar.run"))
                     .size(LabelSize::Small)
                     .weight(FontWeight::SEMIBOLD)
                     .color(Color::Custom(cx.theme().colors().text)),
@@ -8367,7 +8368,7 @@ impl Sidebar {
         let build = device_toolbar_button(
             "device-build",
             IconName::ToolHammer,
-            "Compilar app",
+            t!("sidebar.device_toolbar.build_app"),
             device_ready,
         )
         .on_click(cx.listener(move |this, _, window, cx| {
@@ -8381,21 +8382,26 @@ impl Sidebar {
             }
         }));
 
-        let home = device_toolbar_button("device-home", IconName::Circle, "Home", device_ready)
-            .on_click(cx.listener(move |this, _, window, cx| {
-                if is_android {
-                    this.with_android_sdk_manager(cx, |manager, cx| {
-                        manager.send_keyevent(android_sdk::KEYCODE_HOME, cx)
-                    });
-                } else if let Some(workspace) = this.active_workspace(cx) {
-                    this.return_ios_simulator_to_home(&workspace, window, cx);
-                }
-            }));
+        let home = device_toolbar_button(
+            "device-home",
+            IconName::Circle,
+            t!("sidebar.device_toolbar.home"),
+            device_ready,
+        )
+        .on_click(cx.listener(move |this, _, window, cx| {
+            if is_android {
+                this.with_android_sdk_manager(cx, |manager, cx| {
+                    manager.send_keyevent(android_sdk::KEYCODE_HOME, cx)
+                });
+            } else if let Some(workspace) = this.active_workspace(cx) {
+                this.return_ios_simulator_to_home(&workspace, window, cx);
+            }
+        }));
 
         let screenshot = device_toolbar_button(
             "device-screenshot",
             IconName::Image,
-            "Screenshot",
+            t!("sidebar.device_toolbar.screenshot"),
             device_ready,
         )
         .on_click(cx.listener(move |this, _, window, cx| {
@@ -8412,7 +8418,7 @@ impl Sidebar {
         let copy_identifier = device_toolbar_button(
             "device-copy-id",
             IconName::Copy,
-            "Copiar ID do device",
+            t!("sidebar.device_toolbar.copy_id"),
             device_ready && self.device_identifier(cx).is_some(),
         )
         .on_click(cx.listener(|this, _, _, cx| {
@@ -8422,7 +8428,7 @@ impl Sidebar {
         let open_installed_app = device_toolbar_button(
             "device-open-installed-app",
             IconName::ArrowUpRight,
-            "Abrir app instalado",
+            t!("sidebar.device_toolbar.open_installed_app"),
             device_ready,
         )
         .on_click(cx.listener(move |this, _, window, cx| {
@@ -8440,7 +8446,7 @@ impl Sidebar {
         let power = device_toolbar_button(
             "device-power",
             IconName::Power,
-            "Desligar device",
+            t!("sidebar.device_toolbar.power_off"),
             device_ready,
         )
         .icon_color(Color::Error)
@@ -8502,7 +8508,11 @@ impl Sidebar {
             return;
         };
         workspace.update(cx, |workspace, cx| {
-            show_device_toast(workspace, format!("ID do device copiado: {identifier}"), cx);
+            show_device_toast(
+                workspace,
+                t!("sidebar.device_toolbar.id_copied", identifier = identifier),
+                cx,
+            );
         });
     }
 
@@ -8531,7 +8541,7 @@ impl Sidebar {
                     // makes the open state read as the active tool.
                     .selected_style(ButtonStyle::Tinted(TintColor::Accent))
                     .disabled(!device_ready),
-                Tooltip::text("Configurações do device"),
+                Tooltip::text(t!("sidebar.device_settings.tooltip")),
             )
             .anchor(gpui::Anchor::BottomRight)
             .with_handle(self.device_settings_menu_handle.clone())
@@ -8553,9 +8563,9 @@ impl Sidebar {
                 let appearance_owner = this.clone();
                 let keyboard_owner = this;
                 menu.sectioned()
-                    .header("Simulação")
+                    .header(t!("sidebar.device_settings.simulation"))
                     .item(
-                        ContextMenuEntry::new("Alterar localização do usuário")
+                        ContextMenuEntry::new(t!("sidebar.device_settings.change_location"))
                             .icon(IconName::LocationEdit)
                             .handler(move |window, cx| {
                                 location_owner
@@ -8566,7 +8576,7 @@ impl Sidebar {
                             }),
                     )
                     .item(
-                        ContextMenuEntry::new("Tema escuro")
+                        ContextMenuEntry::new(t!("sidebar.device_settings.dark_appearance"))
                             .icon(IconName::Moon)
                             .toggleable(IconPosition::End, dark_appearance)
                             .handler(move |_window, cx| {
@@ -8578,9 +8588,9 @@ impl Sidebar {
                             }),
                     )
                     .separator()
-                    .header("Entrada")
+                    .header(t!("sidebar.device_settings.input"))
                     .item(
-                        ContextMenuEntry::new("Mostrar teclado do device")
+                        ContextMenuEntry::new(t!("sidebar.device_settings.show_keyboard"))
                             .icon(IconName::Keyboard)
                             .toggleable(IconPosition::End, software_keyboard_visible)
                             .handler(move |window, cx| {
@@ -8635,8 +8645,7 @@ impl Sidebar {
                 .set_location(location.latitude, location.longitude, cx)
         } else {
             let Some(udid) = self.selected_ios_device_udid.clone() else {
-                self.ios_simulator_error =
-                    Some("Selecione primeiro um simulador iOS inicializado.".into());
+                self.ios_simulator_error = Some(t!("sidebar.ios.select_booted_simulator"));
                 cx.notify();
                 return;
             };
@@ -8651,11 +8660,19 @@ impl Sidebar {
                     ])
                     .output()
                     .await
-                    .context("não foi possível executar xcrun simctl location")?;
+                    .with_context(|| {
+                        t!(
+                            "sidebar.errors.command_run_failed",
+                            command = "xcrun simctl location"
+                        )
+                    })?;
                 anyhow::ensure!(
                     output.status.success(),
-                    "xcrun simctl location falhou: {}",
-                    String::from_utf8_lossy(&output.stderr).trim()
+                    t!(
+                        "sidebar.errors.command_failed",
+                        command = "xcrun simctl location",
+                        details = String::from_utf8_lossy(&output.stderr).trim()
+                    )
                 );
                 Ok(())
             })
@@ -8667,15 +8684,19 @@ impl Sidebar {
                 .update(cx, |workspace, cx| match result {
                     Ok(()) => show_device_toast(
                         workspace,
-                        format!(
-                            "Localização do device definida para {}, {}",
-                            location.latitude, location.longitude
+                        t!(
+                            "sidebar.device_settings.location_set",
+                            latitude = location.latitude,
+                            longitude = location.longitude
                         ),
                         cx,
                     ),
                     Err(error) => show_device_toast(
                         workspace,
-                        format!("Não foi possível definir a localização: {error:#}"),
+                        t!(
+                            "sidebar.device_settings.location_failed",
+                            error = format!("{error:#}")
+                        ),
                         cx,
                     ),
                 })
@@ -8703,8 +8724,7 @@ impl Sidebar {
             manager.read(cx).set_software_keyboard_visible(visible, cx)
         } else {
             let Some(udid) = self.selected_ios_device_udid.clone() else {
-                self.ios_simulator_error =
-                    Some("Selecione primeiro um simulador iOS inicializado.".into());
+                self.ios_simulator_error = Some(t!("sidebar.ios.select_booted_simulator"));
                 cx.notify();
                 return;
             };
@@ -8715,9 +8735,7 @@ impl Sidebar {
             #[cfg(not(target_os = "macos"))]
             let result = {
                 let _ = (udid, window);
-                Err(anyhow::anyhow!(
-                    "simuladores iOS só estão disponíveis no macOS"
-                ))
+                Err(anyhow::anyhow!(t!("sidebar.ios.macos_only")))
             };
 
             Task::ready(result)
@@ -8729,15 +8747,18 @@ impl Sidebar {
         let workspace = workspace.downgrade();
         cx.spawn(async move |this, cx| {
             let message = match task.await {
-                Ok(()) if visible => "Teclado do device visível".to_string(),
-                Ok(()) => "Teclado do device oculto".to_string(),
+                Ok(()) if visible => t!("sidebar.device_settings.keyboard_shown"),
+                Ok(()) => t!("sidebar.device_settings.keyboard_hidden"),
                 Err(error) => {
                     this.update(cx, |this, cx| {
                         this.device_software_keyboard_visible = !visible;
                         cx.notify();
                     })
                     .log_err();
-                    format!("Não foi possível alternar o teclado do device: {error:#}")
+                    t!(
+                        "sidebar.device_settings.keyboard_failed",
+                        error = format!("{error:#}")
+                    )
                 }
             };
             workspace
@@ -8809,8 +8830,7 @@ impl Sidebar {
             }
             DevicePlatform::Ios => {
                 let Some(udid) = self.selected_ios_device_udid.clone() else {
-                    self.ios_simulator_error =
-                        Some("Selecione primeiro um simulador iOS inicializado.".into());
+                    self.ios_simulator_error = Some(t!("sidebar.ios.select_booted_simulator"));
                     cx.notify();
                     return;
                 };
@@ -8827,15 +8847,18 @@ impl Sidebar {
         let workspace = workspace.downgrade();
         cx.spawn(async move |this, cx| {
             let message = match task.await {
-                Ok(()) if dark => "Tema escuro ativado".to_string(),
-                Ok(()) => "Tema claro ativado".to_string(),
+                Ok(()) if dark => t!("sidebar.device_settings.dark_enabled"),
+                Ok(()) => t!("sidebar.device_settings.light_enabled"),
                 Err(error) => {
                     this.update(cx, |this, cx| {
                         this.device_dark_appearance = !dark;
                         cx.notify();
                     })
                     .log_err();
-                    format!("Não foi possível trocar o tema do device: {error:#}")
+                    t!(
+                        "sidebar.device_settings.appearance_failed",
+                        error = format!("{error:#}")
+                    )
                 }
             };
             workspace
@@ -9032,7 +9055,7 @@ impl Sidebar {
             return;
         }
 
-        self.ios_busy_message = Some("Procurando simuladores iOS…".into());
+        self.ios_busy_message = Some(t!("sidebar.ios.searching"));
         cx.notify();
 
         let this = cx.weak_entity();
@@ -9056,13 +9079,10 @@ impl Sidebar {
 
             if let Some(udid) = boot_udid {
                 this.update(cx, |this, cx| {
-                    this.ios_busy_message = Some(
-                        match this.ios_device(&udid) {
-                            Some(device) => format!("Inicializando {}…", device.name),
-                            None => "Inicializando simulador iOS…".to_owned(),
-                        }
-                        .into(),
-                    );
+                    this.ios_busy_message = Some(match this.ios_device(&udid) {
+                        Some(device) => t!("sidebar.ios.booting_device", name = device.name),
+                        None => t!("sidebar.ios.booting"),
+                    });
                     cx.notify();
                 })
                 .log_err();
@@ -9076,9 +9096,7 @@ impl Sidebar {
                 match booted {
                     // The device's state changed, so the list has to be read again.
                     Ok(()) => devices = cx.background_spawn(list_ios_simulators()).await,
-                    Err(error) => {
-                        devices = Err(error.context("não foi possível inicializar o simulador"))
-                    }
+                    Err(error) => devices = Err(error.context(t!("sidebar.ios.boot_failed"))),
                 }
             }
 
@@ -9351,15 +9369,14 @@ impl Sidebar {
                     self.ios_failed_device_udid = None;
                 }
                 None => {
-                    self.ios_simulator_error =
-                        Some("GPUI could not mount the native SimulatorKit view.".into());
+                    self.ios_simulator_error = Some(t!("sidebar.ios.mount_failed"));
                     self.ios_failed_device_udid = Some(udid);
                     cx.notify();
                 }
             },
             Err(error) => {
                 self.ios_simulator_error =
-                    Some(format!("Could not open the iOS simulator: {error:#}").into());
+                    Some(t!("sidebar.ios.open_failed", error = format!("{error:#}")));
                 self.ios_failed_device_udid = Some(udid);
                 cx.notify();
             }
@@ -9397,14 +9414,14 @@ impl Sidebar {
                 .gap_2()
                 .p_4()
                 .child(Icon::new(IconName::Smartphone).size(IconSize::XLarge))
-                .child(Label::new("Simulador iOS"))
+                .child(Label::new(t!("sidebar.ios.title")))
                 .child(
-                    Label::new("Clique no botão abaixo para inicializar o simulador iOS.")
+                    Label::new(t!("sidebar.ios.boot_prompt"))
                         .size(LabelSize::Small)
                         .color(Color::Muted),
                 )
                 .child(
-                    Button::new("boot-ios-simulator", "Iniciar simulador")
+                    Button::new("boot-ios-simulator", t!("sidebar.ios.boot_button"))
                         .style(ButtonStyle::Filled)
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.ios_simulator_started = true;
@@ -9469,26 +9486,22 @@ impl Sidebar {
                                 )
                                 .child(Label::new(busy_message))
                                 .child(
-                                    Label::new("O primeiro boot de um device leva mais tempo.")
+                                    Label::new(t!("sidebar.ios.first_boot_slow"))
                                         .size(LabelSize::Small)
                                         .color(Color::Muted),
                                 )
                             })
                             .when(!is_discovering_devices && !has_devices, |this| {
                                 this.child(Icon::new(IconName::Smartphone).size(IconSize::XLarge))
-                                    .child(Label::new("Nenhum simulador iOS disponível"))
+                                    .child(Label::new(t!("sidebar.ios.no_simulators")))
                                     .child(
-                                        Label::new(
-                                            "Não foi possível inicializar um simulador iOS.",
-                                        )
-                                        .size(LabelSize::Small)
-                                        .color(Color::Muted),
+                                        Label::new(t!("sidebar.ios.no_simulators_description"))
+                                            .size(LabelSize::Small)
+                                            .color(Color::Muted),
                                     )
                             })
                             .when(has_devices && selected_device.is_none(), |this| {
-                                this.child(Label::new(
-                                    "Selecione um simulador iOS para abri-lo aqui.",
-                                ))
+                                this.child(Label::new(t!("sidebar.ios.select_to_open")))
                             }),
                     )
                     .child(
@@ -9603,7 +9616,7 @@ impl Sidebar {
         let sidebar = cx.weak_entity();
         let menu_selection = selected_udid;
         let device_menu = ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
-            menu = menu.header("SIMULADORES");
+            menu = menu.header(t!("sidebar.ios.menu_header"));
             for (udid, name, os, status) in entries {
                 let is_selected = menu_selection.as_deref() == Some(udid.as_str());
                 let sidebar = sidebar.clone();
@@ -9645,7 +9658,7 @@ impl Sidebar {
                     },
                 );
             }
-            let action = |label: &'static str, icon: IconName, entry: Option<IosManagerEntry>| {
+            let action = |label: SharedString, icon: IconName, entry: Option<IosManagerEntry>| {
                 let sidebar = sidebar.clone();
                 ContextMenuEntry::new(label)
                     .icon(icon)
@@ -9677,24 +9690,28 @@ impl Sidebar {
             };
             menu.separator()
                 .item(action(
-                    "Novo simulador…",
+                    t!("sidebar.ios.new_simulator"),
                     IconName::Plus,
                     Some(IosManagerEntry::NewSimulator),
                 ))
                 .item(action(
-                    "Gerenciar simuladores…",
+                    t!("sidebar.ios.manage_simulators_ellipsis"),
                     IconName::Sliders,
                     Some(IosManagerEntry::Simulators),
                 ))
-                .item(action("Atualizar lista", IconName::RotateCw, None))
+                .item(action(
+                    t!("sidebar.devices.refresh_list"),
+                    IconName::RotateCw,
+                    None,
+                ))
         });
 
         HeaderBar::new("ios-device-header")
             .child(render_device_picker(
                 "ios-simulator-selector",
-                "Simulador iOS",
+                t!("sidebar.ios.title"),
                 selected_summary,
-                "Selecione um simulador iOS",
+                t!("sidebar.ios.select_placeholder"),
                 device_menu,
                 is_discovering_devices && !has_entries,
                 cx,
@@ -9702,8 +9719,8 @@ impl Sidebar {
             .end_child(
                 IconButton::new("manage-ios-simulators", IconName::Sliders)
                     .icon_size(IconSize::Small)
-                    .aria_label("Gerenciar simuladores")
-                    .tooltip(Tooltip::text("Gerenciar simuladores"))
+                    .aria_label(t!("sidebar.ios.manage_simulators"))
+                    .tooltip(Tooltip::text(t!("sidebar.ios.manage_simulators")))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.show_ios_device_manager(IosManagerEntry::Simulators, window, cx);
                     })),
@@ -9731,38 +9748,35 @@ impl Sidebar {
             Problem,
             Pending,
         }
-        let steps: Vec<(Mark, String, Option<String>, Option<String>)> = vec![
+        let steps: Vec<(Mark, SharedString, Option<SharedString>, Option<String>)> = vec![
             (
                 if xcode.command_line_tools_found() {
                     Mark::Done
                 } else {
                     Mark::Pending
                 },
-                "Command Line Tools encontradas".to_string(),
+                t!("sidebar.xcode.command_line_tools_found"),
                 None,
                 None,
             ),
             match &xcode_app {
                 Some(path) => (
                     Mark::Done,
-                    "Xcode encontrado".to_string(),
-                    Some(path.display().to_string()),
+                    t!("sidebar.xcode.found"),
+                    Some(path.display().to_string().into()),
                     None,
                 ),
                 None => (
                     Mark::Problem,
-                    "Xcode não encontrado".to_string(),
-                    Some("Procuramos em /Applications e pelo Spotlight.".to_string()),
+                    t!("sidebar.xcode.not_found"),
+                    Some(t!("sidebar.xcode.not_found_detail")),
                     None,
                 ),
             },
             (
                 if selected { Mark::Done } else { Mark::Pending },
-                "Apontar o xcode-select para o Xcode".to_string(),
-                (!selected).then(|| {
-                    "Só se o Xcode não virar o padrão sozinho. Pede sua senha, então rode no terminal:"
-                        .to_string()
-                }),
+                t!("sidebar.xcode.select_step"),
+                (!selected).then(|| t!("sidebar.xcode.select_step_detail")),
                 (!selected).then(|| select_command.clone()),
             ),
             (
@@ -9771,17 +9785,12 @@ impl Sidebar {
                 } else {
                     Mark::Pending
                 },
-                "Aceitar a licença do Xcode".to_string(),
+                t!("sidebar.xcode.license_step"),
                 (selected && !xcode.license_accepted)
-                    .then(|| "Abrir o Xcode uma vez resolve.".to_string()),
+                    .then(|| t!("sidebar.xcode.license_step_detail")),
                 None,
             ),
-            (
-                Mark::Pending,
-                "Baixar o runtime do iOS pedido pelo Xcode".to_string(),
-                None,
-                None,
-            ),
+            (Mark::Pending, t!("sidebar.xcode.runtime_step"), None, None),
         ];
         let rows = steps
             .into_iter()
@@ -9853,7 +9862,7 @@ impl Sidebar {
                                             IconName::Copy,
                                         )
                                         .icon_size(IconSize::XSmall)
-                                        .tooltip(Tooltip::text("Copiar comando"))
+                                        .tooltip(Tooltip::text(t!("sidebar.xcode.copy_command")))
                                         .on_click(
                                             move |_, _, cx| {
                                                 cx.write_to_clipboard(ClipboardItem::new_string(
@@ -9866,9 +9875,9 @@ impl Sidebar {
                     )
             });
         let open_label = if xcode_app.is_some() {
-            "Abrir o Xcode"
+            t!("sidebar.xcode.open_xcode")
         } else {
-            "Abrir na App Store"
+            t!("sidebar.xcode.open_app_store")
         };
         v_flex()
             .flex_1()
@@ -9882,18 +9891,14 @@ impl Sidebar {
                     .w_full()
                     .gap_1()
                     .child(
-                        Label::new("O simulador iOS precisa do Xcode")
+                        Label::new(t!("sidebar.xcode.title"))
                             .size(LabelSize::Large)
                             .weight(FontWeight::SEMIBOLD),
                     )
                     .child(
-                        Label::new(
-                            "Os simuladores vêm com o Xcode, que só é instalado pela App Store. \
-                             Depois de instalar, abra o Xcode uma vez para aceitar a licença e \
-                             volte aqui.",
-                        )
-                        .size(LabelSize::Small)
-                        .color(Color::Muted),
+                        Label::new(t!("sidebar.xcode.description"))
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
                     ),
             )
             .child(
@@ -9913,18 +9918,24 @@ impl Sidebar {
                     .gap_2()
                     .child(
                         div().flex_1().min_w_0().child(
-                            Label::new("Verificamos de novo quando o Asylum volta ao foco.")
+                            Label::new(t!("sidebar.xcode.recheck_on_focus"))
                                 .size(LabelSize::XSmall)
                                 .color(Color::Placeholder),
                         ),
                     )
                     .child(
-                        secondary_button("recheck-xcode", None, "Verificar de novo", true, cx)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                if let Some(manager) = this.ios_simulator_manager.clone() {
-                                    manager.update(cx, |manager, cx| manager.refresh(cx));
-                                }
-                            })),
+                        secondary_button(
+                            "recheck-xcode",
+                            None,
+                            t!("sidebar.xcode.recheck"),
+                            true,
+                            cx,
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            if let Some(manager) = this.ios_simulator_manager.clone() {
+                                manager.update(cx, |manager, cx| manager.refresh(cx));
+                            }
+                        })),
                     )
                     .child(
                         primary_button("open-xcode", None, open_label, None, cx).on_click(
@@ -9946,9 +9957,7 @@ impl Sidebar {
             .gap_2()
             .p_4()
             .child(Icon::new(IconName::Smartphone).size(IconSize::XLarge))
-            .child(Label::new(
-                "O simulador iOS integrado está disponível apenas no macOS.",
-            ))
+            .child(Label::new(t!("sidebar.ios.embedded_macos_only")))
             .into_any_element()
     }
 
@@ -10190,7 +10199,7 @@ impl Sidebar {
                                     .color(Color::Muted)
                                     .with_rotate_animation(2),
                             )
-                            .child(Label::new("Conectando à tela do emulador…")),
+                            .child(Label::new(t!("sidebar.android.connecting_screen"))),
                     ),
                 })
                 .child(
@@ -10285,7 +10294,7 @@ impl Sidebar {
             .collect();
         let menu_selection = selected_avd;
         let device_menu = ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
-            menu = menu.header("DISPOSITIVOS");
+            menu = menu.header(t!("sidebar.android.menu_header"));
             for (avd, status) in menu_avds {
                 let is_selected = menu_selection.as_deref() == Some(avd.name.as_str());
                 let label = avd.label();
@@ -10332,7 +10341,7 @@ impl Sidebar {
                     },
                 );
             }
-            let action = |label: &'static str, icon: IconName, entry: Option<ManagerEntry>| {
+            let action = |label: SharedString, icon: IconName, entry: Option<ManagerEntry>| {
                 let sidebar = sidebar.clone();
                 ContextMenuEntry::new(label)
                     .icon(icon)
@@ -10361,25 +10370,29 @@ impl Sidebar {
             };
             menu.separator()
                 .item(action(
-                    "Novo dispositivo…",
+                    t!("sidebar.android.new_device"),
                     IconName::Plus,
                     Some(ManagerEntry::NewDevice),
                 ))
                 .item(action(
-                    "Gerenciar dispositivos…",
+                    t!("sidebar.android.manage_devices_ellipsis"),
                     IconName::Sliders,
                     Some(ManagerEntry::Devices),
                 ))
-                .item(action("Atualizar lista", IconName::RotateCw, None))
+                .item(action(
+                    t!("sidebar.devices.refresh_list"),
+                    IconName::RotateCw,
+                    None,
+                ))
         });
 
         Some(
             HeaderBar::new("android-device-header")
                 .child(render_device_picker(
                     "android-avd-selector",
-                    "Dispositivo virtual Android",
+                    t!("sidebar.android.title"),
                     selected_summary,
-                    "Selecione um dispositivo virtual",
+                    t!("sidebar.android.select_placeholder"),
                     device_menu,
                     is_busy,
                     cx,
@@ -10387,8 +10400,8 @@ impl Sidebar {
                 .end_child(
                     IconButton::new("manage-android-devices", IconName::Sliders)
                         .icon_size(IconSize::Small)
-                        .aria_label("Gerenciar dispositivos")
-                        .tooltip(Tooltip::text("Gerenciar dispositivos"))
+                        .aria_label(t!("sidebar.android.manage_devices"))
+                        .tooltip(Tooltip::text(t!("sidebar.android.manage_devices")))
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.show_android_device_manager(ManagerEntry::Devices, window, cx);
                         })),
@@ -10591,24 +10604,31 @@ impl Sidebar {
             let progress = running.then(|| job.progress).flatten();
             let progress_text = progress.map(|progress| {
                 if progress.installing {
-                    "Descompactando e instalando…".to_string()
+                    t!("sidebar.prepare.installing").to_string()
                 } else if progress.total > 0 {
-                    let mut text = format!(
-                        "{} de {}",
-                        format_bytes(progress.downloaded.min(progress.total)),
-                        format_bytes(progress.total)
-                    );
+                    let mut text = t!(
+                        "sidebar.prepare.progress",
+                        downloaded = format_bytes(progress.downloaded.min(progress.total)),
+                        total = format_bytes(progress.total)
+                    )
+                    .to_string();
                     if let Some(remaining) = progress.remaining {
                         let minutes = remaining.as_secs().div_ceil(60).max(1);
-                        text.push_str(&format!(
-                            " · {minutes} {} restante{}",
-                            if minutes == 1 { "min" } else { "min" },
-                            if minutes == 1 { "" } else { "s" }
-                        ));
+                        let remaining_text = if minutes == 1 {
+                            t!("sidebar.prepare.remaining.one", minutes = minutes)
+                        } else {
+                            t!("sidebar.prepare.remaining.other", minutes = minutes)
+                        };
+                        text.push_str(" · ");
+                        text.push_str(&remaining_text);
                     }
                     text
                 } else {
-                    format!("{} baixados", format_bytes(progress.downloaded))
+                    t!(
+                        "sidebar.prepare.downloaded",
+                        size = format_bytes(progress.downloaded)
+                    )
+                    .to_string()
                 }
             });
             let fraction = progress.map(|progress| {
@@ -10710,17 +10730,24 @@ impl Sidebar {
                     .child(
                         div().flex_1().min_w_0().child(
                             Label::new(if first_boot {
-                                "A primeira inicialização leva alguns minutos."
+                                t!("sidebar.prepare.first_boot_slow")
                             } else {
-                                "Pode fechar o dock; o download continua."
+                                t!("sidebar.prepare.can_close_dock")
                             })
                             .size(LabelSize::XSmall)
                             .color(Color::Placeholder),
                         ),
                     )
                     .child(
-                        secondary_button("cancel-android-prepare", None, "Cancelar", true, cx)
-                            .on_click(cx.listener(move |this, _, _, cx| match platform {
+                        secondary_button(
+                            "cancel-android-prepare",
+                            None,
+                            t!("sidebar.prepare.cancel"),
+                            true,
+                            cx,
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            match platform {
                                 DevicePlatform::Android => {
                                     this.with_android_sdk_manager(cx, |manager, cx| {
                                         if first_boot {
@@ -10736,7 +10763,8 @@ impl Sidebar {
                                             .update(cx, |manager, cx| manager.cancel_prepare(cx));
                                     }
                                 }
-                            })),
+                            }
+                        })),
                     ),
             )
     }
@@ -10782,19 +10810,17 @@ impl Sidebar {
         match state {
             AndroidSdkState::Unknown => base
                 .child(spinner())
-                .child(Label::new("Verificando o Android SDK…")),
+                .child(Label::new(t!("sidebar.android.checking_sdk"))),
             AndroidSdkState::NotInstalled => base
                 .child(Icon::new(IconName::Smartphone).size(IconSize::XLarge))
-                .child(Label::new("Emulador Android não instalado"))
+                .child(Label::new(t!("sidebar.android.not_installed")))
                 .child(
-                    Label::new(
-                        "O Asylum pode baixar o JDK e o Android SDK e criar um dispositivo virtual automaticamente.",
-                    )
-                    .size(LabelSize::Small)
-                    .color(Color::Muted),
+                    Label::new(t!("sidebar.android.not_installed_description"))
+                        .size(LabelSize::Small)
+                        .color(Color::Muted),
                 )
                 .child(
-                    Button::new("install-android-sdk", "Instalar Android SDK")
+                    Button::new("install-android-sdk", t!("sidebar.android.install_sdk"))
                         .style(ButtonStyle::Filled)
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.with_android_sdk_manager(cx, |manager, cx| manager.install(cx));
@@ -10804,9 +10830,16 @@ impl Sidebar {
                 let progress = step.progress.map(|(downloaded, total)| {
                     let downloaded_mb = downloaded / (1024 * 1024);
                     if total > 0 {
-                        format!("{downloaded_mb} MB de {} MB", total / (1024 * 1024))
+                        t!(
+                            "sidebar.android.install_progress",
+                            downloaded = downloaded_mb,
+                            total = total / (1024 * 1024)
+                        )
                     } else {
-                        format!("{downloaded_mb} MB baixados")
+                        t!(
+                            "sidebar.android.install_downloaded",
+                            downloaded = downloaded_mb
+                        )
                     }
                 });
                 base.child(spinner())
@@ -10821,23 +10854,29 @@ impl Sidebar {
             }
             AndroidSdkState::Installed => base
                 .child(Icon::new(IconName::Smartphone).size(IconSize::XLarge))
-                .child(Label::new("Android SDK instalado"))
+                .child(Label::new(t!("sidebar.android.sdk_installed")))
                 .child(
-                    Label::new("Falta criar o dispositivo virtual para usar o emulador.")
+                    Label::new(t!("sidebar.android.sdk_installed_description"))
                         .size(LabelSize::Small)
                         .color(Color::Muted),
                 )
                 .child(
-                    primary_button("create-android-avd", None, "Criar dispositivo virtual", None, cx)
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.show_android_device_manager(ManagerEntry::NewDevice, window, cx);
-                        })),
+                    primary_button(
+                        "create-android-avd",
+                        None,
+                        t!("sidebar.android.create_avd"),
+                        None,
+                        cx,
+                    )
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.show_android_device_manager(ManagerEntry::NewDevice, window, cx);
+                    })),
                 ),
             AndroidSdkState::AvdReady => base
                 .child(Icon::new(IconName::Smartphone).size(IconSize::XLarge))
-                .child(Label::new("Dispositivo virtual pronto"))
+                .child(Label::new(t!("sidebar.android.avd_ready")))
                 .child(
-                    Button::new("boot-android-emulator", "Iniciar emulador")
+                    Button::new("boot-android-emulator", t!("sidebar.android.boot_emulator"))
                         .style(ButtonStyle::Filled)
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.with_android_sdk_manager(cx, |manager, cx| {
@@ -10848,17 +10887,15 @@ impl Sidebar {
             AndroidSdkState::Preparing(job) => {
                 self.render_prepare_job(&job, DevicePlatform::Android, cx)
             }
-            AndroidSdkState::EmulatorBooting if first_boot_job.is_some() => {
-                match &first_boot_job {
-                    Some(job) => self.render_prepare_job(job, DevicePlatform::Android, cx),
-                    None => base,
-                }
-            }
+            AndroidSdkState::EmulatorBooting if first_boot_job.is_some() => match &first_boot_job {
+                Some(job) => self.render_prepare_job(job, DevicePlatform::Android, cx),
+                None => base,
+            },
             AndroidSdkState::EmulatorBooting => base
                 .child(spinner())
-                .child(Label::new("Iniciando o emulador Android…"))
+                .child(Label::new(t!("sidebar.android.booting")))
                 .child(
-                    Label::new("Isso pode levar alguns minutos na primeira inicialização.")
+                    Label::new(t!("sidebar.android.booting_description"))
                         .size(LabelSize::Small)
                         .color(Color::Muted),
                 ),
@@ -10870,11 +10907,11 @@ impl Sidebar {
                         .color(Color::Error),
                 )
                 .child(
-                    Button::new("retry-android-sdk", "Tentar novamente").on_click(cx.listener(
-                        |this, _, _, cx| {
+                    Button::new("retry-android-sdk", t!("sidebar.android.retry")).on_click(
+                        cx.listener(|this, _, _, cx| {
                             this.with_android_sdk_manager(cx, |manager, cx| manager.refresh(cx));
-                        },
-                    )),
+                        }),
+                    ),
                 ),
         }
     }
@@ -11209,14 +11246,14 @@ impl Sidebar {
                 };
                 let menu = ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
                     if !hidden_tabs.is_empty() {
-                        menu = menu.header("Adicionar à dock");
+                        menu = menu.header(t!("sidebar.device_instances.add_to_dock"));
                         for kind in hidden_tabs.iter().copied() {
                             let this = this.clone();
                             menu = menu.custom_entry(
                                 move |_window, cx| {
                                     instance_menu_entry(
                                         kind,
-                                        "Volta como aba desta instância",
+                                        t!("sidebar.device_instances.restore_tab"),
                                         false,
                                         cx,
                                     )
@@ -11231,21 +11268,23 @@ impl Sidebar {
                         }
                         menu = menu.separator();
                     }
-                    menu = menu.header("Nova instância à direita");
+                    menu = menu.header(t!("sidebar.device_instances.new_instance"));
                     for kind in DeviceInstanceKind::ALL.iter().copied() {
                         let already_open = open_kinds.contains(&kind);
                         let description = if already_open {
-                            "Já aberto em outra instância"
+                            t!("sidebar.device_instances.already_open")
                         } else {
                             match kind {
-                                DeviceInstanceKind::Android => "Emulador Android",
-                                DeviceInstanceKind::Ios => "Simulador iOS",
+                                DeviceInstanceKind::Android => {
+                                    t!("sidebar.device_instances.android_emulator")
+                                }
+                                DeviceInstanceKind::Ios => t!("sidebar.ios.title"),
                             }
                         };
                         let this = this.clone();
                         menu = menu.custom_entry(
                             move |_window, cx| {
-                                instance_menu_entry(kind, description, already_open, cx)
+                                instance_menu_entry(kind, description.clone(), already_open, cx)
                             },
                             move |window, cx| {
                                 this.update(cx, |this, cx| {
@@ -11273,7 +11312,7 @@ impl Sidebar {
                     .height(DEVICE_TOOL_SIZE.into())
                     .width(DEVICE_TOOL_SIZE)
                     .selected_style(ButtonStyle::Tinted(TintColor::Accent)),
-                Tooltip::text("Nova instância à direita"),
+                Tooltip::text(t!("sidebar.device_instances.new_instance")),
             )
             .anchor(gpui::Anchor::TopRight)
             .with_handle(self.add_device_instance_menu_handle.clone())
@@ -11357,7 +11396,7 @@ impl Sidebar {
                             .icon_size(IconSize::Indicator)
                             .height(px(16.).into())
                             .width(px(16.))
-                            .tooltip(Tooltip::text("Remover da dock"))
+                            .tooltip(Tooltip::text(t!("sidebar.device_instances.remove_tab")))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.hovered_device_tab = None;
                                 this.remove_device_tab(kind, window, cx);
@@ -11400,7 +11439,9 @@ impl Sidebar {
                     .when(self.device_instance_split, |this| {
                         this.child(header_button(
                             IconButton::new("close-device-instance", IconName::Close)
-                                .tooltip(Tooltip::text("Fechar instância"))
+                                .tooltip(Tooltip::text(t!(
+                                    "sidebar.device_instances.close_instance"
+                                )))
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.request_close_device_instance(window, cx);
                                 })),
@@ -11428,8 +11469,7 @@ impl Sidebar {
     ) {
         let project = workspace.read(cx).project().clone();
         if !project.read(cx).is_local() {
-            self.ios_simulator_error =
-                Some("Os comandos do simulador iOS exigem um projeto local.".into());
+            self.ios_simulator_error = Some(t!("sidebar.ios.requires_local_project"));
             cx.notify();
             return;
         }
@@ -11438,8 +11478,7 @@ impl Sidebar {
             .active_project_directory(cx)
             .map(|path| path.to_path_buf())
         else {
-            self.ios_simulator_error =
-                Some("Não foi possível determinar a pasta do projeto ativo.".into());
+            self.ios_simulator_error = Some(t!("sidebar.devices.no_project_directory"));
             cx.notify();
             return;
         };
@@ -11482,8 +11521,7 @@ impl Sidebar {
         cx: &mut Context<Self>,
     ) {
         let Some(udid) = self.selected_ios_device_udid.clone() else {
-            self.ios_simulator_error =
-                Some("Selecione primeiro um simulador iOS inicializado.".into());
+            self.ios_simulator_error = Some(t!("sidebar.ios.select_booted_simulator"));
             cx.notify();
             return;
         };
@@ -11491,7 +11529,7 @@ impl Sidebar {
         self.spawn_ios_terminal_task(
             workspace,
             "build",
-            "Compilar app iOS",
+            &t!("sidebar.tasks.build_ios"),
             "yarn",
             vec!["ios".to_owned(), "--device".to_owned(), udid],
             window,
@@ -11506,8 +11544,7 @@ impl Sidebar {
         cx: &mut Context<Self>,
     ) {
         if self.selected_ios_device_udid.is_none() {
-            self.ios_simulator_error =
-                Some("Selecione primeiro um simulador iOS inicializado.".into());
+            self.ios_simulator_error = Some(t!("sidebar.ios.select_booted_simulator"));
             cx.notify();
             return;
         }
@@ -11515,7 +11552,7 @@ impl Sidebar {
         self.spawn_ios_terminal_task(
             workspace,
             "start",
-            "Iniciar Expo no iOS",
+            &t!("sidebar.tasks.start_expo_ios"),
             "yarn",
             vec!["expo".to_owned(), "start".to_owned()],
             window,
@@ -11597,7 +11634,7 @@ impl Sidebar {
             workspace,
             "android",
             "build",
-            "Compilar app Android",
+            &t!("sidebar.tasks.build_android"),
             "yarn",
             vec!["android".to_owned()],
             window,
@@ -11615,7 +11652,7 @@ impl Sidebar {
             workspace,
             "android",
             "start",
-            "Iniciar Expo no Android",
+            &t!("sidebar.tasks.start_expo_android"),
             "yarn",
             vec![
                 "expo".to_owned(),
@@ -11725,8 +11762,7 @@ impl Sidebar {
         cx: &mut Context<Self>,
     ) {
         let Some(udid) = self.selected_ios_device_udid.clone() else {
-            self.ios_simulator_error =
-                Some("Selecione primeiro um simulador iOS inicializado.".into());
+            self.ios_simulator_error = Some(t!("sidebar.ios.select_booted_simulator"));
             cx.notify();
             return;
         };
@@ -11736,8 +11772,7 @@ impl Sidebar {
             .active_project_directory(cx)
             .map(|path| path.to_path_buf())
         else {
-            self.ios_simulator_error =
-                Some("Não foi possível determinar a pasta do projeto ativo.".into());
+            self.ios_simulator_error = Some(t!("sidebar.devices.no_project_directory"));
             cx.notify();
             return;
         };
@@ -11755,11 +11790,19 @@ impl Sidebar {
                         .args(["simctl", "terminate", &udid, &bundle_identifier])
                         .output()
                         .await
-                        .context("failed to return the iOS simulator to its Home screen")?;
+                        .with_context(|| {
+                            t!(
+                                "sidebar.errors.command_run_failed",
+                                command = "xcrun simctl terminate"
+                            )
+                        })?;
                     anyhow::ensure!(
                         output.status.success(),
-                        "xcrun simctl terminate failed: {}",
-                        String::from_utf8_lossy(&output.stderr).trim()
+                        t!(
+                            "sidebar.errors.command_failed",
+                            command = "xcrun simctl terminate",
+                            details = String::from_utf8_lossy(&output.stderr).trim()
+                        )
                     );
                     anyhow::Ok(bundle_identifier)
                 }
@@ -11773,7 +11816,8 @@ impl Sidebar {
                             workspace.show_toast(
                                 Toast::new(
                                     NotificationId::unique::<ReturnIosSimulatorHomeSuccessToast>(),
-                                    format!("{bundle_identifier} fechado no simulador iOS"),
+                                    t!("sidebar.ios.app_closed", app = bundle_identifier)
+                                        .to_string(),
                                 )
                                 .autohide(),
                                 cx,
@@ -11782,16 +11826,17 @@ impl Sidebar {
                         cx.notify();
                     }
                     Err(error) => {
-                        let message = format!(
-                            "Não foi possível retornar o simulador iOS à tela inicial: {error:#}"
+                        let message = t!(
+                            "sidebar.ios.return_home_failed",
+                            error = format!("{error:#}")
                         );
-                        this.ios_simulator_error = Some(message.clone().into());
+                        this.ios_simulator_error = Some(message.clone());
                         workspace.update(cx, |workspace, cx| {
                             struct ReturnIosSimulatorHomeErrorToast;
                             workspace.show_toast(
                                 Toast::new(
                                     NotificationId::unique::<ReturnIosSimulatorHomeErrorToast>(),
-                                    message,
+                                    message.to_string(),
                                 )
                                 .autohide(),
                                 cx,
@@ -11812,8 +11857,7 @@ impl Sidebar {
         cx: &mut Context<Self>,
     ) {
         let Some(udid) = self.selected_ios_device_udid.clone() else {
-            self.ios_simulator_error =
-                Some("Selecione primeiro um simulador iOS inicializado.".into());
+            self.ios_simulator_error = Some(t!("sidebar.ios.select_booted_simulator"));
             cx.notify();
             return;
         };
@@ -11847,11 +11891,19 @@ impl Sidebar {
                         .args(["simctl", "launch", &udid, &bundle_identifier])
                         .output()
                         .await
-                        .context("failed to launch the installed iOS app")?;
+                        .with_context(|| {
+                            t!(
+                                "sidebar.errors.command_run_failed",
+                                command = "xcrun simctl launch"
+                            )
+                        })?;
                     anyhow::ensure!(
                         output.status.success(),
-                        "xcrun simctl launch failed: {}",
-                        String::from_utf8_lossy(&output.stderr).trim()
+                        t!(
+                            "sidebar.errors.command_failed",
+                            command = "xcrun simctl launch",
+                            details = String::from_utf8_lossy(&output.stderr).trim()
+                        )
                     );
                     anyhow::Ok(bundle_identifier)
                 }
@@ -11865,7 +11917,8 @@ impl Sidebar {
                             workspace.show_toast(
                                 Toast::new(
                                     NotificationId::unique::<LaunchInstalledIosAppSuccessToast>(),
-                                    format!("{bundle_identifier} aberto no simulador iOS"),
+                                    t!("sidebar.ios.app_opened", app = bundle_identifier)
+                                        .to_string(),
                                 )
                                 .autohide(),
                                 cx,
@@ -11875,14 +11928,14 @@ impl Sidebar {
                     }
                     Err(error) => {
                         let message =
-                            format!("Não foi possível abrir o app iOS instalado: {error:#}");
-                        this.ios_simulator_error = Some(message.clone().into());
+                            t!("sidebar.ios.open_app_failed", error = format!("{error:#}"));
+                        this.ios_simulator_error = Some(message.clone());
                         workspace.update(cx, |workspace, cx| {
                             struct LaunchInstalledIosAppErrorToast;
                             workspace.show_toast(
                                 Toast::new(
                                     NotificationId::unique::<LaunchInstalledIosAppErrorToast>(),
-                                    message,
+                                    message.to_string(),
                                 )
                                 .autohide(),
                                 cx,
@@ -11903,8 +11956,7 @@ impl Sidebar {
         cx: &mut Context<Self>,
     ) {
         let Some(udid) = self.selected_ios_device_udid.clone() else {
-            self.ios_simulator_error =
-                Some("Selecione primeiro um simulador iOS inicializado.".into());
+            self.ios_simulator_error = Some(t!("sidebar.ios.select_booted_simulator"));
             cx.notify();
             return;
         };
@@ -11928,11 +11980,15 @@ impl Sidebar {
 
                 let result = match screenshot_result {
                     Ok(output) if output.status.success() => copy_png_to_clipboard(&tmp_path).await,
-                    Ok(output) => Err(anyhow::anyhow!(
-                        "xcrun simctl screenshot failed: {}",
-                        String::from_utf8_lossy(&output.stderr).trim()
-                    )),
-                    Err(e) => Err(anyhow::anyhow!("Falha ao tirar screenshot: {e:#}")),
+                    Ok(output) => Err(anyhow::anyhow!(t!(
+                        "sidebar.errors.command_failed",
+                        command = "xcrun simctl screenshot",
+                        details = String::from_utf8_lossy(&output.stderr).trim()
+                    ))),
+                    Err(error) => Err(anyhow::anyhow!(t!(
+                        "sidebar.devices.screenshot_failed",
+                        error = format!("{error:#}")
+                    ))),
                 };
 
                 this.update_in(cx, |this, _window, cx| match result {
@@ -11943,7 +11999,7 @@ impl Sidebar {
                             workspace.show_toast(
                                 Toast::new(
                                     NotificationId::unique::<ScreenshotIosSuccessToast>(),
-                                    "Screenshot copiado para a área de transferência",
+                                    t!("sidebar.devices.screenshot_copied").to_string(),
                                 )
                                 .autohide(),
                                 cx,
@@ -11979,14 +12035,15 @@ impl Sidebar {
             .await;
             workspace
                 .update(cx, |workspace, cx| match result {
-                    Ok(()) => show_device_toast(
-                        workspace,
-                        "Screenshot copiado para a área de transferência",
-                        cx,
-                    ),
+                    Ok(()) => {
+                        show_device_toast(workspace, t!("sidebar.devices.screenshot_copied"), cx)
+                    }
                     Err(error) => show_device_toast(
                         workspace,
-                        format!("Não foi possível tirar o screenshot: {error:#}"),
+                        t!(
+                            "sidebar.devices.screenshot_failed",
+                            error = format!("{error:#}")
+                        ),
                         cx,
                     ),
                 })
@@ -12031,12 +12088,15 @@ impl Sidebar {
                 .update(cx, |workspace, cx| match result {
                     Ok(package) => show_device_toast(
                         workspace,
-                        format!("{package} aberto no emulador Android"),
+                        t!("sidebar.android.app_opened", app = package),
                         cx,
                     ),
                     Err(error) => show_device_toast(
                         workspace,
-                        format!("Não foi possível abrir o app Android instalado: {error:#}"),
+                        t!(
+                            "sidebar.android.open_app_failed",
+                            error = format!("{error:#}")
+                        ),
                         cx,
                     ),
                 })
@@ -12128,7 +12188,7 @@ impl Sidebar {
 
 #[cfg(not(target_os = "macos"))]
 async fn list_ios_simulators() -> anyhow::Result<Vec<IosSimulatorDevice>> {
-    anyhow::bail!("simuladores iOS só estão disponíveis no macOS")
+    anyhow::bail!(t!("sidebar.ios.macos_only"))
 }
 
 #[cfg(target_os = "macos")]
@@ -12140,15 +12200,23 @@ async fn list_ios_simulators() -> anyhow::Result<Vec<IosSimulatorDevice>> {
         .args(["simctl", "list", "devices", "available", "--json"])
         .output()
         .await
-        .context("failed to run xcrun simctl")?;
+        .with_context(|| {
+            t!(
+                "sidebar.errors.command_run_failed",
+                command = "xcrun simctl"
+            )
+        })?;
     anyhow::ensure!(
         output.status.success(),
-        "xcrun simctl failed: {}",
-        String::from_utf8_lossy(&output.stderr).trim()
+        t!(
+            "sidebar.errors.command_failed",
+            command = "xcrun simctl",
+            details = String::from_utf8_lossy(&output.stderr).trim()
+        )
     );
 
     let devices: SimctlDeviceList = serde_json::from_slice(&output.stdout)
-        .context("xcrun simctl returned invalid device data")?;
+        .with_context(|| t!("sidebar.ios.invalid_device_data"))?;
     let mut available_devices: Vec<_> = devices
         .devices
         .into_iter()
@@ -12191,11 +12259,19 @@ async fn simctl_appearance(udid: &str, appearance: Option<&str>) -> anyhow::Resu
         .args(&arguments)
         .output()
         .await
-        .context("não foi possível executar xcrun simctl ui")?;
+        .with_context(|| {
+            t!(
+                "sidebar.errors.command_run_failed",
+                command = "xcrun simctl ui"
+            )
+        })?;
     anyhow::ensure!(
         output.status.success(),
-        "xcrun simctl ui falhou: {}",
-        String::from_utf8_lossy(&output.stderr).trim()
+        t!(
+            "sidebar.errors.command_failed",
+            command = "xcrun simctl ui",
+            details = String::from_utf8_lossy(&output.stderr).trim()
+        )
     );
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
@@ -12207,22 +12283,28 @@ async fn boot_ios_simulator(udid: &str) -> anyhow::Result<()> {
         .args(["simctl", "boot", udid])
         .output()
         .await
-        .context("failed to boot the iOS simulator")?;
+        .with_context(|| t!("sidebar.ios.boot_failed"))?;
     // Booting an already-booted device is a success for our purposes.
     anyhow::ensure!(
         output.status.success() || String::from_utf8_lossy(&output.stderr).contains("Booted"),
-        "xcrun simctl boot failed: {}",
-        String::from_utf8_lossy(&output.stderr).trim()
+        t!(
+            "sidebar.errors.command_failed",
+            command = "xcrun simctl boot",
+            details = String::from_utf8_lossy(&output.stderr).trim()
+        )
     );
     let output = smol::process::Command::new("xcrun")
         .args(["simctl", "bootstatus", udid, "-b"])
         .output()
         .await
-        .context("failed while waiting for the iOS simulator to boot")?;
+        .with_context(|| t!("sidebar.ios.boot_wait_failed"))?;
     anyhow::ensure!(
         output.status.success(),
-        "xcrun simctl bootstatus failed: {}",
-        String::from_utf8_lossy(&output.stderr).trim()
+        t!(
+            "sidebar.errors.command_failed",
+            command = "xcrun simctl bootstatus",
+            details = String::from_utf8_lossy(&output.stderr).trim()
+        )
     );
     Ok(())
 }
@@ -12240,23 +12322,35 @@ async fn simctl_pbcopy(udid: &str, text: &str) -> anyhow::Result<()> {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .context("não foi possível executar xcrun simctl pbcopy")?;
+        .with_context(|| {
+            t!(
+                "sidebar.errors.command_run_failed",
+                command = "xcrun simctl pbcopy"
+            )
+        })?;
     if let Some(stdin) = child.stdin.as_mut() {
         use smol::io::AsyncWriteExt as _;
-        stdin
-            .write_all(text.as_bytes())
-            .await
-            .context("não foi possível escrever no xcrun simctl pbcopy")?;
+        stdin.write_all(text.as_bytes()).await.with_context(|| {
+            t!(
+                "sidebar.errors.command_write_failed",
+                command = "xcrun simctl pbcopy"
+            )
+        })?;
         stdin.close().await.ok();
     }
-    let output = child
-        .output()
-        .await
-        .context("xcrun simctl pbcopy não terminou")?;
+    let output = child.output().await.with_context(|| {
+        t!(
+            "sidebar.errors.command_did_not_finish",
+            command = "xcrun simctl pbcopy"
+        )
+    })?;
     anyhow::ensure!(
         output.status.success(),
-        "xcrun simctl pbcopy falhou: {}",
-        String::from_utf8_lossy(&output.stderr).trim()
+        t!(
+            "sidebar.errors.command_failed",
+            command = "xcrun simctl pbcopy",
+            details = String::from_utf8_lossy(&output.stderr).trim()
+        )
     );
     Ok(())
 }
@@ -12267,11 +12361,19 @@ async fn simctl_pbpaste(udid: &str) -> anyhow::Result<String> {
         .args(["simctl", "pbpaste", udid])
         .output()
         .await
-        .context("não foi possível executar xcrun simctl pbpaste")?;
+        .with_context(|| {
+            t!(
+                "sidebar.errors.command_run_failed",
+                command = "xcrun simctl pbpaste"
+            )
+        })?;
     anyhow::ensure!(
         output.status.success(),
-        "xcrun simctl pbpaste falhou: {}",
-        String::from_utf8_lossy(&output.stderr).trim()
+        t!(
+            "sidebar.errors.command_failed",
+            command = "xcrun simctl pbpaste",
+            details = String::from_utf8_lossy(&output.stderr).trim()
+        )
     );
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
@@ -12280,7 +12382,7 @@ async fn simctl_pbpaste(udid: &str) -> anyhow::Result<String> {
 fn device_toolbar_button(
     id: &'static str,
     icon: IconName,
-    tooltip: &'static str,
+    tooltip: SharedString,
     device_ready: bool,
 ) -> IconButton {
     IconButton::new(id, icon)
@@ -12288,7 +12390,7 @@ fn device_toolbar_button(
         .size(ButtonSize::Medium)
         .height(DEVICE_TOOL_SIZE.into())
         .width(DEVICE_TOOL_SIZE)
-        .aria_label(tooltip)
+        .aria_label(tooltip.clone())
         .tooltip(Tooltip::text(tooltip))
         .disabled(!device_ready)
 }
@@ -12297,12 +12399,16 @@ fn device_toolbar_button(
 /// a second action replaces the first message instead of stacking toasts.
 fn show_device_toast(
     workspace: &mut Workspace,
-    message: impl Into<std::borrow::Cow<'static, str>>,
+    message: impl Into<SharedString>,
     cx: &mut Context<Workspace>,
 ) {
     struct DeviceActionToast;
     workspace.show_toast(
-        Toast::new(NotificationId::unique::<DeviceActionToast>(), message).autohide(),
+        Toast::new(
+            NotificationId::unique::<DeviceActionToast>(),
+            message.into().to_string(),
+        )
+        .autohide(),
         cx,
     );
 }
@@ -12320,11 +12426,13 @@ async fn copy_png_to_clipboard(path: &Path) -> anyhow::Result<()> {
         ])
         .output()
         .await
-        .context("Falha ao copiar para clipboard")?;
+        .with_context(|| t!("sidebar.devices.clipboard_failed"))?;
     anyhow::ensure!(
         output.status.success(),
-        "Falha ao copiar para clipboard: {}",
-        String::from_utf8_lossy(&output.stderr).trim()
+        t!(
+            "sidebar.devices.clipboard_failed_details",
+            details = String::from_utf8_lossy(&output.stderr).trim()
+        )
     );
     Ok(())
 }
@@ -12350,9 +12458,9 @@ fn expo_bundle_identifier(
         .and_then(serde_json::Value::as_str)
         .map(str::to_owned)
         .with_context(|| {
-            format!(
-                "a configuração do Expo não tem {}",
-                pointer.trim_start_matches('/').replace('/', ".")
+            t!(
+                "sidebar.expo.missing_identifier",
+                field = pointer.trim_start_matches('/').replace('/', ".")
             )
         })
 }
@@ -12372,41 +12480,47 @@ async fn resolve_expo_bundle_identifier(
     } else if fs.is_file(&app_json_path).await {
         (app_json_path, true)
     } else {
-        anyhow::bail!(
-            "não foi possível encontrar app.config.ts, app.config.js ou app.json em {}",
-            project_directory.display()
-        );
+        anyhow::bail!(t!(
+            "sidebar.expo.config_not_found",
+            directory = project_directory.display()
+        ));
     };
 
     if is_json_config {
         let app_config = fs
             .load(&app_config_path)
             .await
-            .with_context(|| format!("não foi possível ler {}", app_config_path.display()))?;
+            .with_context(|| t!("sidebar.expo.read_failed", path = app_config_path.display()))?;
         let app_config: serde_json::Value =
-            serde_json::from_str(&app_config).context("não foi possível analisar o app.json")?;
+            serde_json::from_str(&app_config).with_context(|| t!("sidebar.expo.parse_failed"))?;
         expo_bundle_identifier(&app_config, platform)
     } else {
         let expo_cli_path = project_directory.join("node_modules/.bin/expo");
         anyhow::ensure!(
             fs.is_file(&expo_cli_path).await,
-            "não foi possível encontrar o Expo CLI local em {}; instale as dependências do projeto primeiro",
-            expo_cli_path.display()
+            t!("sidebar.expo.cli_not_found", path = expo_cli_path.display())
         );
         let output = smol::process::Command::new(&expo_cli_path)
             .current_dir(&project_directory)
             .args(["config", "--json"])
             .output()
             .await
-            .with_context(|| format!("não foi possível avaliar {}", app_config_path.display()))?;
+            .with_context(|| {
+                t!(
+                    "sidebar.expo.evaluate_failed",
+                    path = app_config_path.display()
+                )
+            })?;
         anyhow::ensure!(
             output.status.success(),
-            "o Expo não conseguiu avaliar {}: {}",
-            app_config_path.display(),
-            String::from_utf8_lossy(&output.stderr).trim()
+            t!(
+                "sidebar.expo.evaluate_failed_details",
+                path = app_config_path.display(),
+                details = String::from_utf8_lossy(&output.stderr).trim()
+            )
         );
         let app_config: serde_json::Value = serde_json::from_slice(&output.stdout)
-            .context("o Expo retornou uma configuração JSON inválida")?;
+            .with_context(|| t!("sidebar.expo.invalid_config"))?;
         expo_bundle_identifier(&app_config, platform)
     }
 }
@@ -12698,7 +12812,11 @@ impl Panel for Sidebar {
     }
 
     fn icon_tooltip(&self, _window: &Window, _cx: &App) -> Option<&'static str> {
-        self.devices_only.then_some("Devices")
+        let label = match i18n::current_language() {
+            i18n::Language::English => "Devices",
+            i18n::Language::PortugueseBrazil => "Dispositivos",
+        };
+        self.devices_only.then_some(label)
     }
 
     fn toggle_action(&self) -> Box<dyn gpui::Action> {

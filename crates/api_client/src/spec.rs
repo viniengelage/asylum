@@ -4,11 +4,14 @@
 
 use anyhow::{Context as _, Result, anyhow};
 use collections::HashMap;
+use i18n::t;
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
 
 /// The folder operations without a tag go to.
-pub const UNTAGGED: &str = "Sem tag";
+pub fn untagged_folder() -> String {
+    t!("api_client.spec.untagged").to_string()
+}
 const MAX_REF_DEPTH: usize = 32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,7 +82,9 @@ impl SecurityScheme {
                 format!("apiKey · {location} {name}")
             }
             SchemeKind::OAuth2 => "oauth2 · token bearer".to_string(),
-            SchemeKind::Unsupported(kind) => format!("{kind} · não suportado"),
+            SchemeKind::Unsupported(kind) => {
+                t!("api_client.spec.scheme_unsupported", kind = kind).to_string()
+            }
         }
     }
 }
@@ -250,7 +255,7 @@ impl Spec {
                 .tags
                 .first()
                 .cloned()
-                .unwrap_or_else(|| UNTAGGED.to_string());
+                .unwrap_or_else(untagged_folder);
             if !order.contains(&tag) {
                 order.push(tag.clone());
             }
@@ -286,11 +291,11 @@ pub fn deref<'a>(document: &'a Value, mut value: &'a Value) -> &'a Value {
 
 /// Reads a spec file, inlining references to other files next to it.
 pub fn load(path: &Path, text: &str, read_file: &dyn Fn(&Path) -> Result<String>) -> Result<Spec> {
-    let (document, repaired_lines) =
-        parse_document_with_repairs(text).with_context(|| format!("lendo {}", path.display()))?;
+    let (document, repaired_lines) = parse_document_with_repairs(text)
+        .with_context(|| t!("api_client.spec.error_reading", path = path.display()).to_string())?;
     let mut warnings: Vec<String> = repaired_lines
         .into_iter()
-        .map(|line| format!("linha {line}: valor com \": \" sem aspas, lido como texto"))
+        .map(|line| t!("api_client.spec.warning_unquoted_value", line = line).to_string())
         .collect();
     let base_dir = path.parent().map(Path::to_path_buf);
     let mut cache = HashMap::default();
@@ -505,16 +510,22 @@ fn resolve_external(
 ) -> Value {
     let unresolved = || serde_json::json!({ "$ref": reference });
     if depth >= MAX_REF_DEPTH {
-        warnings.push(format!("$ref aninhado demais: {reference}"));
+        warnings.push(
+            t!(
+                "api_client.spec.warning_ref_too_deep",
+                reference = reference
+            )
+            .to_string(),
+        );
         return unresolved();
     }
     if reference.starts_with("http://") || reference.starts_with("https://") {
-        warnings.push(format!("$ref remoto não é seguido: {reference}"));
+        warnings.push(t!("api_client.spec.warning_ref_remote", reference = reference).to_string());
         return unresolved();
     }
     let (file, pointer) = reference.split_once('#').unwrap_or((reference, ""));
     let Some(base_dir) = base_dir else {
-        warnings.push(format!("$ref sem pasta base: {reference}"));
+        warnings.push(t!("api_client.spec.warning_ref_no_base", reference = reference).to_string());
         return unresolved();
     };
     let path = base_dir.join(file);
@@ -528,14 +539,27 @@ fn resolve_external(
                     document
                 }
                 Err(error) => {
-                    warnings.push(format!("$ref não encontrado: {reference} ({error})"));
+                    warnings.push(
+                        t!(
+                            "api_client.spec.warning_ref_not_found_error",
+                            reference = reference,
+                            error = error
+                        )
+                        .to_string(),
+                    );
                     return unresolved();
                 }
             }
         }
     };
     let Some(target) = document.pointer(pointer).cloned() else {
-        warnings.push(format!("$ref não encontrado: {reference}"));
+        warnings.push(
+            t!(
+                "api_client.spec.warning_ref_not_found",
+                reference = reference
+            )
+            .to_string(),
+        );
         return unresolved();
     };
     // Internal references inside the other file point into that file, so they are
@@ -565,7 +589,13 @@ fn inline_internal_refs(
                         inline_internal_refs(target.clone(), document, warnings, depth + 1)
                     }
                     None => {
-                        warnings.push(format!("$ref não encontrado: #{pointer}"));
+                        warnings.push(
+                            t!(
+                                "api_client.spec.warning_ref_not_found",
+                                reference = format!("#{pointer}")
+                            )
+                            .to_string(),
+                        );
                         Value::Object(object)
                     }
                 };
@@ -597,14 +627,18 @@ pub fn from_document(document: Value, mut warnings: Vec<String>) -> Result<Spec>
             } else if version.starts_with('3') {
                 (SpecFormat::OpenApi30, version.to_string())
             } else {
-                return Err(anyhow!("versão do OpenAPI não suportada: {version}"));
+                return Err(anyhow!(
+                    "{}",
+                    t!(
+                        "api_client.spec.error_unsupported_version",
+                        version = version
+                    )
+                ));
             }
         } else if document.get("swagger").and_then(Value::as_str) == Some("2.0") {
             (SpecFormat::Swagger2, "2.0".to_string())
         } else {
-            return Err(anyhow!(
-                "o arquivo não parece um spec OpenAPI (faltam os campos `openapi` ou `swagger`)"
-            ));
+            return Err(anyhow!("{}", t!("api_client.spec.error_not_openapi")));
         };
 
     let info = document.get("info");
@@ -843,7 +877,7 @@ fn read_operation(
     for raw in shared_parameters.iter().chain(own_parameters.iter()) {
         let raw = deref(document, raw);
         if raw.get("$ref").is_some() {
-            warnings.push(format!("{key}: parâmetro com $ref não encontrado"));
+            warnings.push(t!("api_client.spec.warning_parameter_ref", key = key).to_string());
             continue;
         }
         let Some(name) = raw.get("name").and_then(Value::as_str) else {
@@ -1185,7 +1219,7 @@ paths:
             vec![
                 ("users".to_string(), 1),
                 ("auth".to_string(), 1),
-                (UNTAGGED.to_string(), 1)
+                (untagged_folder(), 1)
             ]
         );
     }

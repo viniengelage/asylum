@@ -29,6 +29,7 @@ pub use tls::SslMode;
 
 use editor::Editor;
 use gpui::{Entity, Subscription, Task, WeakEntity, actions};
+use i18n::t;
 use std::any::TypeId;
 use std::rc::Rc;
 use ui::prelude::*;
@@ -339,7 +340,7 @@ fn toolkit_allowed(workspace: &mut Workspace, cx: &mut Context<Workspace>) -> bo
     workspace.show_toast(
         Toast::new(
             NotificationId::unique::<DatabasePanel>(),
-            task_agents::toolkit_disabled_message("Banco"),
+            task_agents::toolkit_disabled_message(&t!("database_client.toolkit.short_name")),
         )
         .autohide(),
         cx,
@@ -415,7 +416,7 @@ impl StatusItemView for DatabaseToolkitButton {
         let workspace = self.workspace.clone();
         Some(ToolkitEntry {
             icon: IconName::Database,
-            label: "Banco de dados".into(),
+            label: t!("database_client.toolkit.name"),
             is_open,
             action: Box::new(ToggleFocus),
             toggle: Rc::new(move |window, cx| {

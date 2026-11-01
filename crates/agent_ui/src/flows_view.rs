@@ -19,6 +19,7 @@ use gpui::{
     App, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Task,
     WeakEntity, Window,
 };
+use i18n::t;
 use picker::{Picker, PickerDelegate};
 use project::Project;
 use runner::RunningStep;
@@ -76,7 +77,11 @@ pub fn init(cx: &mut App) {
         });
         workspace.register_action(|workspace, _: &AbrirExecucaoAtiva, window, cx| {
             let Some(view) = active_run_view(workspace, cx) else {
-                show_error(workspace, anyhow::anyhow!("nenhuma esteira rodando"), cx);
+                show_error(
+                    workspace,
+                    anyhow::anyhow!("{}", t!("agent_ui.flows.error.none_running")),
+                    cx,
+                );
                 return;
             };
             workspace.activate_item(&view, true, true, window, cx);
@@ -114,7 +119,13 @@ pub fn open_run(
     let Some((mut flow, run)) = record.restore() else {
         show_error(
             workspace,
-            anyhow::anyhow!("a execução de “{}” não abre mais", record.flow_name),
+            anyhow::anyhow!(
+                "{}",
+                t!(
+                    "agent_ui.flows.error.run_unavailable",
+                    name = record.flow_name
+                )
+            ),
             cx,
         );
         return;
@@ -179,8 +190,10 @@ pub fn open_step_thread(
 
 pub(crate) fn flow_source_label(source: &FlowSource) -> String {
     match source {
-        FlowSource::Personal => "só para mim".to_string(),
-        FlowSource::Project { worktree_root_name } => format!("projeto · {worktree_root_name}"),
+        FlowSource::Personal => t!("agent_ui.flows.source.personal_only").to_string(),
+        FlowSource::Project { worktree_root_name } => {
+            t!("agent_ui.flows.source.project", name = worktree_root_name).to_string()
+        }
     }
 }
 
@@ -266,7 +279,9 @@ pub(crate) fn open_flow_path(
             Ok(flow) => open_flow(workspace, flow, agents, project.clone(), None, window, cx),
             Err(error) => show_error(
                 workspace,
-                error.context(format!("{} não abre como esteira", path.display())),
+                error.context(
+                    t!("agent_ui.flows.error.not_a_flow", path = path.display()).to_string(),
+                ),
                 cx,
             ),
         })
@@ -298,7 +313,7 @@ fn native_connection(
 ) -> Result<Task<Result<Rc<NativeAgentConnection>>>> {
     let panel = workspace
         .panel::<AgentPanel>(cx)
-        .context("o painel de agentes não está aberto")?;
+        .with_context(|| t!("agent_ui.flows.error.panel_closed").to_string())?;
     panel.update(cx, |panel, cx| panel.ensure_native_agent_connection(cx));
     let connect = panel
         .read(cx)
@@ -306,7 +321,7 @@ fn native_connection(
         .read(cx)
         .entry(&crate::Agent::NativeAgent)
         .map(|entry| entry.read(cx).wait_for_connection())
-        .context("abra um projeto para rodar esteiras")?;
+        .with_context(|| t!("agent_ui.flows.error.open_project").to_string())?;
     Ok(cx.spawn(async move |_cx| {
         let connected = connect
             .await
@@ -314,23 +329,29 @@ fn native_connection(
         connected
             .connection
             .downcast::<NativeAgentConnection>()
-            .context("o Asylum Agent não está disponível")
+            .with_context(|| t!("agent_ui.flows.error.agent_unavailable").to_string())
     }))
 }
 
 /// What a GitHub step writes, as the confirmation before the run lists it.
 fn github_write(action: &flows::GitHubAction) -> String {
     match action {
-        flows::GitHubAction::StartItem => {
-            "cria o branch do item, move para em andamento e atribui você".to_string()
+        flows::GitHubAction::StartItem => t!("agent_ui.flows.github_write.start_item").to_string(),
+        flows::GitHubAction::OpenPullRequest { draft: true } => {
+            t!("agent_ui.flows.github_write.open_draft_pull_request").to_string()
         }
-        flows::GitHubAction::OpenPullRequest { draft } => format!(
-            "faz push e abre o PR{} que fecha o item",
-            if *draft { " como rascunho" } else { "" }
-        ),
-        flows::GitHubAction::MoveItem { status } => format!("move o item para {status}"),
-        flows::GitHubAction::CommentItem { .. } => "comenta no item".to_string(),
-        flows::GitHubAction::WaitChecks { .. } => "espera os checks".to_string(),
+        flows::GitHubAction::OpenPullRequest { draft: false } => {
+            t!("agent_ui.flows.github_write.open_pull_request").to_string()
+        }
+        flows::GitHubAction::MoveItem { status } => {
+            t!("agent_ui.flows.github_write.move_item", status = status).to_string()
+        }
+        flows::GitHubAction::CommentItem { .. } => {
+            t!("agent_ui.flows.github_write.comment_item").to_string()
+        }
+        flows::GitHubAction::WaitChecks { .. } => {
+            t!("agent_ui.flows.github_write.wait_checks").to_string()
+        }
     }
 }
 
@@ -410,7 +431,10 @@ fn run_flow(
             let Some(flow) = flows.into_iter().find(|flow| flow.id == action.flow) else {
                 show_error(
                     workspace,
-                    anyhow::anyhow!("a esteira “{}” não existe", action.flow),
+                    anyhow::anyhow!(
+                        "{}",
+                        t!("agent_ui.flows.error.flow_not_found", name = action.flow)
+                    ),
                     cx,
                 );
                 return;
@@ -510,7 +534,7 @@ impl PickerDelegate for FlowPickerDelegate {
     }
 
     fn placeholder_text(&self, _window: &mut Window, _cx: &mut App) -> Arc<str> {
-        "Rodar esteira…".into()
+        t!("agent_ui.flows.picker.placeholder").to_string().into()
     }
 
     fn update_matches(
@@ -571,7 +595,7 @@ impl PickerDelegate for FlowPickerDelegate {
                 .border_t_1()
                 .border_color(cx.theme().colors().border_variant)
                 .child(
-                    Button::new("flow-picker-new", "Nova esteira")
+                    Button::new("flow-picker-new", t!("agent_ui.flows.picker.new_flow"))
                         .full_width()
                         .style(ButtonStyle::Outlined)
                         .start_icon(Icon::new(IconName::Plus).size(IconSize::Small))
@@ -596,7 +620,7 @@ impl PickerDelegate for FlowPickerDelegate {
         let flow = self.flows.get(*self.matches.get(index)?)?;
         let steps = flow.steps.len();
         let source = match &flow.source {
-            FlowSource::Personal => "pessoal".to_string(),
+            FlowSource::Personal => t!("agent_ui.flows.source.personal").to_string(),
             FlowSource::Project { worktree_root_name } => worktree_root_name.to_string(),
         };
         Some(
@@ -613,10 +637,15 @@ impl PickerDelegate for FlowPickerDelegate {
                     ),
                 )
                 .end_slot(
-                    Label::new(format!(
-                        "{steps} passo{} · {source}",
-                        if steps == 1 { "" } else { "s" }
-                    ))
+                    Label::new(if steps == 1 {
+                        t!("agent_ui.flows.picker.steps.one", source = source)
+                    } else {
+                        t!(
+                            "agent_ui.flows.picker.steps.other",
+                            count = steps,
+                            source = source
+                        )
+                    })
                     .size(LabelSize::Small)
                     .color(Color::Muted),
                 ),
@@ -630,7 +659,7 @@ fn show_error(workspace: &mut Workspace, error: anyhow::Error, cx: &mut Context<
     workspace.show_toast(
         workspace::Toast::new(
             NotificationId::unique::<FlowError>(),
-            format!("Esteira: {error:#}"),
+            t!("agent_ui.flows.error.toast", error = format!("{error:#}")).to_string(),
         ),
         cx,
     );
@@ -685,7 +714,7 @@ impl FlowView {
     ) -> Self {
         let name_editor = cx.new(|cx| {
             let mut editor = Editor::single_line(window, cx);
-            editor.set_placeholder_text("Nome da esteira", window, cx);
+            editor.set_placeholder_text(&t!("agent_ui.flows.placeholder.name"), window, cx);
             editor.set_text(flow.name.clone(), window, cx);
             editor.set_text_style_refinement(gpui::TextStyleRefinement {
                 font_size: Some(rems(0.9375).into()),
@@ -696,18 +725,22 @@ impl FlowView {
         });
         let library_search = cx.new(|cx| {
             let mut editor = Editor::single_line(window, cx);
-            editor.set_placeholder_text("Buscar agentes…", window, cx);
+            editor.set_placeholder_text(
+                &t!("agent_ui.flows.placeholder.search_agents"),
+                window,
+                cx,
+            );
             editor
         });
         let fs = project.read(cx).fs().clone();
         let input_editor = cx.new(|cx| {
             let mut editor = Editor::auto_height(1, 6, window, cx);
-            editor.set_placeholder_text("O que construir", window, cx);
+            editor.set_placeholder_text(&t!("agent_ui.flows.placeholder.input"), window, cx);
             editor
         });
         let adjust_editor = cx.new(|cx| {
             let mut editor = Editor::single_line(window, cx);
-            editor.set_placeholder_text("O que ajustar? (opcional)", window, cx);
+            editor.set_placeholder_text(&t!("agent_ui.flows.placeholder.adjust"), window, cx);
             editor
         });
         let mut this = Self {
@@ -756,10 +789,18 @@ impl FlowView {
     fn start(&mut self, input: String, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(problem) = self.problems.first() {
             let message = match problem.step() {
-                Some(step) => format!("Passo {}: {problem}", step + 1),
+                Some(step) => t!(
+                    "agent_ui.flows.problem.step",
+                    step = step + 1,
+                    problem = problem
+                )
+                .to_string(),
                 None => problem.to_string(),
             };
-            self.show_toast(&format!("Corrija antes de rodar. {message}"), cx);
+            self.show_toast(
+                &t!("agent_ui.flows.problem.fix_before_run", message = message),
+                cx,
+            );
             return;
         }
         // Writing on GitHub is approved once for the whole run, not step by step.
@@ -777,12 +818,15 @@ impl FlowView {
         let answer = (!writes.is_empty()).then(|| {
             window.prompt(
                 gpui::PromptLevel::Info,
-                "Esta esteira escreve no GitHub",
-                Some(&format!(
-                    "{}\n\nMerge nunca é um passo: fica com você.",
-                    writes.join("\n")
+                &t!("agent_ui.flows.github_confirm.title"),
+                Some(&t!(
+                    "agent_ui.flows.github_confirm.detail",
+                    writes = writes.join("\n")
                 )),
-                &["Rodar", "Cancelar"],
+                &[
+                    t!("agent_ui.flows.github_confirm.run").as_ref(),
+                    t!("agent_ui.flows.github_confirm.cancel").as_ref(),
+                ],
                 cx,
             )
         });
@@ -960,12 +1004,12 @@ impl FlowView {
                     .p_8()
                     .gap_4()
                     .items_center()
-                    .child(Label::new("Nenhuma execução ainda.").color(Color::Muted))
+                    .child(Label::new(t!("agent_ui.flows.run.empty")).color(Color::Muted))
                     .child(
                         primary_button(
                             "run-from-panel",
                             Some(IconName::PlayFilled),
-                            "Rodar esteira",
+                            t!("agent_ui.flows.run.run_flow"),
                             None,
                             cx,
                         )
@@ -980,41 +1024,42 @@ impl FlowView {
         } else {
             done as f32 / total as f32
         };
-        let header =
-            h_flex()
-                .h(px(44.))
-                .flex_none()
-                .px_3()
-                .gap_2()
-                .border_b_1()
-                .border_color(colors.border)
-                .child(Label::new("Execução").weight(FontWeight::SEMIBOLD))
-                .child(
-                    Label::new(format!(
-                        "{done} de {total} · {} min",
-                        self.elapsed_minutes()
-                    ))
-                    .size(LabelSize::XSmall)
-                    .color(Color::Muted),
-                )
-                .child(div().flex_1())
-                .child(if run.is_finished() {
-                    secondary_button("rerun-flow", None, "Rodar de novo", true, cx)
-                        .on_click(cx.listener(|this, _, window, cx| this.rerun(window, cx)))
-                        .into_any_element()
-                } else {
-                    secondary_button(
-                        "stop-run",
-                        Some((IconName::Stop, Color::Error)),
-                        "Parar",
-                        true,
-                        cx,
-                    )
-                    .on_click(cx.listener(|this, _, _window, cx| {
-                        this.stop(Some("você parou a esteira."), cx)
-                    }))
+        let header = h_flex()
+            .h(px(44.))
+            .flex_none()
+            .px_3()
+            .gap_2()
+            .border_b_1()
+            .border_color(colors.border)
+            .child(Label::new(t!("agent_ui.flows.run.title")).weight(FontWeight::SEMIBOLD))
+            .child(
+                Label::new(t!(
+                    "agent_ui.flows.run.progress",
+                    done = done,
+                    total = total,
+                    minutes = self.elapsed_minutes()
+                ))
+                .size(LabelSize::XSmall)
+                .color(Color::Muted),
+            )
+            .child(div().flex_1())
+            .child(if run.is_finished() {
+                secondary_button("rerun-flow", None, t!("agent_ui.flows.run.rerun"), true, cx)
+                    .on_click(cx.listener(|this, _, window, cx| this.rerun(window, cx)))
                     .into_any_element()
-                });
+            } else {
+                secondary_button(
+                    "stop-run",
+                    Some((IconName::Stop, Color::Error)),
+                    t!("agent_ui.flows.run.stop"),
+                    true,
+                    cx,
+                )
+                .on_click(cx.listener(|this, _, _window, cx| {
+                    this.stop(Some(t!("agent_ui.flows.run.stopped_by_you").as_ref()), cx)
+                }))
+                .into_any_element()
+            });
         let bar = div().px_4().pt_3().child(
             div()
                 .h(px(4.))
@@ -1091,7 +1136,7 @@ impl FlowView {
 
         if let (Some(step), RunEventKind::Verified | RunEventKind::Failed) =
             (event.step, event.kind)
-            && event.title.starts_with("Critérios")
+            && event.criteria
         {
             content = content.child(self.render_criteria_results(run, step, event.kind, cx));
         }
@@ -1102,12 +1147,15 @@ impl FlowView {
                 .and_then(|threads| threads.last().copied())
         {
             content = content.child(
-                Button::new(("open-event-thread", index), "Abrir thread")
-                    .label_size(LabelSize::XSmall)
-                    .style(ButtonStyle::Subtle)
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.open_thread(thread_id, window, cx)
-                    })),
+                Button::new(
+                    ("open-event-thread", index),
+                    t!("agent_ui.flows.run.open_thread"),
+                )
+                .label_size(LabelSize::XSmall)
+                .style(ButtonStyle::Subtle)
+                .on_click(
+                    cx.listener(move |this, _, window, cx| this.open_thread(thread_id, window, cx)),
+                ),
             );
         }
         if is_last {
@@ -1122,19 +1170,27 @@ impl FlowView {
                                 .gap_2()
                                 .justify_end()
                                 .child(
-                                    secondary_button("exhausted-stop", None, "Encerrar", true, cx)
-                                        .on_click(cx.listener(|this, _, window, cx| {
+                                    secondary_button(
+                                        "exhausted-stop",
+                                        None,
+                                        t!("agent_ui.flows.run.end"),
+                                        true,
+                                        cx,
+                                    )
+                                    .on_click(cx.listener(
+                                        |this, _, window, cx| {
                                             if let Some(run) = &mut this.run {
                                                 run.answer_exhausted(false);
                                             }
                                             this.after_answer(window, cx);
-                                        })),
+                                        },
+                                    )),
                                 )
                                 .child(
                                     primary_button(
                                         "exhausted-retry",
                                         None,
-                                        "Refazer mais uma vez",
+                                        t!("agent_ui.flows.run.retry_once_more"),
                                         None,
                                         cx,
                                     )
@@ -1210,7 +1266,8 @@ impl FlowView {
                                 Label::new(if criterion.required {
                                     criterion.text.clone()
                                 } else {
-                                    format!("{} · opcional", criterion.text)
+                                    t!("agent_ui.flows.criteria.optional", text = criterion.text)
+                                        .to_string()
                                 })
                                 .size(LabelSize::Small),
                             )
@@ -1232,7 +1289,7 @@ impl FlowView {
     fn render_gate_box(&self, cx: &mut Context<Self>) -> impl IntoElement {
         answer_box(BoxTone::You, cx)
             .child(
-                Label::new("A esteira está parada até você responder.")
+                Label::new(t!("agent_ui.flows.gate.waiting"))
                     .size(LabelSize::Small)
                     .color(Color::Muted),
             )
@@ -1251,26 +1308,37 @@ impl FlowView {
                     .gap_2()
                     .justify_end()
                     .child(
-                        secondary_button("gate-adjust", None, "Pedir ajuste", true, cx).on_click(
-                            cx.listener(|this, _, window, cx| {
-                                let note = this.adjust_editor.read(cx).text(cx);
-                                this.adjust_editor
-                                    .update(cx, |editor, cx| editor.clear(window, cx));
-                                if let Some(run) = &mut this.run {
-                                    run.answer_gate(false, &note);
-                                }
-                                this.after_answer(window, cx);
-                            }),
-                        ),
+                        secondary_button(
+                            "gate-adjust",
+                            None,
+                            t!("agent_ui.flows.gate.request_changes"),
+                            true,
+                            cx,
+                        )
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            let note = this.adjust_editor.read(cx).text(cx);
+                            this.adjust_editor
+                                .update(cx, |editor, cx| editor.clear(window, cx));
+                            if let Some(run) = &mut this.run {
+                                run.answer_gate(false, &note);
+                            }
+                            this.after_answer(window, cx);
+                        })),
                     )
                     .child(
-                        primary_button("gate-approve", None, "Aprovar e seguir", None, cx)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                if let Some(run) = &mut this.run {
-                                    run.answer_gate(true, "");
-                                }
-                                this.after_answer(window, cx);
-                            })),
+                        primary_button(
+                            "gate-approve",
+                            None,
+                            t!("agent_ui.flows.gate.approve"),
+                            None,
+                            cx,
+                        )
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            if let Some(run) = &mut this.run {
+                                run.answer_gate(true, "");
+                            }
+                            this.after_answer(window, cx);
+                        })),
                     ),
             )
     }
@@ -1293,7 +1361,7 @@ impl FlowView {
         let label = self.step_label(step);
         answer_box(BoxTone::You, cx)
             .child(
-                Label::new("Critério com você")
+                Label::new(t!("agent_ui.flows.criteria.with_you"))
                     .size(LabelSize::Small)
                     .weight(FontWeight::SEMIBOLD)
                     .color(Color::Warning),
@@ -1304,25 +1372,39 @@ impl FlowView {
                     .gap_2()
                     .justify_end()
                     .child(
-                        secondary_button("criteria-accept", None, "Aceitar sem", true, cx)
-                            .on_click(cx.listener({
-                                let label = label.clone();
-                                move |this, _, window, cx| {
-                                    if let Some(run) = &mut this.run {
-                                        run.answer_criteria(step, &label, true);
-                                    }
-                                    this.after_answer(window, cx);
+                        secondary_button(
+                            "criteria-accept",
+                            None,
+                            t!("agent_ui.flows.criteria.accept_without"),
+                            true,
+                            cx,
+                        )
+                        .on_click(cx.listener({
+                            let label = label.clone();
+                            move |this, _, window, cx| {
+                                if let Some(run) = &mut this.run {
+                                    run.answer_criteria(step, &label, true);
                                 }
-                            })),
+                                this.after_answer(window, cx);
+                            }
+                        })),
                     )
                     .child(
-                        primary_button("criteria-redo", None, "Pedir para refazer", None, cx)
-                            .on_click(cx.listener(move |this, _, window, cx| {
+                        primary_button(
+                            "criteria-redo",
+                            None,
+                            t!("agent_ui.flows.criteria.redo"),
+                            None,
+                            cx,
+                        )
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
                                 if let Some(run) = &mut this.run {
                                     run.answer_criteria(step, &label, false);
                                 }
                                 this.after_answer(window, cx);
-                            })),
+                            },
+                        )),
                     ),
             )
     }
@@ -1334,7 +1416,7 @@ impl FlowView {
             .skip(1)
             .filter(|event| event.kind == RunEventKind::You)
             .count();
-        let total = |value: String, caption: &'static str| {
+        let total = |value: String, caption: SharedString| {
             v_flex()
                 .flex_1()
                 .child(Label::new(value).weight(FontWeight::SEMIBOLD))
@@ -1346,7 +1428,7 @@ impl FlowView {
         };
         answer_box(BoxTone::Done, cx)
             .child(
-                Label::new("Pronto para revisão")
+                Label::new(t!("agent_ui.flows.done.title"))
                     .weight(FontWeight::SEMIBOLD)
                     .color(Color::Success),
             )
@@ -1354,8 +1436,12 @@ impl FlowView {
                 h_flex()
                     .gap_2()
                     .child(total(
-                        format!("{} min", self.elapsed_minutes()),
-                        "tempo total",
+                        t!(
+                            "agent_ui.flows.done.minutes",
+                            minutes = self.elapsed_minutes()
+                        )
+                        .to_string(),
+                        t!("agent_ui.flows.done.total_time"),
                     ))
                     .child(total(
                         format!(
@@ -1365,16 +1451,17 @@ impl FlowView {
                                 .map(|step| step.attempts as usize)
                                 .sum::<usize>()
                         ),
-                        "rodadas de passos",
+                        t!("agent_ui.flows.done.step_rounds"),
                     ))
-                    .child(total(format!("{answers}"), "respostas suas")),
+                    .child(total(
+                        format!("{answers}"),
+                        t!("agent_ui.flows.done.your_answers"),
+                    )),
             )
             .child(
-                Label::new(
-                    "As entregas ficam nas threads de cada passo. Nada é mergeado pela esteira.",
-                )
-                .size(LabelSize::Small)
-                .color(Color::Muted),
+                Label::new(t!("agent_ui.flows.done.deliveries"))
+                    .size(LabelSize::Small)
+                    .color(Color::Muted),
             )
     }
 
@@ -1397,36 +1484,42 @@ impl FlowView {
                 Label::new(if self.ever_saved {
                     self.flow.file_path.display().to_string()
                 } else {
-                    "Não salva".to_string()
+                    t!("agent_ui.flows.status.unsaved").to_string()
                 })
                 .size(LabelSize::XSmall)
                 .color(Color::Muted)
                 .truncate(),
             )
             .child(
-                Label::new(format!("· {total} passos · {gates} portões"))
-                    .size(LabelSize::XSmall)
-                    .color(Color::Muted),
+                Label::new(t!(
+                    "agent_ui.flows.status.counts",
+                    steps = total,
+                    gates = gates
+                ))
+                .size(LabelSize::XSmall)
+                .color(Color::Muted),
             );
         if let Some(run) = &self.run {
             let (text, color) = match &run.state {
                 RunState::Running => (
-                    format!(
-                        "· Rodando · passo {} de {total} · {}",
-                        run.cursor + 1,
-                        self.step_label(run.cursor)
+                    t!(
+                        "agent_ui.flows.status.running",
+                        step = run.cursor + 1,
+                        total = total,
+                        label = self.step_label(run.cursor)
                     ),
                     Color::Warning,
                 ),
                 RunState::WaitingForYou(_) => (
-                    format!(
-                        "· Rodando · passo {} de {total} · esperando você",
-                        run.cursor + 1
+                    t!(
+                        "agent_ui.flows.status.waiting",
+                        step = run.cursor + 1,
+                        total = total
                     ),
                     Color::Warning,
                 ),
-                RunState::Succeeded => ("· Concluída".to_string(), Color::Success),
-                RunState::Cancelled => ("· Parada".to_string(), Color::Error),
+                RunState::Succeeded => (t!("agent_ui.flows.status.succeeded"), Color::Success),
+                RunState::Cancelled => (t!("agent_ui.flows.status.cancelled"), Color::Error),
             };
             status = status.child(Label::new(text).size(LabelSize::XSmall).color(color));
         }
@@ -1463,13 +1556,13 @@ fn answer_box(tone: BoxTone, cx: &App) -> Div {
 
 fn state_chip(state: StepState, note: Option<String>, cx: &App) -> impl IntoElement {
     let (color, text) = match state {
-        StepState::Queued => (Color::Muted, "na fila"),
-        StepState::Running => (Color::Accent, "rodando"),
-        StepState::Verifying => (Color::Accent, "verificando"),
-        StepState::WaitingForYou => (Color::Warning, "esperando você"),
-        StepState::Passed => (Color::Success, "ok"),
-        StepState::Failed => (Color::Error, "refazendo"),
-        StepState::Skipped => (Color::Muted, "pulado"),
+        StepState::Queued => (Color::Muted, t!("agent_ui.flows.step_state.queued")),
+        StepState::Running => (Color::Accent, t!("agent_ui.flows.step_state.running")),
+        StepState::Verifying => (Color::Accent, t!("agent_ui.flows.step_state.verifying")),
+        StepState::WaitingForYou => (Color::Warning, t!("agent_ui.flows.step_state.waiting")),
+        StepState::Passed => (Color::Success, t!("agent_ui.flows.step_state.passed")),
+        StepState::Failed => (Color::Error, t!("agent_ui.flows.step_state.failed")),
+        StepState::Skipped => (Color::Muted, t!("agent_ui.flows.step_state.skipped")),
     };
     let text = match note {
         Some(note) => format!("{text} · {note}"),
@@ -1501,7 +1594,7 @@ impl Render for FlowView {
         }
         let colors = cx.theme().colors().clone();
         let tab = |id: &'static str,
-                   label: &'static str,
+                   label: SharedString,
                    tab: PanelTab,
                    current: PanelTab,
                    cx: &mut Context<Self>| {
@@ -1529,8 +1622,20 @@ impl Render for FlowView {
                         .border_1()
                         .border_color(colors.border)
                         .bg(colors.editor_background)
-                        .child(tab("panel-step", "Passo", PanelTab::Step, current_tab, cx))
-                        .child(tab("panel-run", "Execução", PanelTab::Run, current_tab, cx)),
+                        .child(tab(
+                            "panel-step",
+                            t!("agent_ui.flows.panel.step"),
+                            PanelTab::Step,
+                            current_tab,
+                            cx,
+                        ))
+                        .child(tab(
+                            "panel-run",
+                            t!("agent_ui.flows.run.title"),
+                            PanelTab::Run,
+                            current_tab,
+                            cx,
+                        )),
                 ),
             )
             .child(
@@ -1676,17 +1781,19 @@ impl Render for FlowRunChip {
         let total = run.steps.len();
         let waiting = matches!(run.state, RunState::WaitingForYou(_));
         let text = if waiting {
-            format!(
-                "{} · passo {} de {total} · esperando você",
-                flow_view.flow.name,
-                run.cursor + 1
+            t!(
+                "agent_ui.flows.chip.waiting",
+                name = flow_view.flow.name,
+                step = run.cursor + 1,
+                total = total
             )
         } else {
-            format!(
-                "{} · passo {} de {total} · {}",
-                flow_view.flow.name,
-                run.cursor + 1,
-                flow_view.step_label(run.cursor)
+            t!(
+                "agent_ui.flows.chip.running",
+                name = flow_view.flow.name,
+                step = run.cursor + 1,
+                total = total,
+                label = flow_view.step_label(run.cursor)
             )
         };
         let color = if waiting {
@@ -1705,7 +1812,7 @@ impl Render for FlowRunChip {
             .hover(|this| this.bg(cx.theme().colors().element_hover))
             .child(div().size(px(6.)).rounded_full().bg(color.color(cx)))
             .child(Label::new(text).size(LabelSize::Small).color(color))
-            .tooltip(ui::Tooltip::text("Abrir a execução"))
+            .tooltip(ui::Tooltip::text(t!("agent_ui.flows.chip.tooltip")))
             .on_click(move |_, window, cx| {
                 workspace
                     .update(cx, |workspace, cx| {
@@ -1763,7 +1870,7 @@ impl StatusItemView for FlowsToolkitButton {
         let workspace = self.workspace.clone();
         Some(ToolkitEntry {
             icon: IconName::ListTree,
-            label: "Esteiras".into(),
+            label: t!("agent_ui.flows.toolkit_label"),
             is_open,
             action: Box::new(RunFlow::default()),
             toggle: Rc::new(move |window, cx| {

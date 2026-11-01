@@ -10,6 +10,7 @@ use crate::{
 };
 use anyhow::{Context as _, anyhow};
 use gpui::{App, AsyncApp, Entity, Task, TaskExt as _, Window};
+use i18n::t;
 use project::Project;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -578,7 +579,8 @@ fn open_mention(
         .strip_prefix(CONTAINER_MENTION_PREFIX)
         .unwrap_or(id)
         .to_string();
-    let workspace = workspace_for(project, cx).context("A janela do projeto foi fechada.")?;
+    let workspace = workspace_for(project, cx)
+        .with_context(|| t!("docker.agent.project_window_closed").to_string())?;
     workspace.update(cx, |workspace, cx| {
         crate::open(workspace, window, cx);
         if let Some(panel) = workspace.panel::<DockerPanel>(cx) {
@@ -611,7 +613,7 @@ fn act(
             workspace.show_toast(
                 workspace::Toast::new(
                     workspace::notifications::NotificationId::unique::<DockerPanel>(),
-                    "Esse container não existe mais.",
+                    t!("docker.agent.container_gone").to_string(),
                 )
                 .autohide(),
                 cx,
@@ -667,13 +669,13 @@ pub fn register_toolkit(cx: &mut App) {
         Toolkit {
             id: task_agents::toolkit_ids::DOCKER.into(),
             name: "Docker".into(),
-            description: "Containers da máquina: estado, logs e ciclo de vida".into(),
+            description: t!("docker.agent.toolkit_description"),
             icon: "docker".into(),
             mention: Some("@container".into()),
             tools: vec![
                 ToolkitTool::new(
                     "docker_list",
-                    "Listou os containers",
+                    t!("docker.agent.tool.list"),
                     "Lists the containers on this machine with state, image, compose project and \
                      service, published ports, CPU and memory when known, and restart counts. \
                      Call it first to learn the names the other docker tools take.",
@@ -682,7 +684,7 @@ pub fn register_toolkit(cx: &mut App) {
                 ),
                 ToolkitTool::new(
                     DOCKER_LOGS_TOOL,
-                    "Leu os logs",
+                    t!("docker.agent.tool.logs"),
                     "Reads the last `tail` log lines of a container (default 200, at most 1000), \
                      stdout and stderr, with local times. `contains` keeps only matching lines. \
                      Use it to find why a container fails or restarts.",
@@ -691,7 +693,7 @@ pub fn register_toolkit(cx: &mut App) {
                 ),
                 ToolkitTool::new(
                     DOCKER_INSPECT_TOOL,
-                    "Inspecionou o container",
+                    t!("docker.agent.tool.inspect"),
                     "Reads a container's state, exit code, restart count, health, restart \
                      policy, command, working dir, user, network, ports and volumes. Env \
                      variables come with their names only.",
@@ -700,49 +702,49 @@ pub fn register_toolkit(cx: &mut App) {
                 ),
                 ToolkitTool::new(
                     "docker_stats",
-                    "Leu CPU e memória",
+                    t!("docker.agent.tool.stats"),
                     "Samples CPU and memory of one container, or of every running one.",
                     ToolAccess::Read,
                     container_stats,
                 ),
                 ToolkitTool::new(
                     "docker_start",
-                    "Iniciou o container",
+                    t!("docker.agent.tool.start"),
                     "Starts a stopped container. Asks the user first.",
                     ToolAccess::Act,
                     lifecycle(ContainerAction::Start),
                 ),
                 ToolkitTool::new(
                     "docker_stop",
-                    "Parou o container",
+                    t!("docker.agent.tool.stop"),
                     "Stops a running container. Asks the user first.",
                     ToolAccess::Act,
                     lifecycle(ContainerAction::Stop),
                 ),
                 ToolkitTool::new(
                     "docker_restart",
-                    "Reiniciou o container",
+                    t!("docker.agent.tool.restart"),
                     "Restarts a container. Asks the user first.",
                     ToolAccess::Act,
                     lifecycle(ContainerAction::Restart),
                 ),
                 ToolkitTool::new(
                     "docker_pause",
-                    "Pausou o container",
+                    t!("docker.agent.tool.pause"),
                     "Pauses a running container (its processes freeze). Asks the user first.",
                     ToolAccess::Act,
                     lifecycle(ContainerAction::Pause),
                 ),
                 ToolkitTool::new(
                     "docker_unpause",
-                    "Retomou o container",
+                    t!("docker.agent.tool.unpause"),
                     "Resumes a paused container. Asks the user first.",
                     ToolAccess::Act,
                     lifecycle(ContainerAction::Unpause),
                 ),
                 ToolkitTool::new(
                     "docker_exec",
-                    "Rodou um comando no container",
+                    t!("docker.agent.tool.exec"),
                     "Runs one non-interactive shell command inside a running container \
                      (`sh -c`, no TTY) and returns stdout, stderr and the exit code, giving up \
                      after `timeout_seconds` (default 30, at most 120). Asks the user first. Use \

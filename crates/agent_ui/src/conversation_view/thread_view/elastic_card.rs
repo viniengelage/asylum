@@ -1,6 +1,7 @@
 use super::{ThreadView, ToolCallLayout};
 use acp_thread::{ToolCall, ToolCallStatus};
 use gpui::{AnyElement, ClipboardItem, relative};
+use i18n::t;
 use task_agents::{
     ELASTIC_ESQL_TOOL, ELASTIC_RECENT_ERRORS_TOOL, ELASTIC_TRACE_TOOL, ELASTIC_WIDE_ESQL_TOOL,
     ElasticConnectionInfo, ElasticQueryResult, ElasticTraceResult,
@@ -165,18 +166,59 @@ fn format_micros(micros: u64) -> String {
     }
 }
 
-fn window_label(minutes: u32) -> String {
+enum WindowSpan {
+    Day,
+    Days(u32),
+    Hours(u32),
+    Minutes(u32),
+}
+
+fn window_span(minutes: u32) -> WindowSpan {
     match minutes {
         minutes if minutes >= 24 * 60 && minutes % (24 * 60) == 0 => {
             let days = minutes / (24 * 60);
             if days == 1 {
-                "últimas 24 h".to_owned()
+                WindowSpan::Day
             } else {
-                format!("últimos {days} dias")
+                WindowSpan::Days(days)
             }
         }
-        minutes if minutes >= 60 && minutes % 60 == 0 => format!("últimas {} h", minutes / 60),
-        minutes => format!("últimos {minutes} min"),
+        minutes if minutes >= 60 && minutes % 60 == 0 => WindowSpan::Hours(minutes / 60),
+        minutes => WindowSpan::Minutes(minutes),
+    }
+}
+
+fn window_label(minutes: u32) -> String {
+    match window_span(minutes) {
+        WindowSpan::Day => t!("agent_ui.elastic_card.window.last_day"),
+        WindowSpan::Days(count) => t!("agent_ui.elastic_card.window.last_days", count = count),
+        WindowSpan::Hours(count) => t!("agent_ui.elastic_card.window.last_hours", count = count),
+        WindowSpan::Minutes(count) => {
+            t!("agent_ui.elastic_card.window.last_minutes", count = count)
+        }
+    }
+    .to_string()
+}
+
+fn no_documents_label(minutes: u32) -> SharedString {
+    match window_span(minutes) {
+        WindowSpan::Day => t!("agent_ui.elastic_card.no_documents.last_day"),
+        WindowSpan::Days(count) => t!(
+            "agent_ui.elastic_card.no_documents.last_days",
+            count = count
+        ),
+        WindowSpan::Hours(count) => {
+            t!(
+                "agent_ui.elastic_card.no_documents.last_hours",
+                count = count
+            )
+        }
+        WindowSpan::Minutes(count) => {
+            t!(
+                "agent_ui.elastic_card.no_documents.last_minutes",
+                count = count
+            )
+        }
     }
 }
 
@@ -232,11 +274,18 @@ fn to_csv(result: &ElasticQueryResult) -> String {
 
 fn rows_label(count: usize, logs: bool) -> String {
     match (count, logs) {
-        (1, true) => "1 doc".to_owned(),
-        (1, false) => "1 linha".to_owned(),
-        (count, true) => format!("{} docs", format_number(&count.to_string())),
-        (count, false) => format!("{} linhas", format_number(&count.to_string())),
+        (1, true) => t!("agent_ui.elastic_card.docs.one"),
+        (1, false) => t!("agent_ui.elastic_card.rows.one"),
+        (count, true) => t!(
+            "agent_ui.elastic_card.docs.other",
+            count = format_number(&count.to_string())
+        ),
+        (count, false) => t!(
+            "agent_ui.elastic_card.rows.other",
+            count = format_number(&count.to_string())
+        ),
     }
+    .to_string()
 }
 
 fn badge(text: String, color: Color, cx: &App) -> AnyElement {
@@ -337,13 +386,13 @@ impl ThreadView {
         let source = result
             .source
             .clone()
-            .unwrap_or_else(|| "consulta".to_owned());
+            .unwrap_or_else(|| t!("agent_ui.elastic_card.query_fallback").to_string());
         let logs = matches!(presentation, Presentation::Logs);
         let (icon, icon_color, title) = match presentation {
             Presentation::Empty => (
                 IconName::XCircle,
                 Color::Muted,
-                format!("{source} · nada na janela"),
+                t!("agent_ui.elastic_card.nothing_in_window", source = source).to_string(),
             ),
             Presentation::Number => (IconName::Hash, Color::Accent, source),
             _ => (
@@ -364,13 +413,7 @@ impl ThreadView {
             Presentation::Empty => div()
                 .px_2()
                 .py_1p5()
-                .child(
-                    Label::new(format!(
-                        "Nenhum documento {}.",
-                        window_label(result.window_minutes).replace("últim", "nos últim")
-                    ))
-                    .size(LabelSize::Small),
-                )
+                .child(Label::new(no_documents_label(result.window_minutes)).size(LabelSize::Small))
                 .into_any_element(),
             Presentation::Number => render_number(&result),
             Presentation::Series { time, value } => render_series(&result, time, value, cx),
@@ -395,9 +438,9 @@ impl ThreadView {
                 Button::new(
                     ("elastic-card-query", entry_ix),
                     if expanded {
-                        "Esconder ES|QL"
+                        t!("agent_ui.elastic_card.hide_esql")
                     } else {
-                        "Ver ES|QL"
+                        t!("agent_ui.elastic_card.show_esql")
                     },
                 )
                 .label_size(LabelSize::Small)
@@ -415,59 +458,68 @@ impl ThreadView {
                 })),
             )
             .child(
-                Button::new(("elastic-card-open", entry_ix), "Abrir no Elastic")
+                Button::new(
+                    ("elastic-card-open", entry_ix),
+                    t!("agent_ui.elastic_card.open_in_elastic"),
+                )
+                .label_size(LabelSize::Small)
+                .color(Color::Muted)
+                .start_icon(
+                    Icon::new(IconName::ArrowUpRight)
+                        .size(IconSize::XSmall)
+                        .color(Color::Muted),
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.open_elastic_query(query.clone(), window_minutes, window, cx);
+                })),
+            )
+            .when_some(follow_source.filter(|_| logs), |this, source| {
+                this.child(
+                    Button::new(
+                        ("elastic-card-follow", entry_ix),
+                        t!("agent_ui.elastic_card.follow"),
+                    )
                     .label_size(LabelSize::Small)
                     .color(Color::Muted)
                     .start_icon(
-                        Icon::new(IconName::ArrowUpRight)
+                        Icon::new(IconName::ListTree)
                             .size(IconSize::XSmall)
                             .color(Color::Muted),
                     )
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        this.open_elastic_query(query.clone(), window_minutes, window, cx);
+                        let Some(project) = this.project.upgrade() else {
+                            return;
+                        };
+                        if let Err(error) =
+                            task_agents::follow_logs(&project, source.clone(), window, cx)
+                        {
+                            this.show_elastic_error(error, cx);
+                        }
                     })),
-            )
-            .when_some(follow_source.filter(|_| logs), |this, source| {
-                this.child(
-                    Button::new(("elastic-card-follow", entry_ix), "Seguir")
-                        .label_size(LabelSize::Small)
-                        .color(Color::Muted)
-                        .start_icon(
-                            Icon::new(IconName::ListTree)
-                                .size(IconSize::XSmall)
-                                .color(Color::Muted),
-                        )
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            let Some(project) = this.project.upgrade() else {
-                                return;
-                            };
-                            if let Err(error) =
-                                task_agents::follow_logs(&project, source.clone(), window, cx)
-                            {
-                                this.show_elastic_error(error, cx);
-                            }
-                        })),
                 )
             })
             .when(has_rows, |this| {
                 this.child(
-                    Button::new(("elastic-card-copy", entry_ix), "Copiar CSV")
-                        .label_size(LabelSize::Small)
-                        .color(Color::Muted)
-                        .start_icon(
-                            Icon::new(IconName::Copy)
-                                .size(IconSize::XSmall)
-                                .color(Color::Muted),
-                        )
-                        .on_click(move |_, _window, cx| {
-                            cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
-                        }),
+                    Button::new(
+                        ("elastic-card-copy", entry_ix),
+                        t!("agent_ui.elastic_card.copy_csv"),
+                    )
+                    .label_size(LabelSize::Small)
+                    .color(Color::Muted)
+                    .start_icon(
+                        Icon::new(IconName::Copy)
+                            .size(IconSize::XSmall)
+                            .color(Color::Muted),
+                    )
+                    .on_click(move |_, _window, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
+                    }),
                 )
             })
             .child(div().flex_1())
             .when_some(result.took_ms, |this, took| {
                 this.child(
-                    Label::new(format!("took {took} ms"))
+                    Label::new(t!("agent_ui.elastic_card.took", milliseconds = took))
                         .size(LabelSize::XSmall)
                         .color(Color::Muted)
                         .buffer_font(cx),
@@ -553,9 +605,12 @@ impl ThreadView {
             .when(hidden > 0, |this| {
                 this.child(
                     div().px_2().py_1().bg(self.tool_card_header_bg(cx)).child(
-                        Label::new(format!("+ {} no resultado", rows_label(hidden, true)))
-                            .size(LabelSize::XSmall)
-                            .color(Color::Muted),
+                        Label::new(t!(
+                            "agent_ui.elastic_card.more_in_result",
+                            rows = rows_label(hidden, true)
+                        ))
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted),
                     ),
                 )
             })
@@ -598,7 +653,7 @@ impl ThreadView {
             .when(hidden > 0, |this| {
                 this.child(
                     div().px_2().py_0p5().child(
-                        Label::new(format!("+ {hidden} colunas"))
+                        Label::new(t!("agent_ui.elastic_card.more_columns", count = hidden))
                             .size(LabelSize::XSmall)
                             .color(Color::Muted),
                     ),
@@ -644,10 +699,16 @@ impl ThreadView {
         let hidden_columns = result.columns.len().saturating_sub(MAX_TABLE_COLUMNS);
         let mut notes = Vec::new();
         if hidden_rows > 0 {
-            notes.push(format!("+ {} no resultado", rows_label(hidden_rows, false)));
+            notes.push(t!(
+                "agent_ui.elastic_card.more_in_result",
+                rows = rows_label(hidden_rows, false)
+            ));
         }
         if hidden_columns > 0 {
-            notes.push(format!("+ {hidden_columns} colunas"));
+            notes.push(t!(
+                "agent_ui.elastic_card.more_columns",
+                count = hidden_columns
+            ));
         }
         v_flex()
             .w_full()
@@ -741,13 +802,14 @@ impl ThreadView {
                 Color::Error
             },
             if result.rows.is_empty() {
-                "Nenhum erro".to_owned()
+                t!("agent_ui.elastic_card.no_errors").to_string()
             } else {
-                format!(
-                    "{} erros em {} mensagens",
-                    format_number(&total.to_string()),
-                    result.rows.len()
+                t!(
+                    "agent_ui.elastic_card.errors_in_messages",
+                    errors = format_number(&total.to_string()),
+                    messages = result.rows.len()
                 )
+                .to_string()
             },
             Some((window_label(result.window_minutes), Color::Muted)),
             &result.connection,
@@ -779,7 +841,9 @@ impl ThreadView {
                         div().flex_1().min_w_0().child(
                             Label::new(
                                 value(row, text_column)
-                                    .unwrap_or_else(|| "(sem mensagem)".to_owned())
+                                    .unwrap_or_else(|| {
+                                        t!("agent_ui.elastic_card.no_message").to_string()
+                                    })
                                     .replace(['\n', '\r'], " "),
                             )
                             .size(LabelSize::Small)
@@ -796,9 +860,12 @@ impl ThreadView {
                     })
                     .when_some(value(row, last_column), |this, last| {
                         this.child(
-                            Label::new(format!("última {}", short_time(&last)))
-                                .size(LabelSize::XSmall)
-                                .color(Color::Muted),
+                            Label::new(t!(
+                                "agent_ui.elastic_card.last_seen",
+                                time = short_time(&last)
+                            ))
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
                         )
                     })
             }))
@@ -812,30 +879,36 @@ impl ThreadView {
             .px_1()
             .py_1()
             .child(
-                Button::new(("elastic-errors-open", entry_ix), "Abrir no Elastic")
-                    .label_size(LabelSize::Small)
-                    .color(Color::Muted)
-                    .start_icon(
-                        Icon::new(IconName::ArrowUpRight)
-                            .size(IconSize::XSmall)
-                            .color(Color::Muted),
-                    )
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.open_elastic_query(query.clone(), window_minutes, window, cx);
-                    })),
+                Button::new(
+                    ("elastic-errors-open", entry_ix),
+                    t!("agent_ui.elastic_card.open_in_elastic"),
+                )
+                .label_size(LabelSize::Small)
+                .color(Color::Muted)
+                .start_icon(
+                    Icon::new(IconName::ArrowUpRight)
+                        .size(IconSize::XSmall)
+                        .color(Color::Muted),
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.open_elastic_query(query.clone(), window_minutes, window, cx);
+                })),
             )
             .child(
-                Button::new(("elastic-errors-copy", entry_ix), "Copiar CSV")
-                    .label_size(LabelSize::Small)
-                    .color(Color::Muted)
-                    .start_icon(
-                        Icon::new(IconName::Copy)
-                            .size(IconSize::XSmall)
-                            .color(Color::Muted),
-                    )
-                    .on_click(move |_, _window, cx| {
-                        cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
-                    }),
+                Button::new(
+                    ("elastic-errors-copy", entry_ix),
+                    t!("agent_ui.elastic_card.copy_csv"),
+                )
+                .label_size(LabelSize::Small)
+                .color(Color::Muted)
+                .start_icon(
+                    Icon::new(IconName::Copy)
+                        .size(IconSize::XSmall)
+                        .color(Color::Muted),
+                )
+                .on_click(move |_, _window, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
+                }),
             )
             .into_any_element();
         vec![header, body, footer]
@@ -863,7 +936,12 @@ impl ThreadView {
             IconName::ListTree,
             if failed { Color::Error } else { Color::Accent },
             title,
-            failed.then(|| ("falhou".to_owned(), Color::Error)),
+            failed.then(|| {
+                (
+                    t!("agent_ui.elastic_card.trace_failed").to_string(),
+                    Color::Error,
+                )
+            }),
             &result.connection,
             cx,
         );
@@ -932,9 +1010,12 @@ impl ThreadView {
             .when(result.total_spans > MAX_TRACE_SPANS, |this| {
                 this.child(
                     div().px_2().child(
-                        Label::new(format!("+ {} spans", result.total_spans - MAX_TRACE_SPANS))
-                            .size(LabelSize::XSmall)
-                            .color(Color::Muted),
+                        Label::new(t!(
+                            "agent_ui.elastic_card.more_spans",
+                            count = result.total_spans - MAX_TRACE_SPANS
+                        ))
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted),
                     ),
                 )
             })
@@ -947,7 +1028,7 @@ impl ThreadView {
                 .border_t_1()
                 .border_color(self.tool_card_border_color(cx))
                 .children(result.errors.iter().take(3).map(|message| {
-                    Label::new(format!("Error: {message}"))
+                    Label::new(t!("agent_ui.elastic_card.error_line", message = message))
                         .size(LabelSize::XSmall)
                         .buffer_font(cx)
                         .color(Color::Error)
@@ -968,48 +1049,55 @@ impl ThreadView {
             .border_t_1()
             .border_color(self.tool_card_border_color(cx))
             .child(
-                Button::new(("elastic-trace-open", entry_ix), "Abrir trace")
+                Button::new(
+                    ("elastic-trace-open", entry_ix),
+                    t!("agent_ui.elastic_card.open_trace"),
+                )
+                .label_size(LabelSize::Small)
+                .color(Color::Muted)
+                .start_icon(
+                    Icon::new(IconName::ArrowUpRight)
+                        .size(IconSize::XSmall)
+                        .color(Color::Muted),
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    let Some(project) = this.project.upgrade() else {
+                        return;
+                    };
+                    if let Err(error) = task_agents::open_log_mention(
+                        &project,
+                        &format!("trace:{trace_id}"),
+                        window,
+                        cx,
+                    ) {
+                        this.show_elastic_error(error, cx);
+                    }
+                })),
+            )
+            .when(result.log_count > 0, |this| {
+                this.child(
+                    Button::new(
+                        ("elastic-trace-logs", entry_ix),
+                        t!("agent_ui.elastic_card.trace_logs"),
+                    )
                     .label_size(LabelSize::Small)
                     .color(Color::Muted)
                     .start_icon(
-                        Icon::new(IconName::ArrowUpRight)
+                        Icon::new(IconName::Filter)
                             .size(IconSize::XSmall)
                             .color(Color::Muted),
                     )
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        let Some(project) = this.project.upgrade() else {
-                            return;
-                        };
-                        if let Err(error) = task_agents::open_log_mention(
-                            &project,
-                            &format!("trace:{trace_id}"),
-                            window,
-                            cx,
-                        ) {
-                            this.show_elastic_error(error, cx);
-                        }
+                        this.open_elastic_query(logs_query.clone(), 7 * 24 * 60, window, cx);
                     })),
-            )
-            .when(result.log_count > 0, |this| {
-                this.child(
-                    Button::new(("elastic-trace-logs", entry_ix), "Logs do trace")
-                        .label_size(LabelSize::Small)
-                        .color(Color::Muted)
-                        .start_icon(
-                            Icon::new(IconName::Filter)
-                                .size(IconSize::XSmall)
-                                .color(Color::Muted),
-                        )
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.open_elastic_query(logs_query.clone(), 7 * 24 * 60, window, cx);
-                        })),
                 )
             })
             .child(div().flex_1())
             .child(
-                Label::new(format!(
-                    "{} spans · {} logs",
-                    result.total_spans, result.log_count
+                Label::new(t!(
+                    "agent_ui.elastic_card.spans_and_logs",
+                    spans = result.total_spans,
+                    logs = result.log_count
                 ))
                 .size(LabelSize::XSmall)
                 .color(Color::Muted),
@@ -1037,7 +1125,10 @@ impl ThreadView {
                     v_flex()
                         .flex_1()
                         .min_w_0()
-                        .child(Label::new("Sem Elastic para consultar").size(LabelSize::Small))
+                        .child(
+                            Label::new(t!("agent_ui.elastic_card.not_connected"))
+                                .size(LabelSize::Small),
+                        )
                         .child(
                             Label::new(message)
                                 .size(LabelSize::XSmall)
@@ -1045,20 +1136,23 @@ impl ThreadView {
                         ),
                 )
                 .child(
-                    Button::new(("elastic-card-panel", entry_ix), "Abrir Elastic")
-                        .label_size(LabelSize::Small)
-                        .start_icon(
-                            Icon::new(IconName::CloudPulse)
-                                .size(IconSize::XSmall)
-                                .color(Color::Accent),
-                        )
-                        .on_click(|_, window, cx| {
-                            if let Some(action) =
-                                cx.build_action("elastic::ToggleFocus", None).log_err()
-                            {
-                                window.dispatch_action(action, cx);
-                            }
-                        }),
+                    Button::new(
+                        ("elastic-card-panel", entry_ix),
+                        t!("agent_ui.elastic_card.open_elastic"),
+                    )
+                    .label_size(LabelSize::Small)
+                    .start_icon(
+                        Icon::new(IconName::CloudPulse)
+                            .size(IconSize::XSmall)
+                            .color(Color::Accent),
+                    )
+                    .on_click(|_, window, cx| {
+                        if let Some(action) =
+                            cx.build_action("elastic::ToggleFocus", None).log_err()
+                        {
+                            window.dispatch_action(action, cx);
+                        }
+                    }),
                 )
                 .into_any_element(),
         ]
@@ -1243,9 +1337,9 @@ mod tests {
 
     #[test]
     fn labels_read_like_the_dock() {
-        assert_eq!(window_label(60), "últimas 1 h");
-        assert_eq!(window_label(24 * 60), "últimas 24 h");
-        assert_eq!(window_label(30), "últimos 30 min");
+        assert_eq!(window_label(60), "last 1 h");
+        assert_eq!(window_label(24 * 60), "last 24 h");
+        assert_eq!(window_label(30), "last 30 min");
         assert_eq!(format_micros(10_412_000), "10,4 s");
         assert_eq!(format_number("67083474"), "67.083.474");
     }

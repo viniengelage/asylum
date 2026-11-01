@@ -4,33 +4,34 @@
 use crate::Sidebar;
 use agent_ui::ThreadId;
 use agent_ui::flows_view::history::{FlowRunRecord, RecordStatus};
-use gpui::{AnyElement, App, Context, Window};
+use gpui::{AnyElement, App, Context, SharedString, Window};
+use i18n::t;
 use std::time::SystemTime;
 use ui::{Tooltip, prelude::*};
 
 /// The runs shown without "Ver todas".
 const VISIBLE_RUNS: usize = 5;
 
-fn status_text(status: RecordStatus) -> (&'static str, Color) {
+fn status_text(status: RecordStatus) -> (SharedString, Color) {
     match status {
-        RecordStatus::Running => ("rodando", Color::Accent),
-        RecordStatus::WaitingForYou => ("esperando você", Color::Warning),
-        RecordStatus::Succeeded => ("concluída", Color::Success),
-        RecordStatus::Cancelled => ("parada", Color::Error),
-        RecordStatus::Interrupted => ("interrompida", Color::Warning),
+        RecordStatus::Running => (t!("sidebar.flows.status_running"), Color::Accent),
+        RecordStatus::WaitingForYou => (t!("sidebar.flows.status_waiting_for_you"), Color::Warning),
+        RecordStatus::Succeeded => (t!("sidebar.flows.status_succeeded"), Color::Success),
+        RecordStatus::Cancelled => (t!("sidebar.flows.status_cancelled"), Color::Error),
+        RecordStatus::Interrupted => (t!("sidebar.flows.status_interrupted"), Color::Warning),
     }
 }
 
-fn elapsed_label(at: SystemTime) -> String {
+fn elapsed_label(at: SystemTime) -> SharedString {
     let seconds = SystemTime::now()
         .duration_since(at)
         .map(|elapsed| elapsed.as_secs())
         .unwrap_or_default();
     match seconds {
-        0..60 => "agora".to_string(),
-        60..3600 => format!("{} min", seconds / 60),
-        3600..86400 => format!("{} h", seconds / 3600),
-        _ => format!("{} d", seconds / 86400),
+        0..60 => t!("sidebar.flows.elapsed_now"),
+        60..3600 => t!("sidebar.flows.elapsed_minutes", count = seconds / 60),
+        3600..86400 => t!("sidebar.flows.elapsed_hours", count = seconds / 3600),
+        _ => t!("sidebar.flows.elapsed_days", count = seconds / 86400),
     }
 }
 
@@ -77,7 +78,7 @@ impl Sidebar {
             .gap_1()
             .cursor_pointer()
             .child(
-                Label::new("ESTEIRAS")
+                Label::new(t!("sidebar.flows.header"))
                     .size(LabelSize::XSmall)
                     .color(Color::Muted),
             )
@@ -93,9 +94,13 @@ impl Sidebar {
             .child(div().flex_1())
             .when(live > 0, |this| {
                 this.child(
-                    Label::new(format!("{live} ativa{}", if live == 1 { "" } else { "s" }))
-                        .size(LabelSize::XSmall)
-                        .color(Color::Accent),
+                    Label::new(if live == 1 {
+                        t!("sidebar.flows.active.one")
+                    } else {
+                        t!("sidebar.flows.active.other", count = live)
+                    })
+                    .size(LabelSize::XSmall)
+                    .color(Color::Accent),
                 )
             })
             .on_click(cx.listener(|this, _, _window, cx| {
@@ -124,9 +129,9 @@ impl Sidebar {
                         Button::new(
                             "flows-show-all",
                             if self.flows_section_show_all {
-                                "Ver menos".to_string()
+                                t!("sidebar.flows.show_less")
                             } else {
-                                format!("Ver todas ({})", records.len())
+                                t!("sidebar.flows.show_all", count = records.len())
                             },
                         )
                         .label_size(LabelSize::XSmall)
@@ -154,10 +159,11 @@ impl Sidebar {
         let total = record.snapshot.steps.len();
         let expanded = self.expanded_flow_runs.contains(&record.id);
         let progress = match status {
-            RecordStatus::Succeeded => format!("{total} de {total}"),
-            _ => format!(
-                "passo {} de {total}",
-                (record.snapshot.cursor + 1).min(total)
+            RecordStatus::Succeeded => t!("sidebar.flows.progress_done", total = total),
+            _ => t!(
+                "sidebar.flows.progress_step",
+                step = (record.snapshot.cursor + 1).min(total),
+                total = total
             ),
         };
         let id = record.id.clone();
@@ -184,7 +190,7 @@ impl Sidebar {
                     },
                 )
                 .icon_size(IconSize::XSmall)
-                .tooltip(Tooltip::text("Threads dos passos"))
+                .tooltip(Tooltip::text(t!("sidebar.flows.step_threads")))
                 .on_click(cx.listener(move |this, _, _window, cx| {
                     if !this.expanded_flow_runs.remove(&toggle_id) {
                         this.expanded_flow_runs.insert(toggle_id.clone());
@@ -218,7 +224,7 @@ impl Sidebar {
                 this.child(
                     Button::new(
                         SharedString::from(format!("flow-run-resume-{}", record.id)),
-                        "Retomar",
+                        t!("sidebar.flows.resume"),
                     )
                     .label_size(LabelSize::XSmall)
                     .style(ButtonStyle::Outlined)
@@ -236,7 +242,7 @@ impl Sidebar {
                             IconName::Close,
                         )
                         .icon_size(IconSize::XSmall)
-                        .tooltip(Tooltip::text("Tirar do histórico"))
+                        .tooltip(Tooltip::text(t!("sidebar.flows.forget")))
                         .on_click(move |_, _window, cx| {
                             agent_ui::flows_view::history::forget(&forget_id, cx)
                         }),

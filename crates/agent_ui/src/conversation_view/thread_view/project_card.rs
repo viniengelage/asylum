@@ -1,6 +1,7 @@
 use super::{ThreadView, ToolCallLayout};
 use acp_thread::{ToolCall, ToolCallStatus};
 use gpui::{AnyElement, FontWeight};
+use i18n::t;
 use task_agents::{PROJECT_ITEMS_TOOL, ProjectItemsCard};
 use ui::prelude::*;
 
@@ -108,7 +109,7 @@ impl ThreadView {
                                 this.child(
                                     Button::new(
                                         SharedString::from(format!("project-card-start-{entry_ix}-{index}")),
-                                        "Começar",
+                                        t!("agent_ui.project_card.start"),
                                     )
                                     .style(ButtonStyle::Subtle)
                                     .label_size(LabelSize::Small)
@@ -133,7 +134,7 @@ impl ThreadView {
                     .border_t_1()
                     .border_color(colors.border)
                     .child(
-                        Button::new(SharedString::from(format!("project-card-board-{entry_ix}")), "Abrir quadro")
+                        Button::new(SharedString::from(format!("project-card-board-{entry_ix}")), t!("agent_ui.project_card.open_board"))
                             .style(ButtonStyle::Subtle)
                             .label_size(LabelSize::Small)
                             .start_icon(Icon::new(IconName::Blocks).size(IconSize::XSmall).color(Color::Muted))
@@ -144,7 +145,7 @@ impl ThreadView {
                             }),
                     )
                     .child(
-                        Button::new(SharedString::from(format!("project-card-dock-{entry_ix}")), "Ver no dock")
+                        Button::new(SharedString::from(format!("project-card-dock-{entry_ix}")), t!("agent_ui.project_card.view_in_dock"))
                             .style(ButtonStyle::Subtle)
                             .label_size(LabelSize::Small)
                             .start_icon(Icon::new(IconName::ListTodo).size(IconSize::XSmall).color(Color::Muted))

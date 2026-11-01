@@ -12,6 +12,7 @@ use anyhow::{Context as _, Result};
 use credentials_provider::CredentialsProvider;
 use gpui::{Entity, Global, Subscription, Task, WeakEntity, actions};
 use http_client::HttpClient;
+use i18n::t;
 use settings::SettingsStore;
 use std::rc::Rc;
 use std::{
@@ -258,7 +259,10 @@ impl ClickUpStore {
     /// Starts the timer on `task_id`, which stops whichever one was running.
     pub fn start_timer(&mut self, task_id: String, cx: &mut Context<Self>) -> Task<Result<()>> {
         let Some((http_client, token, workspace_id)) = self.request_context() else {
-            return Task::ready(Err(anyhow::anyhow!("ClickUp não está conectado")));
+            return Task::ready(Err(anyhow::anyhow!(
+                "{}",
+                t!("clickup.errors.not_connected")
+            )));
         };
         cx.spawn(async move |this, cx| {
             cx.background_spawn(async move {
@@ -271,7 +275,10 @@ impl ClickUpStore {
 
     pub fn stop_timer(&mut self, cx: &mut Context<Self>) -> Task<Result<()>> {
         let Some((http_client, token, workspace_id)) = self.request_context() else {
-            return Task::ready(Err(anyhow::anyhow!("ClickUp não está conectado")));
+            return Task::ready(Err(anyhow::anyhow!(
+                "{}",
+                t!("clickup.errors.not_connected")
+            )));
         };
         cx.spawn(async move |this, cx| {
             cx.background_spawn(async move {
@@ -498,7 +505,7 @@ impl ClickUpStore {
                 Err(error) => {
                     log::error!("ClickUp: falha ao ler o token do keychain: {error:#}");
                     Connection::Unreachable {
-                        message: "Não foi possível ler o token do keychain".into(),
+                        message: t!("clickup.errors.keychain_read"),
                     }
                 }
             };

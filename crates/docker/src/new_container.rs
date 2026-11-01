@@ -1,4 +1,4 @@
-//! "Novo container": runs an image with ports, env, a volume and a network, showing the
+//! "New container": runs an image with ports, env, a volume and a network, showing the
 //! equivalent `docker run`, or adds the same as a service to the project's docker-compose.yml
 //! and brings only that service up.
 
@@ -15,6 +15,7 @@ use gpui::{
     ClipboardItem, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
     Subscription, Task, WeakEntity, px,
 };
+use i18n::t;
 use std::path::{Path, PathBuf};
 use tokio::sync::mpsc;
 use ui::{
@@ -106,10 +107,10 @@ impl NewContainerModal {
     ) -> Self {
         let store = DockerStore::global(cx);
         let image = single_line("postgres:16-alpine", window, cx);
-        let name = single_line("opcional", window, cx);
+        let name = single_line(&t!("docker.new_container.name_placeholder"), window, cx);
         let host_port = single_line("host", window, cx);
         let container_port = single_line("container", window, cx);
-        let volume = single_line("volume:/caminho/no/container", window, cx);
+        let volume = single_line(&t!("docker.new_container.volume_placeholder"), window, cx);
         let mut subscriptions = Vec::new();
         for editor in [&image, &name, &host_port, &container_port, &volume] {
             subscriptions.push(cx.subscribe(editor, |_, _, event: &EditorEvent, cx| {
@@ -158,8 +159,12 @@ impl NewContainerModal {
     }
 
     fn push_env_row(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let key = single_line("CHAVE", window, cx);
-        let value = single_line("valor", window, cx);
+        let key = single_line(&t!("docker.new_container.env_key_placeholder"), window, cx);
+        let value = single_line(
+            &t!("docker.new_container.env_value_placeholder"),
+            window,
+            cx,
+        );
         self._subscriptions.push(cx.subscribe_in(
             &key,
             window,
@@ -207,8 +212,11 @@ impl NewContainerModal {
         let entries: Vec<(String, String)> = match dotenvy::from_path_iter(&path) {
             Ok(iter) => iter.filter_map(Result::ok).collect(),
             Err(error) => {
-                self.progress =
-                    Progress::Failed(format!("{} não abriu: {error}", file_name(&path)).into());
+                self.progress = Progress::Failed(t!(
+                    "docker.new_container.env_file_failed",
+                    file = file_name(&path),
+                    error = error
+                ));
                 cx.notify();
                 return;
             }
@@ -275,23 +283,25 @@ impl NewContainerModal {
                         .any(|(public, _)| *public == port)
             })
         };
-        let describe = |container: &crate::Container| match container.compose_project() {
-            Some(_) => format!("pelo {} do compose", container.display_name()),
-            None => format!("pelo {}", container.display_name()),
+        let describe = |port: u16, container: &crate::Container| {
+            let name = container.display_name();
+            match container.compose_project() {
+                Some(_) => t!(
+                    "docker.new_container.port_in_use_by_compose",
+                    port = port,
+                    name = name
+                ),
+                None => t!("docker.new_container.port_in_use", port = port, name = name),
+            }
+            .to_string()
         };
         if let Some(conflict) = owner(host) {
-            return Some((
-                format!("{host} já está em uso {}", describe(conflict)),
-                true,
-            ));
+            return Some((describe(host, conflict), true));
         }
         if host != container
             && let Some(owner) = owner(container)
         {
-            return Some((
-                format!("{container} já está em uso {}", describe(owner)),
-                false,
-            ));
+            return Some((describe(container, owner), false));
         }
         None
     }
@@ -387,7 +397,7 @@ impl NewContainerModal {
         }
         let image = Self::field(&self.image, cx);
         parts.push(if image.is_empty() {
-            "<imagem>".into()
+            t!("docker.new_container.image_placeholder_in_command").to_string()
         } else {
             image
         });
@@ -403,7 +413,7 @@ impl NewContainerModal {
         }
         let image = Self::field(&self.image, cx);
         if image.is_empty() {
-            self.progress = Progress::Failed("Escolha uma imagem.".into());
+            self.progress = Progress::Failed(t!("docker.new_container.choose_image"));
             cx.notify();
             return;
         }
@@ -411,8 +421,7 @@ impl NewContainerModal {
             || !Self::field(&self.container_port, cx).is_empty()
         {
             if self.ports(cx).is_none() {
-                self.progress =
-                    Progress::Failed("As portas precisam ser números de 1 a 65535.".into());
+                self.progress = Progress::Failed(t!("docker.new_container.invalid_ports"));
                 cx.notify();
                 return;
             }
@@ -425,14 +434,14 @@ impl NewContainerModal {
 
     fn create_from_image(&mut self, image: String, cx: &mut Context<Self>) {
         let Some(docker) = self.store.read(cx).docker().cloned() else {
-            self.progress = Progress::Failed("O Docker não está conectado.".into());
+            self.progress = Progress::Failed(t!("docker.connection.not_connected"));
             cx.notify();
             return;
         };
         let spec = self.spec(cx);
         let name = Self::field(&self.name, cx);
         let start_now = self.start_now;
-        self.progress = Progress::Working("Criando…".into());
+        self.progress = Progress::Working(t!("docker.new_container.creating"));
         cx.notify();
         self.create_task = cx.spawn(async move |this, cx| {
             let name_arg = (!name.is_empty()).then_some(name.as_str());
@@ -447,13 +456,15 @@ impl NewContainerModal {
                                 .as_ref()
                                 .and_then(|detail| Some((detail.current?, detail.total?)))
                             {
-                                Some((current, total)) if total > 0 => {
-                                    format!("Baixando {image}… {}%", current * 100 / total)
-                                }
-                                _ => format!("Baixando {image}…"),
+                                Some((current, total)) if total > 0 => t!(
+                                    "docker.new_container.pulling_percent",
+                                    image = image,
+                                    percent = current * 100 / total
+                                ),
+                                _ => t!("docker.new_container.pulling", image = image),
                             };
                             this.update(cx, |this, cx| {
-                                this.progress = Progress::Working(detail.into());
+                                this.progress = Progress::Working(detail);
                                 cx.notify();
                             })
                             .ok();
@@ -478,17 +489,12 @@ impl NewContainerModal {
                     } else {
                         name.clone()
                     };
-                    this.finish(
-                        format!(
-                            "{label} {}",
-                            if start_now {
-                                "criado e iniciado"
-                            } else {
-                                "criado"
-                            }
-                        ),
-                        cx,
-                    );
+                    let message = if start_now {
+                        t!("docker.new_container.created_and_started", name = label)
+                    } else {
+                        t!("docker.new_container.created", name = label)
+                    };
+                    this.finish(message.to_string(), cx);
                 }
                 Err(error) => {
                     this.progress = Progress::Failed(format!("{error}").into());
@@ -528,8 +534,7 @@ impl NewContainerModal {
     /// has none) and brings only that service up in a terminal.
     fn add_compose_service(&mut self, image: String, window: &mut Window, cx: &mut Context<Self>) {
         let Some(root) = self.project_root.clone() else {
-            self.progress =
-                Progress::Failed("Abra uma pasta de projeto para usar o compose.".into());
+            self.progress = Progress::Failed(t!("docker.new_container.compose_needs_project"));
             cx.notify();
             return;
         };
@@ -539,8 +544,7 @@ impl NewContainerModal {
                 character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
             })
         {
-            self.progress =
-                Progress::Failed("Dê um nome ao serviço (letras, números, - e _).".into());
+            self.progress = Progress::Failed(t!("docker.new_container.invalid_service_name"));
             cx.notify();
             return;
         }
@@ -565,9 +569,11 @@ impl NewContainerModal {
             }
         };
         if let Err(error) = std::fs::write(&path, updated) {
-            self.progress = Progress::Failed(
-                format!("{} não pôde ser salvo: {error}", file_name(&path)).into(),
-            );
+            self.progress = Progress::Failed(t!(
+                "docker.new_container.compose_save_failed",
+                file = file_name(&path),
+                error = error
+            ));
             cx.notify();
             return;
         }
@@ -619,7 +625,12 @@ impl NewContainerModal {
             })
             .log_err();
         self.finish(
-            format!("Serviço {service} escrito em {}", file_name(&path)),
+            t!(
+                "docker.new_container.service_written",
+                service = service,
+                file = file_name(&path)
+            )
+            .to_string(),
             cx,
         );
     }
@@ -630,7 +641,7 @@ impl NewContainerModal {
 
     fn render_field(
         &self,
-        label: &str,
+        label: SharedString,
         editor: &Entity<Editor>,
         width: Option<f32>,
         window: &Window,
@@ -653,13 +664,16 @@ impl NewContainerModal {
         &self,
         value: Mode,
         icon: IconName,
-        label: &'static str,
+        label: SharedString,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let colors = cx.theme().colors();
         let active = self.mode == value;
         h_flex()
-            .id(label)
+            .id(match value {
+                Mode::Image => "docker-mode-image",
+                Mode::ComposeService => "docker-mode-compose-service",
+            })
             .h(px(24.))
             .px(px(10.))
             .gap(px(6.))
@@ -692,7 +706,7 @@ impl NewContainerModal {
     fn render_option(
         &self,
         id: &'static str,
-        label: &'static str,
+        label: SharedString,
         on: bool,
         toggle: fn(&mut Self),
         cx: &mut Context<Self>,
@@ -722,15 +736,25 @@ impl NewContainerModal {
             .child(
                 h_flex()
                     .w_full()
-                    .child(div().flex_1().child(field_label("Variáveis de ambiente")))
+                    .child(
+                        div()
+                            .flex_1()
+                            .child(field_label(t!("docker.new_container.env"))),
+                    )
                     .when_some(env_file, |this, path| {
                         this.child(
                             div()
                                 .id("docker-load-env")
                                 .cursor_pointer()
                                 .child(
-                                    text(format!("Carregar de {}", file_name(&path)), 11.5)
-                                        .color(Color::Accent),
+                                    text(
+                                        t!(
+                                            "docker.new_container.load_env",
+                                            file = file_name(&path)
+                                        ),
+                                        11.5,
+                                    )
+                                    .color(Color::Accent),
                                 )
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.load_env_file(window, cx)
@@ -768,9 +792,9 @@ impl NewContainerModal {
                                     .icon_size(IconSize::Small)
                                     .icon_color(Color::Muted)
                                     .tooltip(Tooltip::text(if revealed {
-                                        "Esconder"
+                                        t!("docker.new_container.hide_value")
                                     } else {
-                                        "Mostrar"
+                                        t!("docker.new_container.show_value")
                                     }))
                                     .on_click(cx.listener(
                                         move |this, _, _, cx| {
@@ -804,7 +828,7 @@ impl NewContainerModal {
             .w(px(200.))
             .flex_none()
             .gap(px(6.))
-            .child(field_label("Rede"))
+            .child(field_label(t!("docker.new_container.network")))
             .child(
                 PopoverMenu::new("docker-network")
                     .trigger(PopoverTriggerArea::new(
@@ -850,8 +874,8 @@ fn file_name(path: &Path) -> String {
         .unwrap_or_else(|| path.display().to_string())
 }
 
-fn field_label(label: &str) -> Label {
-    text(label.to_string(), 11.5)
+fn field_label(label: SharedString) -> Label {
+    text(label, 11.5)
         .weight(FontWeight::MEDIUM)
         .color(Color::Muted)
 }
@@ -930,7 +954,11 @@ fn add_service(existing: &str, service: &ComposeService) -> Result<String, Strin
             .take_while(|line| !top_level(line))
             .any(|line| line.trim_end() == format!("{pad}{}:", service.name));
         if taken {
-            return Err(format!("Já existe um serviço {} no compose.", service.name));
+            return Err(t!(
+                "docker.new_container.service_exists",
+                service = service.name
+            )
+            .to_string());
         }
     }
 
@@ -1035,10 +1063,10 @@ impl Render for NewContainerModal {
         let image_focused = self.image.focus_handle(cx).contains_focused(window, cx);
         let compose = self.mode == Mode::ComposeService;
         let primary_label = match (compose, self.start_now) {
-            (true, true) => "Escrever e subir",
-            (true, false) => "Escrever no compose",
-            (false, true) => "Criar e iniciar",
-            (false, false) => "Criar",
+            (true, true) => t!("docker.new_container.write_and_start"),
+            (true, false) => t!("docker.new_container.write_to_compose"),
+            (false, true) => t!("docker.new_container.create_and_start"),
+            (false, false) => t!("docker.new_container.create"),
         };
         let focus_handle = self.focus_handle.clone();
         modal_surface(cx)
@@ -1067,12 +1095,9 @@ impl Render for NewContainerModal {
                         v_flex()
                             .flex_1()
                             .gap(px(4.))
-                            .child(text("Novo container", 14.).weight(FontWeight::BOLD))
+                            .child(text(t!("docker.new_container.title"), 14.).weight(FontWeight::BOLD))
                             .child(
-                                text(
-                                    "Roda uma imagem com as opções abaixo. Para virar serviço do projeto, use \"Serviço do compose\": o Asylum escreve no docker-compose.yml.",
-                                    12.,
-                                )
+                                text(t!("docker.new_container.description"), 12.)
                                 .color(Color::Muted),
                             ),
                     )
@@ -1098,11 +1123,16 @@ impl Render for NewContainerModal {
                             .border_1()
                             .border_color(colors.border)
                             .bg(colors.editor_background)
-                            .child(self.render_mode(Mode::Image, IconName::Box, "Da imagem", cx))
+                            .child(self.render_mode(
+                                Mode::Image,
+                                IconName::Box,
+                                t!("docker.new_container.mode_image"),
+                                cx,
+                            ))
                             .child(self.render_mode(
                                 Mode::ComposeService,
                                 IconName::Blocks,
-                                "Serviço do compose",
+                                t!("docker.new_container.mode_compose_service"),
                                 cx,
                             )),
                     )
@@ -1116,7 +1146,7 @@ impl Render for NewContainerModal {
                                     .flex_1()
                                     .min_w_0()
                                     .gap(px(6.))
-                                    .child(field_label("Imagem"))
+                                    .child(field_label(t!("docker.new_container.image")))
                                     .child(
                                         input_box(&self.image, 32., window, cx)
                                             .gap(px(8.))
@@ -1136,19 +1166,23 @@ impl Render for NewContainerModal {
                                                         .bg(colors.element_selected)
                                                         .child(match local_image {
                                                             Some(size) => mono(
-                                                                format!("local · {}", format_bytes(size.max(0) as u64)),
+                                                                t!("docker.new_container.image_local", size = format_bytes(size.max(0) as u64)),
                                                                 10.5,
                                                                 Color::Success,
                                                                 cx,
                                                             ),
-                                                            None => mono("baixa ao criar", 10.5, Color::Placeholder, cx),
+                                                            None => mono(t!("docker.new_container.image_pulled_on_create"), 10.5, Color::Placeholder, cx),
                                                         }),
                                                 )
                                             }),
                                     ),
                             )
                             .child(self.render_field(
-                                if compose { "Serviço" } else { "Nome" },
+                                if compose {
+                                    t!("docker.new_container.service")
+                                } else {
+                                    t!("docker.new_container.name")
+                                },
                                 &self.name,
                                 Some(200.),
                                 window,
@@ -1159,7 +1193,7 @@ impl Render for NewContainerModal {
                         v_flex()
                             .w_full()
                             .gap(px(6.))
-                            .child(field_label("Portas · host → container"))
+                            .child(field_label(t!("docker.new_container.ports")))
                             .child(
                                 h_flex()
                                     .w_full()
@@ -1196,7 +1230,13 @@ impl Render for NewContainerModal {
                             .w_full()
                             .gap(px(12.))
                             .items_start()
-                            .child(self.render_field("Volume", &self.volume, None, window, cx))
+                            .child(self.render_field(
+                                t!("docker.new_container.volume"),
+                                &self.volume,
+                                None,
+                                window,
+                                cx,
+                            ))
                             .when(!compose, |this| this.child(self.render_network(cx))),
                     )
                     .child(
@@ -1204,11 +1244,11 @@ impl Render for NewContainerModal {
                             .w_full()
                             .gap(px(20.))
                             .pt(px(2.))
-                            .child(self.render_option("docker-start-now", "Iniciar agora", self.start_now, |this| this.start_now = !this.start_now, cx))
+                            .child(self.render_option("docker-start-now", t!("docker.new_container.start_now"), self.start_now, |this| this.start_now = !this.start_now, cx))
                             .when(!compose, |this| {
                                 this.child(self.render_option(
                                     "docker-remove-on-stop",
-                                    "Remover ao parar (--rm)",
+                                    t!("docker.new_container.remove_on_stop"),
                                     self.remove_on_stop,
                                     |this| this.remove_on_stop = !this.remove_on_stop,
                                     cx,
@@ -1216,7 +1256,7 @@ impl Render for NewContainerModal {
                             })
                             .child(self.render_option(
                                 "docker-restart-always",
-                                "Reiniciar sempre",
+                                t!("docker.new_container.restart_always"),
                                 self.restart_always,
                                 |this| this.restart_always = !this.restart_always,
                                 cx,
@@ -1236,12 +1276,12 @@ impl Render for NewContainerModal {
                                 .child(
                                     h_flex()
                                         .w_full()
-                                        .child(div().flex_1().child(caption("COMANDO EQUIVALENTE")))
+                                        .child(div().flex_1().child(caption(t!("docker.new_container.equivalent_command"))))
                                         .child(
                                             IconButton::new("docker-copy-command", IconName::Copy)
                                                 .icon_size(IconSize::XSmall)
                                                 .icon_color(Color::Muted)
-                                                .tooltip(Tooltip::text("Copiar o comando"))
+                                                .tooltip(Tooltip::text(t!("docker.new_container.copy_command")))
                                                 .on_click(move |_, _, cx| {
                                                     cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))
                                                 }),
@@ -1259,7 +1299,7 @@ impl Render for NewContainerModal {
                     .gap(px(8.))
                     .bg(colors.element_background)
                     .child(div().flex_1().min_w_0().child(match &self.progress {
-                        Progress::Idle => mono("esc cancela", 11.5, Color::Placeholder, cx).into_any_element(),
+                        Progress::Idle => mono(t!("docker.new_container.escape_hint"), 11.5, Color::Placeholder, cx).into_any_element(),
                         Progress::Working(message) => h_flex()
                             .gap_1()
                             .child(
@@ -1285,7 +1325,7 @@ impl Render for NewContainerModal {
                             .cursor_pointer()
                             .hover(|this| this.bg(colors.ghost_element_hover))
                             .child(
-                                text("Cancelar", 12.5)
+                                text(t!("docker.new_container.cancel"), 12.5)
                                     .weight(FontWeight::MEDIUM)
                                     .color(Color::Custom(colors.editor_foreground)),
                             )

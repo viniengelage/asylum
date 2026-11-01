@@ -10,6 +10,7 @@ use base64::Engine as _;
 use fs::Fs;
 use futures::AsyncReadExt as _;
 use http_client::{AsyncBody, HttpClient, HttpRequestExt as _, RedirectPolicy, http};
+use i18n::t;
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -33,8 +34,10 @@ impl HeaderOrigin {
     pub fn label(&self) -> String {
         match self {
             HeaderOrigin::Spec => "spec".to_string(),
-            HeaderOrigin::Collection => "coleção".to_string(),
-            HeaderOrigin::Scheme(name) => format!("coleção · {name}"),
+            HeaderOrigin::Collection => t!("api_client.send.origin_collection").to_string(),
+            HeaderOrigin::Scheme(name) => {
+                t!("api_client.send.origin_scheme", name = name).to_string()
+            }
         }
     }
 }
@@ -182,19 +185,21 @@ pub fn auth_plan(spec: &Spec, operation_key: &str, variables: &dyn Variables) ->
                 SchemeKind::Bearer { .. } | SchemeKind::OAuth2 => variables
                     .get(TOKEN_VARIABLE)
                     .is_none()
-                    .then(|| "sem token: faça login na aba API".to_string()),
+                    .then(|| t!("api_client.send.missing_token").to_string()),
                 SchemeKind::Basic => (variables
                     .get(&basic_secret(&scheme.name, "username"))
                     .is_none()
                     || variables
                         .get(&basic_secret(&scheme.name, "password"))
                         .is_none())
-                .then(|| "usuário e senha não configurados".to_string()),
+                .then(|| t!("api_client.send.missing_basic").to_string()),
                 SchemeKind::ApiKey { .. } => variables
                     .get(&api_key_secret(&scheme.name))
                     .is_none()
-                    .then(|| "chave não configurada".to_string()),
-                SchemeKind::Unsupported(kind) => Some(format!("{kind} não é suportado")),
+                    .then(|| t!("api_client.send.missing_api_key").to_string()),
+                SchemeKind::Unsupported(kind) => {
+                    Some(t!("api_client.send.scheme_unsupported", kind = kind).to_string())
+                }
             };
             AuthPlan {
                 scheme: scheme.name.clone(),
@@ -265,9 +270,11 @@ impl PreparedBody {
                     let name = part.name.replace('"', "%22");
                     match &part.file {
                         Some(path) => {
-                            let fs = fs.context("sem acesso ao disco para ler o arquivo")?;
+                            let fs =
+                                fs.with_context(|| t!("api_client.send.error_no_fs").to_string())?;
                             let content = fs.load_bytes(path).await.with_context(|| {
-                                format!("não foi possível ler {}", path.display())
+                                t!("api_client.send.error_read_file", path = path.display())
+                                    .to_string()
                             })?;
                             let file_name = path
                                 .file_name()
@@ -435,9 +442,13 @@ pub fn prepare(
     collection_headers: &[HeaderEntry],
     variables: &dyn Variables,
 ) -> Result<PreparedRequest> {
-    let operation = spec
-        .operation(operation_key)
-        .with_context(|| format!("{operation_key} não existe mais no spec"))?;
+    let operation = spec.operation(operation_key).with_context(|| {
+        t!(
+            "api_client.send.error_operation_gone",
+            operation = operation_key
+        )
+        .to_string()
+    })?;
     let mut missing: Vec<String> = Vec::new();
     let mut fill = |text: &str| -> String {
         let substitution = vars::substitute(text, &|name| {
@@ -646,9 +657,9 @@ pub async fn execute(
         Some(body) => AsyncBody::from(body.into_bytes(fs).await?),
         None => AsyncBody::empty(),
     };
-    let request = builder
-        .body(body)
-        .with_context(|| format!("URL inválida: {}", prepared.url))?;
+    let request = builder.body(body).with_context(|| {
+        t!("api_client.send.error_invalid_url", url = &prepared.url).to_string()
+    })?;
 
     let started = Instant::now();
     let mut response = http_client.send(request).await?;

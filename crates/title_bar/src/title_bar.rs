@@ -342,7 +342,7 @@ impl Render for TitleBar {
                         .icon_color(Color::Muted)
                         .tooltip(|_window, cx| {
                             Tooltip::for_action(
-                                "Search Files",
+                                i18n::t!("title_bar.search_files"),
                                 &workspace::ToggleFileFinder::default(),
                                 cx,
                             )

@@ -3,7 +3,8 @@ use anyhow::{Context as _, Result, anyhow};
 use async_tungstenite::tungstenite::Message;
 use base64::Engine as _;
 use futures::StreamExt as _;
-use gpui::{App, AppContext as _, AsyncApp, Entity, Global, WeakEntity};
+use gpui::{App, AppContext as _, AsyncApp, Entity, Global, SharedString, WeakEntity};
+use i18n::t;
 use project::Project;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -106,9 +107,10 @@ async fn with_timeout_of<T>(
     futures::pin_mut!(future);
     match futures::future::select(future, timer).await {
         futures::future::Either::Left((result, _)) => result,
-        futures::future::Either::Right(_) => {
-            Err(anyhow!("{what}: o browser não respondeu a tempo"))
-        }
+        futures::future::Either::Right(_) => Err(anyhow!(t!(
+            "web_preview.agent.error.timed_out",
+            action = what
+        ))),
     }
 }
 
@@ -130,7 +132,7 @@ impl CdpSession {
         let targets = http_get_json(port, "/json/list").await?;
         let targets = targets
             .as_array()
-            .context("a lista de páginas do CDP veio vazia")?;
+            .context(t!("web_preview.agent.error.empty_page_list"))?;
         let pages = targets
             .iter()
             .filter(|target| target["type"] == "page")
@@ -149,17 +151,17 @@ impl CdpSession {
                     .find(|target| target["url"].as_str() == Some(page_url))
             })
             .or_else(|| pages.first())
-            .context("nenhuma página aberta no browser")?;
+            .context(t!("web_preview.agent.error.no_page_open"))?;
         let socket_url = target["webSocketDebuggerUrl"]
             .as_str()
-            .context("a página não expõe o websocket do CDP")?
+            .context(t!("web_preview.agent.error.no_websocket"))?
             .to_string();
         let stream = smol::net::TcpStream::connect(("127.0.0.1", port))
             .await
-            .context("não foi possível conectar ao CDP")?;
+            .context(t!("web_preview.agent.error.cdp_connect_failed"))?;
         let (socket, _) = async_tungstenite::client_async(socket_url, stream)
             .await
-            .context("o CDP recusou a conexão")?;
+            .context(t!("web_preview.agent.error.cdp_refused"))?;
         Ok(Self {
             socket,
             next_id: 1,
@@ -183,10 +185,11 @@ impl CdpSession {
             let value: Value = serde_json::from_str(&text)?;
             if value["id"].as_u64() == Some(id) {
                 if let Some(error) = value.get("error") {
-                    anyhow::bail!(
-                        "{method}: {}",
-                        error["message"].as_str().unwrap_or("erro do CDP")
-                    );
+                    let message = error["message"]
+                        .as_str()
+                        .map(SharedString::from)
+                        .unwrap_or_else(|| t!("web_preview.agent.error.cdp_error"));
+                    anyhow::bail!("{method}: {message}");
                 }
                 return Ok(value["result"].clone());
             }
@@ -194,7 +197,10 @@ impl CdpSession {
                 self.events.push(value);
             }
         }
-        Err(anyhow!("o CDP fechou a conexão durante {method}"))
+        Err(anyhow!(t!(
+            "web_preview.agent.error.cdp_closed_during",
+            method = method
+        )))
     }
 
     /// Reads events for a while without sending anything.
@@ -228,7 +234,8 @@ impl CdpSession {
             let description = exception["exception"]["description"]
                 .as_str()
                 .or_else(|| exception["text"].as_str())
-                .unwrap_or("exceção no JavaScript");
+                .map(SharedString::from)
+                .unwrap_or_else(|| t!("web_preview.agent.error.javascript_exception"));
             anyhow::bail!("{description}");
         }
         Ok(result["result"]["value"].clone())
@@ -251,7 +258,7 @@ async fn http_get_json(port: u16, path: &str) -> Result<Value> {
     use smol::io::{AsyncReadExt as _, AsyncWriteExt as _};
     let mut stream = smol::net::TcpStream::connect(("127.0.0.1", port))
         .await
-        .context("o browser embutido não está rodando (abra uma aba de Browser)")?;
+        .context(t!("web_preview.agent.error.browser_not_running"))?;
     stream
         .write_all(
             format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n")
@@ -264,7 +271,10 @@ async fn http_get_json(port: u16, path: &str) -> Result<Value> {
     let mut buffer = [0u8; 8192];
     let (header_end, content_length) = loop {
         let read = stream.read(&mut buffer).await?;
-        anyhow::ensure!(read > 0, "o CDP fechou a conexão sem responder");
+        anyhow::ensure!(
+            read > 0,
+            t!("web_preview.agent.error.cdp_closed_without_response")
+        );
         response.extend_from_slice(&buffer[..read]);
         if let Some(position) = response.windows(4).position(|window| window == b"\r\n\r\n") {
             let headers = String::from_utf8_lossy(&response[..position]).to_lowercase();
@@ -272,17 +282,20 @@ async fn http_get_json(port: u16, path: &str) -> Result<Value> {
                 .lines()
                 .find_map(|line| line.strip_prefix("content-length:"))
                 .and_then(|value| value.trim().parse::<usize>().ok())
-                .context("o CDP não informou o tamanho da resposta")?;
+                .context(t!("web_preview.agent.error.cdp_no_content_length"))?;
             break (position + 4, content_length);
         }
     };
     while response.len() < header_end + content_length {
         let read = stream.read(&mut buffer).await?;
-        anyhow::ensure!(read > 0, "o CDP fechou a conexão no meio da resposta");
+        anyhow::ensure!(
+            read > 0,
+            t!("web_preview.agent.error.cdp_closed_mid_response")
+        );
         response.extend_from_slice(&buffer[..read]);
     }
     let body = String::from_utf8_lossy(&response[header_end..header_end + content_length]);
-    serde_json::from_str(body.trim()).context("o CDP não respondeu JSON")
+    serde_json::from_str(body.trim()).context(t!("web_preview.agent.error.cdp_not_json"))
 }
 
 /// Which pages a tool can work with. Painting and input wait on the renderer, which
@@ -300,18 +313,15 @@ async fn session_for_active_page(
 ) -> Result<(CdpSession, PageInfo)> {
     let view = cx
         .update(|cx| active_view(cx))
-        .context("Nenhuma aba de Browser aberta. Use browser_open com a URL para abrir uma.")?;
+        .context(t!("web_preview.agent.error.no_browser_tab"))?;
     wait_for_browser(&view, cx).await?;
     let info = cx.update(|cx| page_info(&view, cx));
     if page_use == PageUse::PaintOrInput && info.hidden {
-        anyhow::bail!(
-            "A aba de Browser está escondida no painel Devices, e uma página escondida não \
-             desenha nem recebe input. Peça para mostrá-la; browser_eval funciona assim mesmo."
-        );
+        anyhow::bail!(t!("web_preview.agent.error.tab_hidden"));
     }
     let session = with_timeout(
         CdpSession::connect(info.target_id.as_deref(), &info.url),
-        "conectar ao browser",
+        &t!("web_preview.agent.action.connect"),
         cx,
     )
     .await?;
@@ -329,15 +339,13 @@ async fn wait_for_browser(view: &Entity<WebPreviewView>, cx: &mut AsyncApp) -> R
         let (has_browser, has_target, failure, needs_screen) = cx.update(|cx| {
             let view = view.read(cx);
             let failure = if let Some(error) = &view.error {
-                Some(format!(
-                    "O browser não abriu: {} — {}",
-                    error.headline, error.detail
+                Some(t!(
+                    "web_preview.agent.error.browser_failed",
+                    headline = error.headline,
+                    detail = error.detail
                 ))
             } else if !crate::cef_paths::is_installed() {
-                Some(
-                    "O Chromium ainda não foi baixado. Peça para abrir a aba de Browser e baixar."
-                        .to_string(),
-                )
+                Some(t!("web_preview.agent.error.chromium_not_downloaded"))
             } else {
                 None
             };
@@ -363,10 +371,9 @@ async fn wait_for_browser(view: &Entity<WebPreviewView>, cx: &mut AsyncApp) -> R
         }
         if started_at.elapsed() > BROWSER_START_TIMEOUT {
             anyhow::bail!(if needs_screen {
-                "A aba de Browser não apareceu na tela, e o Chromium só sobe quando ela aparece. \
-                 Peça para deixá-la visível."
+                t!("web_preview.agent.error.tab_not_on_screen")
             } else {
-                "O Chromium não subiu a tempo; tente de novo em alguns segundos."
+                t!("web_preview.agent.error.chromium_start_timeout")
             });
         }
         cx.background_executor()
@@ -401,10 +408,10 @@ fn show_view(view: &Entity<WebPreviewView>, cx: &mut AsyncApp) {
 fn page_line(info: &PageInfo) -> String {
     let mut line = format!("{} — {}", info.title, info.url);
     if info.loading {
-        line.push_str(" (carregando)");
+        line.push_str(&t!("web_preview.agent.page_loading_suffix"));
     }
     if info.hidden {
-        line.push_str(" (a aba está escondida no painel Devices)");
+        line.push_str(&t!("web_preview.agent.page_hidden_suffix"));
     }
     line
 }
@@ -415,7 +422,7 @@ fn page_line(info: &PageInfo) -> String {
 async fn wait_until_loaded(navigating_to: &str, cx: &mut AsyncApp) -> Result<PageInfo> {
     let view = cx
         .update(|cx| active_view(cx))
-        .context("a aba de Browser fechou antes de a página carregar")?;
+        .context(t!("web_preview.agent.error.tab_closed_before_load"))?;
     wait_for_browser(&view, cx).await?;
     let started_at = std::time::Instant::now();
     let mut session = None;
@@ -424,7 +431,7 @@ async fn wait_until_loaded(navigating_to: &str, cx: &mut AsyncApp) -> Result<Pag
         if session.is_none() {
             session = with_timeout(
                 CdpSession::connect(info.target_id.as_deref(), &info.url),
-                "conectar ao browser",
+                &t!("web_preview.agent.action.connect"),
                 cx,
             )
             .await
@@ -435,7 +442,7 @@ async fn wait_until_loaded(navigating_to: &str, cx: &mut AsyncApp) -> Result<Pag
         let page = match session.as_mut() {
             Some(session) => with_timeout(
                 session.evaluate("[document.readyState, location.href, document.title]"),
-                "ler o estado da página",
+                &t!("web_preview.agent.action.read_page_state"),
                 cx,
             )
             .await
@@ -447,9 +454,10 @@ async fn wait_until_loaded(navigating_to: &str, cx: &mut AsyncApp) -> Result<Pag
             let url = page[1].as_str().unwrap_or_default().to_string();
             let title = page[2].as_str().unwrap_or_default().to_string();
             if url.starts_with("chrome-error://") {
-                anyhow::bail!(
-                    "A página {navigating_to} não carregou (erro de rede ou endereço inválido)."
-                );
+                anyhow::bail!(t!(
+                    "web_preview.agent.error.page_failed_to_load",
+                    url = navigating_to
+                ));
             }
             let left_blank_page = url != "about:blank" || navigating_to == "about:blank";
             if ready_state == "complete" && left_blank_page {
@@ -531,13 +539,13 @@ fn key_event(key: &str) -> Result<(&'static str, &'static str, i64)> {
         "up" => ("ArrowUp", "ArrowUp", 38),
         "right" => ("ArrowRight", "ArrowRight", 39),
         "down" => ("ArrowDown", "ArrowDown", 40),
-        other => anyhow::bail!("tecla desconhecida: {other}"),
+        other => anyhow::bail!(t!("web_preview.agent.error.unknown_key", key = other)),
     })
 }
 
 fn tool<I>(
     name: &'static str,
-    title: &'static str,
+    title: SharedString,
     description: &'static str,
     access: ToolAccess,
     run: impl AsyncFn(Entity<Project>, I, &mut AsyncApp) -> Result<ToolkitOutput>
@@ -565,7 +573,7 @@ pub fn register_toolkit(cx: &mut App) {
     let tools = vec![
         tool(
             "browser_open",
-            "Abriu uma página no browser",
+            t!("web_preview.agent.tool.open"),
             "Loads a URL in the embedded browser tab (opening one if none is open) and waits for \
              the page to finish loading.",
             ToolAccess::Act,
@@ -575,7 +583,7 @@ pub fn register_toolkit(cx: &mut App) {
                     let (mut session, _) = session_for_active_page(PageUse::Script, cx).await?;
                     let navigation = with_timeout(
                         session.call("Page.navigate", json!({ "url": input.url })),
-                        "navegar",
+                        &t!("web_preview.agent.action.navigate"),
                         cx,
                     )
                     .await?;
@@ -583,7 +591,11 @@ pub fn register_toolkit(cx: &mut App) {
                         .as_str()
                         .filter(|error| !error.is_empty())
                     {
-                        anyhow::bail!("A página {} não carregou: {error}", input.url);
+                        anyhow::bail!(t!(
+                            "web_preview.agent.error.navigation_failed",
+                            url = input.url,
+                            error = error
+                        ));
                     }
                 } else {
                     let target = cx.update(|cx| {
@@ -598,7 +610,7 @@ pub fn register_toolkit(cx: &mut App) {
                             })
                     });
                     let (window, workspace) =
-                        target.context("nenhuma janela deste projeto está aberta")?;
+                        target.context(t!("web_preview.agent.error.no_project_window"))?;
                     let url = input.url.clone();
                     window.update(cx, |_, window, cx| {
                         workspace.update(cx, |workspace, cx| {
@@ -608,20 +620,26 @@ pub fn register_toolkit(cx: &mut App) {
                     })?;
                 }
                 let info = wait_until_loaded(&input.url, cx).await?;
-                Ok(ToolkitOutput::text(format!("Página: {}", page_line(&info))))
+                Ok(ToolkitOutput::text(
+                    t!("web_preview.agent.output.page", page = page_line(&info)).to_string(),
+                ))
             },
         ),
         tool(
             "browser_screenshot",
-            "Viu a página do browser",
+            t!("web_preview.agent.tool.screenshot"),
             "Captures the visible part of the page in the embedded browser. Coordinates for \
              browser_click and browser_scroll are in the pixels of this image.",
             ToolAccess::Read,
             async |_project, _input: NoInput, cx| {
                 let (mut session, info) =
                     session_for_active_page(PageUse::PaintOrInput, cx).await?;
-                let (width, height, scale) =
-                    with_timeout(session.viewport(), "medir a página", cx).await?;
+                let (width, height, scale) = with_timeout(
+                    session.viewport(),
+                    &t!("web_preview.agent.action.measure_page"),
+                    cx,
+                )
+                .await?;
                 let result = with_timeout(
                     session.call(
                         "Page.captureScreenshot",
@@ -630,13 +648,13 @@ pub fn register_toolkit(cx: &mut App) {
                             "clip": { "x": 0, "y": 0, "width": width, "height": height, "scale": scale },
                         }),
                     ),
-                    "capturar a página",
+                    &t!("web_preview.agent.action.capture_page"),
                     cx,
                 )
                 .await?;
                 let data = result["data"]
                     .as_str()
-                    .context("o CDP não devolveu a imagem")?;
+                    .context(t!("web_preview.agent.error.no_image"))?;
                 let png = base64::engine::general_purpose::STANDARD.decode(data)?;
                 let screenshot = cx
                     .background_spawn(async move {
@@ -645,26 +663,34 @@ pub fn register_toolkit(cx: &mut App) {
                         scale_screenshot(image)
                     })
                     .await?;
-                let mut output = ToolkitOutput::text(format!(
-                    "{}\n{}x{} px (a página tem {:.0}x{:.0} px CSS).",
-                    page_line(&info),
-                    screenshot.width,
-                    screenshot.height,
-                    width,
-                    height
-                ));
+                let mut output = ToolkitOutput::text(
+                    t!(
+                        "web_preview.agent.output.screenshot",
+                        page = page_line(&info),
+                        width = screenshot.width,
+                        height = screenshot.height,
+                        css_width = format!("{width:.0}"),
+                        css_height = format!("{height:.0}")
+                    )
+                    .to_string(),
+                );
                 output.push_png(&screenshot.png);
                 Ok(output)
             },
         ),
         tool(
             "browser_click",
-            "Clicou na página",
+            t!("web_preview.agent.tool.click"),
             "Clicks the page at a point given in the pixels of the latest browser_screenshot.",
             ToolAccess::Act,
             async |_project, input: ClickInput, cx| {
                 let (mut session, _) = session_for_active_page(PageUse::PaintOrInput, cx).await?;
-                let (_, _, scale) = with_timeout(session.viewport(), "medir a página", cx).await?;
+                let (_, _, scale) = with_timeout(
+                    session.viewport(),
+                    &t!("web_preview.agent.action.measure_page"),
+                    cx,
+                )
+                .await?;
                 let x = input.x / scale;
                 let y = input.y / scale;
                 let click_count = input.click_count.unwrap_or(1).clamp(1, 3);
@@ -680,39 +706,46 @@ pub fn register_toolkit(cx: &mut App) {
                                 "clickCount": if event_type == "mouseMoved" { 0 } else { click_count },
                             }),
                         ),
-                        "clicar",
+                        &t!("web_preview.agent.action.click"),
                         cx,
                     )
                     .await?;
                 }
-                Ok(ToolkitOutput::text(format!(
-                    "Clicou em ({:.0}, {:.0}).",
-                    input.x, input.y
-                )))
+                Ok(ToolkitOutput::text(
+                    t!(
+                        "web_preview.agent.output.clicked",
+                        x = format!("{:.0}", input.x),
+                        y = format!("{:.0}", input.y)
+                    )
+                    .to_string(),
+                ))
             },
         ),
         tool(
             "browser_type",
-            "Digitou na página",
+            t!("web_preview.agent.tool.type"),
             "Types text into the focused element of the page.",
             ToolAccess::Act,
             async |_project, input: TypeInput, cx| {
                 let (mut session, _) = session_for_active_page(PageUse::PaintOrInput, cx).await?;
                 with_timeout(
                     session.call("Input.insertText", json!({ "text": input.text })),
-                    "digitar",
+                    &t!("web_preview.agent.action.type"),
                     cx,
                 )
                 .await?;
-                Ok(ToolkitOutput::text(format!(
-                    "Digitou {} caracteres.",
-                    input.text.chars().count()
-                )))
+                Ok(ToolkitOutput::text(
+                    t!(
+                        "web_preview.agent.output.typed",
+                        count = input.text.chars().count()
+                    )
+                    .to_string(),
+                ))
             },
         ),
         tool(
             "browser_key",
-            "Apertou uma tecla na página",
+            t!("web_preview.agent.tool.key"),
             "Presses a key in the page: enter, tab, backspace, escape, up, down, left, right.",
             ToolAccess::Act,
             async |_project, input: KeyInput, cx| {
@@ -731,21 +764,31 @@ pub fn register_toolkit(cx: &mut App) {
                         params["type"] = json!("keyDown");
                         params["text"] = json!("\r");
                     }
-                    with_timeout(session.call("Input.dispatchKeyEvent", params), "tecla", cx)
-                        .await?;
+                    with_timeout(
+                        session.call("Input.dispatchKeyEvent", params),
+                        &t!("web_preview.agent.action.key"),
+                        cx,
+                    )
+                    .await?;
                 }
-                Ok(ToolkitOutput::text(format!("Apertou {key}.")))
+                Ok(ToolkitOutput::text(
+                    t!("web_preview.agent.output.key_pressed", key = key).to_string(),
+                ))
             },
         ),
         tool(
             "browser_scroll",
-            "Rolou a página",
+            t!("web_preview.agent.tool.scroll"),
             "Scrolls the page with the mouse wheel.",
             ToolAccess::Act,
             async |_project, input: ScrollInput, cx| {
                 let (mut session, _) = session_for_active_page(PageUse::PaintOrInput, cx).await?;
-                let (width, height, scale) =
-                    with_timeout(session.viewport(), "medir a página", cx).await?;
+                let (width, height, scale) = with_timeout(
+                    session.viewport(),
+                    &t!("web_preview.agent.action.measure_page"),
+                    cx,
+                )
+                .await?;
                 let x = input.x.map_or(width / 2.0, |x| x / scale);
                 let y = input.y.map_or(height / 2.0, |y| y / scale);
                 with_timeout(
@@ -753,19 +796,22 @@ pub fn register_toolkit(cx: &mut App) {
                         "Input.dispatchMouseEvent",
                         json!({ "type": "mouseWheel", "x": x, "y": y, "deltaX": 0, "deltaY": input.delta_y }),
                     ),
-                    "rolar",
+                    &t!("web_preview.agent.action.scroll"),
                     cx,
                 )
                 .await?;
-                Ok(ToolkitOutput::text(format!(
-                    "Rolou {:.0} px.",
-                    input.delta_y
-                )))
+                Ok(ToolkitOutput::text(
+                    t!(
+                        "web_preview.agent.output.scrolled",
+                        pixels = format!("{:.0}", input.delta_y)
+                    )
+                    .to_string(),
+                ))
             },
         ),
         tool(
             "browser_eval",
-            "Rodou JavaScript na página",
+            t!("web_preview.agent.tool.eval"),
             "Evaluates a JavaScript expression in the page and returns the result as JSON. Use it \
              to read the DOM, storage or app state that a screenshot can't show. Promises are \
              awaited for at most 60 seconds; to navigate, use browser_open instead of \
@@ -776,7 +822,7 @@ pub fn register_toolkit(cx: &mut App) {
                 let value = with_timeout_of(
                     EVAL_TIMEOUT,
                     session.evaluate(&input.expression),
-                    "avaliar",
+                    &t!("web_preview.agent.action.evaluate"),
                     cx,
                 )
                 .await?;
@@ -787,14 +833,24 @@ pub fn register_toolkit(cx: &mut App) {
         ),
         tool(
             "browser_console",
-            "Leu o console da página",
+            t!("web_preview.agent.tool.console"),
             "Returns the page's console messages and browser log entries (errors, failed \
              requests) buffered since the page loaded.",
             ToolAccess::Read,
             async |_project, _input: NoInput, cx| {
                 let (mut session, info) = session_for_active_page(PageUse::Script, cx).await?;
-                with_timeout(session.call("Console.enable", json!({})), "console", cx).await?;
-                with_timeout(session.call("Log.enable", json!({})), "log", cx).await?;
+                with_timeout(
+                    session.call("Console.enable", json!({})),
+                    &t!("web_preview.agent.action.console"),
+                    cx,
+                )
+                .await?;
+                with_timeout(
+                    session.call("Log.enable", json!({})),
+                    &t!("web_preview.agent.action.log"),
+                    cx,
+                )
+                .await?;
                 session.collect_events(CONSOLE_COLLECT_TIME, cx).await;
                 let lines = session
                     .events
@@ -825,7 +881,7 @@ pub fn register_toolkit(cx: &mut App) {
                     })
                     .collect::<Vec<_>>();
                 let body = if lines.is_empty() {
-                    "Nenhuma mensagem no console.".to_string()
+                    t!("web_preview.agent.output.console_empty").to_string()
                 } else {
                     lines.join("\n")
                 };
@@ -838,7 +894,7 @@ pub fn register_toolkit(cx: &mut App) {
         Toolkit {
             id: task_agents::toolkit_ids::BROWSER.into(),
             name: "Browser".into(),
-            description: "O Chromium embutido (aba Browser e Devices)".into(),
+            description: t!("web_preview.agent.toolkit_description"),
             icon: "public".into(),
             mention: None,
             tools,

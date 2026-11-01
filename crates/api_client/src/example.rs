@@ -2,6 +2,8 @@
 //! lines of that example so the rest of the file keeps its formatting.
 
 use anyhow::{Result, anyhow};
+use gpui::SharedString;
+use i18n::t;
 use serde_json::Value;
 use std::ops::Range;
 
@@ -102,11 +104,15 @@ fn yaml_block(value: &Value, indent: usize) -> Result<String> {
         .collect())
 }
 
-fn refuse_inline(lines: &[Line], row: usize, what: &str) -> Result<()> {
+fn refuse_inline(lines: &[Line], row: usize, what: SharedString) -> Result<()> {
     match lines[row].key() {
         Some((_, true)) => Err(anyhow!(
-            "{what} está escrito numa linha só (`{}`); edite o exemplo à mão",
-            lines[row].content()
+            "{}",
+            t!(
+                "api_client.example.error_inline",
+                what = what,
+                content = lines[row].content()
+            )
         )),
         _ => Ok(()),
     }
@@ -126,15 +132,35 @@ pub fn example_edit(
         .find(|&index| {
             lines[index].indent() == 0 && lines[index].key().is_some_and(|(key, _)| key == "paths")
         })
-        .ok_or_else(|| anyhow!("o spec não tem `paths:` em YAML de bloco"))?;
-    let path_row = child(&lines, paths_row, |key| key == path)
-        .ok_or_else(|| anyhow!("{path} não foi achado no spec"))?;
+        .ok_or_else(|| anyhow!("{}", t!("api_client.example.error_no_paths")))?;
+    let path_row = child(&lines, paths_row, |key| key == path).ok_or_else(|| {
+        anyhow!(
+            "{}",
+            t!("api_client.example.error_path_not_found", path = path)
+        )
+    })?;
     let method_lower = method.to_ascii_lowercase();
-    let method_row = child(&lines, path_row, |key| key == method_lower)
-        .ok_or_else(|| anyhow!("{method} {path} não foi achado no spec"))?;
-    refuse_inline(&lines, method_row, "A operação")?;
-    let responses_row = child(&lines, method_row, |key| key == "responses")
-        .ok_or_else(|| anyhow!("{method} {path} não tem `responses`"))?;
+    let method_row = child(&lines, path_row, |key| key == method_lower).ok_or_else(|| {
+        anyhow!(
+            "{}",
+            t!(
+                "api_client.example.error_operation_not_found",
+                method = method,
+                path = path
+            )
+        )
+    })?;
+    refuse_inline(&lines, method_row, t!("api_client.example.what_operation"))?;
+    let responses_row = child(&lines, method_row, |key| key == "responses").ok_or_else(|| {
+        anyhow!(
+            "{}",
+            t!(
+                "api_client.example.error_no_responses",
+                method = method,
+                path = path
+            )
+        )
+    })?;
     let status_text = status.to_string();
     let range_text = format!("{}XX", status / 100);
     let status_row = child(&lines, responses_row, |key| key == status_text)
@@ -143,11 +169,22 @@ pub fn example_edit(
                 key.eq_ignore_ascii_case(&range_text)
             })
         })
-        .ok_or_else(|| anyhow!("o spec não lista a resposta {status} de {method} {path}"))?;
-    refuse_inline(&lines, status_row, "A resposta")?;
+        .ok_or_else(|| {
+            anyhow!(
+                "{}",
+                t!(
+                    "api_client.example.error_status_not_listed",
+                    status = status,
+                    method = method,
+                    path = path
+                )
+            )
+        })?;
+    refuse_inline(&lines, status_row, t!("api_client.example.what_response"))?;
     if child(&lines, status_row, |key| key == "$ref").is_some() {
         return Err(anyhow!(
-            "a resposta {status} vem de um $ref; ponha o exemplo em components/responses"
+            "{}",
+            t!("api_client.example.error_status_ref", status = status)
         ));
     }
 
@@ -169,13 +206,22 @@ pub fn example_edit(
         insertion.push_str(&yaml_block(example, indent + 6)?);
         return Ok((offset..offset, insertion));
     };
-    refuse_inline(&lines, content_row, "O content")?;
+    refuse_inline(&lines, content_row, t!("api_client.example.what_content"))?;
     let media_row = child(&lines, content_row, |key| {
         key.split(';').next().unwrap_or(key).trim() == content_type
     })
     .or_else(|| child(&lines, content_row, |key| key.contains("json")))
-    .ok_or_else(|| anyhow!("a resposta {status} não declara {content_type}"))?;
-    refuse_inline(&lines, media_row, "O media type")?;
+    .ok_or_else(|| {
+        anyhow!(
+            "{}",
+            t!(
+                "api_client.example.error_content_type_missing",
+                status = status,
+                content_type = content_type
+            )
+        )
+    })?;
+    refuse_inline(&lines, media_row, t!("api_client.example.what_media_type"))?;
     let indent = child_indent(&lines, media_row);
     let mut replacement = format!("{}example:\n", " ".repeat(indent));
     replacement.push_str(&yaml_block(example, indent + 2)?);
@@ -361,8 +407,8 @@ paths:
                 .to_string()
         };
         assert!(error("/users", "GET", 200).contains("$ref"));
-        assert!(error("/auth/me", "GET", 404).contains("numa linha só"));
-        assert!(error("/auth/me", "GET", 500).contains("não lista a resposta 500"));
-        assert!(error("/nope", "GET", 200).contains("não foi achado"));
+        assert!(error("/auth/me", "GET", 404).contains("single line"));
+        assert!(error("/auth/me", "GET", 500).contains("does not list the 500 response"));
+        assert!(error("/nope", "GET", 200).contains("was not found"));
     }
 }

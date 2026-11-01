@@ -10,6 +10,7 @@ use gpui::{
     Action, AnyElement, AnyView, App, BackgroundExecutor, Context, DismissEvent, Empty, Entity,
     FocusHandle, Focusable, ForegroundExecutor, SharedString, Subscription, Task, Window,
 };
+use i18n::t;
 use picker::{Picker, PickerDelegate, popover_menu::PickerPopoverMenu};
 use settings::{Settings as _, SettingsStore, update_settings_file};
 use std::{
@@ -399,14 +400,17 @@ impl ProfilePickerDelegate {
             .collect()
     }
 
-    fn documentation(candidate: &ProfileCandidate) -> Option<&'static str> {
-        match candidate.id.as_str() {
+    fn documentation(candidate: &ProfileCandidate) -> Option<SharedString> {
+        let documentation = match candidate.id.as_str() {
             builtin_profiles::WRITE => Some("Get help to write anything."),
             builtin_profiles::ASK => Some("Chat about your codebase."),
-            builtin_profiles::PLAN => Some("Explore the project and propose a plan to execute."),
+            builtin_profiles::PLAN => {
+                return Some(t!("agent_ui.profile_selector.plan_description"));
+            }
             builtin_profiles::MINIMAL => Some("Chat about anything with no tools."),
             _ => None,
-        }
+        };
+        documentation.map(SharedString::new_static)
     }
 
     fn entries_from_candidates(candidates: &[ProfileCandidate]) -> Vec<ProfilePickerEntry> {

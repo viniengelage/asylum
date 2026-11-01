@@ -2,6 +2,8 @@
 //! are laid out once extracted, and what the SDK's executables are called.
 
 use anyhow::{Result, anyhow};
+use gpui::SharedString;
+use i18n::t;
 use std::path::{Path, PathBuf};
 
 const CMDLINE_TOOLS_BASE_URL: &str = "https://dl.google.com/android/repository";
@@ -58,11 +60,11 @@ impl HostPlatform {
     pub fn supported_current() -> Result<Self> {
         let platform =
             Self::from_target(std::env::consts::OS, std::env::consts::ARCH).ok_or_else(|| {
-                anyhow!(
-                    "O emulador Android não está disponível para {} ({}).",
-                    std::env::consts::OS,
-                    std::env::consts::ARCH
-                )
+                anyhow!(t!(
+                    "android_sdk.host.unsupported_platform",
+                    os = std::env::consts::OS,
+                    arch = std::env::consts::ARCH
+                ))
             })?;
         match platform.emulator_unsupported_reason() {
             Some(reason) => Err(anyhow!(reason)),
@@ -87,17 +89,17 @@ impl HostPlatform {
 
     /// Google publishes the emulator for macOS (both architectures), Linux x64 and Windows x64
     /// only. Under Windows on ARM the x64 build has no hypervisor to run on.
-    pub fn emulator_unsupported_reason(self) -> Option<&'static str> {
+    pub fn emulator_unsupported_reason(self) -> Option<SharedString> {
         match (self.os, self.arch) {
             (HostOs::MacOs, _)
             | (HostOs::Linux, HostArch::X64)
             | (HostOs::Windows, HostArch::X64) => None,
-            (HostOs::Linux, HostArch::Aarch64) => Some(
-                "O Google não publica o emulador Android para Linux ARM64; use uma máquina x86_64 ou um dispositivo físico.",
-            ),
-            (HostOs::Windows, HostArch::Aarch64) => Some(
-                "O emulador Android não roda no Windows ARM64; use uma máquina x86_64 ou um dispositivo físico.",
-            ),
+            (HostOs::Linux, HostArch::Aarch64) => {
+                Some(t!("android_sdk.host.unsupported_linux_arm64"))
+            }
+            (HostOs::Windows, HostArch::Aarch64) => {
+                Some(t!("android_sdk.host.unsupported_windows_arm64"))
+            }
         }
     }
 

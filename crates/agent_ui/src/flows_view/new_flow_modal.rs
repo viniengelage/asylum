@@ -7,6 +7,7 @@ use flows::{
     AgentStep, Criterion, Flow, FlowSource, FlowStep, GateStep, OnFail, RunStep, StepKind, Verifier,
 };
 use gpui::{DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, WeakEntity, Window};
+use i18n::t;
 use project::Project;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -24,8 +25,8 @@ enum Start {
 }
 
 struct Template {
-    name: &'static str,
-    description: &'static str,
+    name: fn() -> SharedString,
+    description: fn() -> SharedString,
     build: fn() -> Vec<FlowStep>,
 }
 
@@ -58,8 +59,8 @@ fn gate(id: &str, note: &str) -> FlowStep {
 
 const TEMPLATES: &[Template] = &[
     Template {
-        name: "Feature do zero",
-        description: "produto → design → você aprova → dev → testes → QA → docs → você aprova",
+        name: || t!("agent_ui.new_flow.template.feature.name"),
+        description: || t!("agent_ui.new_flow.template.feature.description"),
         build: || {
             vec![
                 agent_step(
@@ -95,8 +96,8 @@ const TEMPLATES: &[Template] = &[
         },
     },
     Template {
-        name: "Correção de bug",
-        description: "dev reproduz e corrige → comando de testes → revisão → você aprova",
+        name: || t!("agent_ui.new_flow.template.bug_fix.name"),
+        description: || t!("agent_ui.new_flow.template.bug_fix.description"),
         build: || {
             vec![
                 agent_step(
@@ -123,8 +124,8 @@ const TEMPLATES: &[Template] = &[
         },
     },
     Template {
-        name: "Revisão de PR",
-        description: "revisor lê o PR → você aprova o que vai como comentário",
+        name: || t!("agent_ui.new_flow.template.pr_review.name"),
+        description: || t!("agent_ui.new_flow.template.pr_review.description"),
         build: || {
             vec![
                 agent_step("revisar", &[], OnFail::AskYou),
@@ -167,16 +168,12 @@ impl NewFlowModal {
         });
         let name = cx.new(|cx| {
             let mut editor = Editor::single_line(window, cx);
-            editor.set_placeholder_text("Ex.: Feature do zero", window, cx);
+            editor.set_placeholder_text(&t!("agent_ui.new_flow.name_placeholder"), window, cx);
             editor
         });
         let request = cx.new(|cx| {
             let mut editor = Editor::auto_height(2, 6, window, cx);
-            editor.set_placeholder_text(
-                "O que a esteira deve construir, ex.: Criar um todo list na área logada",
-                window,
-                cx,
-            );
+            editor.set_placeholder_text(&t!("agent_ui.new_flow.request_placeholder"), window, cx);
             editor
         });
         request.focus_handle(cx).focus(window, cx);
@@ -206,9 +203,9 @@ impl NewFlowModal {
             match self.start {
                 Start::Template(index) => TEMPLATES
                     .get(index)
-                    .map(|template| template.name.to_string())
+                    .map(|template| (template.name)().to_string())
                     .unwrap_or_default(),
-                _ => "Nova esteira".to_string(),
+                _ => t!("agent_ui.new_flow.default_name").to_string(),
             }
         } else {
             typed
@@ -268,8 +265,8 @@ impl NewFlowModal {
         id: &'static str,
         start: Start,
         icon: IconName,
-        title: &'static str,
-        detail: String,
+        title: SharedString,
+        detail: SharedString,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let selected = match (self.start, start) {
@@ -325,9 +322,9 @@ impl NewFlowModal {
             match self.start {
                 Start::Template(index) => TEMPLATES
                     .get(index)
-                    .map(|template| template.name.to_string())
+                    .map(|template| (template.name)().to_string())
                     .unwrap_or_default(),
-                _ => "Nova esteira".to_string(),
+                _ => t!("agent_ui.new_flow.default_name").to_string(),
             }
         } else {
             typed
@@ -368,14 +365,14 @@ impl Render for NewFlowModal {
         let viewport = window.viewport_size();
         let colors = cx.theme().colors().clone();
         let suggest = self.start == Start::Suggest;
-        let section = |text: &'static str| {
+        let section = |text: SharedString| {
             Label::new(text)
                 .size(LabelSize::XSmall)
                 .weight(gpui::FontWeight::SEMIBOLD)
                 .color(Color::Muted)
         };
         let where_button = |id: &'static str,
-                            label: &'static str,
+                            label: SharedString,
                             personal: bool,
                             current: bool,
                             enabled: bool,
@@ -396,7 +393,7 @@ impl Render for NewFlowModal {
         let project_agents = self.agents.len() - personal_agents;
         let template_names = TEMPLATES
             .iter()
-            .map(|template| template.name)
+            .map(|template| (template.name)())
             .collect::<Vec<_>>()
             .join(", ");
         let mut templates = v_flex().gap_1();
@@ -425,9 +422,9 @@ impl Render for NewFlowModal {
                             v_flex()
                                 .flex_1()
                                 .min_w_0()
-                                .child(Label::new(template.name).size(LabelSize::Small))
+                                .child(Label::new((template.name)()).size(LabelSize::Small))
                                 .child(
-                                    Label::new(template.description)
+                                    Label::new((template.description)())
                                         .size(LabelSize::XSmall)
                                         .color(Color::Muted),
                                 ),
@@ -459,18 +456,18 @@ impl Render for NewFlowModal {
                         v_flex()
                             .flex_1()
                             .gap_1()
-                            .child(Headline::new("Nova esteira").size(HeadlineSize::Small))
                             .child(
-                                Label::new(
-                                    "Uma lista de passos com seus agentes. Tudo é editável depois, passo a passo.",
-                                )
-                                .color(Color::Muted),
+                                Headline::new(t!("agent_ui.new_flow.title"))
+                                    .size(HeadlineSize::Small),
+                            )
+                            .child(
+                                Label::new(t!("agent_ui.new_flow.subtitle")).color(Color::Muted),
                             ),
                     )
                     .child(
                         IconButton::new("new-flow-close", IconName::Close)
                             .icon_size(IconSize::Small)
-                            .tooltip(Tooltip::text("Fechar"))
+                            .tooltip(Tooltip::text(t!("agent_ui.new_flow.close")))
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(DismissEvent))),
                     ),
             )
@@ -486,7 +483,7 @@ impl Render for NewFlowModal {
                     .child(
                         v_flex()
                             .gap_2()
-                            .child(section("COMEÇAR DE"))
+                            .child(section(t!("agent_ui.new_flow.section.start_from")))
                             .child(
                                 h_flex()
                                     .items_start()
@@ -495,8 +492,8 @@ impl Render for NewFlowModal {
                                         "new-flow-blank",
                                         Start::Blank,
                                         IconName::Plus,
-                                        "Em branco",
-                                        "só o pedido e um +".to_string(),
+                                        t!("agent_ui.new_flow.start.blank"),
+                                        t!("agent_ui.new_flow.start.blank_detail"),
                                         cx,
                                     ))
                                     .child(self.render_start(
@@ -506,16 +503,16 @@ impl Render for NewFlowModal {
                                             _ => Start::Template(0),
                                         },
                                         IconName::Blocks,
-                                        "De um modelo",
-                                        template_names,
+                                        t!("agent_ui.new_flow.start.template"),
+                                        template_names.into(),
                                         cx,
                                     ))
                                     .child(self.render_start(
                                         "new-flow-suggest",
                                         Start::Suggest,
                                         IconName::Sparkle,
-                                        "Sugerir pelo pedido",
-                                        "a IA propõe os passos com seus agentes".to_string(),
+                                        t!("agent_ui.new_flow.start.suggest"),
+                                        t!("agent_ui.new_flow.start.suggest_detail"),
                                         cx,
                                     )),
                             )
@@ -524,7 +521,7 @@ impl Render for NewFlowModal {
                     .child(
                         v_flex()
                             .gap_2()
-                            .child(section("O QUE CONSTRUIR"))
+                            .child(section(t!("agent_ui.new_flow.section.request")))
                             .child(
                                 v_flex()
                                     .px_3()
@@ -544,10 +541,18 @@ impl Render for NewFlowModal {
                                         h_flex()
                                             .gap_2()
                                             .child(
-                                                Label::new(format!(
-                                                    "Usa só agentes da sua lista: {personal_agents} pessoa{}, {project_agents} do projeto",
-                                                    if personal_agents == 1 { "l" } else { "is" }
-                                                ))
+                                                Label::new(if personal_agents == 1 {
+                                                    t!(
+                                                        "agent_ui.new_flow.agents_used.one",
+                                                        project = project_agents
+                                                    )
+                                                } else {
+                                                    t!(
+                                                        "agent_ui.new_flow.agents_used.other",
+                                                        personal = personal_agents,
+                                                        project = project_agents
+                                                    )
+                                                })
                                                 .size(LabelSize::XSmall)
                                                 .color(Color::Muted),
                                             )
@@ -562,9 +567,11 @@ impl Render for NewFlowModal {
                                                                 .size(rems_from_px(11_f32)),
                                                         )
                                                         .child(
-                                                            Label::new("sugerir")
-                                                                .size(LabelSize::XSmall)
-                                                                .color(Color::Accent),
+                                                            Label::new(t!(
+                                                                "agent_ui.new_flow.suggest_hint"
+                                                            ))
+                                                            .size(LabelSize::XSmall)
+                                                            .color(Color::Accent),
                                                         ),
                                                 )
                                             }),
@@ -580,7 +587,7 @@ impl Render for NewFlowModal {
                                     .flex_1()
                                     .min_w_0()
                                     .gap_2()
-                                    .child(section("NOME"))
+                                    .child(section(t!("agent_ui.new_flow.section.name")))
                                     .child(
                                         div()
                                             .px_2p5()
@@ -597,7 +604,7 @@ impl Render for NewFlowModal {
                                     .flex_1()
                                     .min_w_0()
                                     .gap_2()
-                                    .child(section("SALVAR EM"))
+                                    .child(section(t!("agent_ui.new_flow.section.save_in")))
                                     .child(
                                         h_flex()
                                             .p_0p5()
@@ -608,7 +615,7 @@ impl Render for NewFlowModal {
                                             .bg(colors.editor_background)
                                             .child(where_button(
                                                 "new-flow-project",
-                                                "Projeto",
+                                                t!("agent_ui.new_flow.save_in.project"),
                                                 false,
                                                 self.personal,
                                                 self.project_root.is_some(),
@@ -616,7 +623,7 @@ impl Render for NewFlowModal {
                                             ))
                                             .child(where_button(
                                                 "new-flow-personal",
-                                                "Só para mim",
+                                                t!("agent_ui.new_flow.save_in.personal"),
                                                 true,
                                                 self.personal,
                                                 true,
@@ -642,23 +649,33 @@ impl Render for NewFlowModal {
                     .border_color(colors.border)
                     .child(
                         Label::new(if suggest {
-                            "A sugestão abre no editor da esteira; nada roda até você clicar em Rodar."
+                            t!("agent_ui.new_flow.footer.suggest")
                         } else {
-                            "A esteira abre no editor; nada roda até você clicar em Rodar."
+                            t!("agent_ui.new_flow.footer.blank")
                         })
                         .size(LabelSize::Small)
                         .color(Color::Muted),
                     )
                     .child(div().flex_1())
                     .child(
-                        secondary_button("new-flow-cancel", None, "Cancelar", true, cx)
-                            .on_click(cx.listener(|_, _, _, cx| cx.emit(DismissEvent))),
+                        secondary_button(
+                            "new-flow-cancel",
+                            None,
+                            t!("agent_ui.new_flow.cancel"),
+                            true,
+                            cx,
+                        )
+                        .on_click(cx.listener(|_, _, _, cx| cx.emit(DismissEvent))),
                     )
                     .child(
                         primary_button(
                             "new-flow-create",
                             None,
-                            if suggest { "Sugerir e abrir" } else { "Criar e abrir" },
+                            if suggest {
+                                t!("agent_ui.new_flow.suggest_and_open")
+                            } else {
+                                t!("agent_ui.new_flow.create_and_open")
+                            },
                             Some(create_binding),
                             cx,
                         )

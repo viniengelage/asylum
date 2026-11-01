@@ -4,6 +4,8 @@
 
 use crate::catalog::{SdkComponentKind, SystemImageId, parse_package_revision};
 use anyhow::{Context as _, Result};
+use gpui::SharedString;
+use i18n::t;
 use std::path::{Path, PathBuf};
 
 /// A virtual device that exists under Zed's AVD home.
@@ -58,10 +60,10 @@ pub enum Orientation {
 }
 
 impl Orientation {
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> SharedString {
         match self {
-            Self::Portrait => "Retrato",
-            Self::Landscape => "Paisagem",
+            Self::Portrait => t!("android_sdk.orientation.portrait"),
+            Self::Landscape => t!("android_sdk.orientation.landscape"),
         }
     }
 
@@ -273,10 +275,9 @@ pub(crate) fn write_avd_config(
     entries: &[(&str, String)],
 ) -> Result<()> {
     let path = avd_config_ini(avd_home, name);
-    let config =
-        std::fs::read_to_string(&path).with_context(|| format!("lendo {}", path.display()))?;
+    let config = std::fs::read_to_string(&path).with_context(|| reading_error(&path.display()))?;
     std::fs::write(&path, apply_config_entries(&config, entries))
-        .with_context(|| format!("gravando {}", path.display()))
+        .with_context(|| writing_error(&path.display()))
 }
 
 /// The AVD name for a device the user called `display_name`: `zed-` plus a slug, with a counter
@@ -309,11 +310,11 @@ pub(crate) fn delete_avd(avd_home: &Path, name: &str) -> Result<()> {
     let directory = avd_dir(avd_home, name);
     if directory.exists() {
         std::fs::remove_dir_all(&directory)
-            .with_context(|| format!("apagando {}", directory.display()))?;
+            .with_context(|| deleting_error(&directory.display()))?;
     }
     let marker = avd_marker(avd_home, name);
     if marker.exists() {
-        std::fs::remove_file(&marker).with_context(|| format!("apagando {}", marker.display()))?;
+        std::fs::remove_file(&marker).with_context(|| deleting_error(&marker.display()))?;
     }
     Ok(())
 }
@@ -332,13 +333,13 @@ pub(crate) fn wipe_avd_data(avd_home: &Path, name: &str) -> Result<()> {
     for file in USER_DATA_FILES {
         let path = directory.join(file);
         if path.exists() {
-            std::fs::remove_file(&path).with_context(|| format!("apagando {}", path.display()))?;
+            std::fs::remove_file(&path).with_context(|| deleting_error(&path.display()))?;
         }
     }
     let snapshots = directory.join("snapshots");
     if snapshots.exists() {
         std::fs::remove_dir_all(&snapshots)
-            .with_context(|| format!("apagando {}", snapshots.display()))?;
+            .with_context(|| deleting_error(&snapshots.display()))?;
     }
     Ok(())
 }
@@ -356,13 +357,15 @@ pub(crate) fn duplicate_avd(
     let destination = avd_dir(avd_home, new_name);
     anyhow::ensure!(
         !destination.exists(),
-        "já existe um dispositivo em {}",
-        destination.display()
+        t!(
+            "android_sdk.error.device_exists_at",
+            path = destination.display()
+        )
     );
     copy_avd_directory(&source, &destination)?;
 
     let marker = std::fs::read_to_string(avd_marker(avd_home, name))
-        .with_context(|| format!("lendo {name}.ini"))?;
+        .with_context(|| reading_error(&format!("{name}.ini")))?;
     let new_marker = apply_config_entries(
         &marker,
         &[
@@ -371,7 +374,7 @@ pub(crate) fn duplicate_avd(
         ],
     );
     std::fs::write(avd_marker(avd_home, new_name), new_marker)
-        .with_context(|| format!("gravando {new_name}.ini"))?;
+        .with_context(|| writing_error(&format!("{new_name}.ini")))?;
     write_avd_config(
         avd_home,
         new_name,
@@ -381,8 +384,8 @@ pub(crate) fn duplicate_avd(
 
 fn copy_avd_directory(source: &Path, destination: &Path) -> Result<()> {
     std::fs::create_dir_all(destination)
-        .with_context(|| format!("criando {}", destination.display()))?;
-    for entry in std::fs::read_dir(source).with_context(|| format!("lendo {}", source.display()))? {
+        .with_context(|| t!("android_sdk.error.creating", path = destination.display()))?;
+    for entry in std::fs::read_dir(source).with_context(|| reading_error(&source.display()))? {
         let entry = entry?;
         let file_name = entry.file_name();
         let file_name_text = file_name.to_string_lossy();
@@ -395,10 +398,22 @@ fn copy_avd_directory(source: &Path, destination: &Path) -> Result<()> {
             copy_avd_directory(&path, &target)?;
         } else {
             std::fs::copy(&path, &target)
-                .with_context(|| format!("copiando {}", path.display()))?;
+                .with_context(|| t!("android_sdk.error.copying", path = path.display()))?;
         }
     }
     Ok(())
+}
+
+pub(crate) fn reading_error(path: &dyn std::fmt::Display) -> SharedString {
+    t!("android_sdk.error.reading", path = path)
+}
+
+pub(crate) fn writing_error(path: &dyn std::fmt::Display) -> SharedString {
+    t!("android_sdk.error.writing", path = path)
+}
+
+pub(crate) fn deleting_error(path: &dyn std::fmt::Display) -> SharedString {
+    t!("android_sdk.error.deleting", path = path)
 }
 
 /// The system images under the SDK, with the AVDs that use each one.

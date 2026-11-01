@@ -5,6 +5,7 @@ use super::FlowView;
 use anyhow::{Result, anyhow};
 use futures::StreamExt as _;
 use gpui::Window;
+use i18n::t;
 use language_model::{
     CompletionIntent, LanguageModelRegistry, LanguageModelRequest, LanguageModelRequestMessage,
     Role,
@@ -17,15 +18,12 @@ const MAX_SUGGESTION_REPAIRS: usize = 2;
 impl FlowView {
     pub(super) fn suggest_steps(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.is_running() {
-            self.show_toast("Pare a execução antes de mudar os passos.", cx);
+            self.show_toast(&t!("agent_ui.flow_suggest.stop_run_first"), cx);
             return;
         }
         let request = self.input_editor.read(cx).text(cx);
         if request.trim().is_empty() {
-            self.show_toast(
-                "Escreva em “O que construir” o que a esteira deve entregar.",
-                cx,
-            );
+            self.show_toast(&t!("agent_ui.flow_suggest.request_missing"), cx);
             return;
         }
         let registry = LanguageModelRegistry::read_global(cx);
@@ -35,10 +33,7 @@ impl FlowView {
                 .log_err()
                 .map(|provider| (model, provider))
         }) else {
-            self.show_toast(
-                "Escolha um modelo no painel do Agent para sugerir passos.",
-                cx,
-            );
+            self.show_toast(&t!("agent_ui.flow_suggest.no_model"), cx);
             return;
         };
         let agents = self.agents.clone();
@@ -100,7 +95,10 @@ impl FlowView {
                 match result {
                     Ok(suggestion) => this.apply_suggestion(suggestion, window, cx),
                     Err(error) => {
-                        this.show_toast(&format!("Não foi possível sugerir: {error:#}"), cx);
+                        this.show_toast(
+                            &t!("agent_ui.flow_suggest.failed", error = format!("{error:#}")),
+                            cx,
+                        );
                         cx.notify();
                     }
                 }
@@ -139,17 +137,25 @@ impl FlowView {
                 workspace.show_toast(
                     workspace::Toast::new(
                         NotificationId::unique::<SuggestedSteps>(),
-                        format!("Sugestão para “{short}”: {count} passos. Edite à vontade."),
+                        t!(
+                            "agent_ui.flow_suggest.applied",
+                            request = short,
+                            count = count
+                        )
+                        .to_string(),
                     )
-                    .on_click("Desfazer", move |window, cx| {
-                        let previous = previous.clone();
-                        view.update(cx, |view, cx| {
-                            if view.edit_flow(cx, |flow| flow.steps = previous) {
-                                view.select_step(Some(0), window, cx);
-                            }
-                        })
-                        .log_err();
-                    }),
+                    .on_click(
+                        t!("agent_ui.flow_suggest.undo").to_string(),
+                        move |window, cx| {
+                            let previous = previous.clone();
+                            view.update(cx, |view, cx| {
+                                if view.edit_flow(cx, |flow| flow.steps = previous) {
+                                    view.select_step(Some(0), window, cx);
+                                }
+                            })
+                            .log_err();
+                        },
+                    ),
                     cx,
                 );
             })

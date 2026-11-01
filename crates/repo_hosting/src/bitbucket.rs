@@ -12,12 +12,13 @@ use base64::Engine as _;
 use chrono::{DateTime, Utc};
 use futures::AsyncReadExt as _;
 use http_client::{AsyncBody, HttpClient, HttpRequestExt as _, RedirectPolicy, Request};
+use i18n::t;
 use serde::{Deserialize, de::DeserializeOwned};
 use std::sync::Arc;
 use util::ResultExt as _;
 
 const API_URL: &str = "https://api.bitbucket.org/2.0";
-const HOST: &str = "O Bitbucket";
+const HOST: &str = "Bitbucket";
 
 /// Where Atlassian lets you create, list and revoke API tokens.
 pub const TOKEN_SETTINGS_URL: &str = "https://id.atlassian.com/manage-profile/security/api-tokens";
@@ -84,7 +85,7 @@ impl From<User> for Person {
             display_name: user
                 .display_name
                 .or_else(|| nickname.clone())
-                .unwrap_or_else(|| "Usuário removido".to_string()),
+                .unwrap_or_else(|| t!("repo_hosting.common.removed_user").to_string()),
             nickname,
         }
     }
@@ -948,7 +949,7 @@ pub async fn merge_pull_request(
         let task_url = response
             .location
             .filter(|location| location.starts_with(API_URL))
-            .context("o Bitbucket aceitou o merge mas não disse onde acompanhar")?;
+            .context(t!("repo_hosting.error.bitbucket_merge_no_location"))?;
         return Ok(MergeOutcome::Pending { task_url });
     }
     let merged: BitbucketPullRequest = response.parse()?;
@@ -968,16 +969,23 @@ pub async fn get_merge_task(
         #[serde(default)]
         merge_result: Option<BitbucketPullRequest>,
     }
-    anyhow::ensure!(task_url.starts_with(API_URL), "task de merge fora da API");
+    anyhow::ensure!(
+        task_url.starts_with(API_URL),
+        "{}",
+        t!("repo_hosting.error.merge_task_outside_api")
+    );
     let task: MergeTask = get(client, credentials, task_url).await?;
     match task.task_status.as_str() {
         "PENDING" => Ok(None),
         "SUCCESS" => Ok(Some(
             task.merge_result
-                .context("merge concluído sem o pull request na resposta")?
+                .context(t!("repo_hosting.error.merge_without_pull_request"))?
                 .into_pull_request(repository),
         )),
-        other => anyhow::bail!("o merge terminou como {other}"),
+        other => anyhow::bail!(
+            "{}",
+            t!("repo_hosting.error.merge_ended_as", status = other)
+        ),
     }
 }
 
@@ -1068,8 +1076,13 @@ impl RawResponse {
         } else {
             &self.text
         };
-        serde_json::from_str(text)
-            .with_context(|| format!("resposta inesperada do Bitbucket em {}", self.endpoint))
+        serde_json::from_str(text).with_context(|| {
+            t!(
+                "repo_hosting.error.unexpected_response",
+                host = HOST,
+                endpoint = self.endpoint
+            )
+        })
     }
 }
 
@@ -1106,10 +1119,13 @@ async fn send_raw(
         .next()
         .unwrap_or(url)
         .to_string();
-    let mut response = client
-        .send(request)
-        .await
-        .with_context(|| format!("falha ao chamar o Bitbucket em {endpoint}"))?;
+    let mut response = client.send(request).await.with_context(|| {
+        t!(
+            "repo_hosting.error.request_failed",
+            host = HOST,
+            endpoint = endpoint
+        )
+    })?;
 
     let mut text = String::new();
     response.body_mut().read_to_string(&mut text).await?;
@@ -1252,7 +1268,7 @@ mod tests {
         .unwrap();
         let pull_request = pull_request.into_pull_request(&repository());
         assert_eq!(pull_request.state, PullRequestState::Merged);
-        assert_eq!(pull_request.author.display_name, "Usuário removido");
+        assert_eq!(pull_request.author.display_name, "Removed user");
         assert_eq!(
             pull_request.url,
             "https://bitbucket.org/trix/trix_frontend_app/pull-requests/3"

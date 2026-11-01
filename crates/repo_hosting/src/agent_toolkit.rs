@@ -11,6 +11,7 @@ use crate::panel::{Target, detect_target};
 use crate::{Connection, RepoStore, host};
 use anyhow::{Context as _, Result, anyhow};
 use gpui::{App, AsyncApp, Entity, Task};
+use i18n::t;
 use project::Project;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -854,14 +855,13 @@ pub fn register_toolkit(cx: &mut App) {
         Toolkit {
             id: task_agents::toolkit_ids::REPO.into(),
             name: "Repo".into(),
-            description: "Pull requests e checks do Bitbucket ou GitHub conectado no dock Repo"
-                .into(),
+            description: t!("repo_hosting.toolkit.description"),
             icon: "pull_request".into(),
             mention: Some("@PR".into()),
             tools: vec![
                 ToolkitTool::new(
                     "repo_pull_requests",
-                    "Listou os PRs",
+                    t!("repo_hosting.toolkit.listed_pull_requests"),
                     format!(
                         "Lists the open pull requests of the project's Bitbucket repository, \
                          marking the one opened from the current branch. {PREFER_OVER_MCP}"
@@ -871,7 +871,7 @@ pub fn register_toolkit(cx: &mut App) {
                 ),
                 ToolkitTool::new(
                     REPO_PULL_REQUEST_TOOL,
-                    "Leu o PR",
+                    t!("repo_hosting.toolkit.read_pull_request"),
                     format!(
                         "Reads a pull request: description, reviews, checks, changed files, \
                          commits and comments (with their ids). Defaults to the pull request of \
@@ -884,7 +884,7 @@ pub fn register_toolkit(cx: &mut App) {
                 ),
                 ToolkitTool::new(
                     "repo_pr_diff",
-                    "Leu o diff do PR",
+                    t!("repo_hosting.toolkit.read_diff"),
                     format!(
                         "Returns the unified diff of a pull request against its destination \
                          branch. Defaults to the pull request of the current branch. A big diff \
@@ -895,7 +895,7 @@ pub fn register_toolkit(cx: &mut App) {
                 ),
                 ToolkitTool::new(
                     "repo_check_log",
-                    "Leu o log do check",
+                    t!("repo_hosting.toolkit.read_check_log"),
                     "Reads the end of a GitHub Actions job's log, to see why a check failed. Take \
                      the job id from `repo_pull_request`.",
                     ToolAccess::Read,
@@ -903,7 +903,7 @@ pub fn register_toolkit(cx: &mut App) {
                 ),
                 ToolkitTool::new(
                     "repo_rerun_check",
-                    "Re-rodou o check",
+                    t!("repo_hosting.toolkit.reran_check"),
                     "Runs a failed GitHub Actions job again, with the same commit. Only when the \
                      user asked for it, and only for runs of their own branches; the user \
                      confirms every re-run.",
@@ -912,7 +912,7 @@ pub fn register_toolkit(cx: &mut App) {
                 ),
                 ToolkitTool::new(
                     "repo_pr_comment",
-                    "Comentou no PR",
+                    t!("repo_hosting.toolkit.commented"),
                     "Publishes a general comment on a pull request. Everyone on the pull request \
                      sees it, so only post what the user asked for.",
                     ToolAccess::Act,
@@ -920,7 +920,7 @@ pub fn register_toolkit(cx: &mut App) {
                 ),
                 ToolkitTool::new(
                     "repo_pr_line_comment",
-                    "Comentou na linha",
+                    t!("repo_hosting.toolkit.commented_line"),
                     "Publishes a comment on a line of a file in a pull request, the way a \
                      reviewer does. Everyone on the pull request sees it, so only post what the \
                      user asked for.",
@@ -929,7 +929,7 @@ pub fn register_toolkit(cx: &mut App) {
                 ),
                 ToolkitTool::new(
                     "repo_create_pr",
-                    "Abriu um PR",
+                    t!("repo_hosting.toolkit.created_pull_request"),
                     "Opens a pull request from a branch that is already pushed, with the \
                      repository's default reviewers. Push the branch first when it isn't.",
                     ToolAccess::Act,
@@ -937,7 +937,7 @@ pub fn register_toolkit(cx: &mut App) {
                 ),
                 ToolkitTool::new(
                     REPO_MERGE_TOOL,
-                    "Fez merge do PR",
+                    t!("repo_hosting.toolkit.merged"),
                     "Merges a pull request on Bitbucket or GitHub. Only when the user asked for it: read \
                      the pull request first so they see its checks and reviews, and the user \
                      confirms every merge.",

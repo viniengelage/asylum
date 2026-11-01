@@ -12,6 +12,7 @@ use gpui::{
     Action as _, AnyElement, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
     Subscription, WeakEntity, actions, px,
 };
+use i18n::t;
 use project::Project as WorkspaceProject;
 use repo_hosting::api::RemoteRepository;
 use ui::{
@@ -139,8 +140,15 @@ impl ProjectBoard {
             InputField::new(window, cx, "is:open sprint:@current").start_icon(IconName::Filter)
         });
         let branch_input = cx.new(|cx| InputField::new(window, cx, "feat/…"));
-        let comment_input = cx.new(|cx| InputField::new(window, cx, "Comentar no item…"));
-        let new_item_input = cx.new(|cx| InputField::new(window, cx, "Título do novo item"));
+        let comment_input = cx
+            .new(|cx| InputField::new(window, cx, &t!("github_projects.item.comment_placeholder")));
+        let new_item_input = cx.new(|cx| {
+            InputField::new(
+                window,
+                cx,
+                &t!("github_projects.board.new_item_placeholder"),
+            )
+        });
         let mut subscriptions = vec![cx.observe(&state, |_, _, cx| cx.notify())];
         let editor = filter_input.read(cx).editor().clone();
         let this = cx.weak_entity();
@@ -395,7 +403,7 @@ impl ProjectBoard {
                         .child(
                             segment_option(
                                 "board-view-board",
-                                "Quadro",
+                                t!("github_projects.board.view_board"),
                                 self.view == View::Board,
                                 true,
                                 cx,
@@ -408,7 +416,7 @@ impl ProjectBoard {
                         .child(
                             segment_option(
                                 "board-view-table",
-                                "Tabela",
+                                t!("github_projects.board.view_table"),
                                 self.view == View::Table,
                                 true,
                                 cx,
@@ -419,9 +427,15 @@ impl ProjectBoard {
                             })),
                         )
                         .child(
-                            segment_option("board-view-roadmap", "Roadmap", false, true, cx)
-                                .tooltip(Tooltip::text("O roadmap abre no GitHub"))
-                                .on_click(move |_, _, cx| cx.open_url(&roadmap_url)),
+                            segment_option(
+                                "board-view-roadmap",
+                                t!("github_projects.board.view_roadmap"),
+                                false,
+                                true,
+                                cx,
+                            )
+                            .tooltip(Tooltip::text(t!("github_projects.board.roadmap_tooltip")))
+                            .on_click(move |_, _, cx| cx.open_url(&roadmap_url)),
                         ),
                 ),
             )
@@ -436,12 +450,12 @@ impl ProjectBoard {
                             .color(Color::Muted),
                     )
                     .child(
-                        Label::new(format!(
-                            "Colunas: {}",
-                            project
-                                .status
-                                .as_ref()
-                                .map_or("Status", |field| field.name.as_str())
+                        Label::new(t!(
+                            "github_projects.board.columns",
+                            field = project.status.as_ref().map_or_else(
+                                || t!("github_projects.item.status_field").to_string(),
+                                |field| field.name.clone()
+                            )
                         ))
                         .size(LabelSize::Small),
                     ),
@@ -451,7 +465,7 @@ impl ProjectBoard {
                 secondary_button(
                     "board-open-github",
                     Some((IconName::ArrowUpRight, Color::Muted)),
-                    "Abrir no GitHub",
+                    t!("github_projects.item.open_on_github"),
                     true,
                     cx,
                 )
@@ -461,7 +475,7 @@ impl ProjectBoard {
                 primary_button(
                     "board-new-item",
                     Some(IconName::Plus),
-                    "Novo item",
+                    t!("github_projects.board.new_item"),
                     Some(KeyBinding::for_action_in(&NewItem, &self.focus_handle, cx)),
                     cx,
                 )
@@ -562,15 +576,21 @@ impl ProjectBoard {
                     .children(item.pull_requests.first().map(|pull_request| {
                         let (text, color) = match pull_request.state.as_str() {
                             "MERGED" => (
-                                format!("PR #{} · merge", pull_request.number),
+                                t!(
+                                    "github_projects.item.pull_request_merged",
+                                    number = pull_request.number
+                                ),
                                 Color::Accent.color(cx),
                             ),
                             "CLOSED" => (
-                                format!("PR #{} · fechado", pull_request.number),
+                                t!(
+                                    "github_projects.item.pull_request_closed",
+                                    number = pull_request.number
+                                ),
                                 colors.text_muted,
                             ),
                             _ => (
-                                format!("PR #{}", pull_request.number),
+                                format!("PR #{}", pull_request.number).into(),
                                 Color::Accent.color(cx),
                             ),
                         };
@@ -603,7 +623,10 @@ impl ProjectBoard {
         let colors = cx.theme().colors();
         let accent = colors.border_focused;
         let option_id = option.map(|option| option.id.clone());
-        let title = option.map_or_else(|| "Sem status".to_string(), |option| option.name.clone());
+        let title = option.map_or_else(
+            || t!("github_projects.board.no_status").to_string(),
+            |option| option.name.clone(),
+        );
         let color = option.map_or(colors.text_muted, |option| option_color(option, cx));
         let is_done = option.is_some()
             && option.map(|option| &option.id) == project.done_option().map(|option| &option.id);
@@ -696,9 +719,12 @@ impl ProjectBoard {
                                     .color(Color::Accent),
                             )
                             .child(
-                                Label::new(format!("Solte aqui · vira {column_name}"))
-                                    .size(LabelSize::XSmall)
-                                    .color(Color::Accent),
+                                Label::new(t!(
+                                    "github_projects.board.drop_here",
+                                    column = column_name
+                                ))
+                                .size(LabelSize::XSmall)
+                                .color(Color::Accent),
                             ),
                     )
                 })
@@ -716,9 +742,12 @@ impl ProjectBoard {
                             cx.notify();
                         }))
                         .child(
-                            Label::new(format!("+ {} itens", total - shown))
-                                .size(LabelSize::XSmall)
-                                .color(Color::Muted),
+                            Label::new(t!(
+                                "github_projects.board.more_items",
+                                count = total - shown
+                            ))
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
                         ),
                 )
             })
@@ -764,7 +793,7 @@ impl ProjectBoard {
         cx: &Context<Self>,
     ) -> impl IntoElement {
         let colors = cx.theme().colors();
-        let header = |label: &'static str, width: Option<f32>| {
+        let header = |label: SharedString, width: Option<f32>| {
             let cell = div().px_2().child(
                 Label::new(label)
                     .size(LabelSize::XSmall)
@@ -788,12 +817,27 @@ impl ProjectBoard {
                     .h(px(32.))
                     .border_b_1()
                     .border_color(colors.border)
-                    .child(header("ITEM", None))
-                    .child(header("STATUS", Some(150.)))
-                    .child(header("PRIORIDADE", Some(110.)))
-                    .child(header("SPRINT", Some(140.)))
-                    .child(header("ESTIMATIVA", Some(100.)))
-                    .child(header("RESPONSÁVEIS", Some(160.))),
+                    .child(header(t!("github_projects.board.column_item"), None))
+                    .child(header(
+                        t!("github_projects.board.column_status"),
+                        Some(150.),
+                    ))
+                    .child(header(
+                        t!("github_projects.board.column_priority"),
+                        Some(110.),
+                    ))
+                    .child(header(
+                        t!("github_projects.board.column_sprint"),
+                        Some(140.),
+                    ))
+                    .child(header(
+                        t!("github_projects.board.column_estimate"),
+                        Some(100.),
+                    ))
+                    .child(header(
+                        t!("github_projects.board.column_assignees"),
+                        Some(160.),
+                    )),
             )
             .children(items.iter().map(|item| {
                 let item_id = item.id.clone();
@@ -897,7 +941,7 @@ impl ProjectBoard {
 
     fn field_row(
         &self,
-        label: &'static str,
+        label: SharedString,
         value: AnyElement,
         menu: Option<Entity<ContextMenu>>,
         id: &'static str,
@@ -941,7 +985,7 @@ impl ProjectBoard {
             )
     }
 
-    fn section_label(title: &'static str, trailing: Option<String>) -> impl IntoElement {
+    fn section_label(title: SharedString, trailing: Option<String>) -> impl IntoElement {
         h_flex()
             .px_4()
             .pt_3p5()
@@ -996,13 +1040,14 @@ impl ProjectBoard {
                 );
             }
             let board = board.clone();
-            menu.separator().entry("Limpar", None, move |_, cx| {
-                board
-                    .update(cx, |board, cx| {
-                        board.set_field(item_id.clone(), field_id.clone(), NewValue::Clear, cx)
-                    })
-                    .log_err();
-            })
+            menu.separator()
+                .entry(t!("github_projects.board.clear"), None, move |_, cx| {
+                    board
+                        .update(cx, |board, cx| {
+                            board.set_field(item_id.clone(), field_id.clone(), NewValue::Clear, cx)
+                        })
+                        .log_err();
+                })
         })
     }
 
@@ -1177,7 +1222,7 @@ impl ProjectBoard {
                         .color(Color::Muted),
                 )
                 .child(
-                    Label::new("ninguém")
+                    Label::new(t!("github_projects.board.nobody"))
                         .size(LabelSize::Small)
                         .color(Color::Muted),
                 )
@@ -1193,7 +1238,7 @@ impl ProjectBoard {
                 let state = self.state.downgrade();
                 let item_id = item.id.clone();
                 ContextMenu::build(window, cx, move |menu, _, _| {
-                    menu.entry("Atribuir a mim", None, move |_, cx| {
+                    menu.entry(t!("github_projects.board.assign_me"), None, move |_, cx| {
                         state
                             .update(cx, |state, cx| {
                                 state.assign_me(&item_id, cx).detach_and_log_err(cx)
@@ -1217,9 +1262,9 @@ impl ProjectBoard {
             .collect();
         let item_url = item.url.clone();
         let kind = match item.kind {
-            ItemKind::Issue => "Issue",
-            ItemKind::PullRequest => "Pull request",
-            ItemKind::Draft => "Rascunho",
+            ItemKind::Issue => t!("github_projects.board.kind_issue"),
+            ItemKind::PullRequest => t!("github_projects.board.kind_pull_request"),
+            ItemKind::Draft => t!("github_projects.board.kind_draft"),
         };
         let reference = match (&item.repository, item.number) {
             (Some(repository), Some(number)) => format!("{kind} · {repository}#{number}"),
@@ -1254,18 +1299,33 @@ impl ProjectBoard {
                         h_flex()
                             .gap_1p5()
                             .child(
-                                Icon::new(if item.closed { IconName::Check } else { IconName::Circle })
-                                    .size(IconSize::XSmall)
-                                    .color(if item.closed { Color::Accent } else { Color::Success }),
+                                Icon::new(if item.closed {
+                                    IconName::Check
+                                } else {
+                                    IconName::Circle
+                                })
+                                .size(IconSize::XSmall)
+                                .color(if item.closed {
+                                    Color::Accent
+                                } else {
+                                    Color::Success
+                                }),
                             )
-                            .child(Label::new(reference).size(LabelSize::XSmall).buffer_font(cx).color(Color::Muted))
+                            .child(
+                                Label::new(reference)
+                                    .size(LabelSize::XSmall)
+                                    .buffer_font(cx)
+                                    .color(Color::Muted),
+                            )
                             .child(div().flex_1())
                             .when_some(item_url, |this, url| {
                                 this.child(
                                     IconButton::new("board-item-open", IconName::ArrowUpRight)
                                         .icon_size(IconSize::Small)
                                         .icon_color(Color::Muted)
-                                        .tooltip(Tooltip::text("Abrir no GitHub"))
+                                        .tooltip(Tooltip::text(t!(
+                                            "github_projects.item.open_on_github"
+                                        )))
                                         .on_click(move |_, _, cx| cx.open_url(&url)),
                                 )
                             })
@@ -1276,18 +1336,40 @@ impl ProjectBoard {
                                     .on_click(cx.listener(|this, _, _, cx| this.select(None, cx))),
                             ),
                     )
-                    .child(Label::new(item.title.clone()).size(LabelSize::Large).weight(FontWeight::SEMIBOLD))
+                    .child(
+                        Label::new(item.title.clone())
+                            .size(LabelSize::Large)
+                            .weight(FontWeight::SEMIBOLD),
+                    )
                     .child(
                         h_flex()
                             .gap_1p5()
                             .child(if item.closed {
-                                chip("Fechada", Color::Accent.color(cx), None, false, cx).into_any_element()
+                                chip(
+                                    t!("github_projects.board.state_closed"),
+                                    Color::Accent.color(cx),
+                                    None,
+                                    false,
+                                    cx,
+                                )
+                                .into_any_element()
                             } else {
-                                chip("Aberta", Color::Success.color(cx), None, false, cx).into_any_element()
+                                chip(
+                                    t!("github_projects.board.state_open"),
+                                    Color::Success.color(cx),
+                                    None,
+                                    false,
+                                    cx,
+                                )
+                                .into_any_element()
                             })
-                            .children(item.labels.first().map(|label| chip(label.name.clone(), Color::Info.color(cx), None, false, cx)))
+                            .children(item.labels.first().map(|label| {
+                                chip(label.name.clone(), Color::Info.color(cx), None, false, cx)
+                            }))
                             .children(item.author.as_ref().map(|author| {
-                                Label::new(format!("aberta por {author}")).size(LabelSize::XSmall).color(Color::Muted)
+                                Label::new(t!("github_projects.board.opened_by", author = author))
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted)
                             })),
                     ),
             )
@@ -1297,14 +1379,29 @@ impl ProjectBoard {
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
-                    .child(Self::section_label("CAMPOS DO PROJETO", Some("sincronizam com o GitHub".to_string())))
-                    .child(self.field_row("Status", status_value, status_menu, "board-field-status", cx))
+                    .child(Self::section_label(
+                        t!("github_projects.board.section_fields"),
+                        Some(t!("github_projects.board.section_fields_detail").to_string()),
+                    ))
+                    .child(self.field_row(
+                        t!("github_projects.item.status_field"),
+                        status_value,
+                        status_menu,
+                        "board-field-status",
+                        cx,
+                    ))
                     .when(priority.is_some(), |this| {
-                        this.child(self.field_row("Prioridade", priority_value, priority_menu, "board-field-priority", cx))
+                        this.child(self.field_row(
+                            t!("github_projects.board.field_priority"),
+                            priority_value,
+                            priority_menu,
+                            "board-field-priority",
+                            cx,
+                        ))
                     })
                     .when(project.iteration.is_some(), |this| {
                         this.child(self.field_row(
-                            project.iteration.as_ref().map_or("Sprint", |_| "Sprint"),
+                            t!("github_projects.board.field_sprint"),
                             iteration_value,
                             iteration_menu,
                             "board-field-iteration",
@@ -1312,10 +1409,25 @@ impl ProjectBoard {
                         ))
                     })
                     .when(project.estimate.is_some(), |this| {
-                        this.child(self.field_row("Estimativa", estimate_value, estimate_menu, "board-field-estimate", cx))
+                        this.child(self.field_row(
+                            t!("github_projects.board.field_estimate"),
+                            estimate_value,
+                            estimate_menu,
+                            "board-field-estimate",
+                            cx,
+                        ))
                     })
-                    .child(self.field_row("Responsáveis", assignees_value, assignees_menu, "board-field-assignees", cx))
-                    .child(Self::section_label("DESENVOLVIMENTO", None))
+                    .child(self.field_row(
+                        t!("github_projects.board.field_assignees"),
+                        assignees_value,
+                        assignees_menu,
+                        "board-field-assignees",
+                        cx,
+                    ))
+                    .child(Self::section_label(
+                        t!("github_projects.board.section_development"),
+                        None,
+                    ))
                     .child(
                         div().px_4().child(
                             v_flex()
@@ -1329,12 +1441,22 @@ impl ProjectBoard {
                                     this.child(
                                         h_flex()
                                             .gap_1p5()
-                                            .child(Icon::new(IconName::GitBranchPlus).size(IconSize::XSmall).color(Color::Muted))
-                                            .child(Label::new("Nenhum branch ou PR ainda").size(LabelSize::Small)),
+                                            .child(
+                                                Icon::new(IconName::GitBranchPlus)
+                                                    .size(IconSize::XSmall)
+                                                    .color(Color::Muted),
+                                            )
+                                            .child(
+                                                Label::new(t!(
+                                                    "github_projects.board.no_branch_yet"
+                                                ))
+                                                .size(LabelSize::Small),
+                                            ),
                                     )
                                     .child(
-                                        Label::new(format!(
-                                            "Começar cria o branch abaixo a partir de {default_branch} e vincula ao item."
+                                        Label::new(t!(
+                                            "github_projects.board.start_creates_branch",
+                                            branch = default_branch
                                         ))
                                         .size(LabelSize::XSmall)
                                         .color(Color::Muted),
@@ -1344,48 +1466,95 @@ impl ProjectBoard {
                                 .children(item.linked_branches.iter().map(|branch| {
                                     h_flex()
                                         .gap_1p5()
-                                        .child(Icon::new(IconName::GitBranch).size(IconSize::XSmall).color(Color::Muted))
-                                        .child(Label::new(branch.clone()).size(LabelSize::Small).buffer_font(cx))
-                                        .when(current_branch.as_deref() == Some(branch.as_str()), |this| {
-                                            this.child(chip("branch atual", Color::Accent.color(cx), None, false, cx))
-                                        })
+                                        .child(
+                                            Icon::new(IconName::GitBranch)
+                                                .size(IconSize::XSmall)
+                                                .color(Color::Muted),
+                                        )
+                                        .child(
+                                            Label::new(branch.clone())
+                                                .size(LabelSize::Small)
+                                                .buffer_font(cx),
+                                        )
+                                        .when(
+                                            current_branch.as_deref() == Some(branch.as_str()),
+                                            |this| {
+                                                this.child(chip(
+                                                    t!("github_projects.item.current_branch"),
+                                                    Color::Accent.color(cx),
+                                                    None,
+                                                    false,
+                                                    cx,
+                                                ))
+                                            },
+                                        )
                                 }))
                                 .children(item.pull_requests.iter().map(|pull_request| {
                                     let url = pull_request.url.clone();
                                     h_flex()
-                                        .id(SharedString::from(format!("board-pr-{}", pull_request.number)))
+                                        .id(SharedString::from(format!(
+                                            "board-pr-{}",
+                                            pull_request.number
+                                        )))
                                         .gap_1p5()
                                         .cursor_pointer()
                                         .on_click(move |_, _, cx| cx.open_url(&url))
-                                        .child(Icon::new(IconName::PullRequest).size(IconSize::XSmall).color(Color::Accent))
-                                        .child(Label::new(format!("PR #{}", pull_request.number)).size(LabelSize::Small))
-                                        .child(Label::new(pull_request.state.to_lowercase()).size(LabelSize::XSmall).color(Color::Muted))
+                                        .child(
+                                            Icon::new(IconName::PullRequest)
+                                                .size(IconSize::XSmall)
+                                                .color(Color::Accent),
+                                        )
+                                        .child(
+                                            Label::new(format!("PR #{}", pull_request.number))
+                                                .size(LabelSize::Small),
+                                        )
+                                        .child(
+                                            Label::new(pull_request.state.to_lowercase())
+                                                .size(LabelSize::XSmall)
+                                                .color(Color::Muted),
+                                        )
                                 })),
                         ),
                     )
                     .when(!subtasks.is_empty(), |this| {
-                        this.child(Self::section_label("SUBTAREFAS", Some(format!("{done}/{}", subtasks.len()))))
-                            .children(subtasks.into_iter().map(|subtask| {
-                                let state = self.state.downgrade();
-                                let item_id = item.id.clone();
-                                let line = subtask.line;
-                                h_flex().h(px(28.)).px_4().child(
-                                    Checkbox::new(SharedString::from(format!("board-subtask-{line}")), subtask.done.into())
-                                        .label(subtask.text)
-                                        .on_click(move |toggle, _, cx| {
-                                            let done = toggle.selected();
-                                            state
-                                                .update(cx, |state, cx| {
-                                                    state.toggle_subtask(&item_id, line, done, cx).detach_and_log_err(cx)
-                                                })
-                                                .log_err();
-                                        }),
+                        this.child(Self::section_label(
+                            t!("github_projects.board.section_subtasks"),
+                            Some(format!("{done}/{}", subtasks.len())),
+                        ))
+                        .children(subtasks.into_iter().map(|subtask| {
+                            let state = self.state.downgrade();
+                            let item_id = item.id.clone();
+                            let line = subtask.line;
+                            h_flex().h(px(28.)).px_4().child(
+                                Checkbox::new(
+                                    SharedString::from(format!("board-subtask-{line}")),
+                                    subtask.done.into(),
                                 )
-                            }))
+                                .label(subtask.text)
+                                .on_click(move |toggle, _, cx| {
+                                    let done = toggle.selected();
+                                    state
+                                        .update(cx, |state, cx| {
+                                            state
+                                                .toggle_subtask(&item_id, line, done, cx)
+                                                .detach_and_log_err(cx)
+                                        })
+                                        .log_err();
+                                }),
+                            )
+                        }))
                     })
                     .when(!description.is_empty(), |this| {
-                        this.child(Self::section_label("DESCRIÇÃO", None)).child(
-                            div().px_4().pb_3().child(Label::new(description).size(LabelSize::Small).color(Color::Muted)),
+                        this.child(Self::section_label(
+                            t!("github_projects.board.section_description"),
+                            None,
+                        ))
+                        .child(
+                            div().px_4().pb_3().child(
+                                Label::new(description)
+                                    .size(LabelSize::Small)
+                                    .color(Color::Muted),
+                            ),
                         )
                     }),
             )
@@ -1397,21 +1566,27 @@ impl ProjectBoard {
                     .border_t_1()
                     .border_color(colors.border)
                     .when_some(self.error.clone(), |this, error| {
-                        this.child(Label::new(error).size(LabelSize::XSmall).color(Color::Error))
+                        this.child(
+                            Label::new(error)
+                                .size(LabelSize::XSmall)
+                                .color(Color::Error),
+                        )
                     })
                     .when(self.commenting, |this| {
                         this.child(
                             div()
                                 .key_context("BoardComment")
-                                .on_action(cx.listener(move |this, _: &menu::Confirm, window, cx| {
-                                    this.post_comment(comment_item.clone(), window, cx)
-                                }))
+                                .on_action(cx.listener(
+                                    move |this, _: &menu::Confirm, window, cx| {
+                                        this.post_comment(comment_item.clone(), window, cx)
+                                    },
+                                ))
                                 .child(self.comment_input.clone()),
                         )
                     })
                     .when(!started && item.kind == ItemKind::Issue, |this| {
                         this.child(
-                            Label::new("Começar: cria o branch, faz checkout, move para Em andamento e atribui a você.")
+                            Label::new(t!("github_projects.board.start_hint"))
                                 .size(LabelSize::XSmall)
                                 .color(Color::Muted),
                         )
@@ -1421,20 +1596,41 @@ impl ProjectBoard {
                             .gap_2()
                             .when(item.kind != ItemKind::Draft, |this| {
                                 this.child(
-                                    secondary_button("board-comment", Some((IconName::Chat, Color::Muted)), "Comentar", true, cx)
-                                        .on_click(cx.listener(|this, _, window, cx| {
+                                    secondary_button(
+                                        "board-comment",
+                                        Some((IconName::Chat, Color::Muted)),
+                                        t!("github_projects.item.comment"),
+                                        true,
+                                        cx,
+                                    )
+                                    .on_click(cx.listener(
+                                        |this, _, window, cx| {
                                             this.commenting = !this.commenting;
                                             if this.commenting {
-                                                window.focus(&this.comment_input.focus_handle(cx), cx);
+                                                window.focus(
+                                                    &this.comment_input.focus_handle(cx),
+                                                    cx,
+                                                );
                                             }
                                             cx.notify();
-                                        })),
+                                        },
+                                    )),
                                 )
                             })
                             .child(
-                                secondary_button("board-mention", Some((IconName::AtSign, Color::Muted)), "Agent", true, cx)
-                                    .tooltip(Tooltip::text("Mencionar no Agent"))
-                                    .on_click(move |_, window, cx| window.dispatch_action(mention.boxed_clone(), cx)),
+                                secondary_button(
+                                    "board-mention",
+                                    Some((IconName::AtSign, Color::Muted)),
+                                    t!("github_projects.board.agent"),
+                                    true,
+                                    cx,
+                                )
+                                .tooltip(Tooltip::text(t!(
+                                    "github_projects.board.mention_in_agent"
+                                )))
+                                .on_click(move |_, window, cx| {
+                                    window.dispatch_action(mention.boxed_clone(), cx)
+                                }),
                             )
                             .child(div().flex_1())
                             .when(item.kind == ItemKind::Issue && !on_branch, |this| {
@@ -1442,14 +1638,24 @@ impl ProjectBoard {
                                     primary_button(
                                         "board-start",
                                         Some(IconName::PlayFilled),
-                                        if started { "Ir para o branch" } else { "Começar" },
-                                        Some(KeyBinding::for_action_in(&StartItem, &self.focus_handle, cx)),
+                                        if started {
+                                            t!("github_projects.board.go_to_branch")
+                                        } else {
+                                            t!("github_projects.board.start")
+                                        },
+                                        Some(KeyBinding::for_action_in(
+                                            &StartItem,
+                                            &self.focus_handle,
+                                            cx,
+                                        )),
                                         cx,
                                     )
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.selected = Some(item_id.clone());
-                                        this.start_selected(&StartItem, window, cx)
-                                    })),
+                                    .on_click(cx.listener(
+                                        move |this, _, window, cx| {
+                                            this.selected = Some(item_id.clone());
+                                            this.start_selected(&StartItem, window, cx)
+                                        },
+                                    )),
                                 )
                             }),
                     ),
@@ -1475,17 +1681,31 @@ impl Render for ProjectBoard {
                             .as_deref()
                             .and_then(|id| project.item(id))
                             .cloned();
-                        let footer = format!(
-                            "{} · {} itens{}",
-                            project.summary.title,
-                            project.items.len(),
-                            synced
-                                .map(|ago| format!(" · sincronizado {ago}"))
-                                .unwrap_or_default()
-                        );
-                        let rate = format!(
-                            "GraphQL {} / {} pontos",
-                            project.rate_limit.remaining, project.rate_limit.limit
+                        let item_count = if project.items.len() == 1 {
+                            t!("github_projects.board.footer_items.one")
+                        } else {
+                            t!(
+                                "github_projects.board.footer_items.other",
+                                count = project.items.len()
+                            )
+                        };
+                        let footer = match synced {
+                            Some(ago) => t!(
+                                "github_projects.board.footer_synced",
+                                project = project.summary.title,
+                                items = item_count,
+                                ago = ago
+                            ),
+                            None => t!(
+                                "github_projects.board.footer",
+                                project = project.summary.title,
+                                items = item_count
+                            ),
+                        };
+                        let rate = t!(
+                            "github_projects.board.rate_limit",
+                            remaining = project.rate_limit.remaining,
+                            limit = project.rate_limit.limit
                         );
                         v_flex()
                             .size_full()
@@ -1510,11 +1730,9 @@ impl Render for ProjectBoard {
                                         }))
                                         .child(div().w(px(420.)).child(self.new_item_input.clone()))
                                         .child(
-                                            Label::new(
-                                                "Enter cria um rascunho no projeto · Esc cancela",
-                                            )
-                                            .size(LabelSize::XSmall)
-                                            .color(Color::Muted),
+                                            Label::new(t!("github_projects.board.new_item_hint"))
+                                                .size(LabelSize::XSmall)
+                                                .color(Color::Muted),
                                         ),
                                 )
                             })
@@ -1561,18 +1779,22 @@ impl Render for ProjectBoard {
                 }
             }
             other => {
-                let (title, detail): (&str, Option<SharedString>) = match other {
+                let (title, detail): (SharedString, Option<SharedString>) = match other {
                     Availability::NotConnected => (
-                        "Conecte o GitHub no dock Repo",
-                        Some("Repo e Tarefas usam a mesma conta do GitHub.".into()),
+                        t!("github_projects.empty.connect_title"),
+                        Some(t!("github_projects.empty.connect_detail")),
                     ),
-                    Availability::NoProjects => ("Nenhum projeto aberto", None),
+                    Availability::NoProjects => {
+                        (t!("github_projects.empty.no_projects_title"), None)
+                    }
                     Availability::MissingScope => (
-                        "Falta acesso ao GitHub Projects",
-                        Some("Rode gh auth refresh -s project, ou dê Projects ao token fine-grained.".into()),
+                        t!("github_projects.empty.missing_scope_title"),
+                        Some(t!("github_projects.empty.missing_scope_detail")),
                     ),
-                    Availability::Failed(error) => ("Não deu para carregar o projeto", Some(error)),
-                    _ => ("Carregando o projeto…", None),
+                    Availability::Failed(error) => {
+                        (t!("github_projects.empty.failed_title"), Some(error))
+                    }
+                    _ => (t!("github_projects.empty.loading"), None),
                 };
                 v_flex()
                     .size_full()

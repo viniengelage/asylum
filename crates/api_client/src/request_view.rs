@@ -16,6 +16,7 @@ use gpui::{
     AnyElement, ClipboardItem, Div, DragMoveEvent, Empty, Entity, EventEmitter, FocusHandle,
     Focusable, FontWeight, HighlightStyle, Hsla, Pixels, Subscription, Task, WeakEntity,
 };
+use i18n::t;
 use language::LanguageRegistry;
 use std::{sync::Arc, time::Duration};
 use ui::{Checkbox, Indicator, Tooltip, prelude::*};
@@ -164,7 +165,8 @@ fn is_sensitive_variable(name: &str) -> bool {
 /// What a placeholder resolves to right now, as it can be shown on screen.
 fn resolved_variable(collection: &Collection, name: &str) -> Option<String> {
     if name.starts_with('$') {
-        return vars::dynamic_value(name).map(|_| "gerado a cada envio".to_string());
+        return vars::dynamic_value(name)
+            .map(|_| t!("api_client.request.generated_each_send").to_string());
     }
     let value = collection.variable(name)?;
     Some(if is_sensitive_variable(name) {
@@ -269,11 +271,18 @@ fn render_template(text: &str, collection: &Collection, muted: bool, cx: &App) -
 
 fn human_size(bytes: usize) -> String {
     if bytes < 1024 {
-        format!("{bytes} B")
-    } else if bytes < 1024 * 1024 {
-        format!("{:.1} KB", bytes as f64 / 1024.0).replace('.', ",")
+        return format!("{bytes} B");
+    }
+    let size = if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
     } else {
-        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0)).replace('.', ",")
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    };
+    // Brazilian Portuguese writes the decimal separator as a comma.
+    if i18n::current_language() == i18n::Language::PortugueseBrazil {
+        size.replace('.', ",")
+    } else {
+        size
     }
 }
 
@@ -292,13 +301,14 @@ impl ApiRequestView {
             None => (None, None, collection.read(cx).draft(&operation_key)),
         };
 
-        let url_input = cx.new(|cx| InputField::new(window, cx, "{{baseUrl}}/caminho"));
+        let url_input =
+            cx.new(|cx| InputField::new(window, cx, &t!("api_client.request.url_placeholder")));
         let url_editor = url_input.read(cx).editor().clone();
         url_editor.set_text(&draft.url, window, cx);
 
         let body_editor = cx.new(|cx| {
             let mut editor = Editor::multi_line(window, cx);
-            editor.set_placeholder_text("Sem body", window, cx);
+            editor.set_placeholder_text(&t!("api_client.request.no_body"), window, cx);
             editor.set_text(draft.body.clone().unwrap_or_default(), window, cx);
             editor
         });
@@ -341,7 +351,12 @@ impl ApiRequestView {
             _subscriptions: Vec::new(),
         };
         for parameter in &draft.path_params {
-            let input = this.new_input("valor", &parameter.value, window, cx);
+            let input = this.new_input(
+                &t!("api_client.settings.value_placeholder"),
+                &parameter.value,
+                window,
+                cx,
+            );
             this.path_params.push((parameter.name.clone(), input));
         }
         for parameter in &draft.query {
@@ -433,12 +448,17 @@ impl ApiRequestView {
         cx: &mut Context<Self>,
     ) -> FormRow {
         FormRow {
-            name: self.new_input("campo", &field.name, window, cx),
+            name: self.new_input(
+                &t!("api_client.request.field_placeholder"),
+                &field.name,
+                window,
+                cx,
+            ),
             value: self.new_input(
-                if field.is_file {
-                    "caminho do arquivo"
+                &if field.is_file {
+                    t!("api_client.request.file_path_placeholder")
                 } else {
-                    "valor"
+                    t!("api_client.settings.value_placeholder")
                 },
                 &field.value,
                 window,
@@ -476,7 +496,12 @@ impl ApiRequestView {
             };
         CaptureRow {
             path: make("$.id", path, window, cx),
-            variable: make("variável", variable, window, cx),
+            variable: make(
+                &t!("api_client.request.variable_placeholder"),
+                variable,
+                window,
+                cx,
+            ),
         }
     }
 
@@ -528,7 +553,7 @@ impl ApiRequestView {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some("Anexar".into()),
+            prompt: Some(t!("api_client.request.attach")),
         });
         cx.spawn_in(window, async move |this, cx| {
             let Some(path) = paths.await??.and_then(|paths| paths.into_iter().next()) else {
@@ -555,8 +580,18 @@ impl ApiRequestView {
         cx: &mut Context<Self>,
     ) -> Row {
         Row {
-            name: self.new_input("nome", name, window, cx),
-            value: self.new_input("valor", value, window, cx),
+            name: self.new_input(
+                &t!("api_client.settings.name_placeholder"),
+                name,
+                window,
+                cx,
+            ),
+            value: self.new_input(
+                &t!("api_client.settings.value_placeholder"),
+                value,
+                window,
+                cx,
+            ),
             enabled,
         }
     }
@@ -745,7 +780,11 @@ impl ApiRequestView {
         let base_url = environment.get("baseUrl").filter(|url| !url.is_empty());
         Some(match base_url {
             Some(base_url) => format!("{} → {base_url}", environment.name),
-            None => format!("{} → sem baseUrl", environment.name),
+            None => t!(
+                "api_client.request.environment_no_base_url",
+                environment = &environment.name
+            )
+            .to_string(),
         })
     }
 
@@ -786,7 +825,11 @@ impl ApiRequestView {
         let send_button = ui::primary_button(
             "api-send",
             Some(IconName::Send),
-            if sending { "Enviando…" } else { "Enviar" },
+            if sending {
+                t!("api_client.request.sending")
+            } else {
+                t!("api_client.request.send")
+            },
             Some(ui::KeyBinding::for_action_in(
                 &SendRequest,
                 &focus_handle,
@@ -883,7 +926,7 @@ impl ApiRequestView {
                 })
                 .unwrap_or_default();
             parts.push(if schemes.is_empty() {
-                "security: nenhuma (rota pública)".to_string()
+                t!("api_client.request.security_none").to_string()
             } else {
                 format!("security: {}", schemes.join(", "))
             });
@@ -921,7 +964,7 @@ impl ApiRequestView {
                                 .id("api-open-in-spec")
                                 .cursor_pointer()
                                 .child(
-                                    Label::new("Ver na spec")
+                                    Label::new(t!("api_client.request.view_in_spec"))
                                         .size(LabelSize::XSmall)
                                         .color(Color::Accent),
                                 )
@@ -943,9 +986,9 @@ impl ApiRequestView {
                                 .color(Color::Warning),
                         )
                         .child(
-                            Label::new(format!(
-                                "Sem valor: {} — defina no ambiente ou na aba API",
-                                missing
+                            Label::new(t!(
+                                "api_client.request.missing_values",
+                                names = missing
                                     .iter()
                                     .map(|name| if name.starts_with('{') {
                                         name.clone()
@@ -962,7 +1005,7 @@ impl ApiRequestView {
             })
             .when(operation.is_none(), |this| {
                 this.child(
-                    Label::new("Esta operação não existe mais no spec.")
+                    Label::new(t!("api_client.request.operation_gone"))
                         .size(LabelSize::XSmall)
                         .color(Color::Error),
                 )
@@ -1003,9 +1046,9 @@ impl ApiRequestView {
                     .map(|spec| spec.schemes_for(operation).len())
                     .unwrap_or(0);
                 if schemes == 0 {
-                    "Auth · nenhuma".to_string()
+                    t!("api_client.request.auth_none").to_string()
                 } else {
-                    "Auth · herdada".to_string()
+                    t!("api_client.request.auth_inherited").to_string()
                 }
             }
             None => "Auth".to_string(),
@@ -1051,7 +1094,7 @@ impl ApiRequestView {
                             {
                                 "Body".to_string()
                             } else {
-                                "Body · nenhum".to_string()
+                                t!("api_client.request.body_none").to_string()
                             },
                             tab == RequestTab::Body,
                             |this, _| this.request_tab = RequestTab::Body,
@@ -1067,7 +1110,10 @@ impl ApiRequestView {
                     ))
                     .child(self.render_tab_button(
                         "api-tab-captures",
-                        with_count("Capturas", self.capture_rows.len()),
+                        with_count(
+                            &t!("api_client.request.captures_tab"),
+                            self.capture_rows.len(),
+                        ),
                         tab == RequestTab::Captures,
                         |this, _| this.request_tab = RequestTab::Captures,
                         cx,
@@ -1102,7 +1148,7 @@ impl ApiRequestView {
                     ui::secondary_button(
                         "api-fill-example",
                         Some((IconName::FileTextOutlined, Color::Muted)),
-                        "Preencher com o exemplo do spec",
+                        t!("api_client.request.fill_example"),
                         true,
                         cx,
                     )
@@ -1179,7 +1225,7 @@ impl ApiRequestView {
     fn add_row_button(
         &self,
         kind: &'static str,
-        label: &'static str,
+        label: SharedString,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         Button::new(SharedString::from(format!("api-{kind}-add")), label)
@@ -1202,7 +1248,7 @@ impl ApiRequestView {
             }))
     }
 
-    fn section_label(text: &'static str) -> impl IntoElement {
+    fn section_label(text: impl Into<SharedString>) -> impl IntoElement {
         Label::new(text)
             .size(LabelSize::XSmall)
             .weight(FontWeight::SEMIBOLD)
@@ -1260,7 +1306,7 @@ impl ApiRequestView {
             })
             .child(Self::section_label("QUERY"))
             .child(self.render_rows("query", &self.query_rows, cx))
-            .child(self.add_row_button("query", "Adicionar parâmetro", cx))
+            .child(self.add_row_button("query", t!("api_client.request.add_parameter"), cx))
             .into_any_element()
     }
 
@@ -1338,9 +1384,18 @@ impl ApiRequestView {
                     .h(px(32.))
                     .min_h(px(32.))
                     .child(div().flex_none().w(px(20.)))
-                    .child(name_column(Self::section_label("HEADER").into_any_element()))
-                    .child(div().flex_1().child(Self::section_label("VALOR")))
-                    .child(origin_column(Self::section_label("ORIGEM").into_any_element()))
+                    .child(name_column(
+                        Self::section_label("HEADER").into_any_element(),
+                    ))
+                    .child(
+                        div()
+                            .flex_1()
+                            .child(Self::section_label(t!("api_client.request.value_column"))),
+                    )
+                    .child(origin_column(
+                        Self::section_label(t!("api_client.request.origin_column"))
+                            .into_any_element(),
+                    ))
                     .child(div().flex_none().w(px(24.))),
             )
             .children(inherited.into_iter().enumerate().map(|(index, header)| {
@@ -1399,9 +1454,9 @@ impl ApiRequestView {
                             .icon_size(IconSize::XSmall)
                             .icon_color(Color::Muted)
                             .tooltip(Tooltip::text(if header.origin == HeaderOrigin::Spec {
-                                "Ver na spec"
+                                t!("api_client.request.view_in_spec")
                             } else {
-                                "Abrir os headers da coleção"
+                                t!("api_client.request.open_collection_headers")
                             }))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.open_header_origin(&origin, window, cx)
@@ -1425,7 +1480,11 @@ impl ApiRequestView {
                     )
                     .child(name_column(header.name.clone().into_any_element()))
                     .child(div().flex_1().min_w_0().child(header.value.clone()))
-                    .child(origin_column(origin_chip("esta request".to_string(), None, cx)))
+                    .child(origin_column(origin_chip(
+                        t!("api_client.request.origin_this_request").to_string(),
+                        None,
+                        cx,
+                    )))
                     .child(
                         IconButton::new(("api-header-remove", index), IconName::Trash)
                             .icon_size(IconSize::XSmall)
@@ -1443,14 +1502,12 @@ impl ApiRequestView {
                     .h(px(40.))
                     .px_3()
                     .gap_4()
-                    .child(self.add_row_button("header", "Adicionar header", cx))
+                    .child(self.add_row_button("header", t!("api_client.settings.add_header"), cx))
                     .child(
-                        Label::new(
-                            "Herdados vêm da coleção e do spec — desmarcar aqui vale só para esta request.",
-                        )
-                        .size(LabelSize::XSmall)
-                        .color(Color::Muted)
-                        .truncate(),
+                        Label::new(t!("api_client.request.inherited_note"))
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted)
+                            .truncate(),
                     ),
             )
             .into_any_element()
@@ -1473,9 +1530,9 @@ impl ApiRequestView {
                     .child(chip(content_type, Color::Muted, cx))
                     .child(
                         Label::new(if kind == BodyKind::Multipart {
-                            "Campos de arquivo vão com o conteúdo do arquivo; o boundary é gerado no envio."
+                            t!("api_client.request.multipart_note")
                         } else {
-                            "Os campos vão codificados como formulário."
+                            t!("api_client.request.url_encoded_note")
                         })
                         .size(LabelSize::XSmall)
                         .color(Color::Muted),
@@ -1500,17 +1557,23 @@ impl ApiRequestView {
                         this.child(
                             Button::new(
                                 ("api-form-kind", index),
-                                if row.is_file { "Arquivo" } else { "Texto" },
+                                if row.is_file {
+                                    t!("api_client.request.field_file")
+                                } else {
+                                    t!("api_client.request.field_text")
+                                },
                             )
                             .style(ButtonStyle::Outlined)
                             .label_size(LabelSize::XSmall)
-                            .tooltip(Tooltip::text("Alternar entre texto e arquivo"))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                if let Some(row) = this.form_rows.get_mut(index) {
-                                    row.is_file = !row.is_file;
-                                }
-                                this.store_draft(cx);
-                            })),
+                            .tooltip(Tooltip::text(t!("api_client.request.toggle_field_kind")))
+                            .on_click(cx.listener(
+                                move |this, _, _, cx| {
+                                    if let Some(row) = this.form_rows.get_mut(index) {
+                                        row.is_file = !row.is_file;
+                                    }
+                                    this.store_draft(cx);
+                                },
+                            )),
                         )
                     })
                     .when(row.is_file, |this| {
@@ -1518,7 +1581,7 @@ impl ApiRequestView {
                             IconButton::new(("api-form-pick", index), IconName::FolderOpen)
                                 .icon_size(IconSize::Small)
                                 .icon_color(Color::Muted)
-                                .tooltip(Tooltip::text("Escolher arquivo"))
+                                .tooltip(Tooltip::text(t!("api_client.request.choose_file")))
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.pick_file(index, window, cx)
                                 })),
@@ -1537,7 +1600,7 @@ impl ApiRequestView {
                     )
             }))
             .child(
-                Button::new("api-form-add", "Adicionar campo")
+                Button::new("api-form-add", t!("api_client.request.add_field"))
                     .style(ButtonStyle::Subtle)
                     .label_size(LabelSize::Small)
                     .color(Color::Accent)
@@ -1574,11 +1637,9 @@ impl ApiRequestView {
         v_flex()
             .gap_2()
             .child(
-                Label::new(
-                    "Depois de uma resposta 2xx, cada caminho vira uma variável que as outras requests usam como {{nome}}.",
-                )
-                .size(LabelSize::XSmall)
-                .color(Color::Muted),
+                Label::new(t!("api_client.request.captures_note"))
+                    .size(LabelSize::XSmall)
+                    .color(Color::Muted),
             )
             .when_some(login, |this, login| {
                 this.child(
@@ -1593,13 +1654,16 @@ impl ApiRequestView {
                                 .color(Color::Success),
                         )
                         .child(
-                            Label::new(format!(
-                                "Esta é a request de login: {} → {{{{token}}}}{}",
-                                login.token_path,
-                                login
-                                    .refresh_token_path
-                                    .map(|path| format!(", {path} → {{{{refreshToken}}}}"))
-                                    .unwrap_or_default()
+                            Label::new(t!(
+                                "api_client.request.login_captures",
+                                captures = format!(
+                                    "{} → {{{{token}}}}{}",
+                                    login.token_path,
+                                    login
+                                        .refresh_token_path
+                                        .map(|path| format!(", {path} → {{{{refreshToken}}}}"))
+                                        .unwrap_or_default()
+                                )
                             ))
                             .size(LabelSize::Small)
                             .buffer_font(cx),
@@ -1638,13 +1702,19 @@ impl ApiRequestView {
                     .child(
                         div().flex_1().min_w_0().child(
                             Label::new(if !path_valid {
-                                "caminho não suportado".to_string()
+                                t!("api_client.request.unsupported_path").to_string()
                             } else {
-                                current.unwrap_or_else(|| "ainda sem valor".to_string())
+                                current.unwrap_or_else(|| {
+                                    t!("api_client.request.no_value_yet").to_string()
+                                })
                             })
                             .size(LabelSize::XSmall)
                             .buffer_font(cx)
-                            .color(if path_valid { Color::Muted } else { Color::Warning })
+                            .color(if path_valid {
+                                Color::Muted
+                            } else {
+                                Color::Warning
+                            })
                             .truncate(),
                         ),
                     )
@@ -1662,7 +1732,7 @@ impl ApiRequestView {
                     )
             }))
             .child(
-                Button::new("api-capture-add", "Adicionar captura")
+                Button::new("api-capture-add", t!("api_client.request.add_capture"))
                     .style(ButtonStyle::Subtle)
                     .label_size(LabelSize::Small)
                     .color(Color::Accent)
@@ -1704,7 +1774,7 @@ impl ApiRequestView {
             .when(!is_json, |this| {
                 this.child(
                     div().px_3().pt_2().child(
-                        Label::new("Este body não é JSON: o texto vai como está.")
+                        Label::new(t!("api_client.request.body_not_json"))
                             .size(LabelSize::XSmall)
                             .color(Color::Warning),
                     ),
@@ -1725,7 +1795,7 @@ impl ApiRequestView {
             .child(render_validation(
                 self.body_validation.as_ref(),
                 schema_reference.as_deref(),
-                "Válido contra",
+                &t!("api_client.request.valid_against"),
                 cx,
             ))
             .into_any_element()
@@ -1746,7 +1816,7 @@ impl ApiRequestView {
             .gap_2()
             .when(plans.is_empty(), |this| {
                 this.child(
-                    Label::new("Esta rota é pública: o spec declara security: [].")
+                    Label::new(t!("api_client.request.public_route"))
                         .size(LabelSize::Small)
                         .color(Color::Muted),
                 )
@@ -1786,7 +1856,7 @@ impl ApiRequestView {
                     })
             }))
             .child(
-                Label::new("Login, chaves e headers da coleção ficam na aba API do dock.")
+                Label::new(t!("api_client.request.auth_note"))
                     .size(LabelSize::XSmall)
                     .color(Color::Muted),
             )
@@ -1812,37 +1882,40 @@ impl ApiRequestView {
                 )
             })
             .when(!operation.parameters.is_empty(), |this| {
-                this.child(Self::section_label("PARÂMETROS")).children(
-                    operation.parameters.iter().map(|parameter| {
-                        let location = match parameter.location {
-                            ParameterLocation::Path => "path",
-                            ParameterLocation::Query => "query",
-                            ParameterLocation::Header => "header",
-                            ParameterLocation::Cookie => "cookie",
-                        };
-                        h_flex()
-                            .gap_2()
-                            .child(
-                                Label::new(parameter.name.clone())
-                                    .size(LabelSize::Small)
-                                    .buffer_font(cx),
+                this.child(Self::section_label(t!(
+                    "api_client.request.parameters_section"
+                )))
+                .children(operation.parameters.iter().map(|parameter| {
+                    let location = match parameter.location {
+                        ParameterLocation::Path => "path",
+                        ParameterLocation::Query => "query",
+                        ParameterLocation::Header => "header",
+                        ParameterLocation::Cookie => "cookie",
+                    };
+                    h_flex()
+                        .gap_2()
+                        .child(
+                            Label::new(parameter.name.clone())
+                                .size(LabelSize::Small)
+                                .buffer_font(cx),
+                        )
+                        .child(chip(location, Color::Muted, cx))
+                        .when(parameter.required, |this| {
+                            this.child(chip(t!("api_client.request.required"), Color::Warning, cx))
+                        })
+                        .when_some(parameter.description.clone(), |this, description| {
+                            this.child(
+                                Label::new(description)
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted)
+                                    .truncate(),
                             )
-                            .child(chip(location, Color::Muted, cx))
-                            .when(parameter.required, |this| {
-                                this.child(chip("obrigatório", Color::Warning, cx))
-                            })
-                            .when_some(parameter.description.clone(), |this, description| {
-                                this.child(
-                                    Label::new(description)
-                                        .size(LabelSize::XSmall)
-                                        .color(Color::Muted)
-                                        .truncate(),
-                                )
-                            })
-                    }),
-                )
+                        })
+                }))
             })
-            .child(Self::section_label("RESPOSTAS"))
+            .child(Self::section_label(t!(
+                "api_client.request.responses_section"
+            )))
             .children(operation.responses.iter().map(|response| {
                 let status: u16 = response.status.parse().unwrap_or(0);
                 h_flex()
@@ -1964,9 +2037,9 @@ impl ApiRequestView {
                 .when(!pairs.is_empty(), |this| {
                     this.child(
                         Label::new(if exchange.login_capture.is_some() {
-                            "Login capturado:"
+                            t!("api_client.request.login_captured")
                         } else {
-                            "Capturado:"
+                            t!("api_client.request.captured")
                         })
                         .size(LabelSize::Small)
                         .weight(FontWeight::SEMIBOLD),
@@ -1987,28 +2060,34 @@ impl ApiRequestView {
                         .and_then(|login| login.expires_in),
                     |this, seconds| {
                         this.child(
-                            Label::new(format!("expira em {seconds} s"))
-                                .size(LabelSize::XSmall)
-                                .buffer_font(cx)
-                                .color(Color::Muted)
-                                .single_line(),
+                            Label::new(t!(
+                                "api_client.request.expires_in_seconds",
+                                seconds = seconds
+                            ))
+                            .size(LabelSize::XSmall)
+                            .buffer_font(cx)
+                            .color(Color::Muted)
+                            .single_line(),
                         )
                     },
                 )
                 .when(!missing.is_empty(), |this| {
                     this.child(
-                        Label::new(format!("sem valor nesta resposta: {}", missing.join(", ")))
-                            .size(LabelSize::XSmall)
-                            .buffer_font(cx)
-                            .color(Color::Warning)
-                            .truncate(),
+                        Label::new(t!(
+                            "api_client.request.missing_in_response",
+                            names = missing.join(", ")
+                        ))
+                        .size(LabelSize::XSmall)
+                        .buffer_font(cx)
+                        .color(Color::Warning)
+                        .truncate(),
                     )
                 })
                 .child(div().flex_1())
                 .when(exchange.login_capture.is_some(), |this| {
                     this.child(
                         div().min_w_0().child(
-                            Label::new("Authorization aplicado na coleção")
+                            Label::new(t!("api_client.request.authorization_applied"))
                                 .size(LabelSize::XSmall)
                                 .color(Color::Muted)
                                 .truncate(),
@@ -2057,21 +2136,21 @@ impl ApiRequestView {
                 Color::Muted
             })
             .tooltip(Tooltip::text(if self.saved_id.is_some() {
-                "Atualizar em Salvas por mim"
+                t!("api_client.request.update_saved")
             } else {
-                "Salvar em Salvas por mim"
+                t!("api_client.request.save_to_saved")
             }))
             .on_click(cx.listener(|this, _, _, cx| this.save(cx)));
         let header = h_flex().h(px(44.)).px_3().gap_2p5().child(
-            Label::new("Resposta")
+            Label::new(t!("api_client.request.response_title"))
                 .size(LabelSize::Small)
                 .weight(FontWeight::SEMIBOLD),
         );
         let Some(exchange) = self.exchange.as_ref() else {
             let hint = if self.send_task.is_some() {
-                "Enviando…"
+                t!("api_client.request.sending")
             } else {
-                "Envie a request (⌘↵) para ver a resposta aqui."
+                t!("api_client.request.response_empty")
             };
             return v_flex()
                 .flex_1()
@@ -2095,10 +2174,20 @@ impl ApiRequestView {
             facts.push(format!(
                 "{}{}",
                 human_size(response.body.len()),
-                if response.truncated { " (cortado)" } else { "" }
+                if response.truncated {
+                    t!("api_client.request.truncated")
+                } else {
+                    SharedString::default()
+                }
             ));
         }
-        facts.push(format!("às {}", exchange.sent_at.format("%H:%M:%S")));
+        facts.push(
+            t!(
+                "api_client.request.sent_at",
+                time = exchange.sent_at.format("%H:%M:%S")
+            )
+            .to_string(),
+        );
         let header = header
             .when_some(exchange.response.as_ref(), |this, response| {
                 let status_text = match &response.reason {
@@ -2108,7 +2197,11 @@ impl ApiRequestView {
                 this.child(status_chip(status_text, status_color(response.status), cx))
             })
             .when(exchange.error.is_some(), |this| {
-                this.child(status_chip("falhou".to_string(), Color::Error, cx))
+                this.child(status_chip(
+                    t!("api_client.request.failed").to_string(),
+                    Color::Error,
+                    cx,
+                ))
             })
             .child(
                 Label::new(facts.join(" · "))
@@ -2167,7 +2260,7 @@ impl ApiRequestView {
                         IconButton::new("api-save-example", IconName::FileCode)
                             .icon_size(IconSize::Small)
                             .icon_color(Color::Muted)
-                            .tooltip(Tooltip::text("Salvar esta resposta como exemplo no spec"))
+                            .tooltip(Tooltip::text(t!("api_client.request.save_example_tooltip")))
                             .on_click(
                                 cx.listener(|this, _, window, cx| this.save_as_example(window, cx)),
                             ),
@@ -2178,7 +2271,7 @@ impl ApiRequestView {
                 IconButton::new("api-copy-body", IconName::Copy)
                     .icon_size(IconSize::Small)
                     .icon_color(Color::Muted)
-                    .tooltip(Tooltip::text("Copiar o body da resposta"))
+                    .tooltip(Tooltip::text(t!("api_client.request.copy_body_tooltip")))
                     .on_click(cx.listener(|this, _, _, cx| {
                         let text = this.response_editor.read(cx).text(cx);
                         cx.write_to_clipboard(ClipboardItem::new_string(text));
@@ -2216,7 +2309,7 @@ impl ApiRequestView {
                         .child(render_validation(
                             exchange.validation.as_ref(),
                             exchange.response_schema_name.as_deref(),
-                            "Resposta confere com",
+                            &t!("api_client.request.response_matches"),
                             cx,
                         )),
                 )
@@ -2285,16 +2378,19 @@ impl ApiRequestView {
                 cookie.path.clone(),
             ];
             parts.push(match cookie.expires_at {
-                Some(expires_at) if expires_at <= now => "apagado".to_string(),
+                Some(expires_at) if expires_at <= now => {
+                    t!("api_client.request.cookie_deleted").to_string()
+                }
                 Some(expires_at) => chrono::DateTime::from_timestamp(expires_at, 0)
                     .map(|expires| {
-                        format!(
-                            "expira {}",
-                            expires.with_timezone(&chrono::Local).format("%d/%m %H:%M")
+                        t!(
+                            "api_client.request.cookie_expires",
+                            time = expires.with_timezone(&chrono::Local).format("%d/%m %H:%M")
                         )
+                        .to_string()
                     })
                     .unwrap_or_default(),
-                None => "sessão".to_string(),
+                None => t!("api_client.request.cookie_session").to_string(),
             });
             if cookie.http_only {
                 parts.push("HttpOnly".to_string());
@@ -2335,10 +2431,12 @@ impl ApiRequestView {
             .min_h_0()
             .overflow_y_scroll()
             .gap_1()
-            .child(Self::section_label("DEFINIDOS NESTA RESPOSTA"))
+            .child(Self::section_label(t!(
+                "api_client.request.cookies_set_section"
+            )))
             .when(exchange.cookies_set.is_empty(), |this| {
                 this.child(
-                    Label::new("Nenhum Set-Cookie.")
+                    Label::new(t!("api_client.request.no_set_cookie"))
                         .size(LabelSize::XSmall)
                         .color(Color::Muted),
                 )
@@ -2347,24 +2445,28 @@ impl ApiRequestView {
             .child(
                 h_flex()
                     .pt_2()
-                    .child(Self::section_label("GUARDADOS NA COLEÇÃO"))
+                    .child(Self::section_label(t!(
+                        "api_client.request.cookies_stored_section"
+                    )))
                     .child(div().flex_1())
                     .when(!jar.is_empty(), |this| {
                         this.child(
-                            Button::new("api-clear-cookies", "Limpar cookies")
-                                .style(ButtonStyle::Outlined)
-                                .label_size(LabelSize::Small)
-                                .on_click(move |_, _, cx| {
-                                    collection.update(cx, |collection, cx| {
-                                        collection.clear_cookies(cx)
-                                    });
-                                }),
+                            Button::new(
+                                "api-clear-cookies",
+                                t!("api_client.request.clear_cookies"),
+                            )
+                            .style(ButtonStyle::Outlined)
+                            .label_size(LabelSize::Small)
+                            .on_click(move |_, _, cx| {
+                                collection
+                                    .update(cx, |collection, cx| collection.clear_cookies(cx));
+                            }),
                         )
                     }),
             )
             .when(jar.is_empty(), |this| {
                 this.child(
-                    Label::new("Vazio. Os cookies das respostas voltam sozinhos nas próximas requests ao mesmo domínio.")
+                    Label::new(t!("api_client.request.cookies_empty"))
                         .size(LabelSize::XSmall)
                         .color(Color::Muted),
                 )
@@ -2411,10 +2513,7 @@ impl ApiRequestView {
             .extension()
             .is_some_and(|extension| extension == "yml" || extension == "yaml");
         if !is_yaml {
-            self.example_status = Some((
-                "Salvar como exemplo só funciona em specs YAML.".into(),
-                false,
-            ));
+            self.example_status = Some((t!("api_client.request.example_yaml_only"), false));
             cx.notify();
             return;
         }
@@ -2456,8 +2555,11 @@ impl ApiRequestView {
             this.update(cx, |this, cx| {
                 this.example_status = Some(match outcome {
                     Ok(()) => (
-                        format!("Exemplo de {status} inserido em {file_name}; salve o arquivo para manter.")
-                            .into(),
+                        t!(
+                            "api_client.request.example_inserted",
+                            status = status,
+                            file = file_name
+                        ),
                         true,
                     ),
                     Err(error) => (format!("{error:#}").into(), false),
@@ -2487,10 +2589,8 @@ impl ApiRequestView {
                     .when(steps.len() > 1, |this| {
                         this.child(
                             div().pb_2().child(
-                                Label::new(
-                                    "O token não servia: o Asylum renovou o login e repetiu a request.",
-                                )
-                                .size(LabelSize::Small),
+                                Label::new(t!("api_client.request.timeline_renewed"))
+                                    .size(LabelSize::Small),
                             ),
                         )
                     })
@@ -2505,7 +2605,7 @@ impl ApiRequestView {
                                 Some(reason) => format!("{status} {reason}"),
                                 None => status.to_string(),
                             },
-                            None => "erro".to_string(),
+                            None => t!("api_client.request.error").to_string(),
                         };
                         h_flex()
                             .min_h(px(40.))
@@ -2534,7 +2634,11 @@ impl ApiRequestView {
                                             .size(LabelSize::XSmall)
                                             .buffer_font(cx)
                                             .weight(FontWeight::SEMIBOLD)
-                                            .color(if failed { Color::Error } else { Color::Default }),
+                                            .color(if failed {
+                                                Color::Error
+                                            } else {
+                                                Color::Default
+                                            }),
                                     ),
                             )
                             .child(
@@ -2550,12 +2654,11 @@ impl ApiRequestView {
                                             .truncate(),
                                     ),
                             )
-                            .child(
-                                h_flex()
-                                    .flex_none()
-                                    .w(px(140.))
-                                    .child(status_chip(status_text, color, cx)),
-                            )
+                            .child(h_flex().flex_none().w(px(140.)).child(status_chip(
+                                status_text,
+                                color,
+                                cx,
+                            )))
                             .child(
                                 div().flex_1().min_w_0().child(
                                     Label::new(step.note)
@@ -2584,22 +2687,28 @@ impl ApiRequestView {
                         .child(
                             h_flex()
                                 .pb_2()
-                                .child(Self::section_label("REQUEST ENVIADA"))
+                                .child(Self::section_label(t!(
+                                    "api_client.request.sent_request_section"
+                                )))
                                 .child(div().flex_1())
                                 .child(
                                     ui::secondary_button(
                                         "api-copy-curl",
                                         Some((IconName::Terminal, Color::Muted)),
-                                        "Copiar como cURL",
+                                        t!("api_client.request.copy_as_curl"),
                                         true,
                                         cx,
                                     )
-                                    .tooltip(Tooltip::text("As credenciais saem mascaradas"))
-                                    .on_click(move |_, _, cx| {
-                                        cx.write_to_clipboard(ClipboardItem::new_string(
-                                            curl.clone(),
-                                        ));
-                                    }),
+                                    .tooltip(Tooltip::text(t!(
+                                        "api_client.request.copy_as_curl_tooltip"
+                                    )))
+                                    .on_click(
+                                        move |_, _, cx| {
+                                            cx.write_to_clipboard(ClipboardItem::new_string(
+                                                curl.clone(),
+                                            ));
+                                        },
+                                    ),
                                 ),
                         )
                         .child(
@@ -2716,7 +2825,7 @@ fn render_validation(
             Some(reference.trim_start_matches("#/").to_string()),
         ),
         Some(name) => (name.to_string(), None),
-        None => ("o schema do spec".to_string(), None),
+        None => (t!("api_client.request.spec_schema").to_string(), None),
     };
     let footer = h_flex()
         .flex_none()
@@ -2773,9 +2882,10 @@ fn render_validation(
                     }))
                     .when(issues.len() > 4 || *more > 0, |this| {
                         this.child(
-                            Label::new(format!(
-                                "e mais {} fora de {schema}",
-                                issues.len().saturating_sub(4) + more
+                            Label::new(t!(
+                                "api_client.request.more_issues",
+                                count = issues.len().saturating_sub(4) + more,
+                                schema = &schema
                             ))
                             .size(LabelSize::XSmall)
                             .color(Color::Muted),
@@ -2785,7 +2895,7 @@ fn render_validation(
             .into_any_element(),
         Validation::Unchecked { reason } => footer
             .child(
-                Label::new(format!("Sem validação: {reason}"))
+                Label::new(t!("api_client.request.not_validated", reason = reason))
                     .size(LabelSize::XSmall)
                     .color(Color::Muted)
                     .truncate(),

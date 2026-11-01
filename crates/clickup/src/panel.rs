@@ -7,6 +7,7 @@ use gpui::{
     Subscription, Task, px,
 };
 use gpui::{ClipboardItem, WeakEntity};
+use i18n::t;
 use project::Project;
 use std::{
     collections::{HashMap, HashSet},
@@ -126,7 +127,7 @@ impl ClickUpPanel {
         let store_subscription = cx.observe(&store, |_, _, cx| cx.notify());
 
         let filter_input = cx.new(|cx| {
-            InputField::new(window, cx, "Filtrar por título ou ID")
+            InputField::new(window, cx, &t!("clickup.tasks.filter_placeholder"))
                 .start_icon(IconName::MagnifyingGlass)
         });
         let filter_editor = filter_input.read(cx).editor().clone();
@@ -218,9 +219,9 @@ impl ClickUpPanel {
             Ok(account) => TokenCheck::Valid(account),
             Err(error) => {
                 let message: SharedString = if crate::is_unauthorized(&error) {
-                    "O ClickUp recusou este token. Confira se copiou inteiro ou gere outro.".into()
+                    t!("clickup.connect.token_rejected")
                 } else {
-                    format!("Não foi possível falar com o ClickUp: {error}").into()
+                    t!("clickup.connect.unreachable", error = error)
                 };
                 self.set_field_error(Some(message), cx);
                 TokenCheck::Invalid
@@ -284,8 +285,7 @@ impl ClickUpPanel {
                     }
                     Err(error) => {
                         log::error!("ClickUp: falha ao salvar o token no keychain: {error:#}");
-                        let message: SharedString =
-                            "Não foi possível salvar o token no keychain.".into();
+                        let message = t!("clickup.connect.keychain_save_failed");
                         this.set_field_error(Some(message), cx);
                         this.token_check = TokenCheck::Invalid;
                     }
@@ -328,7 +328,7 @@ impl ClickUpPanel {
             )
     }
 
-    fn render_step(&self, number: usize, title: &'static str, cx: &App) -> impl IntoElement {
+    fn render_step(&self, number: usize, title: SharedString, cx: &App) -> impl IntoElement {
         h_flex()
             .gap(DynamicSpacing::Base10.px(cx))
             .child(
@@ -350,24 +350,19 @@ impl ClickUpPanel {
 
     fn render_check_hint(&self, cx: &App) -> Option<AnyElement> {
         let (icon, text, color): (Option<IconName>, SharedString, Color) = match &self.token_check {
-            TokenCheck::Idle => (
-                None,
-                "Começa com pk_. Fica só no Keychain do macOS.".into(),
-                Color::Muted,
-            ),
+            TokenCheck::Idle => (None, t!("clickup.connect.token_hint"), Color::Muted),
             TokenCheck::Checking => (
                 Some(IconName::LoadCircle),
-                "Verificando com o ClickUp…".into(),
+                t!("clickup.connect.checking"),
                 Color::Muted,
             ),
             TokenCheck::Valid(account) => (
                 Some(IconName::Check),
-                format!(
-                    "Conectado como {} · {}",
-                    account.user.display_name(),
-                    workspace_count(account.workspaces.len())
-                )
-                .into(),
+                t!(
+                    "clickup.connect.connected_as",
+                    name = account.user.display_name(),
+                    workspaces = workspace_count(account.workspaces.len())
+                ),
                 Color::Success,
             ),
             TokenCheck::Invalid => return None,
@@ -407,12 +402,12 @@ impl ClickUpPanel {
                 v_flex()
                     .min_w_0()
                     .child(
-                        Label::new("O ClickUp recusou o token salvo")
+                        Label::new(t!("clickup.connect.saved_token_rejected"))
                             .size(LabelSize::Small)
                             .weight(FontWeight::SEMIBOLD),
                     )
                     .child(
-                        Label::new("Foi regenerado? Cole o token novo abaixo.")
+                        Label::new(t!("clickup.connect.saved_token_rejected_detail"))
                             .size(LabelSize::XSmall)
                             .color(Color::Muted),
                     ),
@@ -434,19 +429,22 @@ impl ClickUpPanel {
             .child(
                 v_flex()
                     .gap(DynamicSpacing::Base08.px(cx))
-                    .child(self.render_step(1, "Gere um token em Settings → Apps → API Token", cx))
+                    .child(self.render_step(1, t!("clickup.connect.step_generate"), cx))
                     .child(
                         h_flex().pl(DynamicSpacing::Base32.px(cx)).child(
-                            Button::new("clickup-open-token-settings", "Abrir no ClickUp")
-                                .style(ButtonStyle::Outlined)
-                                .size(ButtonSize::Medium)
-                                .label_size(LabelSize::Small)
-                                .start_icon(
-                                    Icon::new(IconName::ArrowUpRight)
-                                        .size(IconSize::Small)
-                                        .color(Color::Muted),
-                                )
-                                .on_click(|_, _, cx| cx.open_url(TOKEN_SETTINGS_URL)),
+                            Button::new(
+                                "clickup-open-token-settings",
+                                t!("clickup.common.open_in_clickup"),
+                            )
+                            .style(ButtonStyle::Outlined)
+                            .size(ButtonSize::Medium)
+                            .label_size(LabelSize::Small)
+                            .start_icon(
+                                Icon::new(IconName::ArrowUpRight)
+                                    .size(IconSize::Small)
+                                    .color(Color::Muted),
+                            )
+                            .on_click(|_, _, cx| cx.open_url(TOKEN_SETTINGS_URL)),
                         ),
                     ),
             )
@@ -454,12 +452,12 @@ impl ClickUpPanel {
             .child(
                 v_flex()
                     .gap(DynamicSpacing::Base08.px(cx))
-                    .child(self.render_step(2, "Cole o token aqui", cx))
+                    .child(self.render_step(2, t!("clickup.connect.step_paste"), cx))
                     .child(self.token_input.clone())
                     .children(self.render_check_hint(cx)),
             )
             .child(
-                Button::new("clickup-connect", "Conectar")
+                Button::new("clickup-connect", t!("clickup.connect.connect"))
                     .full_width()
                     .style(ButtonStyle::Filled)
                     .size(ButtonSize::Large)
@@ -472,12 +470,13 @@ impl ClickUpPanel {
             .when(self.replacing_token, |this| {
                 this.child(
                     h_flex().justify_center().child(
-                        Button::new("clickup-cancel-replace", "Manter o token atual")
-                            .style(ButtonStyle::Subtle)
-                            .label_size(LabelSize::Small)
-                            .on_click(
-                                cx.listener(|this, _, _, cx| this.cancel_replacing_token(cx)),
-                            ),
+                        Button::new(
+                            "clickup-cancel-replace",
+                            t!("clickup.connect.keep_current_token"),
+                        )
+                        .style(ButtonStyle::Subtle)
+                        .label_size(LabelSize::Small)
+                        .on_click(cx.listener(|this, _, _, cx| this.cancel_replacing_token(cx))),
                     ),
                 )
             });
@@ -497,23 +496,23 @@ impl ClickUpPanel {
                     .gap(DynamicSpacing::Base20.px(cx))
                     .px(DynamicSpacing::Base24.px(cx))
                     .py(DynamicSpacing::Base24.px(cx))
-                    .when(show_rejected, |this| this.child(self.render_rejected_banner(cx)))
+                    .when(show_rejected, |this| {
+                        this.child(self.render_rejected_banner(cx))
+                    })
                     .child(self.render_badge(cx))
                     .child(
                         v_flex()
                             .items_center()
                             .gap(DynamicSpacing::Base06.px(cx))
                             .child(
-                                Label::new("Conecte seu ClickUp")
+                                Label::new(t!("clickup.connect.title"))
                                     .size(LabelSize::Large)
                                     .weight(FontWeight::SEMIBOLD),
                             )
                             .child(
-                                Label::new(
-                                    "Use um token pessoal da sua conta. Sem apps para criar e sem expiração.",
-                                )
-                                .size(LabelSize::Small)
-                                .color(Color::Muted),
+                                Label::new(t!("clickup.connect.subtitle"))
+                                    .size(LabelSize::Small)
+                                    .color(Color::Muted),
                             ),
                     )
                     .child(card),
@@ -535,11 +534,9 @@ impl ClickUpPanel {
                     .color(Color::Muted),
             )
             .child(
-                Label::new(
-                    "O token acessa tudo que sua conta vê no ClickUp. Fica só no Keychain; para revogar, regenere o token no ClickUp.",
-                )
-                .size(LabelSize::XSmall)
-                .color(Color::Muted),
+                Label::new(t!("clickup.connect.privacy"))
+                    .size(LabelSize::XSmall)
+                    .color(Color::Muted),
             )
     }
 
@@ -585,7 +582,7 @@ impl ClickUpPanel {
                 IconButton::new("clickup-account-settings", IconName::Settings)
                     .icon_size(IconSize::Small)
                     .icon_color(Color::Muted),
-                Tooltip::text("Conta do ClickUp"),
+                Tooltip::text(t!("clickup.account.tooltip")),
             )
             .anchor(gpui::Anchor::BottomRight)
             .menu(move |window, cx| {
@@ -593,7 +590,7 @@ impl ClickUpPanel {
                 let store = store.clone();
                 Some(ContextMenu::build(window, cx, move |menu, _, _| {
                     menu.item(
-                        ContextMenuEntry::new("Trocar token")
+                        ContextMenuEntry::new(t!("clickup.account.replace_token"))
                             .icon(IconName::Pencil)
                             .icon_color(Color::Muted)
                             .handler({
@@ -608,14 +605,14 @@ impl ClickUpPanel {
                             }),
                     )
                     .item(
-                        ContextMenuEntry::new("Gerenciar token no ClickUp")
+                        ContextMenuEntry::new(t!("clickup.account.manage_token"))
                             .icon(IconName::ArrowUpRight)
                             .icon_color(Color::Muted)
                             .handler(|_, cx| cx.open_url(TOKEN_SETTINGS_URL)),
                     )
                     .separator()
                     .item(
-                        ContextMenuEntry::new("Desconectar")
+                        ContextMenuEntry::new(t!("clickup.account.disconnect"))
                             .icon(IconName::Exit)
                             .icon_color(Color::Error)
                             .handler(move |_, cx| {
@@ -633,7 +630,7 @@ impl ClickUpPanel {
         let name: SharedString = selected
             .as_ref()
             .map(|workspace| workspace.name.clone().into())
-            .unwrap_or_else(|| "Nenhum workspace".into());
+            .unwrap_or_else(|| t!("clickup.account.no_workspace"));
         let trigger = Button::new("clickup-workspace-picker", name)
             .style(ButtonStyle::Outlined)
             .size(ButtonSize::Medium)
@@ -700,15 +697,19 @@ impl ClickUpPanel {
                     .icon_size(IconSize::Small)
                     .icon_color(Color::Muted)
                     .disabled(is_syncing)
-                    .tooltip(Tooltip::text("Sincronizar agora"))
+                    .tooltip(Tooltip::text(t!("clickup.tasks.sync_now")))
                     .on_click(move |_, _, cx| store.update(cx, |store, cx| store.sync(cx))),
             )
     }
 
     fn render_task_tabs(&self, tasks: &AssignedTasks, cx: &Context<Self>) -> impl IntoElement {
         let tabs = [
-            (TaskTab::Open, "Minhas", Some(tasks.open.len())),
-            (TaskTab::Closed, "Concluídas", None),
+            (
+                TaskTab::Open,
+                t!("clickup.tasks.tab_mine"),
+                Some(tasks.open.len()),
+            ),
+            (TaskTab::Closed, t!("clickup.tasks.tab_done"), None),
         ];
         TabBar::new("clickup-task-tabs")
             .style(TabStyle::Pill)
@@ -722,7 +723,7 @@ impl ClickUpPanel {
                         } else {
                             TabPosition::Last
                         };
-                        Tab::new(label)
+                        Tab::new(label.clone())
                             .style(TabStyle::Pill)
                             .position(position)
                             .toggle_state(selected)
@@ -908,16 +909,16 @@ impl ClickUpPanel {
 
         if visible.is_empty() {
             let (icon, title) = if tasks.synced_at.is_none() {
-                (IconName::LoadCircle, "Buscando suas tarefas…")
+                (IconName::LoadCircle, t!("clickup.tasks.loading"))
             } else if !filter.is_empty() {
-                (IconName::MagnifyingGlass, "Nenhuma tarefa com esse filtro")
+                (IconName::MagnifyingGlass, t!("clickup.tasks.empty_filter"))
             } else if self.selected_tab == TaskTab::Open {
-                (IconName::Check, "Nenhuma tarefa aberta atribuída a você")
+                (IconName::Check, t!("clickup.tasks.empty_open"))
             } else {
-                (IconName::Check, "Nada concluído nos últimos 30 dias")
+                (IconName::Check, t!("clickup.tasks.empty_done"))
             };
             return self
-                .render_centered_message(icon, title.into(), None, None, cx)
+                .render_centered_message(icon, title, None, None, cx)
                 .into_any_element();
         }
 
@@ -969,7 +970,7 @@ impl ClickUpPanel {
             )
             .child(
                 div().flex_1().min_w_0().child(
-                    Label::new(format!("Falha ao sincronizar: {error}"))
+                    Label::new(t!("clickup.tasks.sync_failed", error = error))
                         .size(LabelSize::XSmall)
                         .color(Color::Muted),
                 ),
@@ -1046,8 +1047,13 @@ impl ClickUpPanel {
 
 impl ClickUpPanel {
     fn open_task(&mut self, task: api::Task, window: &mut Window, cx: &mut Context<Self>) {
-        let comment_input = cx
-            .new(|cx| InputField::new(window, cx, &format!("Comentar em {}…", task.display_id())));
+        let comment_input = cx.new(|cx| {
+            InputField::new(
+                window,
+                cx,
+                &t!("clickup.task.comment_placeholder", id = task.display_id()),
+            )
+        });
         self.open_task = Some(OpenTask {
             summary: task,
             detail: None,
@@ -1207,7 +1213,10 @@ impl ClickUpPanel {
                     .border_1()
                     .border_color(cx.theme().colors().border_variant)
                     .cursor_pointer()
-                    .tooltip(Tooltip::text(format!("Abrir {name}")))
+                    .tooltip(Tooltip::text(t!(
+                        "clickup.task.open_attachment",
+                        name = name
+                    )))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.open_comment_image(opened.clone(), window, cx)
                     }))
@@ -1219,15 +1228,17 @@ impl ClickUpPanel {
                     )
                     .into_any_element()
             }
-            Some(CommentImage::Loading) => Label::new(format!("Carregando {name}…"))
-                .size(LabelSize::XSmall)
-                .color(Color::Muted)
-                .mt(DynamicSpacing::Base04.px(cx))
-                .into_any_element(),
+            Some(CommentImage::Loading) => {
+                Label::new(t!("clickup.task.loading_attachment", name = name))
+                    .size(LabelSize::XSmall)
+                    .color(Color::Muted)
+                    .mt(DynamicSpacing::Base04.px(cx))
+                    .into_any_element()
+            }
             Some(CommentImage::Failed) | None => render_file_link(
                 id,
                 if attachment.is_image() {
-                    format!("{name} (abrir no navegador)")
+                    t!("clickup.task.open_in_browser", name = name).to_string()
                 } else {
                     name
                 },
@@ -1264,8 +1275,10 @@ impl ClickUpPanel {
                 if let Err(error) = result
                     && let Some(open_task) = &mut this.open_task
                 {
-                    open_task.error =
-                        Some(format!("Não deu para trocar o status: {error:#}").into());
+                    open_task.error = Some(t!(
+                        "clickup.task.status_failed",
+                        error = format!("{error:#}")
+                    ));
                 }
                 this.reload_open_task(cx);
                 this.store.update(cx, |store, cx| store.sync(cx));
@@ -1307,7 +1320,10 @@ impl ClickUpPanel {
                         this.reload_open_task(cx);
                     }
                     Err(error) => {
-                        open_task.error = Some(format!("Não deu para comentar: {error:#}").into());
+                        open_task.error = Some(t!(
+                            "clickup.task.comment_failed",
+                            error = format!("{error:#}")
+                        ));
                     }
                 }
                 cx.notify();
@@ -1335,8 +1351,10 @@ impl ClickUpPanel {
                 if let Err(error) = result
                     && let Some(open_task) = &mut this.open_task
                 {
-                    open_task.error =
-                        Some(format!("Não deu para mexer no timer: {error:#}").into());
+                    open_task.error = Some(t!(
+                        "clickup.task.timer_failed",
+                        error = format!("{error:#}")
+                    ));
                 }
                 this.reload_open_task(cx);
                 cx.notify();
@@ -1362,7 +1380,7 @@ impl ClickUpPanel {
     }
 
     fn render_section_header(
-        title: &'static str,
+        title: SharedString,
         count: Option<usize>,
         trailing: Option<AnyElement>,
         cx: &App,
@@ -1391,7 +1409,7 @@ impl ClickUpPanel {
             .children(trailing)
     }
 
-    fn render_field(label: &'static str, value: AnyElement, cx: &App) -> impl IntoElement {
+    fn render_field(label: SharedString, value: AnyElement, cx: &App) -> impl IntoElement {
         h_flex()
             .min_h(DynamicSpacing::Base24.px(cx))
             .gap(DynamicSpacing::Base08.px(cx))
@@ -1465,11 +1483,16 @@ impl ClickUpPanel {
                 let started = Local
                     .timestamp_millis_opt(started_at)
                     .single()
-                    .map(|started| format!("desde {}", started.format("%H:%M")))
+                    .map(|started| {
+                        t!("clickup.task.timer_since", time = started.format("%H:%M")).to_string()
+                    })
                     .unwrap_or_default();
                 (format_clock(now_millis - started_at), started)
             }
-            None => ("00:00:00".to_string(), "Timer parado".to_string()),
+            None => (
+                "00:00:00".to_string(),
+                t!("clickup.task.timer_stopped").to_string(),
+            ),
         };
         let is_running = started_at.is_some();
         h_flex()
@@ -1516,7 +1539,11 @@ impl ClickUpPanel {
             .child(
                 Button::new(
                     "clickup-task-timer",
-                    if is_running { "Parar" } else { "Iniciar" },
+                    if is_running {
+                        t!("clickup.task.timer_stop")
+                    } else {
+                        t!("clickup.task.timer_start")
+                    },
                 )
                 .style(ButtonStyle::Outlined)
                 .label_size(LabelSize::Small)
@@ -1581,7 +1608,7 @@ impl ClickUpPanel {
                     .truncate(),
                 )
                 .into_any_element(),
-            Some(_) => Label::new("Ninguém")
+            Some(_) => Label::new(t!("clickup.task.nobody"))
                 .size(LabelSize::Small)
                 .color(Color::Muted)
                 .into_any_element(),
@@ -1601,7 +1628,7 @@ impl ClickUpPanel {
                 )
                 .child(Label::new(label).size(LabelSize::Small).color(color))
                 .into_any_element(),
-            None => Label::new("Sem prazo")
+            None => Label::new(t!("clickup.task.no_due_date"))
                 .size(LabelSize::Small)
                 .color(Color::Muted)
                 .into_any_element(),
@@ -1614,10 +1641,26 @@ impl ClickUpPanel {
         {
             Some(priority) => {
                 let (icon, color, label) = match priority {
-                    "urgent" => (IconName::SignalHigh, Color::Error, "Urgente"),
-                    "high" => (IconName::SignalMedium, Color::Warning, "Alta"),
-                    "normal" => (IconName::SignalLow, Color::Muted, "Normal"),
-                    _ => (IconName::SignalLow, Color::Disabled, "Baixa"),
+                    "urgent" => (
+                        IconName::SignalHigh,
+                        Color::Error,
+                        t!("clickup.task.priority_urgent"),
+                    ),
+                    "high" => (
+                        IconName::SignalMedium,
+                        Color::Warning,
+                        t!("clickup.task.priority_high"),
+                    ),
+                    "normal" => (
+                        IconName::SignalLow,
+                        Color::Muted,
+                        t!("clickup.task.priority_normal"),
+                    ),
+                    _ => (
+                        IconName::SignalLow,
+                        Color::Disabled,
+                        t!("clickup.task.priority_low"),
+                    ),
                 };
                 h_flex()
                     .gap(DynamicSpacing::Base04.px(cx))
@@ -1625,7 +1668,7 @@ impl ClickUpPanel {
                     .child(Label::new(label).size(LabelSize::Small))
                     .into_any_element()
             }
-            None => Label::new("Sem prioridade")
+            None => Label::new(t!("clickup.task.no_priority"))
                 .size(LabelSize::Small)
                 .color(Color::Muted)
                 .into_any_element(),
@@ -1643,9 +1686,12 @@ impl ClickUpPanel {
                     .child(Label::new(format_duration(spent)).size(LabelSize::Small))
                     .when_some(estimate, |this, estimate| {
                         this.child(
-                            Label::new(format!("de {} estimadas", format_duration(estimate)))
-                                .size(LabelSize::Small)
-                                .color(Color::Muted),
+                            Label::new(t!(
+                                "clickup.task.of_estimate",
+                                estimate = format_duration(estimate)
+                            ))
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
                         )
                     }),
             )
@@ -1708,18 +1754,26 @@ impl ClickUpPanel {
             )
             .child(div().h(DynamicSpacing::Base08.px(cx)))
             .child(Self::render_field(
-                "Status",
+                t!("clickup.task.field_status"),
                 self.render_status_picker(open_task, cx),
                 cx,
             ))
-            .child(Self::render_field("Responsáveis", assignees, cx))
-            .child(Self::render_field("Prazo", due, cx))
-            .child(Self::render_field("Prioridade", priority, cx))
-            .child(Self::render_field("Tempo", time, cx))
+            .child(Self::render_field(
+                t!("clickup.task.field_assignees"),
+                assignees,
+                cx,
+            ))
+            .child(Self::render_field(t!("clickup.task.field_due"), due, cx))
+            .child(Self::render_field(
+                t!("clickup.task.field_priority"),
+                priority,
+                cx,
+            ))
+            .child(Self::render_field(t!("clickup.task.field_time"), time, cx))
             .child(div().h(DynamicSpacing::Base08.px(cx)))
             .child(self.render_timer_card(open_task, cx))
             .child(Self::render_section_header(
-                "DESENVOLVIMENTO",
+                t!("clickup.task.section_development"),
                 Some(development_count),
                 None,
                 cx,
@@ -1727,12 +1781,9 @@ impl ClickUpPanel {
 
         if development_count == 0 {
             content = content.child(
-                Label::new(format!(
-                    "Nenhum PR citado. Um branch com {} no nome aparece aqui.",
-                    task.display_id()
-                ))
-                .size(LabelSize::Small)
-                .color(Color::Muted),
+                Label::new(t!("clickup.task.no_development", id = task.display_id()))
+                    .size(LabelSize::Small)
+                    .color(Color::Muted),
             );
         }
         if let Some(branch) = branch {
@@ -1740,7 +1791,7 @@ impl ClickUpPanel {
                 "clickup-task-branch",
                 IconName::GitBranch,
                 branch,
-                "branch atual".to_string(),
+                t!("clickup.task.current_branch").to_string(),
                 None,
                 cx,
             ));
@@ -1757,7 +1808,12 @@ impl ClickUpPanel {
             ));
         }
 
-        content = content.child(Self::render_section_header("DESCRIÇÃO", None, None, cx));
+        content = content.child(Self::render_section_header(
+            t!("clickup.task.section_description"),
+            None,
+            None,
+            cx,
+        ));
         content = match description {
             Some(description) => {
                 let is_long = description.chars().count() > DESCRIPTION_PREVIEW_CHARS;
@@ -1778,9 +1834,9 @@ impl ClickUpPanel {
                             Button::new(
                                 "clickup-task-description-toggle",
                                 if expanded {
-                                    "Mostrar menos"
+                                    t!("clickup.task.show_less")
                                 } else {
-                                    "Mostrar mais"
+                                    t!("clickup.task.show_more")
                                 },
                             )
                             .style(ButtonStyle::Transparent)
@@ -1798,9 +1854,9 @@ impl ClickUpPanel {
             }
             None => content.child(
                 Label::new(if detail.is_some() {
-                    "Sem descrição"
+                    t!("clickup.task.no_description")
                 } else {
-                    "…"
+                    "…".into()
                 })
                 .size(LabelSize::Small)
                 .color(Color::Muted),
@@ -1808,7 +1864,7 @@ impl ClickUpPanel {
         };
 
         content = content.child(Self::render_section_header(
-            "COMENTÁRIOS",
+            t!("clickup.task.section_comments"),
             Some(open_task.comments.len()),
             None,
             cx,
@@ -1816,9 +1872,9 @@ impl ClickUpPanel {
         if open_task.comments.is_empty() {
             content = content.child(
                 Label::new(if detail.is_some() {
-                    "Nenhum comentário ainda"
+                    t!("clickup.task.no_comments")
                 } else {
-                    "…"
+                    "…".into()
                 })
                 .size(LabelSize::Small)
                 .color(Color::Muted),
@@ -1901,7 +1957,7 @@ impl ClickUpPanel {
                     .px(DynamicSpacing::Base08.px(cx))
                     .py(DynamicSpacing::Base06.px(cx))
                     .child(
-                        Button::new("clickup-task-back", "Tarefas")
+                        Button::new("clickup-task-back", t!("clickup.task.back"))
                             .style(ButtonStyle::Transparent)
                             .label_size(LabelSize::Small)
                             .start_icon(Icon::new(IconName::ChevronLeft).size(IconSize::XSmall))
@@ -1922,7 +1978,7 @@ impl ClickUpPanel {
                             .child(
                                 IconButton::new("clickup-task-copy-id", IconName::Copy)
                                     .icon_size(IconSize::Small)
-                                    .tooltip(Tooltip::text("Copiar ID"))
+                                    .tooltip(Tooltip::text(t!("clickup.task.copy_id")))
                                     .on_click(move |_, _, cx| {
                                         cx.write_to_clipboard(ClipboardItem::new_string(
                                             copied_id.clone(),
@@ -1932,7 +1988,7 @@ impl ClickUpPanel {
                             .child(
                                 IconButton::new("clickup-task-open", IconName::ArrowUpRight)
                                     .icon_size(IconSize::Small)
-                                    .tooltip(Tooltip::text("Abrir no ClickUp"))
+                                    .tooltip(Tooltip::text(t!("clickup.common.open_in_clickup")))
                                     .on_click(move |_, _, cx| cx.open_url(&url)),
                             ),
                     ),
@@ -1955,12 +2011,12 @@ impl ClickUpPanel {
                         h_flex()
                             .justify_between()
                             .child(
-                                Label::new("Enter envia")
+                                Label::new(t!("clickup.task.enter_sends"))
                                     .size(LabelSize::XSmall)
                                     .color(Color::Muted),
                             )
                             .child(
-                                Button::new("clickup-task-comment", "Comentar")
+                                Button::new("clickup-task-comment", t!("clickup.task.comment"))
                                     .style(ButtonStyle::Filled)
                                     .label_size(LabelSize::Small)
                                     .start_icon(Icon::new(IconName::Send).size(IconSize::XSmall))
@@ -2116,15 +2172,9 @@ fn relative_time(millis: i64, now: DateTime<Local>) -> String {
     };
     let clock = time.format("%H:%M");
     match (now.date_naive() - time.date_naive()).num_days() {
-        0 => format!("hoje, {clock}"),
-        1 => format!("ontem, {clock}"),
-        _ => {
-            let month = MONTHS
-                .get(time.month0() as usize)
-                .copied()
-                .unwrap_or_default();
-            format!("{} {month}, {clock}", time.day())
-        }
+        0 => t!("clickup.date.today_at", time = clock).to_string(),
+        1 => t!("clickup.date.yesterday_at", time = clock).to_string(),
+        _ => format!("{}, {clock}", day_and_month(time.day(), time.month0())),
     }
 }
 
@@ -2188,27 +2238,50 @@ fn group_by_status<'a>(tasks: &[&'a api::Task]) -> Vec<StatusGroup<'a>> {
     groups.into_iter().map(|(_, _, group)| group).collect()
 }
 
-const MONTHS: [&str; 12] = [
-    "jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez",
-];
+fn month_abbreviation(month0: u32) -> SharedString {
+    match month0 {
+        0 => t!("clickup.date.month_jan"),
+        1 => t!("clickup.date.month_feb"),
+        2 => t!("clickup.date.month_mar"),
+        3 => t!("clickup.date.month_apr"),
+        4 => t!("clickup.date.month_may"),
+        5 => t!("clickup.date.month_jun"),
+        6 => t!("clickup.date.month_jul"),
+        7 => t!("clickup.date.month_aug"),
+        8 => t!("clickup.date.month_sep"),
+        9 => t!("clickup.date.month_oct"),
+        10 => t!("clickup.date.month_nov"),
+        _ => t!("clickup.date.month_dec"),
+    }
+}
 
-/// "Hoje", "Amanhã", "Ontem" or "26 set", colored by urgency.
+fn day_and_month(day: u32, month0: u32) -> SharedString {
+    t!(
+        "clickup.date.day_month",
+        day = day,
+        month = month_abbreviation(month0)
+    )
+}
+
+/// "Today", "Tomorrow", "Yesterday" or "Sep 26", colored by urgency.
 fn due_label(due_millis: i64, now: DateTime<Local>) -> Option<(String, Color)> {
     let due = Local.timestamp_millis_opt(due_millis).single()?;
     let days = (due.date_naive() - now.date_naive()).num_days();
     let label = match days {
-        0 => "Hoje".to_string(),
-        1 => "Amanhã".to_string(),
-        -1 => "Ontem".to_string(),
+        0 => t!("clickup.date.today").to_string(),
+        1 => t!("clickup.date.tomorrow").to_string(),
+        -1 => t!("clickup.date.yesterday").to_string(),
         _ => {
-            let month = MONTHS
-                .get(due.month0() as usize)
-                .copied()
-                .unwrap_or_default();
             if due.year() == now.year() {
-                format!("{} {month}", due.day())
+                day_and_month(due.day(), due.month0()).to_string()
             } else {
-                format!("{} {month} {}", due.day(), due.year())
+                t!(
+                    "clickup.date.day_month_year",
+                    day = due.day(),
+                    month = month_abbreviation(due.month0()),
+                    year = due.year()
+                )
+                .to_string()
             }
         }
     };
@@ -2224,17 +2297,17 @@ fn due_label(due_millis: i64, now: DateTime<Local>) -> Option<(String, Color)> {
 
 fn sync_status_label(tasks: &AssignedTasks) -> String {
     let open = match tasks.open.len() {
-        1 => "1 aberta".to_string(),
-        count => format!("{count} abertas"),
+        1 => t!("clickup.tasks.open_count.one"),
+        count => t!("clickup.tasks.open_count.other", count = count),
     };
     match tasks.synced_at {
-        None => "Sincronizando…".to_string(),
+        None => t!("clickup.tasks.syncing").to_string(),
         Some(synced_at) => {
             let minutes = synced_at.elapsed().as_secs() / 60;
             if minutes == 0 {
-                format!("Sincronizado agora · {open}")
+                t!("clickup.tasks.synced_now", open = open).to_string()
             } else {
-                format!("Sincronizado há {minutes} min · {open}")
+                t!("clickup.tasks.synced_ago", minutes = minutes, open = open).to_string()
             }
         }
     }
@@ -2250,9 +2323,9 @@ fn spinning_if(icon: Icon, spinning: bool) -> AnyElement {
 
 fn workspace_count(count: usize) -> String {
     if count == 1 {
-        "1 workspace".to_string()
+        t!("clickup.account.workspace_count.one").to_string()
     } else {
-        format!("{count} workspaces")
+        t!("clickup.account.workspace_count.other", count = count).to_string()
     }
 }
 
@@ -2271,7 +2344,7 @@ impl Render for ClickUpPanel {
             Connection::Loading => self
                 .render_centered_message(
                     IconName::LoadCircle,
-                    "Carregando o ClickUp…".into(),
+                    t!("clickup.connection.loading"),
                     None,
                     None,
                     cx,
@@ -2292,7 +2365,7 @@ impl Render for ClickUpPanel {
                 let actions = h_flex()
                     .gap(DynamicSpacing::Base08.px(cx))
                     .child(
-                        Button::new("clickup-retry", "Tentar de novo")
+                        Button::new("clickup-retry", t!("clickup.connection.retry"))
                             .style(ButtonStyle::Outlined)
                             .label_size(LabelSize::Small)
                             .on_click(move |_, _, cx| {
@@ -2300,20 +2373,23 @@ impl Render for ClickUpPanel {
                             }),
                     )
                     .child(
-                        Button::new("clickup-replace-unreachable", "Trocar token")
-                            .style(ButtonStyle::Subtle)
-                            .label_size(LabelSize::Small)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.start_replacing_token(window, cx);
-                                this.store
-                                    .update(cx, |store, cx| store.disconnect(cx))
-                                    .detach_and_log_err(cx);
-                            })),
+                        Button::new(
+                            "clickup-replace-unreachable",
+                            t!("clickup.account.replace_token"),
+                        )
+                        .style(ButtonStyle::Subtle)
+                        .label_size(LabelSize::Small)
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.start_replacing_token(window, cx);
+                            this.store
+                                .update(cx, |store, cx| store.disconnect(cx))
+                                .detach_and_log_err(cx);
+                        })),
                     )
                     .into_any_element();
                 self.render_centered_message(
                     IconName::Disconnected,
-                    "Sem conexão com o ClickUp".into(),
+                    t!("clickup.connection.unreachable"),
                     Some(message),
                     Some(actions),
                     cx,
@@ -2463,16 +2539,19 @@ mod tests {
         };
         assert_eq!(
             due_label(at(23), now),
-            Some(("Hoje".into(), Color::Warning))
+            Some(("Today".into(), Color::Warning))
         );
         assert_eq!(
             due_label(at(24), now),
-            Some(("Amanhã".into(), Color::Muted))
+            Some(("Tomorrow".into(), Color::Muted))
         );
-        assert_eq!(due_label(at(22), now), Some(("Ontem".into(), Color::Error)));
+        assert_eq!(
+            due_label(at(22), now),
+            Some(("Yesterday".into(), Color::Error))
+        );
         assert_eq!(
             due_label(at(29), now),
-            Some(("29 set".into(), Color::Muted))
+            Some(("Sep 29".into(), Color::Muted))
         );
     }
 

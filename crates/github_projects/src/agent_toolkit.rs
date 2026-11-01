@@ -9,6 +9,7 @@ use crate::{
 };
 use anyhow::{Context as _, Result, anyhow};
 use gpui::{App, AsyncApp, Entity, Task, WindowHandle};
+use i18n::t;
 use project::Project;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -663,13 +664,13 @@ pub fn register_toolkit(cx: &mut App) {
         Toolkit {
             id: task_agents::toolkit_ids::GITHUB_PROJECTS.into(),
             name: "GitHub Projects".into(),
-            description: "Itens do projeto do GitHub no dock Tarefas".into(),
+            description: t!("github_projects.toolkit.description"),
             icon: "blocks".into(),
             mention: Some("@Item".into()),
             tools: vec![
                 ToolkitTool::new(
                     PROJECT_ITEMS_TOOL,
-                    "Leu o projeto",
+                    t!("github_projects.toolkit.read_project"),
                     "Lists the open items of the GitHub project in the Tarefas dock: by default \
                      the user's items in the current sprint, with status, priority and sprint. \
                      Use this instead of any GitHub MCP server tool.",
@@ -678,7 +679,7 @@ pub fn register_toolkit(cx: &mut App) {
                 ),
                 ToolkitTool::new(
                     PROJECT_ITEM_TOOL,
-                    "Leu o item",
+                    t!("github_projects.toolkit.read_item"),
                     "Reads one item of the GitHub project: fields, subtasks, linked branches and \
                      pull requests, and its description.",
                     ToolAccess::Read,
@@ -686,7 +687,7 @@ pub fn register_toolkit(cx: &mut App) {
                 ),
                 ToolkitTool::new(
                     "project_item_start",
-                    "Começou o item",
+                    t!("github_projects.toolkit.started_item"),
                     "Starts an issue of the project: creates its branch on GitHub linked to it, \
                      checks it out, moves it to work in progress and assigns it to the user. Only \
                      when the user asked; they confirm it.",
@@ -695,7 +696,7 @@ pub fn register_toolkit(cx: &mut App) {
                 ),
                 ToolkitTool::new(
                     "project_item_update",
-                    "Mudou o item",
+                    t!("github_projects.toolkit.updated_item"),
                     "Changes an item's Status, priority, sprint or estimate, or assigns it to the \
                      user. Only what the user asked for; they confirm it. Moving to done with a \
                      pull request still open is refused unless the user said to after being told.",
@@ -704,7 +705,7 @@ pub fn register_toolkit(cx: &mut App) {
                 ),
                 ToolkitTool::new(
                     "project_item_comment",
-                    "Comentou no item",
+                    t!("github_projects.toolkit.commented_item"),
                     "Publishes a comment on an issue or pull request of the project. Everyone \
                      sees it, so only post what the user asked for.",
                     ToolAccess::Act,

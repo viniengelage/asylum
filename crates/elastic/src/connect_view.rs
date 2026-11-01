@@ -9,6 +9,7 @@ use gpui::{
     WeakEntity, px,
 };
 use http_client::HttpClient;
+use i18n::t;
 use std::{sync::Arc, time::Instant};
 use ui::{
     TintColor, ToggleButtonGroup, ToggleButtonGroupSize, ToggleButtonGroupStyle,
@@ -68,26 +69,33 @@ impl ConnectView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let input =
-            |placeholder: &str, label: &str, window: &mut Window, cx: &mut Context<Self>| {
-                cx.new(|cx| InputField::new(window, cx, placeholder).label(label.to_owned()))
-            };
-        let name_input = input("trix-logs", "Nome", window, cx);
+        let input = |placeholder: &str,
+                     label: SharedString,
+                     window: &mut Window,
+                     cx: &mut Context<Self>| {
+            cx.new(|cx| InputField::new(window, cx, placeholder).label(label))
+        };
+        let name_input = input("trix-logs", t!("elastic.connect.name_label"), window, cx);
         let url_input = cx.new(|cx| {
-            InputField::new(window, cx, "https://kibana.suaempresa.com")
+            InputField::new(window, cx, &t!("elastic.connect.url_placeholder"))
                 .label("URL")
                 .start_icon(IconName::Link)
         });
-        let username_input = input("o mesmo do login no Kibana", "Usuário", window, cx);
+        let username_input = input(
+            &t!("elastic.connect.username_placeholder"),
+            t!("elastic.connect.username_label"),
+            window,
+            cx,
+        );
         // `masked(false)` still shows the reveal toggle, so only the secrets call it.
         let password_input = cx.new(|cx| {
-            InputField::new(window, cx, "fica no Keychain do perfil")
-                .label("Senha")
+            InputField::new(window, cx, &t!("elastic.connect.password_placeholder"))
+                .label(t!("elastic.connect.password_label"))
                 .masked(true)
         });
         let api_key_input = cx.new(|cx| {
-            InputField::new(window, cx, "a chave encoded, fica no Keychain do perfil")
-                .label("API key")
+            InputField::new(window, cx, &t!("elastic.connect.api_key_placeholder"))
+                .label(t!("elastic.connect.api_key_label"))
                 .masked(true)
         });
 
@@ -154,7 +162,7 @@ impl ConnectView {
         let text = |input: &Entity<InputField>| input.read(cx).text(cx).trim().to_owned();
         let url = text(&self.url_input);
         if url.is_empty() {
-            return Err("Preencha a URL.".into());
+            return Err(t!("elastic.connect.url_required"));
         }
         let url = if url.contains("://") {
             url
@@ -163,7 +171,7 @@ impl ConnectView {
         };
         let username = text(&self.username_input);
         if self.auth == AuthKind::Password && username.is_empty() {
-            return Err("Preencha o usuário.".into());
+            return Err(t!("elastic.connect.username_required"));
         }
         let host = http_client::Url::parse(&url)
             .ok()
@@ -241,7 +249,7 @@ impl ConnectView {
             }
         };
         let Some(panel) = self.panel.upgrade() else {
-            self.save_error = Some("O dock Elastic foi fechado.".into());
+            self.save_error = Some(t!("elastic.connect.dock_closed"));
             cx.notify();
             return;
         };
@@ -287,7 +295,7 @@ impl ConnectView {
                                 .color(Color::Muted),
                         )
                         .child(
-                            Label::new("Testando…")
+                            Label::new(t!("elastic.connect.testing"))
                                 .size(LabelSize::Small)
                                 .color(Color::Muted),
                         )
@@ -323,7 +331,7 @@ impl ConnectView {
                                 .color(Color::Muted),
                         )
                         .child(
-                            Label::new("Testar conexão")
+                            Label::new(t!("elastic.connect.test"))
                                 .size(LabelSize::Small)
                                 .weight(FontWeight::SEMIBOLD),
                         ),
@@ -365,12 +373,9 @@ impl ConnectView {
                 }))
                 .when(failed && checks.len() > 2, |this| {
                     this.child(
-                        Label::new(
-                            "Dá para salvar assim: o dock e o Agent escondem os índices sem \
-                             permissão e dizem qual privilégio pedir.",
-                        )
-                        .size(LabelSize::XSmall)
-                        .color(Color::Accent),
+                        Label::new(t!("elastic.connect.save_anyway_hint"))
+                            .size(LabelSize::XSmall)
+                            .color(Color::Accent),
                     )
                 })
                 .into_any_element(),
@@ -400,8 +405,7 @@ async fn run_checks(
         checks.push(Check {
             passed: true,
             warning: false,
-            text: "senha em branco: o teste usa a que já está no keychain só depois de salvar"
-                .to_string(),
+            text: t!("elastic.connect.check_blank_password").to_string(),
         });
     }
     let elastic = Elastic::new(http, endpoint, connection.auth_with(Some(secret)));
@@ -443,9 +447,7 @@ async fn run_checks(
             checks.push(Check {
                 passed: false,
                 warning: true,
-                text: "GET / · sem o privilégio monitor: a versão vem do Kibana e o dock não \
-                       mostra o tamanho dos data streams"
-                    .to_string(),
+                text: t!("elastic.connect.check_no_monitor").to_string(),
             })
         }
         Err(error) => {
@@ -466,7 +468,7 @@ async fn run_checks(
                 user.username,
                 user.authentication_realm.name,
                 if user.roles.is_empty() {
-                    "nenhuma".to_string()
+                    t!("elastic.connect.roles_none").to_string()
                 } else {
                     user.roles.join(", ")
                 }
@@ -489,8 +491,7 @@ async fn run_checks(
         Ok(missing) if missing.is_empty() => checks.push(Check {
             passed: true,
             warning: false,
-            text: "privilégios: read em logs-*, traces-*, metrics-* e monitor no cluster"
-                .to_string(),
+            text: t!("elastic.connect.check_privileges_ok").to_string(),
         }),
         Ok(missing) => {
             for privilege in &missing.cluster {
@@ -500,14 +501,23 @@ async fn run_checks(
                 checks.push(Check {
                     passed: false,
                     warning: privilege == "monitor",
-                    text: format!("cluster · sem {privilege}"),
+                    text: t!(
+                        "elastic.connect.check_cluster_missing",
+                        privilege = privilege
+                    )
+                    .to_string(),
                 });
             }
             for (pattern, privileges) in &missing.index {
                 checks.push(Check {
                     passed: false,
                     warning: false,
-                    text: format!("{pattern} · sem {}", privileges.join(", ")),
+                    text: t!(
+                        "elastic.connect.check_index_missing",
+                        pattern = pattern,
+                        privileges = privileges.join(", ")
+                    )
+                    .to_string(),
                 });
             }
         }
@@ -524,9 +534,9 @@ async fn run_checks(
         Ok(result) => checks.push(Check {
             passed: true,
             warning: false,
-            text: format!(
-                "ES|QL em logs-* · {} docs{}",
-                result
+            text: t!(
+                "elastic.connect.check_esql_ok",
+                count = result
                     .values
                     .first()
                     .and_then(|row| row.first())
@@ -535,16 +545,17 @@ async fn run_checks(
                         None => crate::results::display(count),
                     })
                     .unwrap_or_default(),
-                result
+                took = result
                     .took
                     .map(|took| format!(" · {took} ms"))
                     .unwrap_or_default()
-            ),
+            )
+            .to_string(),
         }),
         Err(error) => checks.push(Check {
             passed: false,
             warning: false,
-            text: format!("ES|QL em logs-* · {error}"),
+            text: t!("elastic.connect.check_esql_failed", error = error).to_string(),
         }),
     }
     checks
@@ -554,18 +565,14 @@ fn set_input(input: &Entity<InputField>, text: &str, window: &mut Window, cx: &m
     input.update(cx, |input, cx| input.set_text(text, window, cx));
 }
 
-fn field_label(text: &'static str) -> impl IntoElement {
+fn field_label(text: impl Into<SharedString>) -> impl IntoElement {
     Label::new(text).size(LabelSize::Small).color(Color::Muted)
 }
 
 impl Render for ConnectView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let saving = self.save_task.is_some();
-        let title = if self.editing.is_some() {
-            "Editar conexão"
-        } else {
-            "Nova conexão"
-        };
+        let title = self.tab_content_text(0, cx);
         let environment_index = Environment::ALL
             .iter()
             .position(|environment| *environment == self.environment)
@@ -581,7 +588,7 @@ impl Render for ConnectView {
         });
         let via_buttons = [
             ToggleButtonSimple::new(
-                "Pela URL do Kibana",
+                t!("elastic.connect.via_kibana"),
                 cx.listener(|this, _, _, cx| {
                     this.via = Via::Kibana;
                     this.test = TestState::Idle;
@@ -589,7 +596,7 @@ impl Render for ConnectView {
                 }),
             ),
             ToggleButtonSimple::new(
-                "Direto no Elasticsearch",
+                t!("elastic.connect.via_direct"),
                 cx.listener(|this, _, _, cx| {
                     this.via = Via::Direct;
                     this.test = TestState::Idle;
@@ -599,28 +606,31 @@ impl Render for ConnectView {
         ];
         let auth_buttons = [
             ToggleButtonSimple::new(
-                "Usuário e senha",
+                t!("elastic.connect.auth_password"),
                 cx.listener(|this, _, _, cx| this.set_auth(AuthKind::Password, cx)),
             ),
             ToggleButtonSimple::new(
-                "API key",
+                t!("elastic.connect.auth_api_key"),
                 cx.listener(|this, _, _, cx| this.set_auth(AuthKind::ApiKey, cx)),
             ),
             ToggleButtonSimple::new(
-                "Sem autenticação",
+                t!("elastic.connect.auth_none"),
                 cx.listener(|this, _, _, cx| this.set_auth(AuthKind::None, cx)),
             ),
         ];
         let scope_buttons = [
             ToggleButtonSimple::new(
-                "Só para mim (perfil)",
+                t!("elastic.connect.scope_profile"),
                 cx.listener(|this, _, _, cx| {
                     this.scope = Scope::Profile;
                     cx.notify();
                 }),
             ),
             ToggleButtonSimple::new(
-                format!("Projeto · {}", connection::PROJECT_FILE),
+                t!(
+                    "elastic.connect.scope_project",
+                    file = connection::PROJECT_FILE
+                ),
                 cx.listener(|this, _, _, cx| {
                     this.scope = Scope::Project;
                     cx.notify();
@@ -628,14 +638,8 @@ impl Render for ConnectView {
             ),
         ];
         let via_hint = match self.via {
-            Via::Kibana => {
-                "A URL que você abre no navegador. As consultas passam pelo proxy do Dev Tools do \
-                 Kibana, com o mesmo login."
-            }
-            Via::Direct => {
-                "A porta 9200 do Elasticsearch. Quando só a VPC enxerga o cluster, use pelo Kibana \
-                 ou uma VPN."
-            }
+            Via::Kibana => t!("elastic.connect.via_hint_kibana"),
+            Via::Direct => t!("elastic.connect.via_hint_direct"),
         };
 
         v_flex()
@@ -680,7 +684,7 @@ impl Render for ConnectView {
                     .child(
                         v_flex()
                             .gap_1()
-                            .child(field_label("Como chegar ao cluster"))
+                            .child(field_label(t!("elastic.connect.via_label")))
                             .child(
                                 ToggleButtonGroup::single_row("elastic-via", via_buttons)
                                     .style(ToggleButtonGroupStyle::Outlined)
@@ -708,7 +712,7 @@ impl Render for ConnectView {
                                 v_flex()
                                     .flex_1()
                                     .gap_1()
-                                    .child(field_label("Ambiente"))
+                                    .child(field_label(t!("elastic.connect.environment_label")))
                                     .child(
                                         ToggleButtonGroup::single_row(
                                             "elastic-environment",
@@ -722,18 +726,21 @@ impl Render for ConnectView {
                             ),
                     )
                     .child(
-                        v_flex().gap_1().child(field_label("Autenticação")).child(
-                            ToggleButtonGroup::single_row("elastic-auth", auth_buttons)
-                                .style(ToggleButtonGroupStyle::Outlined)
-                                .size(ToggleButtonGroupSize::Custom(rems_from_px(30_f32)))
-                                .label_size(LabelSize::Small)
-                                .auto_width()
-                                .selected_index(match self.auth {
-                                    AuthKind::Password => 0,
-                                    AuthKind::ApiKey => 1,
-                                    AuthKind::None => 2,
-                                }),
-                        ),
+                        v_flex()
+                            .gap_1()
+                            .child(field_label(t!("elastic.connect.auth_label")))
+                            .child(
+                                ToggleButtonGroup::single_row("elastic-auth", auth_buttons)
+                                    .style(ToggleButtonGroupStyle::Outlined)
+                                    .size(ToggleButtonGroupSize::Custom(rems_from_px(30_f32)))
+                                    .label_size(LabelSize::Small)
+                                    .auto_width()
+                                    .selected_index(match self.auth {
+                                        AuthKind::Password => 0,
+                                        AuthKind::ApiKey => 1,
+                                        AuthKind::None => 2,
+                                    }),
+                            ),
                     )
                     .when(self.auth == AuthKind::Password, |this| {
                         this.child(self.username_input.clone())
@@ -747,7 +754,7 @@ impl Render for ConnectView {
                     .child(
                         v_flex()
                             .gap_1()
-                            .child(field_label("Salvar em"))
+                            .child(field_label(t!("elastic.connect.scope_label")))
                             .child(
                                 ToggleButtonGroup::single_row("elastic-scope", scope_buttons)
                                     .style(ToggleButtonGroupStyle::Outlined)
@@ -760,12 +767,9 @@ impl Render for ConnectView {
                                     }),
                             )
                             .child(
-                                Label::new(
-                                    "No projeto vão só a URL e o usuário. Senhas e API keys ficam \
-                                     no Keychain de cada um.",
-                                )
-                                .size(LabelSize::XSmall)
-                                .color(Color::Muted),
+                                Label::new(t!("elastic.connect.scope_hint"))
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted),
                             ),
                     )
                     .children(self.render_test_result(cx))
@@ -777,7 +781,7 @@ impl Render for ConnectView {
                             .pt_2()
                             .gap_2()
                             .child(
-                                Button::new("elastic-test", "Testar conexão")
+                                Button::new("elastic-test", t!("elastic.connect.test"))
                                     .style(ButtonStyle::Outlined)
                                     .start_icon(
                                         Icon::new(IconName::SignalHigh).size(IconSize::Small),
@@ -789,7 +793,7 @@ impl Render for ConnectView {
                             )
                             .child(div().flex_1())
                             .child(
-                                Button::new("elastic-cancel", "Cancelar")
+                                Button::new("elastic-cancel", t!("elastic.common.cancel"))
                                     .style(ButtonStyle::Subtle)
                                     .on_click(
                                         cx.listener(|_, _, _, cx| cx.emit(ItemEvent::CloseItem)),
@@ -799,9 +803,9 @@ impl Render for ConnectView {
                                 Button::new(
                                     "elastic-save",
                                     if saving {
-                                        "Salvando…"
+                                        t!("elastic.connect.saving")
                                     } else {
-                                        "Salvar e conectar"
+                                        t!("elastic.connect.save")
                                     },
                                 )
                                 .style(ButtonStyle::Tinted(TintColor::Accent))
@@ -833,9 +837,9 @@ impl Item for ConnectView {
 
     fn tab_content_text(&self, _detail: usize, _cx: &App) -> SharedString {
         if self.editing.is_some() {
-            "Editar conexão".into()
+            t!("elastic.connect.title_edit")
         } else {
-            "Nova conexão".into()
+            t!("elastic.connect.title_new")
         }
     }
 

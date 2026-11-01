@@ -76,14 +76,18 @@ impl AgentTool for UpdatePlanTool {
         _cx: &mut App,
     ) -> SharedString {
         let Ok(input) = input else {
-            return "Updating plan".into();
+            return i18n::t!("agent.update_plan_tool.title");
         };
         let completed = input
             .steps
             .iter()
             .filter(|step| step.status == PlanStepStatus::Completed)
             .count();
-        format!("Plan progress: {completed} of {}", input.steps.len()).into()
+        i18n::t!(
+            "agent.update_plan_tool.progress_title",
+            completed = completed,
+            total = input.steps.len()
+        )
     }
 
     fn run(

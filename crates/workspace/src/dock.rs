@@ -1265,7 +1265,7 @@ impl Dock {
                                 .icon_color(Color::Muted)
                                 .size(ui::ButtonSize::None)
                                 .icon_size(IconSize::Small)
-                                .tooltip(Tooltip::text("Close Tab"))
+                                .tooltip(Tooltip::text(i18n::t!("workspace.dock.close_tab")))
                                 .on_click(cx.listener(
                                     move |dock, _, window, cx| {
                                         dock.close_tab(panel_id, window, cx);
@@ -1927,7 +1927,12 @@ impl Render for DockToggleButtons {
             }
             let position = dock.position();
             let action = dock.toggle_action();
-            let label: SharedString = format!("Toggle {} Dock", position.label()).into();
+            let label = match position {
+                DockPosition::Left => i18n::t!("workspace.dock.toggle_left"),
+                DockPosition::Bottom => i18n::t!("workspace.dock.toggle_bottom"),
+                DockPosition::Devices => i18n::t!("workspace.dock.toggle_devices"),
+                DockPosition::Right => i18n::t!("workspace.dock.toggle_right"),
+            };
             // The `Closed` glyphs are the plain outlines; whether the dock is open is shown
             // by the button's fill instead.
             let (icon, rotation) = match position {

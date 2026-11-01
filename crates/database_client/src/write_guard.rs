@@ -11,6 +11,7 @@ use crate::{
 use gpui::{
     DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Subscription, Task, px,
 };
+use i18n::t;
 use std::sync::Arc;
 use ui::{modal_surface, prelude::*, secondary_button};
 use ui_input::{ErasedEditorEvent, InputField};
@@ -164,13 +165,14 @@ impl WriteGuard {
                                     )
                                 })
                                 .map(|rows| match rows {
-                                    1 => "≈ 1 linha".to_owned(),
-                                    rows => format!(
-                                        "≈ {} linhas",
-                                        crate::panel::format_count(rows as i64)
-                                    ),
+                                    1 => t!("database_client.guard.estimate_rows.one").to_string(),
+                                    rows => t!(
+                                        "database_client.guard.estimate_rows.other",
+                                        count = crate::panel::format_count(rows as i64)
+                                    )
+                                    .to_string(),
                                 })
-                                .ok_or_else(|| "sem estimativa".to_owned()),
+                                .ok_or_else(|| t!("database_client.guard.no_estimate").to_string()),
                             Err(error) => Err(format!("{error:#}")),
                         });
                         cx.notify();
@@ -238,48 +240,56 @@ impl Render for WriteGuard {
             .unwrap_or("SQL")
             .to_uppercase();
         let title = match self.risk {
-            Risk::EveryRow if production => format!("{keyword} sem WHERE em prod"),
-            Risk::EveryRow => format!("{keyword} sem WHERE"),
-            Risk::Ddl if production => "Mudança de estrutura em prod".to_owned(),
-            Risk::Ddl => "Mudança de estrutura".to_owned(),
-            Risk::ProductionWrite => "Escrita em prod".to_owned(),
+            Risk::EveryRow if production => t!(
+                "database_client.guard.title_every_row_prod",
+                keyword = keyword
+            ),
+            Risk::EveryRow => t!("database_client.guard.title_every_row", keyword = keyword),
+            Risk::Ddl if production => t!("database_client.guard.title_ddl_prod"),
+            Risk::Ddl => t!("database_client.guard.title_ddl"),
+            Risk::ProductionWrite => t!("database_client.guard.title_prod_write"),
         };
         let table = target_table(&self.statement);
         let reach = match (&self.estimate, self.risk) {
-            (_, Risk::Ddl) => (
-                "O schema muda para todo mundo que usa este banco.".to_owned(),
-                None,
-            ),
+            (_, Risk::Ddl) => (t!("database_client.guard.reach_ddl").to_string(), None),
             (Some(Ok(rows)), Risk::EveryRow) => (
                 match (keyword.as_str(), &table) {
-                    ("DELETE" | "TRUNCATE", Some(table)) => {
-                        format!("Apaga todas as {rows} de {table}")
-                    }
-                    ("UPDATE", Some(table)) => format!("Altera todas as {rows} de {table}"),
-                    _ => format!("Afeta todas as {rows}"),
-                },
-                Some("estimativa do planner, sem rodar".to_owned()),
+                    ("DELETE" | "TRUNCATE", Some(table)) => t!(
+                        "database_client.guard.reach_delete_all",
+                        rows = rows,
+                        table = table
+                    ),
+                    ("UPDATE", Some(table)) => t!(
+                        "database_client.guard.reach_update_all",
+                        rows = rows,
+                        table = table
+                    ),
+                    _ => t!("database_client.guard.reach_affects_all", rows = rows),
+                }
+                .to_string(),
+                Some(t!("database_client.guard.planner_estimate").to_string()),
             ),
             (Some(Ok(rows)), _) => (
-                format!("Afeta {rows}"),
-                Some("estimativa do planner, sem rodar".to_owned()),
+                t!("database_client.guard.reach_affects", rows = rows).to_string(),
+                Some(t!("database_client.guard.planner_estimate").to_string()),
             ),
-            (Some(Err(error)), _) => ("Sem estimativa de linhas".to_owned(), Some(error.clone())),
+            (Some(Err(error)), _) => (
+                t!("database_client.guard.no_row_estimate").to_string(),
+                Some(error.clone()),
+            ),
             (None, Risk::EveryRow) => (
-                "Não há WHERE: a tabela inteira é afetada.".to_owned(),
-                Some("estimando…".to_owned()),
+                t!("database_client.guard.reach_no_where").to_string(),
+                Some(t!("database_client.guard.estimating").to_string()),
             ),
             (None, _) => (
-                "Esta conexão está marcada como produção.".to_owned(),
-                Some("estimando…".to_owned()),
+                t!("database_client.guard.reach_production").to_string(),
+                Some(t!("database_client.guard.estimating").to_string()),
             ),
         };
         let transaction_note: SharedString = match &self.note {
             Some(note) => note.clone(),
-            None if self.in_transaction => {
-                "Já existe uma transação aberta nesta aba: nada é gravado até o COMMIT.".into()
-            }
-            None => "você vê o total afetado e decide COMMIT ou ROLLBACK".into(),
+            None if self.in_transaction => t!("database_client.guard.note_in_transaction"),
+            None => t!("database_client.guard.note_decide_later"),
         };
         let confirmed = self.confirmed(cx);
         let colors = cx.theme().colors();
@@ -306,9 +316,9 @@ impl Render for WriteGuard {
                 )
         };
         let run_label = if self.in_transaction || !production {
-            "Rodar"
+            t!("database_client.guard.run")
         } else {
-            "Rodar e commitar"
+            t!("database_client.guard.run_and_commit")
         };
         let actions = h_flex()
             .gap_2()
@@ -319,7 +329,7 @@ impl Render for WriteGuard {
                     .px_3()
                     .gap_2()
                     .cursor_pointer()
-                    .child(Label::new("Cancelar").size(LabelSize::Small))
+                    .child(Label::new(t!("database_client.guard.cancel")).size(LabelSize::Small))
                     .child(
                         Label::new("esc")
                             .size(LabelSize::XSmall)
@@ -334,7 +344,7 @@ impl Render for WriteGuard {
                     secondary_button(
                         "db-guard-transaction",
                         None,
-                        "Rodar e decidir depois",
+                        t!("database_client.guard.run_decide_later"),
                         confirmed,
                         cx,
                     )
@@ -447,7 +457,7 @@ impl Render for WriteGuard {
                             )
                             .when_some(self.line, |this, line| {
                                 this.child(
-                                    Label::new(format!("linha {line}"))
+                                    Label::new(t!("database_client.guard.line", line = line))
                                         .size(LabelSize::XSmall)
                                         .color(Color::Muted),
                                 )
@@ -461,19 +471,22 @@ impl Render for WriteGuard {
                                 consequence(
                                     IconName::Link,
                                     Color::Muted,
-                                    format!(
-                                        "{table} referencia esta tabela (ON DELETE {on_delete})"
-                                    ),
-                                    Some("o Postgres pode recusar no meio".to_owned()),
+                                    t!(
+                                        "database_client.guard.referenced_by",
+                                        table = table,
+                                        on_delete = on_delete
+                                    )
+                                    .to_string(),
+                                    Some(t!("database_client.guard.may_refuse").to_string()),
                                 )
                             }))
                             .child(consequence(
                                 IconName::RotateCcw,
                                 Color::Muted,
                                 if self.in_transaction {
-                                    "Roda dentro da transação aberta".to_owned()
+                                    t!("database_client.guard.runs_in_transaction").to_string()
                                 } else {
-                                    "Pode rodar numa transação aberta".to_owned()
+                                    t!("database_client.guard.can_run_in_transaction").to_string()
                                 },
                                 Some(transaction_note.to_string()),
                             )),
@@ -494,14 +507,20 @@ impl Render for WriteGuard {
                         .child(
                             h_flex()
                                 .gap_1()
-                                .child(Label::new("Digite").size(LabelSize::Small))
+                                .child(
+                                    Label::new(t!("database_client.guard.type_prefix"))
+                                        .size(LabelSize::Small),
+                                )
                                 .child(
                                     Label::new(self.connection.database.clone())
                                         .size(LabelSize::Small)
                                         .buffer_font(cx)
                                         .weight(FontWeight::SEMIBOLD),
                                 )
-                                .child(Label::new("para liberar").size(LabelSize::Small)),
+                                .child(
+                                    Label::new(t!("database_client.guard.type_suffix"))
+                                        .size(LabelSize::Small),
+                                ),
                         )
                         .child(input)
                         .children(bottom_actions.map(|actions| div().pt_2().child(actions))),

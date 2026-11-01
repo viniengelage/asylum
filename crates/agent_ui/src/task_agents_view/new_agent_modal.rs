@@ -10,6 +10,7 @@ use gpui::{
     App, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, Task, WeakEntity,
     Window, actions,
 };
+use i18n::t;
 use language_model::{
     CompletionIntent, LanguageModelRegistry, LanguageModelRequest, LanguageModelRequestMessage,
     Role,
@@ -76,7 +77,7 @@ impl NewAgentModal {
         let description = cx.new(|cx| {
             let mut editor = Editor::auto_height(3, 10, window, cx);
             editor.set_placeholder_text(
-                "Ex.: quando um PR mexer em telas do app, abrir o preview no simulador, tirar print das telas alteradas e comentar no PR as diferenças para o design.",
+                &t!("agent_ui.new_agent.description_placeholder"),
                 window,
                 cx,
             );
@@ -150,14 +151,14 @@ impl NewAgentModal {
                 .map(|provider| (model, provider))
         });
         let error = if description.trim().is_empty() {
-            Some("Diga o que o agente deve fazer.")
+            Some(t!("agent_ui.new_agent.error.no_description"))
         } else if model.is_none() {
-            Some("Escolha um modelo no painel do Agent para gerar a sugestão.")
+            Some(t!("agent_ui.new_agent.error.no_model"))
         } else {
             None
         };
         if let Some(error) = error {
-            self.generation.error = Some(error.into());
+            self.generation.error = Some(error);
             cx.notify();
             return;
         }
@@ -220,8 +221,10 @@ impl NewAgentModal {
                     };
                     attempt += 1;
                     this.update(cx, |this, cx| {
-                        this.generation.progress =
-                            Some(format!("Corrigindo: {}", problems.join("; ")).into());
+                        this.generation.progress = Some(t!(
+                            "agent_ui.new_agent.progress.fixing",
+                            problems = problems.join("; ")
+                        ));
                         cx.notify();
                     })?;
                     messages.push(LanguageModelRequestMessage {
@@ -249,8 +252,10 @@ impl NewAgentModal {
                         this.generation.output.clear();
                     }
                     Err(error) => {
-                        this.generation.error =
-                            Some(format!("Não foi possível gerar a sugestão: {error:#}").into());
+                        this.generation.error = Some(t!(
+                            "agent_ui.new_agent.error.suggestion_failed",
+                            error = format!("{error:#}")
+                        ));
                     }
                 }
                 cx.notify();
@@ -260,7 +265,7 @@ impl NewAgentModal {
         self.generation = Generation {
             running: true,
             output: String::new(),
-            progress: Some("Escrevendo a sugestão…".into()),
+            progress: Some(t!("agent_ui.new_agent.progress.writing")),
             error: None,
             _task: Some(task),
         };
@@ -290,7 +295,7 @@ impl NewAgentModal {
         cx.emit(DismissEvent);
     }
 
-    fn render_section_label(label: &'static str) -> Label {
+    fn render_section_label(label: SharedString) -> Label {
         Label::new(label)
             .size(LabelSize::XSmall)
             .weight(gpui::FontWeight::MEDIUM)
@@ -319,7 +324,7 @@ impl NewAgentModal {
         let mut row = h_flex().flex_wrap().gap_1p5().child(
             self.render_start_chip(
                 "new-agent-blank",
-                "Em branco",
+                t!("agent_ui.new_agent.start.blank"),
                 IconName::Plus,
                 self.start == Start::Blank,
             )
@@ -347,16 +352,14 @@ impl NewAgentModal {
         let selected = matches!(self.start, Start::Imported(_));
         let chip = self.render_start_chip(
             "new-agent-import",
-            "Importar .claude/agents",
+            t!("agent_ui.new_agent.start.import"),
             IconName::Download,
             selected,
         );
         if self.imported.is_empty() {
             return chip
                 .disabled(true)
-                .tooltip(Tooltip::text(
-                    "Nenhum agente em .claude/agents nos projetos abertos",
-                ))
+                .tooltip(Tooltip::text(t!("agent_ui.new_agent.start.import_empty")))
                 .into_any_element();
         }
         let modal = cx.entity().downgrade();
@@ -443,18 +446,20 @@ impl NewAgentModal {
                                     this.suggest(&SuggestAgent, window, cx)
                                 }))
                         })
-                        .tooltip(Tooltip::text(
-                            "A IA escolhe perfil, ferramentas e permissões e escreve as instruções",
-                        ))
+                        .tooltip(Tooltip::text(t!("agent_ui.new_agent.suggest_tooltip")))
                         .child(ui::KeyBinding::for_action_in(
                             &SuggestAgent,
                             &description_focus,
                             cx,
                         ))
                         .child(
-                            Label::new(if running { "sugerindo…" } else { "sugerir" })
-                                .size(LabelSize::XSmall)
-                                .color(Color::Muted),
+                            Label::new(if running {
+                                t!("agent_ui.new_agent.suggesting")
+                            } else {
+                                t!("agent_ui.new_agent.suggest")
+                            })
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
                         ),
                 ),
             )
@@ -470,7 +475,7 @@ impl NewAgentModal {
             .bg(cx.theme().colors().surface_background)
     }
 
-    fn render_column_header(title: &'static str, cx: &App) -> Div {
+    fn render_column_header(title: SharedString, cx: &App) -> Div {
         h_flex()
             .justify_between()
             .px_3()
@@ -480,7 +485,7 @@ impl NewAgentModal {
             .child(Self::render_section_label(title))
     }
 
-    fn render_value(label: &'static str, value: impl IntoElement) -> impl IntoElement {
+    fn render_value(label: SharedString, value: impl IntoElement) -> impl IntoElement {
         v_flex()
             .gap_0p5()
             .child(
@@ -494,7 +499,7 @@ impl NewAgentModal {
     fn render_trigger(
         id: &'static str,
         label: impl Into<SharedString>,
-        tooltip: &'static str,
+        tooltip: SharedString,
     ) -> impl IntoElement {
         div().id(id).tooltip(Tooltip::text(tooltip)).child(
             Switch::new(id, ToggleState::Selected)
@@ -507,7 +512,7 @@ impl NewAgentModal {
         let agent = &self.suggestion;
         let profiles = AgentProfile::available_profiles(cx);
         let profile = match agent.profile.as_deref() {
-            None => "Perfil atual da thread".to_string(),
+            None => t!("agent_ui.task_agents.profile.current_thread").to_string(),
             Some(id) => profiles
                 .iter()
                 .find(|(profile_id, _)| profile_id.0.as_ref() == id)
@@ -517,44 +522,47 @@ impl NewAgentModal {
         let model = agent
             .model
             .clone()
-            .unwrap_or_else(|| "Modelo da thread".to_string());
+            .unwrap_or_else(|| t!("agent_ui.task_agents.model.thread").to_string());
         Self::render_column(cx).child(
             v_flex()
                 .p_3()
                 .gap_3()
                 .child(Self::render_value(
-                    "Nome",
+                    t!("agent_ui.new_agent.field.name"),
                     Label::new(agent.name.clone()).single_line().truncate(),
                 ))
                 .child(Self::render_value(
-                    "Comando",
+                    t!("agent_ui.new_agent.field.command"),
                     Label::new(format!("/{}", agent.command))
                         .size(LabelSize::Small)
                         .color(Color::Accent)
                         .buffer_font(cx),
                 ))
                 .child(Self::render_value(
-                    "Perfil base",
+                    t!("agent_ui.new_agent.field.base_profile"),
                     Label::new(profile).single_line().truncate(),
                 ))
                 .child(Self::render_value(
-                    "Modelo",
+                    t!("agent_ui.new_agent.field.model"),
                     Label::new(model).single_line().truncate(),
                 ))
                 .child(Self::render_value(
-                    "Gatilhos",
+                    t!("agent_ui.new_agent.field.triggers"),
                     v_flex()
                         .pt_1()
                         .gap_1p5()
                         .child(Self::render_trigger(
                             "new-agent-trigger-composer",
-                            format!("/{} no composer", agent.command),
-                            "Sempre ligado: digite o comando no composer do Agent",
+                            t!(
+                                "agent_ui.new_agent.trigger.composer",
+                                command = agent.command
+                            ),
+                            t!("agent_ui.new_agent.trigger.composer_tooltip"),
                         ))
                         .child(Self::render_trigger(
                             "new-agent-trigger-sidebar",
-                            "na seção Agentes da sidebar",
-                            "Sempre ligado: o agente aparece na seção Agentes da sidebar",
+                            t!("agent_ui.new_agent.trigger.sidebar"),
+                            t!("agent_ui.new_agent.trigger.sidebar_tooltip"),
                         )),
                 )),
         )
@@ -564,7 +572,7 @@ impl NewAgentModal {
         icon: Icon,
         name: impl Into<SharedString>,
         description: Option<SharedString>,
-        permission: (&'static str, Color),
+        permission: (SharedString, Color),
         cx: &App,
     ) -> impl IntoElement {
         let colors = cx.theme().colors();
@@ -633,9 +641,12 @@ impl NewAgentModal {
                     .iter()
                     .all(|tool| tool.access == ToolAccess::Read) =>
                 {
-                    ("livre", Color::Success)
+                    (t!("agent_ui.task_agents.permission.allow"), Color::Success)
                 }
-                None => ("pede", Color::Warning),
+                None => (
+                    t!("agent_ui.task_agents.permission.confirm"),
+                    Color::Warning,
+                ),
             };
             rows = rows.child(Self::render_tool_row(
                 Icon::from_path(format!("icons/{}.svg", toolkit.icon)),
@@ -672,24 +683,22 @@ impl NewAgentModal {
         if agent.toolkits.is_empty() {
             rows = rows.child(
                 div().px_3().py_2().child(
-                    Label::new(
-                        "Só as ferramentas do perfil base. Ligue toolkits depois, no formulário.",
-                    )
-                    .size(LabelSize::Small)
-                    .color(Color::Muted),
+                    Label::new(t!("agent_ui.new_agent.tools.base_only"))
+                        .size(LabelSize::Small)
+                        .color(Color::Muted),
                 ),
             );
         }
         Self::render_column(cx)
             .child(
-                Self::render_column_header("FERRAMENTAS", cx).child(
+                Self::render_column_header(t!("agent_ui.new_agent.tools.title"), cx).child(
                     div()
                         .id("new-agent-permissions-help")
-                        .tooltip(Tooltip::text(
-                            "livre: roda sem perguntar. pede: confirma com você antes de agir. nunca: a ferramenta fica bloqueada.",
-                        ))
+                        .tooltip(Tooltip::text(t!(
+                            "agent_ui.new_agent.tools.permissions_help"
+                        )))
                         .child(
-                            Label::new("por que cada")
+                            Label::new(t!("agent_ui.new_agent.tools.why"))
                                 .size(LabelSize::XSmall)
                                 .color(Color::Accent),
                         ),
@@ -712,7 +721,10 @@ impl NewAgentModal {
         let personal = self.personal;
         let colors = cx.theme().colors();
         Self::render_column(cx)
-            .child(Self::render_column_header("SAÍDA", cx))
+            .child(Self::render_column_header(
+                t!("agent_ui.new_agent.output.title"),
+                cx,
+            ))
             .child(
                 v_flex()
                     .flex_1()
@@ -732,7 +744,7 @@ impl NewAgentModal {
                             }),
                     )
                     .child(Self::render_value(
-                        "Destino",
+                        t!("agent_ui.new_agent.output.destination"),
                         h_flex().pt_0p5().child(
                             h_flex()
                                 .gap_0p5()
@@ -742,37 +754,47 @@ impl NewAgentModal {
                                 .border_color(colors.border_variant)
                                 .bg(colors.editor_background)
                                 .child(
-                                    Button::new("new-agent-project", "Projeto")
-                                        .style(ButtonStyle::Subtle)
-                                        .label_size(LabelSize::Small)
-                                        .toggle_state(!personal)
-                                        .selected_style(ButtonStyle::Tinted(ui::TintColor::Accent))
-                                        .tooltip(Tooltip::text(
-                                            "Vai para .asylum/agents e entra no git",
-                                        ))
-                                        .on_click(cx.listener(|this, _, _, cx| {
+                                    Button::new(
+                                        "new-agent-project",
+                                        t!("agent_ui.new_agent.output.project"),
+                                    )
+                                    .style(ButtonStyle::Subtle)
+                                    .label_size(LabelSize::Small)
+                                    .toggle_state(!personal)
+                                    .selected_style(ButtonStyle::Tinted(ui::TintColor::Accent))
+                                    .tooltip(Tooltip::text(t!(
+                                        "agent_ui.new_agent.output.project_tooltip"
+                                    )))
+                                    .on_click(cx.listener(
+                                        |this, _, _, cx| {
                                             this.personal = false;
                                             cx.notify();
-                                        })),
+                                        },
+                                    )),
                                 )
                                 .child(
-                                    Button::new("new-agent-personal", "Só para mim")
-                                        .style(ButtonStyle::Subtle)
-                                        .label_size(LabelSize::Small)
-                                        .toggle_state(personal)
-                                        .selected_style(ButtonStyle::Tinted(ui::TintColor::Accent))
-                                        .tooltip(Tooltip::text(
-                                            "Fica nos seus dados, fora do repositório",
-                                        ))
-                                        .on_click(cx.listener(|this, _, _, cx| {
+                                    Button::new(
+                                        "new-agent-personal",
+                                        t!("agent_ui.new_agent.output.personal"),
+                                    )
+                                    .style(ButtonStyle::Subtle)
+                                    .label_size(LabelSize::Small)
+                                    .toggle_state(personal)
+                                    .selected_style(ButtonStyle::Tinted(ui::TintColor::Accent))
+                                    .tooltip(Tooltip::text(t!(
+                                        "agent_ui.new_agent.output.personal_tooltip"
+                                    )))
+                                    .on_click(cx.listener(
+                                        |this, _, _, cx| {
                                             this.personal = true;
                                             cx.notify();
-                                        })),
+                                        },
+                                    )),
                                 ),
                         ),
                     ))
                     .child(Self::render_value(
-                        "Salvar em",
+                        t!("agent_ui.new_agent.output.save_to"),
                         Label::new(path)
                             .size(LabelSize::XSmall)
                             .color(Color::Muted)
@@ -784,15 +806,17 @@ impl NewAgentModal {
 
     fn render_suggestion_header(&self, cx: &App) -> impl IntoElement {
         let badge = match &self.start {
-            Start::Blank => "em branco",
-            Start::Template(_) => "do modelo",
-            Start::Imported(_) => "importada",
-            Start::Generated => "gerada agora",
+            Start::Blank => t!("agent_ui.new_agent.badge.blank"),
+            Start::Template(_) => t!("agent_ui.new_agent.badge.template"),
+            Start::Imported(_) => t!("agent_ui.new_agent.badge.imported"),
+            Start::Generated => t!("agent_ui.new_agent.badge.generated"),
         };
         let accent = Color::Accent.color(cx);
         h_flex()
             .gap_3()
-            .child(Self::render_section_label("SUGESTÃO"))
+            .child(Self::render_section_label(t!(
+                "agent_ui.new_agent.suggestion"
+            )))
             .child(
                 ui::Chip::new(badge)
                     .icon(if self.start == Start::Generated {
@@ -837,7 +861,7 @@ fn permission_color(mode: PermissionMode) -> Color {
     }
 }
 
-fn permission_chip(label: &'static str, color: Color, cx: &App) -> impl IntoElement {
+fn permission_chip(label: SharedString, color: Color, cx: &App) -> impl IntoElement {
     let tint = color.color(cx);
     ui::Chip::new(label)
         .label_color(color)
@@ -891,19 +915,20 @@ impl Render for NewAgentModal {
                         v_flex()
                             .flex_1()
                             .gap_1()
-                            .child(Headline::new("Novo agente").size(HeadlineSize::Small))
                             .child(
-                                Label::new(
-                                    "Descreva a tarefa. O Asylum sugere ferramentas, gatilhos e saída — tudo editável depois.",
-                                )
-                                .size(LabelSize::Small)
-                                .color(Color::Muted),
+                                Headline::new(t!("agent_ui.task_agents.new_agent"))
+                                    .size(HeadlineSize::Small),
+                            )
+                            .child(
+                                Label::new(t!("agent_ui.new_agent.subtitle"))
+                                    .size(LabelSize::Small)
+                                    .color(Color::Muted),
                             ),
                     )
                     .child(
                         IconButton::new("new-agent-close", IconName::Close)
                             .icon_size(IconSize::Small)
-                            .tooltip(Tooltip::text("Fechar"))
+                            .tooltip(Tooltip::text(t!("agent_ui.new_agent.close")))
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(DismissEvent))),
                     ),
             )
@@ -919,13 +944,17 @@ impl Render for NewAgentModal {
                     .child(
                         v_flex()
                             .gap_2()
-                            .child(Self::render_section_label("COMEÇAR DE"))
+                            .child(Self::render_section_label(t!(
+                                "agent_ui.new_agent.start.title"
+                            )))
                             .child(self.render_starts(cx)),
                     )
                     .child(
                         v_flex()
                             .gap_2()
-                            .child(Self::render_section_label("O QUE ELE FAZ"))
+                            .child(Self::render_section_label(t!(
+                                "agent_ui.new_agent.description_title"
+                            )))
                             .child(self.render_description(window, cx))
                             .when_some(self.generation.error.clone(), |this, error| {
                                 this.child(
@@ -981,25 +1010,28 @@ impl Render for NewAgentModal {
                     .border_t_1()
                     .border_color(cx.theme().colors().border_variant)
                     .child(
-                        Label::new(
-                            "Nada roda até você salvar e chamar. Permissões \"pede\" sempre confirmam.",
+                        Label::new(t!("agent_ui.new_agent.footer"))
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted)
+                            .flex_1(),
+                    )
+                    .child(
+                        Button::new(
+                            "new-agent-create-and-run",
+                            t!("agent_ui.new_agent.create_and_run"),
                         )
-                        .size(LabelSize::XSmall)
-                        .color(Color::Muted)
-                        .flex_1(),
+                        .style(ButtonStyle::Outlined)
+                        .disabled(running)
+                        .start_icon(Icon::new(IconName::PlayOutlined).size(IconSize::XSmall))
+                        .tooltip(Tooltip::text(t!(
+                            "agent_ui.new_agent.create_and_run_tooltip"
+                        )))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.create_suggested(true, window, cx)
+                        })),
                     )
                     .child(
-                        Button::new("new-agent-create-and-run", "Criar e chamar")
-                            .style(ButtonStyle::Outlined)
-                            .disabled(running)
-                            .start_icon(Icon::new(IconName::PlayOutlined).size(IconSize::XSmall))
-                            .tooltip(Tooltip::text("Cria o agente e abre uma thread nova com /comando"))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.create_suggested(true, window, cx)
-                            })),
-                    )
-                    .child(
-                        Button::new("new-agent-create", "Criar agente")
+                        Button::new("new-agent-create", t!("agent_ui.new_agent.create"))
                             .style(ButtonStyle::Tinted(ui::TintColor::Accent))
                             .disabled(running)
                             .key_binding(ui::KeyBinding::for_action_in(

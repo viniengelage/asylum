@@ -1,0 +1,14 @@
+{
+  "dock.close_tab": "Close Tab",
+  "dock.toggle_bottom": "Toggle Bottom Dock",
+  "dock.toggle_devices": "Toggle Devices Dock",
+  "dock.toggle_left": "Toggle Left Dock",
+  "dock.toggle_right": "Toggle Right Dock",
+  "foreign_paths.cancel": "Cancel",
+  "foreign_paths.detail": "There it opens with that profile's accounts, AI and MCP servers.",
+  "foreign_paths.open_here": "Open here",
+  "foreign_paths.open_there": "Open in {profile}",
+  "foreign_paths.title": "This folder belongs to the {profile} profile",
+  "pane.fallback_title": "Pane",
+  "toolkit.title": "Toolkit"
+}

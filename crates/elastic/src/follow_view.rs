@@ -16,6 +16,7 @@ use gpui::{
     AnyElement, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, ScrollStrategy,
     Subscription, Task, UniformListScrollHandle, WeakEntity, px, uniform_list,
 };
+use i18n::t;
 use project::Project;
 use std::{
     collections::VecDeque,
@@ -236,9 +237,7 @@ impl FollowView {
                             .log_err();
                         if this.last_seen.elapsed() > IDLE_STOP {
                             this.state = State::Paused {
-                                reason: Some(
-                                    "parou sozinho depois de 10 min com a aba fora de foco".into(),
-                                ),
+                                reason: Some(t!("elastic.follow.stopped_idle")),
                             };
                             cx.notify();
                             return false;
@@ -421,7 +420,7 @@ impl FollowView {
         window.dispatch_action(
             Box::new(zed_actions::agent::MentionLogs {
                 id,
-                title: format!("seguindo {}", self.source),
+                title: t!("elastic.follow.mention_title", source = self.source).to_string(),
                 prompt: Some(prompt.to_string()),
                 submit: true,
             }),
@@ -567,16 +566,16 @@ impl FollowView {
                                 .color(Color::Accent),
                         )
                         .child(
-                            Label::new(format!("Padrão novo desde {}", pattern.since))
+                            Label::new(t!("elastic.follow.new_pattern", time = pattern.since))
                                 .size(LabelSize::Small)
                                 .weight(FontWeight::SEMIBOLD),
                         ),
                 )
                 .child(
-                    Label::new(format!(
-                        "\"{}\" não apareceu nas últimas 24 h e já veio {} vezes nesta sessão.",
-                        example.chars().take(160).collect::<String>(),
-                        pattern.hits
+                    Label::new(t!(
+                        "elastic.follow.new_pattern_body",
+                        example = example.chars().take(160).collect::<String>(),
+                        count = pattern.hits
                     ))
                     .size(LabelSize::Small)
                     .color(Color::Muted),
@@ -585,7 +584,7 @@ impl FollowView {
                     h_flex()
                         .gap_2()
                         .child(
-                            Button::new("elastic-pattern-investigate", "Investigar no chat")
+                            Button::new("elastic-pattern-investigate", t!("elastic.follow.investigate"))
                                 .style(ButtonStyle::Tinted(ui::TintColor::Accent))
                                 .label_size(LabelSize::Small)
                                 .start_icon(Icon::new(IconName::Chat).size(IconSize::Small))
@@ -605,7 +604,7 @@ impl FollowView {
                                 })),
                         )
                         .child(
-                            Button::new("elastic-pattern-query", "Montar consulta")
+                            Button::new("elastic-pattern-query", t!("elastic.follow.build_query"))
                                 .style(ButtonStyle::Outlined)
                                 .label_size(LabelSize::Small)
                                 .start_icon(Icon::new(IconName::FileCode).size(IconSize::Small))
@@ -636,7 +635,7 @@ impl FollowView {
                                 })),
                         )
                         .child(
-                            Button::new("elastic-pattern-silence", "Silenciar este padrão")
+                            Button::new("elastic-pattern-silence", t!("elastic.follow.silence"))
                                 .style(ButtonStyle::Subtle)
                                 .label_size(LabelSize::Small)
                                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -685,17 +684,17 @@ impl Render for FollowView {
             self.last_seen = Instant::now();
         }
         let (dot, status) = match &self.state {
-            State::Starting => (Color::Muted, "conectando…".to_string()),
+            State::Starting => (Color::Muted, t!("elastic.common.connecting")),
             State::Following => (
                 Color::Error,
-                format!(
-                    "a cada {} s · {} docs/min",
-                    POLL_INTERVAL.as_secs(),
-                    self.arrivals.len()
+                t!(
+                    "elastic.follow.status_following",
+                    seconds = POLL_INTERVAL.as_secs(),
+                    rate = self.arrivals.len()
                 ),
             ),
-            State::Paused { .. } => (Color::Warning, "pausado".to_string()),
-            State::Failed(_) => (Color::Error, "falhou".to_string()),
+            State::Paused { .. } => (Color::Warning, t!("elastic.follow.status_paused")),
+            State::Failed(_) => (Color::Error, t!("elastic.common.failed")),
         };
         let paused = matches!(self.state, State::Paused { .. } | State::Failed(_));
         let line_count = self.lines.len();
@@ -705,13 +704,13 @@ impl Render for FollowView {
                 reason: Some(reason),
             } => reason.to_string(),
             State::Failed(error) => error.to_string(),
-            _ => format!(
-                "Seguindo há {} min {} s · consulta a cada {} s, relendo os últimos 30 s por \
-                 atraso de ingestão · para sozinho após 10 min com a aba fora de foco",
-                running_for / 60,
-                running_for % 60,
-                POLL_INTERVAL.as_secs()
-            ),
+            _ => t!(
+                "elastic.follow.subtitle",
+                minutes = running_for / 60,
+                seconds = running_for % 60,
+                interval = POLL_INTERVAL.as_secs()
+            )
+            .to_string(),
         };
         let selected = self
             .selected
@@ -810,21 +809,22 @@ impl Render for FollowView {
                                         .color(Color::Accent),
                                 )
                                 .child(
-                                    Label::new("vigiando padrões")
+                                    Label::new(t!("elastic.follow.watching"))
                                         .size(LabelSize::XSmall)
                                         .color(Color::Accent),
                                 )
-                                .tooltip(Tooltip::text(
-                                    "Compara o que chega com as mensagens das últimas 24 h e avisa \
-                                     quando aparece um padrão novo. Roda aqui, sem o modelo.",
-                                )),
+                                .tooltip(Tooltip::text(t!("elastic.follow.watching_tooltip"))),
                         )
                     })
                     .child(div().flex_1())
                     .child(
                         Button::new(
                             "elastic-follow-pause",
-                            if paused { "Retomar" } else { "Pausar" },
+                            if paused {
+                                t!("elastic.follow.resume")
+                            } else {
+                                t!("elastic.follow.pause")
+                            },
                         )
                         .style(ButtonStyle::Outlined)
                         .label_size(LabelSize::Small)
@@ -890,19 +890,23 @@ impl Render for FollowView {
                     .border_color(cx.theme().colors().border)
                     .child(ui::Indicator::dot().color(dot))
                     .child(
-                        Label::new(format!(
-                            "{} · {} docs desde o início, {} na memória (máx. {})",
-                            if paused { "Pausado" } else { "Seguindo o fim" },
-                            results::format_count(self.total as u64),
-                            results::format_count(line_count as u64),
-                            results::format_count(MAX_LINES as u64),
+                        Label::new(t!(
+                            "elastic.follow.footer",
+                            state = if paused {
+                                t!("elastic.follow.state_paused")
+                            } else {
+                                t!("elastic.follow.state_following")
+                            },
+                            total = results::format_count(self.total as u64),
+                            kept = results::format_count(line_count as u64),
+                            max = results::format_count(MAX_LINES as u64),
                         ))
                         .size(LabelSize::XSmall)
                         .color(Color::Muted),
                     )
                     .child(div().flex_1())
                     .child(
-                        Button::new("elastic-follow-save", "Salvar como .log")
+                        Button::new("elastic-follow-save", t!("elastic.follow.save_log"))
                             .style(ButtonStyle::Outlined)
                             .label_size(LabelSize::Small)
                             .start_icon(Icon::new(IconName::Download).size(IconSize::Small))
@@ -912,7 +916,7 @@ impl Render for FollowView {
                             ),
                     )
                     .child(
-                        Button::new("elastic-follow-agent", "Mandar para o Agent")
+                        Button::new("elastic-follow-agent", t!("elastic.follow.send_to_agent"))
                             .style(ButtonStyle::Outlined)
                             .label_size(LabelSize::Small)
                             .start_icon(Icon::new(IconName::Sparkle).size(IconSize::Small))
@@ -943,8 +947,11 @@ impl Item for FollowView {
 
     fn tab_content_text(&self, _detail: usize, _cx: &App) -> SharedString {
         match self.applied_filter.as_deref().and_then(filtered_app) {
-            Some(app) => format!("seguindo · {app}").into(),
-            None => format!("seguindo · {}", short_source(&self.source)).into(),
+            Some(app) => t!("elastic.follow.tab_title", source = app),
+            None => t!(
+                "elastic.follow.tab_title",
+                source = short_source(&self.source)
+            ),
         }
     }
 

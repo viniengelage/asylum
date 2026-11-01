@@ -33,6 +33,7 @@ agent.workspace = true
 async-channel.workspace = true
 agent_servers.workspace = true
 agent_settings.workspace = true
+i18n.workspace = true
 task_agents.workspace = true
 flows.workspace = true
 agent_skills.workspace = true

@@ -14,6 +14,7 @@ use gpui::{
     Action as _, AnyElement, Div, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Pixels,
     Stateful, Subscription, Task, WeakEntity, px, uniform_list,
 };
+use i18n::t;
 use project::Project;
 use std::{
     ops::Range,
@@ -122,7 +123,7 @@ impl ApiPanel {
         let project = workspace.project().clone();
         let fs = workspace.app_state().fs.clone();
         let filter_input = cx.new(|cx| {
-            InputField::new(window, cx, "Filtrar por rota, método ou tag…")
+            InputField::new(window, cx, &t!("api_client.panel.filter_placeholder"))
                 .start_icon(IconName::MagnifyingGlass)
         });
         let mut subscriptions = Vec::new();
@@ -642,7 +643,7 @@ impl ApiPanel {
                 .gap_2()
                 .border_t_1()
                 .border_color(colors.border)
-                .child(section_label("SALVAS POR MIM"))
+                .child(section_label(t!("api_client.panel.saved_by_me_section")))
                 .child(div().flex_1())
                 .child(
                     Label::new(file)
@@ -683,7 +684,7 @@ impl ApiPanel {
                             .icon_size(IconSize::XSmall)
                             .icon_color(Color::Muted)
                             .visible_on_hover("api-row")
-                            .tooltip(Tooltip::text("Apagar"))
+                            .tooltip(Tooltip::text(t!("api_client.panel.delete")))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 if let Some(collection) = this.collection().cloned() {
                                     collection.update(cx, |collection, cx| {
@@ -715,12 +716,19 @@ impl ApiPanel {
             .map(|spec| spec.api_version.clone())
             .filter(|version| !version.is_empty());
         let synced = match (&collection.spec_error, collection.synced_at) {
-            (Some(_), _) => ("erro ao ler o spec".to_string(), Color::Error),
+            (Some(_), _) => (t!("api_client.panel.sync_error").to_string(), Color::Error),
             (None, Some(synced_at)) => (
-                format!("sincronizado às {}", synced_at.format("%H:%M")),
+                t!(
+                    "api_client.panel.synced_at",
+                    time = synced_at.format("%H:%M")
+                )
+                .to_string(),
                 Color::Success,
             ),
-            (None, None) => ("lendo o spec…".to_string(), Color::Muted),
+            (None, None) => (
+                t!("api_client.panel.reading_spec").to_string(),
+                Color::Muted,
+            ),
         };
         let environments: Vec<String> = collection
             .environments()
@@ -730,7 +738,7 @@ impl ApiPanel {
         let active = collection
             .active_environment()
             .map(|environment| environment.name.clone())
-            .unwrap_or_else(|| "sem ambiente".to_string());
+            .unwrap_or_else(|| t!("api_client.panel.no_environment").to_string());
         let titles: Vec<(usize, String)> = self
             .collections
             .iter()
@@ -804,7 +812,7 @@ impl ApiPanel {
                                 let active = active.clone();
                                 let collection = collection_entity.clone();
                                 Some(ContextMenu::build(window, cx, move |mut menu, _, _| {
-                                    menu = menu.header("Ambiente");
+                                    menu = menu.header(t!("api_client.panel.environment_header"));
                                     for name in environments.iter() {
                                         let collection = collection.clone();
                                         let chosen = name.clone();
@@ -829,7 +837,7 @@ impl ApiPanel {
                         IconButton::new("api-settings", IconName::Sliders)
                             .icon_size(IconSize::Small)
                             .icon_color(Color::Muted)
-                            .tooltip(Tooltip::text("Login, headers e ambientes"))
+                            .tooltip(Tooltip::text(t!("api_client.panel.settings_tooltip")))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.open_settings(window, cx);
                             })),
@@ -847,7 +855,8 @@ impl ApiPanel {
                                 let titles = titles.clone();
                                 Some(ContextMenu::build(window, cx, move |mut menu, _, _| {
                                     if has_many {
-                                        menu = menu.header("Coleções");
+                                        menu =
+                                            menu.header(t!("api_client.panel.collections_header"));
                                         for (index, title) in titles.iter() {
                                             let this = this.clone();
                                             let index = *index;
@@ -865,24 +874,32 @@ impl ApiPanel {
                                     let open_spec = this.clone();
                                     let reload = this.clone();
                                     let link = this;
-                                    menu.entry("Abrir o spec", None, move |window, cx| {
-                                        open_spec
-                                            .update(cx, |this, cx| this.open_spec(window, cx))
-                                            .log_err();
-                                    })
-                                    .entry("Reler o spec", None, move |_, cx| {
-                                        reload
-                                            .update(cx, |this, cx| {
-                                                if let Some(collection) = this.collection() {
-                                                    collection.update(cx, |collection, cx| {
-                                                        collection.reload_spec(cx)
-                                                    });
-                                                }
-                                            })
-                                            .log_err();
-                                    })
+                                    menu.entry(
+                                        t!("api_client.panel.open_spec"),
+                                        None,
+                                        move |window, cx| {
+                                            open_spec
+                                                .update(cx, |this, cx| this.open_spec(window, cx))
+                                                .log_err();
+                                        },
+                                    )
                                     .entry(
-                                        "Vincular outra API…",
+                                        t!("api_client.panel.reload_spec"),
+                                        None,
+                                        move |_, cx| {
+                                            reload
+                                                .update(cx, |this, cx| {
+                                                    if let Some(collection) = this.collection() {
+                                                        collection.update(cx, |collection, cx| {
+                                                            collection.reload_spec(cx)
+                                                        });
+                                                    }
+                                                })
+                                                .log_err();
+                                        },
+                                    )
+                                    .entry(
+                                        t!("api_client.panel.link_another"),
                                         None,
                                         move |_, cx| {
                                             link.update(cx, |this, cx| {
@@ -939,7 +956,7 @@ impl ApiPanel {
                 (LoginStatus::LoggingIn, _) => (
                     IconName::LoadCircle,
                     Color::Muted,
-                    "Entrando…".to_string(),
+                    t!("api_client.panel.logging_in").to_string(),
                     collection
                         .file
                         .auth
@@ -951,22 +968,33 @@ impl ApiPanel {
                 (LoginStatus::Failed(error), _) => (
                     IconName::Warning,
                     Color::Error,
-                    "O login falhou".to_string(),
+                    t!("api_client.panel.login_failed").to_string(),
                     error.to_string(),
                 ),
                 (LoginStatus::Idle, true) => {
                     let who = collection
                         .login_label()
-                        .map(|label| format!("Logado como {label}"))
-                        .unwrap_or_else(|| "Logado".to_string());
+                        .map(|label| t!("api_client.panel.logged_in_as", label = label).to_string())
+                        .unwrap_or_else(|| t!("api_client.panel.logged_in").to_string());
                     let expiry = match collection.session.seconds_left() {
-                        Some(seconds) if seconds <= 0 => "token expirado".to_string(),
-                        Some(seconds) if seconds < 120 => format!("token expira em {seconds} s"),
-                        Some(seconds) if seconds < 7200 => {
-                            format!("token expira em {} min", seconds / 60)
+                        Some(seconds) if seconds <= 0 => {
+                            t!("api_client.panel.token_expired").to_string()
                         }
-                        Some(seconds) => format!("token expira em {} h", seconds / 3600),
-                        None => "token sem validade conhecida".to_string(),
+                        Some(seconds) if seconds < 120 => {
+                            t!("api_client.panel.token_expires_seconds", seconds = seconds)
+                                .to_string()
+                        }
+                        Some(seconds) if seconds < 7200 => t!(
+                            "api_client.panel.token_expires_minutes",
+                            minutes = seconds / 60
+                        )
+                        .to_string(),
+                        Some(seconds) => t!(
+                            "api_client.panel.token_expires_hours",
+                            hours = seconds / 3600
+                        )
+                        .to_string(),
+                        None => t!("api_client.panel.token_no_expiry").to_string(),
                     };
                     let scheme = collection
                         .file
@@ -986,14 +1014,14 @@ impl ApiPanel {
                     Some(login) => (
                         IconName::Person,
                         Color::Muted,
-                        "Não logado".to_string(),
-                        format!("login por {}", login.operation),
+                        t!("api_client.panel.not_logged_in").to_string(),
+                        t!("api_client.panel.login_via", operation = &login.operation).to_string(),
                     ),
                     None => (
                         IconName::Person,
                         Color::Muted,
-                        "Login não configurado".to_string(),
-                        "o spec tem bearer, mas nenhuma rota de login foi achada".to_string(),
+                        t!("api_client.panel.login_not_configured").to_string(),
+                        t!("api_client.panel.login_not_found").to_string(),
                     ),
                 },
             };
@@ -1014,7 +1042,7 @@ impl ApiPanel {
             div().into_any_element()
         } else if has_login && logged_in {
             let renew = collection_entity;
-            ui::secondary_button("api-renew", None, "Renovar", true, cx)
+            ui::secondary_button("api-renew", None, t!("api_client.panel.renew"), true, cx)
                 .on_click(move |_, _, cx| {
                     renew.update(cx, |collection, cx| {
                         collection.renew(cx).detach_and_log_err(cx)
@@ -1023,15 +1051,21 @@ impl ApiPanel {
                 .into_any_element()
         } else if has_login && has_credentials {
             let login = collection_entity;
-            ui::primary_button("api-login", None, "Entrar", None, cx)
+            ui::primary_button("api-login", None, t!("api_client.panel.log_in"), None, cx)
                 .on_click(move |_, _, cx| {
                     login.update(cx, |collection, cx| collection.start_login(cx));
                 })
                 .into_any_element()
         } else {
-            ui::secondary_button("api-configure-login", None, "Configurar", true, cx)
-                .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx)))
-                .into_any_element()
+            ui::secondary_button(
+                "api-configure-login",
+                None,
+                t!("api_client.panel.configure"),
+                true,
+                cx,
+            )
+            .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx)))
+            .into_any_element()
         };
         h_flex()
             .w_full()
@@ -1107,11 +1141,11 @@ impl ApiPanel {
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| "spec".to_string());
         let summary = spec.as_ref().map(|spec| {
-            format!(
-                "{} operações · {} tags · {} servers",
-                spec.operations.len(),
-                spec.folders().len(),
-                spec.servers.len()
+            t!(
+                "api_client.panel.spec_summary",
+                operations = spec.operations.len(),
+                tags = spec.folders().len(),
+                servers = spec.servers.len()
             )
         });
         let warnings = spec
@@ -1163,7 +1197,7 @@ impl ApiPanel {
                     .pt_3()
                     .pb_1()
                     .gap_2()
-                    .child(section_label("ROTAS"))
+                    .child(section_label(t!("api_client.panel.routes_section")))
                     .when_some(spec.as_ref(), |this, spec| {
                         this.child(
                             Label::new(spec.operations.len().to_string())
@@ -1176,7 +1210,7 @@ impl ApiPanel {
                         IconButton::new("api-expand-all", IconName::ChevronDownUp)
                             .icon_size(IconSize::Small)
                             .icon_color(Color::Muted)
-                            .tooltip(Tooltip::text("Expandir ou recolher todas as pastas"))
+                            .tooltip(Tooltip::text(t!("api_client.panel.expand_all_tooltip")))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 let Some(collection) = this.collection() else {
                                     return;
@@ -1244,9 +1278,12 @@ impl ApiPanel {
                                 .id("api-warnings")
                                 .child(
                                     Label::new(if warnings.len() == 1 {
-                                        "· 1 aviso".to_string()
+                                        t!("api_client.panel.warnings.one")
                                     } else {
-                                        format!("· {} avisos", warnings.len())
+                                        t!(
+                                            "api_client.panel.warnings.other",
+                                            count = warnings.len()
+                                        )
                                     })
                                     .size(LabelSize::XSmall)
                                     .color(Color::Warning),
@@ -1260,7 +1297,7 @@ impl ApiPanel {
                             .id("api-open-spec")
                             .cursor_pointer()
                             .child(
-                                Label::new(format!("Abrir {spec_file_name}"))
+                                Label::new(t!("api_client.panel.open_file", file = spec_file_name))
                                     .size(LabelSize::XSmall)
                                     .weight(FontWeight::MEDIUM)
                                     .color(Color::Accent),
@@ -1279,7 +1316,7 @@ impl ApiPanel {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some("Usar este spec".into()),
+            prompt: Some(t!("api_client.panel.use_this_spec")),
         });
         let roots = self.roots(cx);
         let fs = self.fs.clone();
@@ -1376,7 +1413,7 @@ impl ApiPanel {
                     ),
                 )
         };
-        let note_row = |icon: IconName, title: &'static str, detail: &'static str| {
+        let note_row = |icon: IconName, title: SharedString, detail: SharedString| {
             h_flex()
                 .w_full()
                 .gap_2p5()
@@ -1403,9 +1440,9 @@ impl ApiPanel {
                 )
         };
         let link_label = match (&chosen, linking) {
-            (_, true) => "Vinculando…".to_string(),
-            (Some(chosen), false) => format!("Vincular {}", chosen.title),
-            (None, false) => "Vincular".to_string(),
+            (_, true) => t!("api_client.panel.linking"),
+            (Some(chosen), false) => t!("api_client.panel.link_named", title = &chosen.title),
+            (None, false) => t!("api_client.panel.link"),
         };
         let link_button =
             ui::primary_button("api-link", Some(IconName::Link), link_label, None, cx)
@@ -1444,7 +1481,11 @@ impl ApiPanel {
                                         .size(IconSize::XSmall)
                                         .color(Color::Muted),
                                 )
-                                .child(Label::new("Rotas").size(LabelSize::Small).color(Color::Muted))
+                                .child(
+                                    Label::new(t!("api_client.panel.routes"))
+                                        .size(LabelSize::Small)
+                                        .color(Color::Muted),
+                                )
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.view = View::Tree;
                                     cx.notify();
@@ -1455,118 +1496,121 @@ impl ApiPanel {
                         v_flex()
                             .gap_0p5()
                             .child(
-                                Label::new("Vincular uma API")
+                                Label::new(t!("api_client.panel.link_title"))
                                     .size(LabelSize::Large)
                                     .weight(FontWeight::SEMIBOLD),
                             )
                             .child(
-                                Label::new(
-                                    "O Asylum lê o spec do projeto e monta a coleção. O yml continua sendo a fonte.",
-                                )
-                                .size(LabelSize::XSmall)
-                                .color(Color::Muted),
+                                Label::new(t!("api_client.panel.link_description"))
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted),
                             ),
                     )
-                    .child(section_label("ENCONTRADOS NO PROJETO"))
+                    .child(section_label(t!("api_client.panel.found_section")))
                     .when(!self.discovered, |this| {
                         this.child(
-                            Label::new("Procurando arquivos openapi/swagger…")
+                            Label::new(t!("api_client.panel.searching_files"))
                                 .size(LabelSize::Small)
                                 .color(Color::Muted),
                         )
                     })
                     .when(self.discovered && self.candidates.is_empty(), |this| {
                         this.child(
-                            Label::new(
-                                "Nenhum arquivo com openapi ou swagger no nome (yml, yaml ou json) foi achado nas pastas do projeto.",
-                            )
-                            .size(LabelSize::Small)
-                            .color(Color::Muted),
+                            Label::new(t!("api_client.panel.no_files_found"))
+                                .size(LabelSize::Small)
+                                .color(Color::Muted),
                         )
                     })
-                    .children(self.candidates.iter().enumerate().map(|(index, candidate)| {
-                        let active = index == selected;
-                        let detail: AnyElement = match &candidate.summary {
-                            Some(Ok(summary)) => h_flex()
-                                .gap_2()
-                                .child(
-                                    h_flex()
-                                        .flex_none()
-                                        .h(px(18.))
-                                        .px_1p5()
-                                        .rounded_md()
-                                        .map(|this| {
-                                            if active {
-                                                this.bg(accent)
-                                            } else {
-                                                this.bg(Color::Warning.color(cx).opacity(0.12))
-                                            }
-                                        })
+                    .children(
+                        self.candidates
+                            .iter()
+                            .enumerate()
+                            .map(|(index, candidate)| {
+                                let active = index == selected;
+                                let detail: AnyElement = match &candidate.summary {
+                                    Some(Ok(summary)) => h_flex()
+                                        .gap_2()
                                         .child(
-                                            Label::new(summary.format.clone())
+                                            h_flex()
+                                                .flex_none()
+                                                .h(px(18.))
+                                                .px_1p5()
+                                                .rounded_md()
+                                                .map(|this| {
+                                                    if active {
+                                                        this.bg(accent)
+                                                    } else {
+                                                        this.bg(Color::Warning
+                                                            .color(cx)
+                                                            .opacity(0.12))
+                                                    }
+                                                })
+                                                .child(
+                                                    Label::new(summary.format.clone())
+                                                        .size(LabelSize::XSmall)
+                                                        .weight(FontWeight::SEMIBOLD)
+                                                        .color(if active {
+                                                            Color::Custom(gpui::white())
+                                                        } else {
+                                                            Color::Warning
+                                                        }),
+                                                ),
+                                        )
+                                        .child(
+                                            Label::new(summary.info.clone())
                                                 .size(LabelSize::XSmall)
-                                                .weight(FontWeight::SEMIBOLD)
-                                                .color(if active {
-                                                    Color::Custom(gpui::white())
-                                                } else {
-                                                    Color::Warning
-                                                }),
-                                        ),
-                                )
-                                .child(
-                                    Label::new(summary.info.clone())
+                                                .color(Color::Muted)
+                                                .truncate(),
+                                        )
+                                        .into_any_element(),
+                                    Some(Err(error)) => Label::new(error.clone())
+                                        .size(LabelSize::XSmall)
+                                        .color(Color::Error)
+                                        .truncate()
+                                        .into_any_element(),
+                                    None => Label::new(t!("api_client.panel.reading"))
                                         .size(LabelSize::XSmall)
                                         .color(Color::Muted)
-                                        .truncate(),
-                                )
-                                .into_any_element(),
-                            Some(Err(error)) => Label::new(error.clone())
-                                .size(LabelSize::XSmall)
-                                .color(Color::Error)
-                                .truncate()
-                                .into_any_element(),
-                            None => Label::new("lendo…")
-                                .size(LabelSize::XSmall)
-                                .color(Color::Muted)
-                                .into_any_element(),
-                        };
-                        h_flex()
-                            .id(("api-candidate", index))
-                            .w_full()
-                            .px_3()
-                            .py_2p5()
-                            .gap_2p5()
-                            .rounded_lg()
-                            .border_1()
-                            .cursor_pointer()
-                            .map(|this| {
-                                if active {
-                                    this.bg(accent.opacity(0.18)).border_color(accent)
-                                } else {
-                                    this.bg(colors.element_background)
-                                        .border_color(colors.border_selected)
-                                }
-                            })
-                            .child(ui::radio_indicator(active, cx))
-                            .child(
-                                v_flex()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .gap_1()
+                                        .into_any_element(),
+                                };
+                                h_flex()
+                                    .id(("api-candidate", index))
+                                    .w_full()
+                                    .px_3()
+                                    .py_2p5()
+                                    .gap_2p5()
+                                    .rounded_lg()
+                                    .border_1()
+                                    .cursor_pointer()
+                                    .map(|this| {
+                                        if active {
+                                            this.bg(accent.opacity(0.18)).border_color(accent)
+                                        } else {
+                                            this.bg(colors.element_background)
+                                                .border_color(colors.border_selected)
+                                        }
+                                    })
+                                    .child(ui::radio_indicator(active, cx))
                                     .child(
-                                        Label::new(candidate.relative.clone())
-                                            .size(LabelSize::Small)
-                                            .buffer_font(cx)
-                                            .weight(FontWeight::SEMIBOLD)
-                                            .truncate(),
+                                        v_flex()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .gap_1()
+                                            .child(
+                                                Label::new(candidate.relative.clone())
+                                                    .size(LabelSize::Small)
+                                                    .buffer_font(cx)
+                                                    .weight(FontWeight::SEMIBOLD)
+                                                    .truncate(),
+                                            )
+                                            .child(detail),
                                     )
-                                    .child(detail),
-                            )
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.selected_candidate = index;
-                                cx.notify();
-                            }))
-                    }))
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.selected_candidate = index;
+                                        cx.notify();
+                                    }))
+                            }),
+                    )
                     .child(
                         h_flex()
                             .id("api-link-other")
@@ -1585,7 +1629,7 @@ impl ApiPanel {
                                     .color(Color::Muted),
                             )
                             .child(
-                                Label::new("Outro arquivo de spec…")
+                                Label::new(t!("api_client.panel.other_spec_file"))
                                     .size(LabelSize::Small)
                                     .color(Color::Muted),
                             )
@@ -1600,30 +1644,41 @@ impl ApiPanel {
                             tags => format!("{}…", tags[..3].join(", ")),
                         };
                         let servers = if chosen.servers.is_empty() {
-                            "local, sem baseUrl".to_string()
+                            t!("api_client.panel.local_no_base_url").to_string()
                         } else {
                             chosen.servers.join(" · ")
                         };
                         this.child(Divider::horizontal())
-                            .child(section_label("O QUE VAI SER CRIADO"))
+                            .child(section_label(t!("api_client.panel.plan_section")))
                             .child(plan_row(
                                 IconName::Folder,
                                 "tags",
-                                format!("{} pastas", chosen.tags.len()),
+                                t!("api_client.panel.plan_folders", count = chosen.tags.len())
+                                    .to_string(),
                                 folders,
                             ))
                             .child(plan_row(
                                 IconName::ArrowRightLeft,
                                 "paths",
-                                format!("{} requests", chosen.operation_count),
+                                t!(
+                                    "api_client.panel.plan_requests",
+                                    count = chosen.operation_count
+                                )
+                                .to_string(),
                                 String::new(),
                             ))
                             .child(plan_row(
                                 IconName::Server,
                                 "servers",
                                 match chosen.servers.len() {
-                                    0 | 1 => "1 ambiente".to_string(),
-                                    count => format!("{count} ambientes"),
+                                    0 | 1 => {
+                                        t!("api_client.panel.plan_environments.one").to_string()
+                                    }
+                                    count => t!(
+                                        "api_client.panel.plan_environments.other",
+                                        count = count
+                                    )
+                                    .to_string(),
                                 },
                                 servers,
                             ))
@@ -1631,7 +1686,7 @@ impl ApiPanel {
                                 this.child(plan_row(
                                     IconName::Lock,
                                     "securitySchemes",
-                                    "Login da coleção".to_string(),
+                                    t!("api_client.panel.plan_login").to_string(),
                                     chosen.schemes.join(", "),
                                 ))
                             })
@@ -1639,21 +1694,21 @@ impl ApiPanel {
                                 this.child(plan_row(
                                     IconName::Check,
                                     "components.schemas",
-                                    "Validação".to_string(),
-                                    "body e respostas".to_string(),
+                                    t!("api_client.panel.plan_validation").to_string(),
+                                    t!("api_client.panel.plan_validation_detail").to_string(),
                                 ))
                             })
                     })
                     .child(Divider::horizontal())
                     .child(note_row(
                         IconName::RotateCw,
-                        "Observa o arquivo",
-                        "Re-sincroniza ao salvar o yml ou trocar de branch",
+                        t!("api_client.panel.note_watch_title"),
+                        t!("api_client.panel.note_watch_detail"),
                     ))
                     .child(note_row(
                         IconName::FileCode,
-                        "Coleção versionável",
-                        ".asylum/api/<nome>.json com ambientes, headers e requests salvas — sem segredos",
+                        t!("api_client.panel.note_versioned_title"),
+                        t!("api_client.panel.note_versioned_detail"),
                     ))
                     .child(
                         h_flex()
@@ -1666,14 +1721,16 @@ impl ApiPanel {
                             .bg(colors.element_background)
                             .border_1()
                             .border_color(colors.border_selected)
-                            .child(Icon::new(IconName::Lock).size(IconSize::Small).color(Color::Muted))
+                            .child(
+                                Icon::new(IconName::Lock)
+                                    .size(IconSize::Small)
+                                    .color(Color::Muted),
+                            )
                             .child(
                                 div().flex_1().min_w_0().child(
-                                    Label::new(
-                                        "Tokens e senhas ficam no Keychain deste perfil. O arquivo versionado só guarda nomes de variáveis.",
-                                    )
-                                    .size(LabelSize::XSmall)
-                                    .color(Color::Muted),
+                                    Label::new(t!("api_client.panel.keychain_note"))
+                                        .size(LabelSize::XSmall)
+                                        .color(Color::Muted),
                                 ),
                             ),
                     )
@@ -1729,11 +1786,11 @@ impl ApiPanel {
                 (name, value)
             })
             .collect();
-        let mut scheme_values: Vec<(String, &'static str, String, bool, String)> = Vec::new();
+        let mut scheme_values: Vec<(String, SharedString, String, bool, String)> = Vec::new();
         if let Some(spec) = snapshot.spec.as_ref() {
             for scheme in &spec.security_schemes {
                 let parts: &[(&'static str, bool)] = match &scheme.kind {
-                    SchemeKind::ApiKey { .. } => &[("chave", true)],
+                    SchemeKind::ApiKey { .. } => &[("key", true)],
                     SchemeKind::Basic => &[("username", false), ("password", true)],
                     _ => &[],
                 };
@@ -1744,13 +1801,27 @@ impl ApiPanel {
                     };
                     let name = secret.trim_start_matches(SECRET_PREFIX).to_string();
                     let value = snapshot.secret(&name).unwrap_or("").to_string();
-                    let label = match &scheme.kind {
-                        SchemeKind::ApiKey { name: header, .. } => {
-                            format!("Chave de {} ({header}) · keychain", scheme.name)
-                        }
-                        _ => format!("{part} de {} · keychain", scheme.name),
+                    let (placeholder, label) = match &scheme.kind {
+                        SchemeKind::ApiKey { name: header, .. } => (
+                            t!("api_client.settings.api_key_placeholder"),
+                            t!(
+                                "api_client.settings.api_key_label",
+                                scheme = &scheme.name,
+                                header = header
+                            )
+                            .to_string(),
+                        ),
+                        _ => (
+                            SharedString::from(*part),
+                            t!(
+                                "api_client.settings.basic_secret_label",
+                                part = part,
+                                scheme = &scheme.name
+                            )
+                            .to_string(),
+                        ),
                     };
-                    scheme_values.push((name, part, value, *masked, label));
+                    scheme_values.push((name, placeholder, value, *masked, label));
                 }
             }
         }
@@ -1782,16 +1853,18 @@ impl ApiPanel {
         let scheme_secrets = scheme_values
             .into_iter()
             .map(|(name, placeholder, value, masked, label)| {
-                let input = self.input(placeholder, &value, masked, window, cx);
+                let input = self.input(&placeholder, &value, masked, window, cx);
                 (name, label, input)
             })
             .collect();
+        let name_placeholder = t!("api_client.settings.name_placeholder");
+        let value_placeholder = t!("api_client.settings.value_placeholder");
         let headers = header_values
             .iter()
             .map(|header| {
                 (
-                    self.input("nome", &header.name, false, window, cx),
-                    self.input("valor", &header.value, false, window, cx),
+                    self.input(&name_placeholder, &header.name, false, window, cx),
+                    self.input(&value_placeholder, &header.value, false, window, cx),
                     header.enabled,
                 )
             })
@@ -1801,8 +1874,8 @@ impl ApiPanel {
             .iter()
             .map(|variable| {
                 (
-                    self.input("nome", &variable.name, false, window, cx),
-                    self.input("valor", &variable.value, false, window, cx),
+                    self.input(&name_placeholder, &variable.name, false, window, cx),
+                    self.input(&value_placeholder, &variable.value, false, window, cx),
                 )
             })
             .collect();
@@ -1819,7 +1892,7 @@ impl ApiPanel {
                 cx,
             ),
             expires_in_path: self.input(
-                "$.expiresIn (vazio = exp do JWT)",
+                &t!("api_client.settings.expires_in_placeholder"),
                 login.expires_in_path.as_deref().unwrap_or(""),
                 false,
                 window,
@@ -1837,7 +1910,13 @@ impl ApiPanel {
             headers,
             environment_name: environment.name,
             environment_variables,
-            new_environment: self.input("nome do ambiente novo", "", false, window, cx),
+            new_environment: self.input(
+                &t!("api_client.settings.new_environment_placeholder"),
+                "",
+                false,
+                window,
+                cx,
+            ),
             renew_before_expiry: auth.renew_before_expiry,
             retry_on_unauthorized: auth.retry_on_unauthorized,
             remember_session: auth.remember_session,
@@ -2048,9 +2127,13 @@ impl ApiPanel {
                         ),
                     None => this
                         .child(
-                            Label::new(current.clone().unwrap_or_else(|| "Nenhuma".to_string()))
-                                .size(LabelSize::Small)
-                                .color(Color::Muted),
+                            Label::new(
+                                current
+                                    .clone()
+                                    .unwrap_or_else(|| t!("api_client.settings.none").to_string()),
+                            )
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
                         )
                         .child(div().flex_1()),
                 })
@@ -2070,7 +2153,7 @@ impl ApiPanel {
                         if allow_none {
                             let this = this.clone();
                             menu = menu.toggleable_entry(
-                                "Nenhuma",
+                                t!("api_client.settings.none"),
                                 current.is_none(),
                                 IconPosition::End,
                                 None,
@@ -2145,20 +2228,20 @@ impl ApiPanel {
         let toggles = [
             (
                 "api-renew-before",
-                "Renovar 5 min antes de expirar",
+                t!("api_client.settings.renew_before_expiry"),
                 form.renew_before_expiry,
                 (|form: &mut SettingsForm| form.renew_before_expiry = !form.renew_before_expiry)
                     as fn(&mut SettingsForm),
             ),
             (
                 "api-retry-401",
-                "Ao receber 401, renovar e repetir a request",
+                t!("api_client.settings.retry_on_unauthorized"),
                 form.retry_on_unauthorized,
                 |form: &mut SettingsForm| form.retry_on_unauthorized = !form.retry_on_unauthorized,
             ),
             (
                 "api-remember",
-                "Lembrar o login entre aberturas do Asylum",
+                t!("api_client.settings.remember_session"),
                 form.remember_session,
                 |form: &mut SettingsForm| form.remember_session = !form.remember_session,
             ),
@@ -2169,9 +2252,9 @@ impl ApiPanel {
             "api-test-login",
             Some(IconName::PlayFilled),
             if logging_in {
-                "Entrando…"
+                t!("api_client.panel.logging_in")
             } else {
-                "Testar login"
+                t!("api_client.settings.test_login")
             },
             None,
             cx,
@@ -2179,7 +2262,7 @@ impl ApiPanel {
         .flex_1()
         .h(px(32.))
         .justify_center()
-        .tooltip(Tooltip::text("Salva o formulário e faz o login"))
+        .tooltip(Tooltip::text(t!("api_client.settings.test_login_tooltip")))
         .map(|this| {
             if can_test {
                 this.on_click(
@@ -2193,7 +2276,7 @@ impl ApiPanel {
         let logout_button = ui::secondary_button(
             "api-settings-logout",
             Some((IconName::Exit, Color::Muted)),
-            "Sair e apagar token",
+            t!("api_client.settings.logout"),
             logged_in,
             cx,
         )
@@ -2206,7 +2289,7 @@ impl ApiPanel {
                 collection.update(cx, |collection, cx| collection.logout(cx));
             })
         });
-        let add_link = |id: &'static str, label: &'static str| {
+        let add_link = |id: &'static str, label: SharedString| {
             h_flex()
                 .id(id)
                 .gap_1p5()
@@ -2240,7 +2323,11 @@ impl ApiPanel {
                                     .size(IconSize::XSmall)
                                     .color(Color::Muted),
                             )
-                            .child(Label::new("Rotas").size(LabelSize::Small).color(Color::Muted))
+                            .child(
+                                Label::new(t!("api_client.panel.routes"))
+                                    .size(LabelSize::Small)
+                                    .color(Color::Muted),
+                            )
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.view = View::Tree;
                                 cx.notify();
@@ -2257,19 +2344,25 @@ impl ApiPanel {
                 v_flex()
                     .gap_0p5()
                     .child(
-                        Label::new("Login e headers")
+                        Label::new(t!("api_client.settings.title"))
                             .size(LabelSize::Large)
                             .weight(FontWeight::SEMIBOLD),
                     )
                     .child(
-                        Label::new("Valem para todas as rotas da coleção neste perfil.")
+                        Label::new(t!("api_client.settings.subtitle"))
                             .size(LabelSize::XSmall)
                             .color(Color::Muted),
                     ),
             )
-            .child(section_header("ESQUEMAS DO SPEC", Some("components.securitySchemes"), cx))
+            .child(section_header(
+                t!("api_client.settings.schemes_section"),
+                Some("components.securitySchemes"),
+                cx,
+            ))
             .when(schemes.is_empty(), |this| {
-                this.child(field_label("O spec não declara securitySchemes.".to_string()))
+                this.child(field_label(
+                    t!("api_client.settings.no_schemes").to_string(),
+                ))
             })
             .children(schemes.into_iter().map(|(name, summary, uses, is_login)| {
                 h_flex()
@@ -2300,7 +2393,9 @@ impl ApiPanel {
                             )
                             .child(field_label(summary)),
                     )
-                    .child(field_label(format!("{uses} rotas")))
+                    .child(field_label(
+                        t!("api_client.settings.scheme_routes", count = uses).to_string(),
+                    ))
             }))
             .children(form.scheme_secrets.iter().map(|(_, label, input)| {
                 v_flex()
@@ -2309,8 +2404,10 @@ impl ApiPanel {
                     .child(input.clone())
             }))
             .child(Divider::horizontal())
-            .child(section_label("LOGIN"))
-            .child(field_label("Request de login".to_string()))
+            .child(section_label(t!("api_client.settings.login_section")))
+            .child(field_label(
+                t!("api_client.settings.login_request").to_string(),
+            ))
             .child(operation_picker(
                 "api-login-operation",
                 form.login_operation.clone(),
@@ -2319,7 +2416,7 @@ impl ApiPanel {
                 cx,
             ))
             .child(field_label(
-                "Body do login · {{secret.nome}} vira um campo de credencial".to_string(),
+                t!("api_client.settings.login_body").to_string(),
             ))
             .child(
                 div()
@@ -2331,35 +2428,44 @@ impl ApiPanel {
                     .child(form.login_body.clone()),
             )
             .when(!form.credentials.is_empty(), |this| {
-                this.child(field_label("Credenciais".to_string())).child(
+                this.child(field_label(
+                    t!("api_client.settings.credentials").to_string(),
+                ))
+                .child(
                     v_flex()
                         .gap_1p5()
                         .children(form.credentials.iter().map(|(_, input)| input.clone())),
                 )
             })
-            .child(field_label("Extrair da resposta".to_string()))
+            .child(field_label(
+                t!("api_client.settings.extract_from_response").to_string(),
+            ))
             .child(
-                v_flex()
-                    .gap_1p5()
-                    .children(
-                        [
-                            (&form.token_path, "{{token}}"),
-                            (&form.refresh_token_path, "{{refreshToken}}"),
-                            (&form.expires_in_path, "expira (s)"),
-                        ]
-                        .into_iter()
-                        .map(|(input, target)| {
-                            h_flex()
-                                .gap_2()
-                                .child(div().flex_1().child(input.clone()))
-                                .child(
-                                    Icon::new(IconName::ArrowRight)
-                                        .size(IconSize::XSmall)
-                                        .color(Color::Muted),
-                                )
-                                .child(variable_chip(target, cx))
-                        }),
-                    ),
+                v_flex().gap_1p5().children(
+                    [
+                        (&form.token_path, SharedString::from("{{token}}")),
+                        (
+                            &form.refresh_token_path,
+                            SharedString::from("{{refreshToken}}"),
+                        ),
+                        (
+                            &form.expires_in_path,
+                            t!("api_client.settings.expires_seconds"),
+                        ),
+                    ]
+                    .into_iter()
+                    .map(|(input, target)| {
+                        h_flex()
+                            .gap_2()
+                            .child(div().flex_1().child(input.clone()))
+                            .child(
+                                Icon::new(IconName::ArrowRight)
+                                    .size(IconSize::XSmall)
+                                    .color(Color::Muted),
+                            )
+                            .child(variable_chip(target, cx))
+                    }),
+                ),
             )
             .when(
                 !crate::config::login_paths_are_valid(&LoginConfig {
@@ -2372,13 +2478,15 @@ impl ApiPanel {
                 }),
                 |this| {
                     this.child(
-                        Label::new("Caminho não suportado: use $.a.b, $['a-b'] ou $.lista[0]")
+                        Label::new(t!("api_client.settings.unsupported_path"))
                             .size(LabelSize::XSmall)
                             .color(Color::Warning),
                     )
                 },
             )
-            .child(field_label("Request de renovação".to_string()))
+            .child(field_label(
+                t!("api_client.settings.refresh_request").to_string(),
+            ))
             .child(operation_picker(
                 "api-refresh-operation",
                 form.refresh_operation.clone(),
@@ -2389,46 +2497,47 @@ impl ApiPanel {
             .when(form.refresh_operation.is_some(), |this| {
                 this.child(form.refresh_body.clone())
             })
-            .child(
-                v_flex()
-                    .gap_2()
-                    .py_1()
-                    .children(toggles.into_iter().map(|(id, label, state, flip)| {
-                        let this = cx.weak_entity();
-                        SwitchField::new(
-                            id,
-                            Some(label),
-                            None,
-                            if state {
-                                ToggleState::Selected
-                            } else {
-                                ToggleState::Unselected
-                            },
-                            move |_, _, cx| {
-                                this.update(cx, |this, cx| {
-                                    if let Some(form) = this.settings.as_mut() {
-                                        flip(form);
-                                        form.dirty = true;
-                                    }
-                                    cx.notify();
-                                })
-                                .log_err();
-                            },
-                        )
-                    })),
-            )
+            .child(v_flex().gap_2().py_1().children(toggles.into_iter().map(
+                |(id, label, state, flip)| {
+                    let this = cx.weak_entity();
+                    SwitchField::new(
+                        id,
+                        Some(label),
+                        None,
+                        if state {
+                            ToggleState::Selected
+                        } else {
+                            ToggleState::Unselected
+                        },
+                        move |_, _, cx| {
+                            this.update(cx, |this, cx| {
+                                if let Some(form) = this.settings.as_mut() {
+                                    flip(form);
+                                    form.dirty = true;
+                                }
+                                cx.notify();
+                            })
+                            .log_err();
+                        },
+                    )
+                },
+            )))
             .when_some(
                 match &login_status {
                     LoginStatus::Failed(error) => Some(error.clone()),
                     _ => None,
                 },
                 |this, error| {
-                    this.child(Label::new(error).size(LabelSize::XSmall).color(Color::Error))
+                    this.child(
+                        Label::new(error)
+                            .size(LabelSize::XSmall)
+                            .color(Color::Error),
+                    )
                 },
             )
             .child(h_flex().gap_2().child(test_button).child(logout_button))
             .child(Divider::horizontal())
-            .child(section_label("HEADERS DA COLEÇÃO"))
+            .child(section_label(t!("api_client.settings.headers_section")))
             .when(has_bearer_login, |this| {
                 this.child(
                     field_box()
@@ -2452,58 +2561,92 @@ impl ApiPanel {
                                 .size(IconSize::XSmall)
                                 .color(Color::Success),
                         )
-                        .tooltip(Tooltip::text("Vem do login; não precisa estar na lista")),
+                        .tooltip(Tooltip::text(t!(
+                            "api_client.settings.authorization_tooltip"
+                        ))),
                 )
             })
-            .children(form.headers.iter().enumerate().map(|(index, (name, value, enabled))| {
-                h_flex()
-                    .gap_1p5()
-                    .child(
-                        ui::Checkbox::new(("api-collection-header", index), (*enabled).into())
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                if let Some(form) = this.settings.as_mut()
-                                    && let Some(header) = form.headers.get_mut(index)
-                                {
-                                    header.2 = !header.2;
-                                    form.dirty = true;
-                                }
-                                cx.notify();
-                            })),
-                    )
-                    .child(div().w(px(130.)).child(name.clone()))
-                    .child(div().flex_1().child(value.clone()))
-                    .child(
-                        IconButton::new(("api-collection-header-remove", index), IconName::Trash)
-                            .icon_size(IconSize::XSmall)
-                            .icon_color(Color::Muted)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                if let Some(form) = this.settings.as_mut()
-                                    && index < form.headers.len()
-                                {
-                                    form.headers.remove(index);
-                                    form.dirty = true;
-                                }
-                                cx.notify();
-                            })),
-                    )
-            }))
-            .child(add_link("api-collection-header-add", "Adicionar header").on_click(
-                cx.listener(|this, _, window, cx| {
-                    let name = this.input("nome", "", false, window, cx);
-                    let value = this.input("valor", "", false, window, cx);
+            .children(
+                form.headers
+                    .iter()
+                    .enumerate()
+                    .map(|(index, (name, value, enabled))| {
+                        h_flex()
+                            .gap_1p5()
+                            .child(
+                                ui::Checkbox::new(
+                                    ("api-collection-header", index),
+                                    (*enabled).into(),
+                                )
+                                .on_click(cx.listener(
+                                    move |this, _, _, cx| {
+                                        if let Some(form) = this.settings.as_mut()
+                                            && let Some(header) = form.headers.get_mut(index)
+                                        {
+                                            header.2 = !header.2;
+                                            form.dirty = true;
+                                        }
+                                        cx.notify();
+                                    },
+                                )),
+                            )
+                            .child(div().w(px(130.)).child(name.clone()))
+                            .child(div().flex_1().child(value.clone()))
+                            .child(
+                                IconButton::new(
+                                    ("api-collection-header-remove", index),
+                                    IconName::Trash,
+                                )
+                                .icon_size(IconSize::XSmall)
+                                .icon_color(Color::Muted)
+                                .on_click(cx.listener(
+                                    move |this, _, _, cx| {
+                                        if let Some(form) = this.settings.as_mut()
+                                            && index < form.headers.len()
+                                        {
+                                            form.headers.remove(index);
+                                            form.dirty = true;
+                                        }
+                                        cx.notify();
+                                    },
+                                )),
+                            )
+                    }),
+            )
+            .child(
+                add_link(
+                    "api-collection-header-add",
+                    t!("api_client.settings.add_header"),
+                )
+                .on_click(cx.listener(|this, _, window, cx| {
+                    let name = this.input(
+                        &t!("api_client.settings.name_placeholder"),
+                        "",
+                        false,
+                        window,
+                        cx,
+                    );
+                    let value = this.input(
+                        &t!("api_client.settings.value_placeholder"),
+                        "",
+                        false,
+                        window,
+                        cx,
+                    );
                     if let Some(form) = this.settings.as_mut() {
                         form.headers.push((name, value, true));
                         form.dirty = true;
                     }
                     cx.notify();
-                }),
-            ))
+                })),
+            )
             .child(field_label(
-                "Authorization é gerado pelo esquema do login; rotas com security: [] (como o login) não o recebem."
-                    .to_string(),
+                t!("api_client.settings.authorization_note").to_string(),
             ))
             .child(Divider::horizontal())
-            .child(section_label("AMBIENTES"))
+            .child(section_label(t!(
+                "api_client.settings.environments_section"
+            )))
             .child(
                 ui::segmented_control(cx).children(environments.iter().enumerate().map(
                     |(index, name)| {
@@ -2516,101 +2659,132 @@ impl ApiPanel {
                             true,
                             cx,
                         )
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            // Switching edits another environment; save what was typed first.
-                            this.save_settings(false, window, cx);
-                            if let Some(collection) = this.collection().cloned() {
-                                collection.update(cx, |collection, cx| {
-                                    collection.set_active_environment(chosen.clone(), cx)
-                                });
-                                this.settings =
-                                    Some(this.build_settings_form(&collection, window, cx));
-                            }
-                            cx.notify();
-                        }))
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                // Switching edits another environment; save what was typed first.
+                                this.save_settings(false, window, cx);
+                                if let Some(collection) = this.collection().cloned() {
+                                    collection.update(cx, |collection, cx| {
+                                        collection.set_active_environment(chosen.clone(), cx)
+                                    });
+                                    this.settings =
+                                        Some(this.build_settings_form(&collection, window, cx));
+                                }
+                                cx.notify();
+                            },
+                        ))
                     },
                 )),
             )
-            .child(field_label(format!(
-                "Variáveis de {} ({{{{baseUrl}}}} é a URL base)",
-                form.environment_name
-            )))
-            .children(form.environment_variables.iter().enumerate().map(|(index, (name, value))| {
-                h_flex()
-                    .gap_1p5()
-                    .child(div().w(px(110.)).child(name.clone()))
-                    .child(div().flex_1().child(value.clone()))
-                    .child(
-                        IconButton::new(("api-variable-remove", index), IconName::Trash)
-                            .icon_size(IconSize::XSmall)
-                            .icon_color(Color::Muted)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                if let Some(form) = this.settings.as_mut()
-                                    && index < form.environment_variables.len()
-                                {
-                                    form.environment_variables.remove(index);
-                                    form.dirty = true;
-                                }
-                                cx.notify();
-                            })),
-                    )
-            }))
-            .child(add_link("api-variable-add", "Adicionar variável").on_click(cx.listener(
-                |this, _, window, cx| {
-                    let name = this.input("nome", "", false, window, cx);
-                    let value = this.input("valor", "", false, window, cx);
-                    if let Some(form) = this.settings.as_mut() {
-                        form.environment_variables.push((name, value));
-                        form.dirty = true;
-                    }
-                    cx.notify();
+            .child(field_label(
+                t!(
+                    "api_client.settings.environment_variables",
+                    environment = &form.environment_name
+                )
+                .to_string(),
+            ))
+            .children(form.environment_variables.iter().enumerate().map(
+                |(index, (name, value))| {
+                    h_flex()
+                        .gap_1p5()
+                        .child(div().w(px(110.)).child(name.clone()))
+                        .child(div().flex_1().child(value.clone()))
+                        .child(
+                            IconButton::new(("api-variable-remove", index), IconName::Trash)
+                                .icon_size(IconSize::XSmall)
+                                .icon_color(Color::Muted)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    if let Some(form) = this.settings.as_mut()
+                                        && index < form.environment_variables.len()
+                                    {
+                                        form.environment_variables.remove(index);
+                                        form.dirty = true;
+                                    }
+                                    cx.notify();
+                                })),
+                        )
                 },
-            )))
+            ))
+            .child(
+                add_link("api-variable-add", t!("api_client.settings.add_variable")).on_click(
+                    cx.listener(|this, _, window, cx| {
+                        let name = this.input(
+                            &t!("api_client.settings.name_placeholder"),
+                            "",
+                            false,
+                            window,
+                            cx,
+                        );
+                        let value = this.input(
+                            &t!("api_client.settings.value_placeholder"),
+                            "",
+                            false,
+                            window,
+                            cx,
+                        );
+                        if let Some(form) = this.settings.as_mut() {
+                            form.environment_variables.push((name, value));
+                            form.dirty = true;
+                        }
+                        cx.notify();
+                    }),
+                ),
+            )
             .child(
                 h_flex()
                     .gap_1p5()
                     .child(div().flex_1().child(form.new_environment.clone()))
                     .child(
-                        ui::secondary_button("api-environment-add", None, "Criar ambiente", true, cx)
-                            .h(px(32.))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                let Some(form) = this.settings.as_ref() else {
-                                    return;
-                                };
-                                let name = form.new_environment.read(cx).text(cx).trim().to_string();
-                                if name.is_empty() {
-                                    return;
-                                }
-                                this.save_settings(false, window, cx);
-                                let Some(collection) = this.collection().cloned() else {
-                                    return;
-                                };
-                                collection.update(cx, |collection, cx| {
-                                    let base_url = collection
-                                        .active_environment()
-                                        .and_then(|environment| environment.get("baseUrl"))
-                                        .unwrap_or("")
-                                        .to_string();
-                                    let new_name = name.clone();
-                                    collection.update_file(
-                                        |file| {
-                                            if !file.environments.iter().any(|environment| environment.name == new_name) {
-                                                file.environments.push(Environment {
-                                                    name: new_name,
-                                                    variables: vec![Variable {
-                                                        name: "baseUrl".to_string(),
-                                                        value: base_url,
-                                                    }],
-                                                });
-                                            }
-                                        },
-                                        cx,
-                                    );
-                                    collection.set_active_environment(name, cx);
-                                });
-                                this.settings = Some(this.build_settings_form(&collection, window, cx));
-                                cx.notify();
-                            })),
+                        ui::secondary_button(
+                            "api-environment-add",
+                            None,
+                            t!("api_client.settings.create_environment"),
+                            true,
+                            cx,
+                        )
+                        .h(px(32.))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            let Some(form) = this.settings.as_ref() else {
+                                return;
+                            };
+                            let name = form.new_environment.read(cx).text(cx).trim().to_string();
+                            if name.is_empty() {
+                                return;
+                            }
+                            this.save_settings(false, window, cx);
+                            let Some(collection) = this.collection().cloned() else {
+                                return;
+                            };
+                            collection.update(cx, |collection, cx| {
+                                let base_url = collection
+                                    .active_environment()
+                                    .and_then(|environment| environment.get("baseUrl"))
+                                    .unwrap_or("")
+                                    .to_string();
+                                let new_name = name.clone();
+                                collection.update_file(
+                                    |file| {
+                                        if !file
+                                            .environments
+                                            .iter()
+                                            .any(|environment| environment.name == new_name)
+                                        {
+                                            file.environments.push(Environment {
+                                                name: new_name,
+                                                variables: vec![Variable {
+                                                    name: "baseUrl".to_string(),
+                                                    value: base_url,
+                                                }],
+                                            });
+                                        }
+                                    },
+                                    cx,
+                                );
+                                collection.set_active_environment(name, cx);
+                            });
+                            this.settings = Some(this.build_settings_form(&collection, window, cx));
+                            cx.notify();
+                        })),
                     ),
             );
 
@@ -2634,16 +2808,23 @@ impl ApiPanel {
                     .border_color(colors.border)
                     .child(
                         Label::new(if form.dirty {
-                            "Alterações não salvas"
+                            t!("api_client.settings.unsaved_changes")
                         } else {
-                            ""
+                            SharedString::default()
                         })
                         .size(LabelSize::XSmall)
                         .color(Color::Warning),
                     )
                     .child(div().flex_1())
                     .child(
-                        ui::primary_button("api-settings-save", None, "Salvar", None, cx).on_click(
+                        ui::primary_button(
+                            "api-settings-save",
+                            None,
+                            t!("api_client.settings.save"),
+                            None,
+                            cx,
+                        )
+                        .on_click(
                             cx.listener(|this, _, window, cx| {
                                 this.save_settings(false, window, cx)
                             }),
@@ -2654,7 +2835,7 @@ impl ApiPanel {
     }
 }
 
-pub(crate) fn section_label(text: &'static str) -> Label {
+pub(crate) fn section_label(text: impl Into<SharedString>) -> Label {
     Label::new(text)
         .size(LabelSize::XSmall)
         .weight(FontWeight::SEMIBOLD)
@@ -2662,7 +2843,7 @@ pub(crate) fn section_label(text: &'static str) -> Label {
 }
 
 /// A section title with a note at its right, like the spec key the section comes from.
-fn section_header(text: &'static str, note: Option<&'static str>, cx: &App) -> Div {
+fn section_header(text: impl Into<SharedString>, note: Option<&'static str>, cx: &App) -> Div {
     h_flex()
         .w_full()
         .gap_2()
@@ -2749,12 +2930,13 @@ fn summarize(path: &Path, text: &str) -> Result<CandidateSummary, String> {
     Ok(CandidateSummary {
         title: spec.title.clone(),
         format: spec.format.label(&spec.version_string),
-        info: format!(
-            "{} v{} · {} operações",
-            spec.title,
-            spec.api_version,
-            spec.operations.len()
-        ),
+        info: t!(
+            "api_client.panel.candidate_info",
+            title = &spec.title,
+            version = &spec.api_version,
+            count = spec.operations.len()
+        )
+        .to_string(),
         operation_count: spec.operations.len(),
         tags: spec.folders().into_iter().map(|(tag, _)| tag).collect(),
         servers: spec
@@ -2786,7 +2968,7 @@ impl Render for ApiPanel {
                         .items_center()
                         .justify_center()
                         .child(
-                            Label::new("Procurando APIs no projeto…")
+                            Label::new(t!("api_client.panel.searching_apis"))
                                 .size(LabelSize::Small)
                                 .color(Color::Muted),
                         )

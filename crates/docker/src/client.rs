@@ -3,7 +3,9 @@
 
 use bytes::{Buf as _, Bytes, BytesMut};
 use collections::HashMap;
+use gpui::SharedString;
 use http_body_util::{BodyExt as _, Full};
+use i18n::t;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     path::{Path, PathBuf},
@@ -19,19 +21,34 @@ pub const COMPOSE_CONFIG_FILES_LABEL: &str = "com.docker.compose.project.config_
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
-#[derive(Debug, Clone, thiserror::Error)]
+#[derive(Debug, Clone)]
 pub enum DockerError {
-    #[error("o Docker não respondeu em {socket}: {reason}")]
     DaemonUnavailable { socket: String, reason: String },
-    #[error("{0}")]
     NotFound(String),
-    #[error("{0}")]
     Conflict(String),
-    #[error("o Docker recusou ({status}): {message}")]
     Api { status: u16, message: String },
-    #[error("resposta inesperada do Docker: {0}")]
     Decode(String),
 }
+
+impl std::fmt::Display for DockerError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let message = match self {
+            Self::DaemonUnavailable { socket, reason } => t!(
+                "docker.error.daemon_unavailable",
+                socket = socket,
+                reason = reason
+            ),
+            Self::NotFound(message) | Self::Conflict(message) => message.clone().into(),
+            Self::Api { status, message } => {
+                t!("docker.error.api", status = status, message = message)
+            }
+            Self::Decode(message) => t!("docker.error.unexpected_response", message = message),
+        };
+        formatter.write_str(&message)
+    }
+}
+
+impl std::error::Error for DockerError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Docker {
@@ -361,7 +378,7 @@ impl Docker {
             };
             tokio_timeout(REQUEST_TIMEOUT, request)
                 .await
-                .unwrap_or_else(|| Err(unavailable(&socket, "tempo esgotado")))
+                .unwrap_or_else(|| Err(unavailable(&socket, t!("docker.error.timed_out"))))
         })
         .await
     }
@@ -390,7 +407,7 @@ impl Docker {
                 transport::send(&socket, method, &path, body),
             )
             .await
-            .unwrap_or_else(|| Err(unavailable(&socket, "tempo esgotado")))?;
+            .unwrap_or_else(|| Err(unavailable(&socket, t!("docker.error.timed_out"))))?;
             let status = response.status().as_u16();
             let mut body = response.into_body();
             if status >= 300 {
@@ -497,7 +514,7 @@ mod transport {
     ) -> Result<hyper::Response<Full<Bytes>>, DockerError> {
         Err(unavailable(
             socket,
-            "o Docker por named pipe do Windows ainda não é suportado",
+            t!("docker.error.windows_named_pipe_unsupported"),
         ))
     }
 }
@@ -539,7 +556,9 @@ async fn on_runtime<T: Send + 'static>(
     reqwest_client::runtime()
         .spawn(future)
         .await
-        .map_err(|error| DockerError::Decode(format!("a tarefa do Docker parou: {error}")))?
+        .map_err(|error| {
+            DockerError::Decode(t!("docker.error.task_stopped", error = error).to_string())
+        })?
 }
 
 fn on_runtime_detached(future: impl Future<Output = ()> + Send + 'static) {
@@ -731,16 +750,26 @@ impl ContainerState {
         matches!(self, Self::Running | Self::Restarting | Self::Paused)
     }
 
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> SharedString {
         match self {
-            Self::Running => "rodando",
-            Self::Paused => "pausado",
-            Self::Restarting => "reiniciando",
-            Self::Exited => "parado",
-            Self::Created => "criado",
-            Self::Dead => "morto",
-            Self::Removing => "removendo",
+            Self::Running => t!("docker.state.running"),
+            Self::Paused => t!("docker.state.paused"),
+            Self::Restarting => t!("docker.state.restarting"),
+            Self::Exited => t!("docker.state.exited"),
+            Self::Created => t!("docker.state.created"),
+            Self::Dead => t!("docker.state.dead"),
+            Self::Removing => t!("docker.state.removing"),
         }
+    }
+}
+
+/// The text shown for one of the health values `Container::health` parses from Docker.
+pub fn health_label(health: &str) -> SharedString {
+    match health {
+        "healthy" => t!("docker.health.healthy"),
+        "unhealthy" => t!("docker.health.unhealthy"),
+        "starting" => t!("docker.health.starting"),
+        other => other.to_string().into(),
     }
 }
 
@@ -844,7 +873,7 @@ impl Container {
         rest.split(')').next()?.parse().ok()
     }
 
-    /// "3 minutes ago" from the status, for "há 3 min".
+    /// "3 minutes" from "Exited (0) 3 minutes ago", for "3 min ago".
     pub fn status_age(&self) -> Option<&str> {
         let (_, age) = self.status.split_once(") ")?;
         Some(age.trim_end_matches(" ago"))

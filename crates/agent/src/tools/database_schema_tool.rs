@@ -78,8 +78,8 @@ impl AgentTool for DatabaseSchemaTool {
         _cx: &mut App,
     ) -> SharedString {
         match input.ok().and_then(|input| input.table) {
-            Some(table) => format!("Reading the schema of {table}").into(),
-            None => "Listing database tables".into(),
+            Some(table) => i18n::t!("agent.database_schema_tool.title_table", table = table),
+            None => i18n::t!("agent.database_schema_tool.title_tables"),
         }
     }
 

@@ -1,6 +1,7 @@
 use super::{ThreadView, ToolCallLayout};
 use acp_thread::{ToolCall, ToolCallStatus};
 use gpui::AnyElement;
+use i18n::t;
 use task_agents::{
     PullRequestCard, PullRequestCheckState, PullRequestMergeCard, REPO_MERGE_TOOL,
     REPO_PULL_REQUEST_TOOL,
@@ -47,22 +48,22 @@ fn dot(color: Color, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
-fn state_badge(card: &PullRequestCard) -> (&'static str, Color) {
+fn state_badge(card: &PullRequestCard) -> (SharedString, Color) {
     match card.state.as_str() {
-        "merged" => ("Mergeado", Color::Success),
-        "declined" => ("Recusado", Color::Error),
-        "superseded" => ("Substituído", Color::Muted),
-        _ if card.draft => ("Rascunho", Color::Muted),
-        _ => ("Aberto", Color::Accent),
+        "merged" => (t!("agent_ui.repo_card.state_merged"), Color::Success),
+        "declined" => (t!("agent_ui.repo_card.state_declined"), Color::Error),
+        "superseded" => (t!("agent_ui.repo_card.state_superseded"), Color::Muted),
+        _ if card.draft => (t!("agent_ui.repo_card.state_draft"), Color::Muted),
+        _ => (t!("agent_ui.repo_card.state_open"), Color::Accent),
     }
 }
 
-fn check_label(state: PullRequestCheckState) -> (&'static str, Color) {
+fn check_label(state: PullRequestCheckState) -> (SharedString, Color) {
     match state {
-        PullRequestCheckState::Passed => ("passou", Color::Success),
-        PullRequestCheckState::Failed => ("falhou", Color::Error),
-        PullRequestCheckState::Running => ("rodando", Color::Warning),
-        PullRequestCheckState::Stopped => ("parado", Color::Muted),
+        PullRequestCheckState::Passed => (t!("agent_ui.repo_card.check_passed"), Color::Success),
+        PullRequestCheckState::Failed => (t!("agent_ui.repo_card.check_failed"), Color::Error),
+        PullRequestCheckState::Running => (t!("agent_ui.repo_card.check_running"), Color::Warning),
+        PullRequestCheckState::Stopped => (t!("agent_ui.repo_card.check_stopped"), Color::Muted),
     }
 }
 
@@ -93,7 +94,7 @@ impl ThreadView {
             .into_any_element()
     }
 
-    fn render_repo_section_title(&self, title: &'static str) -> AnyElement {
+    fn render_repo_section_title(&self, title: SharedString) -> AnyElement {
         Label::new(title)
             .size(LabelSize::XSmall)
             .color(Color::Muted)
@@ -131,18 +132,26 @@ impl ThreadView {
                         ),
                     )
                     .when(card.is_current_branch, |this| {
-                        this.child(badge("seu branch", Color::Muted, cx))
+                        this.child(badge(
+                            t!("agent_ui.repo_card.your_branch"),
+                            Color::Muted,
+                            cx,
+                        ))
                     })
                     .child(badge(state_text, state_color, cx)),
             )
             .child(
-                Label::new(format!(
-                    "{} → {} · +{} −{} · {} arquivo(s)",
-                    card.source_branch,
-                    card.destination_branch,
-                    card.lines_added,
-                    card.lines_removed,
-                    card.file_count
+                Label::new(t!(
+                    "agent_ui.repo_card.summary_line",
+                    source = card.source_branch,
+                    destination = card.destination_branch,
+                    added = card.lines_added,
+                    removed = card.lines_removed,
+                    files = if card.file_count == 1 {
+                        t!("agent_ui.repo_card.files.one")
+                    } else {
+                        t!("agent_ui.repo_card.files.other", count = card.file_count)
+                    }
                 ))
                 .size(LabelSize::XSmall)
                 .color(Color::Muted)
@@ -160,7 +169,7 @@ impl ThreadView {
                 .py_1p5()
                 .border_b_1()
                 .border_color(self.tool_card_border_color(cx))
-                .child(self.render_repo_section_title("CHECKS"));
+                .child(self.render_repo_section_title(t!("agent_ui.repo_card.checks_title")));
             for (check_ix, check) in card.checks.iter().enumerate() {
                 let (label, color) = check_label(check.state);
                 let log_url = check
@@ -185,7 +194,7 @@ impl ThreadView {
                                     SharedString::from(format!(
                                         "repo-card-check-{entry_ix}-{check_ix}"
                                     )),
-                                    "Ver log",
+                                    t!("agent_ui.repo_card.view_log"),
                                 )
                                 .label_size(LabelSize::XSmall)
                                 .color(Color::Muted)
@@ -203,21 +212,24 @@ impl ThreadView {
             .py_1p5()
             .border_b_1()
             .border_color(self.tool_card_border_color(cx))
-            .child(self.render_repo_section_title("REVISÕES"));
+            .child(self.render_repo_section_title(t!("agent_ui.repo_card.reviews_title")));
         if card.reviewers.is_empty() {
             reviews = reviews.child(
-                Label::new("Ninguém revisou ainda")
+                Label::new(t!("agent_ui.repo_card.no_reviews"))
                     .size(LabelSize::Small)
                     .color(Color::Muted),
             );
         }
         for reviewer in &card.reviewers {
             let (verdict, color) = if reviewer.requested_changes {
-                ("pediu mudanças", Color::Warning)
+                (
+                    t!("agent_ui.repo_card.review_changes_requested"),
+                    Color::Warning,
+                )
             } else if reviewer.approved {
-                ("aprovou", Color::Success)
+                (t!("agent_ui.repo_card.review_approved"), Color::Success)
             } else {
-                ("aguardando", Color::Muted)
+                (t!("agent_ui.repo_card.review_waiting"), Color::Muted)
             };
             reviews = reviews.child(
                 h_flex()
@@ -235,16 +247,34 @@ impl ThreadView {
             .filter(|reviewer| reviewer.approved)
             .count();
         let mut summary = vec![if card.conflict_count > 0 {
-            format!("Conflitos em {} arquivo(s)", card.conflict_count)
+            if card.conflict_count == 1 {
+                t!("agent_ui.repo_card.conflicts.one")
+            } else {
+                t!(
+                    "agent_ui.repo_card.conflicts.other",
+                    count = card.conflict_count
+                )
+            }
         } else {
-            format!("Sem conflito com {}", card.destination_branch)
+            t!(
+                "agent_ui.repo_card.no_conflicts",
+                branch = card.destination_branch
+            )
         }];
-        summary.push(format!(
-            "aprovações {approvals} de {}",
-            card.reviewers.len()
+        summary.push(t!(
+            "agent_ui.repo_card.approvals",
+            approved = approvals,
+            total = card.reviewers.len()
         ));
         if card.open_task_count > 0 {
-            summary.push(format!("{} tarefa(s) aberta(s)", card.open_task_count));
+            summary.push(if card.open_task_count == 1 {
+                t!("agent_ui.repo_card.open_tasks.one")
+            } else {
+                t!(
+                    "agent_ui.repo_card.open_tasks.other",
+                    count = card.open_task_count
+                )
+            });
         }
 
         let number = card.number;
@@ -258,57 +288,64 @@ impl ThreadView {
             .py_1()
             .when(is_open, |this| {
                 this.child(
-                    Button::new(("repo-card-diff", entry_ix), "Ver diff")
-                        .label_size(LabelSize::Small)
-                        .color(Color::Muted)
-                        .start_icon(
-                            Icon::new(IconName::Diff)
-                                .size(IconSize::XSmall)
-                                .color(Color::Muted),
-                        )
-                        .on_click(move |_, window, cx| {
-                            window.dispatch_action(
-                                Box::new(zed_actions::repo_hosting::DiffPullRequest { number }),
-                                cx,
-                            )
-                        }),
-                )
-                .when(!card.is_current_branch, |this| {
-                    this.child(
-                        Button::new(("repo-card-checkout", entry_ix), "Checkout")
-                            .label_size(LabelSize::Small)
-                            .color(Color::Muted)
-                            .start_icon(
-                                Icon::new(IconName::GitBranch)
-                                    .size(IconSize::XSmall)
-                                    .color(Color::Muted),
-                            )
-                            .on_click(move |_, window, cx| {
-                                window.dispatch_action(
-                                    Box::new(zed_actions::repo_hosting::CheckoutPullRequest {
-                                        number,
-                                    }),
-                                    cx,
-                                )
-                            }),
+                    Button::new(
+                        ("repo-card-diff", entry_ix),
+                        t!("agent_ui.repo_card.view_diff"),
                     )
-                })
-            })
-            .child(
-                Button::new(("repo-card-open", entry_ix), "Abrir no Repo")
                     .label_size(LabelSize::Small)
                     .color(Color::Muted)
                     .start_icon(
-                        Icon::new(IconName::PullRequest)
+                        Icon::new(IconName::Diff)
                             .size(IconSize::XSmall)
                             .color(Color::Muted),
                     )
                     .on_click(move |_, window, cx| {
                         window.dispatch_action(
-                            Box::new(zed_actions::repo_hosting::OpenPullRequest { number }),
+                            Box::new(zed_actions::repo_hosting::DiffPullRequest { number }),
                             cx,
                         )
                     }),
+                )
+                .when(!card.is_current_branch, |this| {
+                    this.child(
+                        Button::new(
+                            ("repo-card-checkout", entry_ix),
+                            t!("agent_ui.repo_card.checkout"),
+                        )
+                        .label_size(LabelSize::Small)
+                        .color(Color::Muted)
+                        .start_icon(
+                            Icon::new(IconName::GitBranch)
+                                .size(IconSize::XSmall)
+                                .color(Color::Muted),
+                        )
+                        .on_click(move |_, window, cx| {
+                            window.dispatch_action(
+                                Box::new(zed_actions::repo_hosting::CheckoutPullRequest { number }),
+                                cx,
+                            )
+                        }),
+                    )
+                })
+            })
+            .child(
+                Button::new(
+                    ("repo-card-open", entry_ix),
+                    t!("agent_ui.repo_card.open_in_repo"),
+                )
+                .label_size(LabelSize::Small)
+                .color(Color::Muted)
+                .start_icon(
+                    Icon::new(IconName::PullRequest)
+                        .size(IconSize::XSmall)
+                        .color(Color::Muted),
+                )
+                .on_click(move |_, window, cx| {
+                    window.dispatch_action(
+                        Box::new(zed_actions::repo_hosting::OpenPullRequest { number }),
+                        cx,
+                    )
+                }),
             )
             .child(
                 Button::new(("repo-card-web", entry_ix), "Bitbucket")
@@ -359,9 +396,10 @@ impl ThreadView {
                                 .truncate(),
                         )
                         .child(
-                            Label::new(format!(
-                                "Mergeado em {} · {}",
-                                card.destination_branch, card.strategy
+                            Label::new(t!(
+                                "agent_ui.repo_card.merged_into",
+                                branch = card.destination_branch,
+                                strategy = card.strategy
                             ))
                             .size(LabelSize::XSmall)
                             .color(Color::Muted),

@@ -8,6 +8,7 @@ use gpui::{
     Anchor, AnyElement, ClickEvent, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable,
     FontWeight, ScrollHandle, Subscription, WeakEntity, px,
 };
+use i18n::t;
 use std::collections::HashMap;
 use ui::{
     CommonAnimationExt as _, ContextMenu, ContextMenuEntry, PopoverMenu, PopoverMenuHandle,
@@ -19,7 +20,7 @@ use ui_input::{ErasedEditorEvent, InputField};
 use util::ResultExt as _;
 use workspace::{ModalView, Workspace, notifications::NotifyTaskExt as _};
 
-/// How many system images step D lists before "Mostrar versões mais antigas".
+/// How many system images step D lists before "Show older versions".
 const RECENT_IMAGE_COUNT: usize = 5;
 const RAM_OPTIONS_MB: [u32; 3] = [2048, 4096, 8192];
 const PROFILE_COLUMNS: usize = 4;
@@ -90,7 +91,7 @@ enum WizardPurpose {
         avd: String,
         image: Option<SystemImageId>,
     },
-    /// "Baixar imagem…" in the system images tab: step D alone.
+    /// "Download image…" in the system images tab: step D alone.
     DownloadImage,
 }
 
@@ -123,14 +124,21 @@ impl AndroidDeviceManagerModal {
             manager.refresh_catalog(cx);
             manager.refresh_device_profiles(cx);
         });
-        let name_input = cx.new(|cx| InputField::new(window, cx, "Pixel 9").label("Nome"));
+        let name_input = cx.new(|cx| {
+            InputField::new(window, cx, "Pixel 9").label(t!("sidebar.android_manager.name_label"))
+        });
         let storage_input = cx.new(|cx| {
             InputField::new(window, cx, "8")
-                .label("Armazenamento interno")
+                .label(t!("sidebar.android_manager.storage_label"))
                 .end_hint("GB")
         });
         let search_input = cx.new(|cx| {
-            InputField::new(window, cx, "Buscar perfil").start_icon(IconName::MagnifyingGlass)
+            InputField::new(
+                window,
+                cx,
+                &t!("sidebar.android_manager.search_profile_placeholder"),
+            )
+            .start_icon(IconName::MagnifyingGlass)
         });
         let mut subscriptions = vec![cx.observe(&manager, |this, _, cx| {
             this.fill_wizard_defaults(cx);
@@ -463,7 +471,7 @@ impl AndroidDeviceManagerModal {
                 IconButton::new("android-manager-close", IconName::Close)
                     .icon_size(IconSize::Small)
                     .icon_color(Color::Muted)
-                    .aria_label("Fechar")
+                    .aria_label(t!("sidebar.android_manager.close"))
                     .on_click(cx.listener(|this, _, _, cx| this.dismiss(cx))),
             )
     }
@@ -474,17 +482,33 @@ impl AndroidDeviceManagerModal {
         let image_count = manager.inventory().installed_images.len();
         let subtitle = format!(
             "{} · {}",
-            plural(avd_count, "dispositivo virtual", "dispositivos virtuais"),
+            plural(
+                avd_count,
+                t!("sidebar.android_manager.virtual_device_count.one"),
+                t!(
+                    "sidebar.android_manager.virtual_device_count.other",
+                    count = avd_count
+                ),
+            ),
             plural(
                 image_count,
-                "imagem do sistema instalada",
-                "imagens do sistema instaladas"
+                t!("sidebar.android_manager.installed_image_count.one"),
+                t!(
+                    "sidebar.android_manager.installed_image_count.other",
+                    count = image_count
+                ),
             )
         );
         let tabs = segmented_control(cx).w(px(300.)).children(
             [
-                (ManagerTab::Devices, "Dispositivos"),
-                (ManagerTab::SystemImages, "Imagens do sistema"),
+                (
+                    ManagerTab::Devices,
+                    t!("sidebar.android_manager.tab_devices"),
+                ),
+                (
+                    ManagerTab::SystemImages,
+                    t!("sidebar.android_manager.tab_system_images"),
+                ),
             ]
             .into_iter()
             .map(|(option, label)| {
@@ -508,7 +532,11 @@ impl AndroidDeviceManagerModal {
             .pr(px(20.))
             .pb(px(14.))
             .pl_6()
-            .child(self.render_header("Dispositivos Android".into(), Some(subtitle.into()), cx))
+            .child(self.render_header(
+                t!("sidebar.android_manager.title"),
+                Some(subtitle.into()),
+                cx,
+            ))
             .child(tabs);
         let body = match tab {
             ManagerTab::Devices => self.render_devices_tab(cx),
@@ -529,12 +557,21 @@ impl AndroidDeviceManagerModal {
         let busy = manager.is_busy();
         let inventory = manager.inventory();
         let footer_text = format!(
-            "{} · {} em uso{}",
+            "{} · {}{}",
             tildify(&manager.android_dir()),
-            format_bytes(inventory.used_bytes),
+            t!(
+                "sidebar.android_manager.disk_in_use",
+                size = format_bytes(inventory.used_bytes)
+            ),
             inventory
                 .available_bytes
-                .map(|available| format!(" · {} livres", format_bytes(available)))
+                .map(|available| format!(
+                    " · {}",
+                    t!(
+                        "sidebar.android_manager.disk_free",
+                        size = format_bytes(available)
+                    )
+                ))
                 .unwrap_or_default()
         );
         let android_dir = manager.android_dir();
@@ -556,9 +593,9 @@ impl AndroidDeviceManagerModal {
                         .py_8()
                         .items_center()
                         .gap_1()
-                        .child(Label::new("Nenhum dispositivo virtual ainda"))
+                        .child(Label::new(t!("sidebar.android_manager.no_devices_title")))
                         .child(
-                            Label::new("Crie um para rodar apps Android no dock.")
+                            Label::new(t!("sidebar.android_manager.no_devices_hint"))
                                 .size(LabelSize::Small)
                                 .color(Color::Muted),
                         ),
@@ -580,37 +617,48 @@ impl AndroidDeviceManagerModal {
                 self.render_avd_row(index, avd, status, busy, menu_handle, cx)
             }));
 
-        let footer =
-            modal_footer(cx)
-                .child(
-                    h_flex()
-                        .flex_1()
-                        .min_w_0()
-                        .gap_2()
-                        .child(
-                            Icon::new(IconName::Folder)
-                                .size(IconSize::XSmall)
-                                .color(Color::Placeholder),
-                        )
-                        .child(
-                            Label::new(footer_text)
-                                .size(LabelSize::XSmall)
-                                .color(Color::Placeholder)
-                                .truncate(),
-                        ),
+        let footer = modal_footer(cx)
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap_2()
+                    .child(
+                        Icon::new(IconName::Folder)
+                            .size(IconSize::XSmall)
+                            .color(Color::Placeholder),
+                    )
+                    .child(
+                        Label::new(footer_text)
+                            .size(LabelSize::XSmall)
+                            .color(Color::Placeholder)
+                            .truncate(),
+                    ),
+            )
+            .child(
+                secondary_button(
+                    "android-open-folder",
+                    None,
+                    t!("sidebar.android_manager.open_folder"),
+                    true,
+                    cx,
                 )
-                .child(
-                    secondary_button("android-open-folder", None, "Abrir pasta", true, cx)
-                        .on_click(move |_, _, cx| {
-                            cx.open_with_system(&android_dir);
-                        }),
+                .on_click(move |_, _, cx| {
+                    cx.open_with_system(&android_dir);
+                }),
+            )
+            .child(
+                primary_button(
+                    "android-new-device",
+                    None,
+                    t!("sidebar.android_manager.new_device"),
+                    None,
+                    cx,
                 )
-                .child(
-                    primary_button("android-new-device", None, "Novo dispositivo", None, cx)
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.start_wizard(WizardPurpose::Create, window, cx)
-                        })),
-                );
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.start_wizard(WizardPurpose::Create, window, cx)
+                })),
+            );
         v_flex()
             .w_full()
             .border_color(colors.border)
@@ -634,30 +682,42 @@ impl AndroidDeviceManagerModal {
         let image_missing = matches!(status, DeviceStatus::ImageMissing);
         let mut meta = avd
             .os_label()
-            .unwrap_or_else(|| "Imagem desconhecida".to_string());
+            .unwrap_or_else(|| t!("sidebar.android_manager.unknown_image").to_string());
         if let Some(flavor) = avd.system_image.as_ref().and_then(SystemImageId::flavor) {
             meta.push_str(" · ");
             meta.push_str(flavor.label());
         }
         meta.push_str(" · ");
         if image_missing {
-            meta.push_str("imagem não baixada");
+            meta.push_str(&t!("sidebar.android_manager.image_not_downloaded"));
         } else {
             meta.push_str(&format_bytes(avd.disk_bytes));
         }
 
         let name = avd.name.clone();
         let (action_icon, action_color, action_label) = if is_running {
-            (IconName::Stop, Color::Error, "Parar")
+            (
+                IconName::Stop,
+                Color::Error,
+                t!("sidebar.android_manager.stop"),
+            )
         } else if image_missing {
-            (IconName::Download, Color::Default, "Baixar a imagem")
+            (
+                IconName::Download,
+                Color::Default,
+                t!("sidebar.android_manager.download_the_image"),
+            )
         } else {
-            (IconName::PlayFilled, Color::Success, "Iniciar")
+            (
+                IconName::PlayFilled,
+                Color::Success,
+                t!("sidebar.android_manager.start"),
+            )
         };
         let action = IconButton::new(("android-avd-action", index), action_icon)
             .icon_size(IconSize::Small)
             .icon_color(action_color)
-            .aria_label(action_label)
+            .aria_label(action_label.clone())
             .tooltip(Tooltip::text(action_label))
             .disabled(busy && !is_running)
             .on_click(cx.listener({
@@ -692,7 +752,7 @@ impl AndroidDeviceManagerModal {
                 IconButton::new(("android-avd-more", index), IconName::Ellipsis)
                     .icon_size(IconSize::Small)
                     .icon_color(Color::Muted)
-                    .aria_label(format!("Ações de {label}")),
+                    .aria_label(t!("sidebar.android_manager.actions_for", name = label)),
             )
             .menu(move |window, cx| {
                 let this = this.clone();
@@ -700,7 +760,7 @@ impl AndroidDeviceManagerModal {
                 let image = image.clone();
                 Some(ContextMenu::build(window, cx, move |menu, _, _| {
                     let disk_actions_disabled = is_running || busy;
-                    let item = |label: &'static str,
+                    let item = |label: SharedString,
                                 icon: IconName,
                                 disabled: bool,
                                 action: fn(
@@ -744,7 +804,7 @@ impl AndroidDeviceManagerModal {
                         }
                     };
                     menu.item(item(
-                        "Iniciar",
+                        t!("sidebar.android_manager.start"),
                         IconName::PlayFilled,
                         is_running || image_missing,
                         |this, name, _, cx| {
@@ -753,7 +813,7 @@ impl AndroidDeviceManagerModal {
                         },
                     ))
                     .item(item(
-                        "Iniciar do zero (cold boot)",
+                        t!("sidebar.android_manager.cold_boot"),
                         IconName::RotateCcw,
                         is_running || image_missing,
                         |this, name, _, cx| {
@@ -762,7 +822,7 @@ impl AndroidDeviceManagerModal {
                         },
                     ))
                     .item(item(
-                        "Editar…",
+                        t!("sidebar.android_manager.edit"),
                         IconName::Pencil,
                         disk_actions_disabled,
                         |this, name, window, cx| {
@@ -775,7 +835,7 @@ impl AndroidDeviceManagerModal {
                         },
                     ))
                     .item(item(
-                        "Duplicar",
+                        t!("sidebar.android_manager.duplicate"),
                         IconName::Copy,
                         disk_actions_disabled,
                         |this, name, window, cx| {
@@ -786,7 +846,7 @@ impl AndroidDeviceManagerModal {
                         },
                     ))
                     .item(item(
-                        "Apagar dados…",
+                        t!("sidebar.android_manager.wipe_data_ellipsis"),
                         IconName::Eraser,
                         disk_actions_disabled,
                         |this, name, window, cx| {
@@ -796,7 +856,7 @@ impl AndroidDeviceManagerModal {
                         },
                     ))
                     .item(item(
-                        "Mostrar no Finder",
+                        t!("sidebar.android_manager.reveal_in_finder"),
                         IconName::Folder,
                         false,
                         |this, name, _, cx| {
@@ -815,7 +875,10 @@ impl AndroidDeviceManagerModal {
                                         .size(IconSize::XSmall)
                                         .color(Color::Error),
                                 )
-                                .child(Label::new("Excluir…").color(Color::Error))
+                                .child(
+                                    Label::new(t!("sidebar.android_manager.delete_ellipsis"))
+                                        .color(Color::Error),
+                                )
                                 .into_any_element()
                         },
                         move |window, cx| {
@@ -838,7 +901,9 @@ impl AndroidDeviceManagerModal {
             .when(menu_open, |this| this.bg(colors.ghost_element_hover))
             .hover(|this| this.bg(colors.ghost_element_hover))
             .when(is_running && busy, |this| {
-                this.tooltip(Tooltip::text("Pare o dispositivo primeiro"))
+                this.tooltip(Tooltip::text(t!(
+                    "sidebar.android_manager.stop_device_first"
+                )))
             })
             .child(
                 div()
@@ -906,7 +971,7 @@ impl AndroidDeviceManagerModal {
                 })
                 .collect();
         let colors = cx.theme().colors().clone();
-        let section = |title: &'static str| {
+        let section = |title: SharedString| {
             Label::new(title)
                 .size(LabelSize::XSmall)
                 .weight(FontWeight::SEMIBOLD)
@@ -927,9 +992,12 @@ impl AndroidDeviceManagerModal {
             .map(|(index, image)| {
                 let unused = image.used_by.is_empty();
                 let usage = if unused {
-                    "nenhum dispositivo usa".to_string()
+                    t!("sidebar.android_manager.image_unused")
                 } else {
-                    format!("usada por {}", image.used_by.join(", "))
+                    t!(
+                        "sidebar.android_manager.image_used_by",
+                        devices = image.used_by.join(", ")
+                    )
                 };
                 let id = image.id.clone();
                 h_flex()
@@ -981,12 +1049,12 @@ impl AndroidDeviceManagerModal {
                             } else {
                                 Color::Placeholder
                             })
-                            .aria_label("Remover imagem")
+                            .aria_label(t!("sidebar.android_manager.remove_image"))
                             .disabled(!unused || busy)
                             .tooltip(Tooltip::text(if unused {
-                                "Remover imagem"
+                                t!("sidebar.android_manager.remove_image")
                             } else {
-                                "Algum dispositivo usa esta imagem"
+                                t!("sidebar.android_manager.image_in_use")
                             }))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 let image = id.clone();
@@ -1020,24 +1088,31 @@ impl AndroidDeviceManagerModal {
                         ),
                     )
                     .child(
-                        Label::new(installed.unwrap_or_else(|| "não instalado".to_string()))
-                            .size(LabelSize::Small)
-                            .buffer_font(cx)
-                            .color(Color::Muted),
+                        Label::new(
+                            installed
+                                .map(SharedString::from)
+                                .unwrap_or_else(|| t!("sidebar.android_manager.not_installed")),
+                        )
+                        .size(LabelSize::Small)
+                        .buffer_font(cx)
+                        .color(Color::Muted),
                     )
                     .child(div().flex_1())
                     .map(|this| match available {
                         Some(available) => this
                             .child(
-                                Label::new(format!("{available} disponível"))
-                                    .size(LabelSize::Small)
-                                    .color(Color::Accent),
+                                Label::new(t!(
+                                    "sidebar.android_manager.version_available",
+                                    version = available
+                                ))
+                                .size(LabelSize::Small)
+                                .color(Color::Accent),
                             )
                             .child(
                                 secondary_button(
                                     ("android-update-component", index),
                                     None,
-                                    "Atualizar",
+                                    t!("sidebar.android_manager.update"),
                                     !busy,
                                     cx,
                                 )
@@ -1052,7 +1127,7 @@ impl AndroidDeviceManagerModal {
                                 }),
                             ),
                         None => this.child(
-                            Label::new("atualizado")
+                            Label::new(t!("sidebar.android_manager.up_to_date"))
                                 .size(LabelSize::Small)
                                 .color(Color::Placeholder),
                         ),
@@ -1073,15 +1148,19 @@ impl AndroidDeviceManagerModal {
             .child(
                 v_flex()
                     .gap_1p5()
-                    .child(section("IMAGENS INSTALADAS"))
+                    .child(section(t!(
+                        "sidebar.android_manager.installed_images_section"
+                    )))
                     .child(
                         table()
                             .when(images.is_empty(), |this| {
                                 this.child(
                                     div().p_3().child(
-                                        Label::new("Nenhuma imagem instalada")
-                                            .size(LabelSize::Small)
-                                            .color(Color::Muted),
+                                        Label::new(t!(
+                                            "sidebar.android_manager.no_installed_images"
+                                        ))
+                                        .size(LabelSize::Small)
+                                        .color(Color::Muted),
                                     ),
                                 )
                             })
@@ -1091,39 +1170,44 @@ impl AndroidDeviceManagerModal {
             .child(
                 v_flex()
                     .gap_1p5()
-                    .child(section("COMPONENTES DO SDK"))
+                    .child(section(t!(
+                        "sidebar.android_manager.sdk_components_section"
+                    )))
                     .child(table().children(component_rows)),
             );
 
-        let footer =
-            modal_footer(cx)
-                .child(
-                    h_flex()
-                        .flex_1()
-                        .min_w_0()
-                        .gap_2()
-                        .child(
-                            Icon::new(IconName::Info)
-                                .size(IconSize::XSmall)
-                                .color(Color::Placeholder),
-                        )
-                        .child(
-                            Label::new(
-                                "Imagens só são removidas quando nenhum dispositivo depende delas.",
-                            )
+        let footer = modal_footer(cx)
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap_2()
+                    .child(
+                        Icon::new(IconName::Info)
+                            .size(IconSize::XSmall)
+                            .color(Color::Placeholder),
+                    )
+                    .child(
+                        Label::new(t!("sidebar.android_manager.images_footer_hint"))
                             .size(LabelSize::XSmall)
                             .color(Color::Placeholder)
                             .truncate(),
-                        ),
+                    ),
+            )
+            .child(
+                secondary_button(
+                    "android-download-image",
+                    None,
+                    t!("sidebar.android_manager.download_image_ellipsis"),
+                    !busy,
+                    cx,
                 )
-                .child(
-                    secondary_button("android-download-image", None, "Baixar imagem…", !busy, cx)
-                        .when(!busy, |this| {
-                            this.on_click(cx.listener(|this, _, window, cx| {
-                                this.start_wizard(WizardPurpose::DownloadImage, window, cx)
-                            }))
-                        }),
-                );
+                .when(!busy, |this| {
+                    this.on_click(cx.listener(|this, _, window, cx| {
+                        this.start_wizard(WizardPurpose::DownloadImage, window, cx)
+                    }))
+                }),
+            );
         v_flex()
             .w_full()
             .child(body)
@@ -1165,7 +1249,7 @@ impl AndroidDeviceManagerModal {
             subtitle.push_str(" · ");
             subtitle.push_str(flavor.label());
         }
-        let consequence = |icon: IconName, text: String, detail: String| {
+        let consequence = |icon: IconName, text: SharedString, detail: SharedString| {
             h_flex()
                 .w_full()
                 .gap_2p5()
@@ -1190,13 +1274,16 @@ impl AndroidDeviceManagerModal {
         let freed = avd.disk_bytes + if remove_image { image_bytes } else { 0 };
         let (title, action_label) = if wipe {
             (
-                format!("Apagar os dados de {}?", avd.label()),
-                "Apagar dados".to_string(),
+                t!("sidebar.android_manager.wipe_title", name = avd.label()),
+                t!("sidebar.android_manager.wipe_data"),
             )
         } else {
             (
-                format!("Excluir {}?", avd.label()),
-                format!("Excluir e liberar {}", format_bytes(freed)),
+                t!("sidebar.android_manager.delete_title", name = avd.label()),
+                t!(
+                    "sidebar.android_manager.delete_and_free",
+                    size = format_bytes(freed)
+                ),
             )
         };
         let colors = cx.theme().colors().clone();
@@ -1252,20 +1339,24 @@ impl AndroidDeviceManagerModal {
                         } else {
                             IconName::Trash
                         },
-                        "Apaga apps, contas e arquivos do dispositivo".to_string(),
+                        t!("sidebar.android_manager.consequence_erase"),
                         if wipe {
-                            "o dispositivo volta ao estado de fábrica no próximo boot".to_string()
+                            t!("sidebar.android_manager.consequence_erase_wipe_detail")
                         } else {
-                            format!("libera {} em {avd_dir}", format_bytes(avd.disk_bytes))
+                            t!(
+                                "sidebar.android_manager.consequence_erase_delete_detail",
+                                size = format_bytes(avd.disk_bytes),
+                                path = avd_dir
+                            )
                         },
                     ))
                     .child(consequence(
                         IconName::Warning,
-                        "Não dá para desfazer".to_string(),
+                        t!("sidebar.android_manager.consequence_irreversible"),
                         if wipe {
-                            "os ajustes do dispositivo continuam".to_string()
+                            t!("sidebar.android_manager.consequence_irreversible_wipe_detail")
                         } else {
-                            "um dispositivo novo começa do zero".to_string()
+                            t!("sidebar.android_manager.consequence_irreversible_delete_detail")
                         },
                     )),
             )
@@ -1300,13 +1391,16 @@ impl AndroidDeviceManagerModal {
                             v_flex()
                                 .gap_0p5()
                                 .child(
-                                    Label::new(format!("Remover também a imagem {image_label}"))
-                                        .size(LabelSize::Small),
+                                    Label::new(t!(
+                                        "sidebar.android_manager.also_remove_image",
+                                        image = image_label
+                                    ))
+                                    .size(LabelSize::Small),
                                 )
                                 .child(
-                                    Label::new(format!(
-                                        "Nenhum outro dispositivo usa · libera mais {}",
-                                        format_bytes(image_bytes)
+                                    Label::new(t!(
+                                        "sidebar.android_manager.also_remove_image_detail",
+                                        size = format_bytes(image_bytes)
                                     ))
                                     .size(LabelSize::XSmall)
                                     .color(Color::Muted),
@@ -1317,18 +1411,23 @@ impl AndroidDeviceManagerModal {
         let footer = modal_footer(cx)
             .child(
                 div().flex_1().child(
-                    Label::new("esc para cancelar")
+                    Label::new(t!("sidebar.android_manager.esc_to_cancel"))
                         .size(LabelSize::XSmall)
                         .color(Color::Placeholder),
                 ),
             )
             .child(
-                secondary_button("android-confirm-cancel", None, "Cancelar", true, cx).on_click(
-                    cx.listener(|this, _, _, cx| {
-                        this.mode = Mode::Manage(ManagerTab::Devices);
-                        cx.notify();
-                    }),
-                ),
+                secondary_button(
+                    "android-confirm-cancel",
+                    None,
+                    t!("sidebar.android_manager.cancel"),
+                    true,
+                    cx,
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.mode = Mode::Manage(ManagerTab::Devices);
+                    cx.notify();
+                })),
             )
             .child(
                 destructive_button("android-confirm-run", action_label, true, cx)
@@ -1346,17 +1445,17 @@ impl AndroidDeviceManagerModal {
             return div().into_any_element();
         };
         let title: SharedString = match &wizard.purpose {
-            WizardPurpose::Create => "Novo dispositivo Android".into(),
-            WizardPurpose::DownloadImage => "Baixar imagem do sistema".into(),
-            WizardPurpose::Edit { avd, .. } => format!(
-                "Editar {}",
-                self.manager
+            WizardPurpose::Create => t!("sidebar.android_manager.wizard_title_create"),
+            WizardPurpose::DownloadImage => t!("sidebar.android_manager.wizard_title_download"),
+            WizardPurpose::Edit { avd, .. } => t!(
+                "sidebar.android_manager.wizard_title_edit",
+                name = self
+                    .manager
                     .read(cx)
                     .avd(avd)
                     .map(AndroidAvd::label)
                     .unwrap_or_else(|| avd.clone())
-            )
-            .into(),
+            ),
         };
         let colors = cx.theme().colors().clone();
         let header = v_flex()
@@ -1394,9 +1493,18 @@ impl AndroidDeviceManagerModal {
         let colors = cx.theme().colors().clone();
         let editing = matches!(wizard.purpose, WizardPurpose::Edit { .. });
         let steps = [
-            (WizardStep::Hardware, "Hardware"),
-            (WizardStep::SystemImage, "Sistema"),
-            (WizardStep::Settings, "Ajustes"),
+            (
+                WizardStep::Hardware,
+                t!("sidebar.android_manager.step_hardware"),
+            ),
+            (
+                WizardStep::SystemImage,
+                t!("sidebar.android_manager.step_system"),
+            ),
+            (
+                WizardStep::Settings,
+                t!("sidebar.android_manager.step_settings"),
+            ),
         ];
         let mut row = h_flex().w_full().gap_2p5();
         for (index, (step, label)) in steps.into_iter().enumerate() {
@@ -1578,12 +1686,12 @@ impl AndroidDeviceManagerModal {
                     .child(div().w(px(200.)).child(self.search_input.clone())),
             )
             .when(loading && profiles.is_empty(), |this| {
-                this.child(loading_row("Carregando perfis de hardware…"))
+                this.child(loading_row(t!("sidebar.android_manager.loading_profiles")))
             })
             .when(!loading && profiles.is_empty(), |this| {
                 this.child(
                     div().py_6().child(
-                        Label::new("Nenhum perfil nesta categoria")
+                        Label::new(t!("sidebar.android_manager.no_profiles"))
                             .size(LabelSize::Small)
                             .color(Color::Muted),
                     ),
@@ -1683,11 +1791,11 @@ impl AndroidDeviceManagerModal {
                     ),
             )
             .when(loading && shown == 0, |this| {
-                this.child(loading_row("Carregando versões do Android…"))
+                this.child(loading_row(t!("sidebar.android_manager.loading_images")))
             })
             .when(!loading && shown == 0, |this| {
                 this.child(
-                    Label::new("Nenhuma imagem disponível para este tipo")
+                    Label::new(t!("sidebar.android_manager.no_images_for_flavor"))
                         .size(LabelSize::Small)
                         .color(Color::Muted),
                 )
@@ -1704,9 +1812,12 @@ impl AndroidDeviceManagerModal {
                                 this.update_wizard(cx, |wizard| wizard.show_older_images = true)
                             }))
                             .child(
-                                Label::new(format!("Mostrar versões mais antigas ({range})"))
-                                    .size(LabelSize::Small)
-                                    .color(Color::Accent),
+                                Label::new(t!(
+                                    "sidebar.android_manager.show_older_images",
+                                    range = range
+                                ))
+                                .size(LabelSize::Small)
+                                .color(Color::Accent),
                             ),
                     )
                 },
@@ -1799,7 +1910,7 @@ impl AndroidDeviceManagerModal {
                     }))
                 })
         };
-        let field_label = |label: &'static str| Label::new(label).size(LabelSize::Small);
+        let field_label = |label: SharedString| Label::new(label).size(LabelSize::Small);
         let ram = wizard.ram_mb;
         let ram_track =
             segmented_control(cx)
@@ -1841,8 +1952,8 @@ impl AndroidDeviceManagerModal {
                 option_row(
                     &colors,
                     0,
-                    "Teclado do computador",
-                    "Digita direto no emulador (hw.keyboard).",
+                    t!("sidebar.android_manager.option_keyboard"),
+                    t!("sidebar.android_manager.option_keyboard_detail"),
                     keyboard,
                     false,
                     cx,
@@ -1858,8 +1969,8 @@ impl AndroidDeviceManagerModal {
             .child(option_row(
                 &colors,
                 1,
-                "GPU do Mac",
-                "Renderiza a ~28 fps; sem ela o Android fica em ~12 fps.",
+                t!("sidebar.android_manager.option_gpu"),
+                t!("sidebar.android_manager.option_gpu_detail"),
                 true,
                 true,
                 cx,
@@ -1869,8 +1980,8 @@ impl AndroidDeviceManagerModal {
                 option_row(
                     &colors,
                     2,
-                    "Iniciar ao terminar",
-                    "Abre no dock assim que o dispositivo estiver criado.",
+                    t!("sidebar.android_manager.option_boot"),
+                    t!("sidebar.android_manager.option_boot_detail"),
                     boot,
                     false,
                     cx,
@@ -1887,8 +1998,8 @@ impl AndroidDeviceManagerModal {
         options = options.child(option_row(
             &colors,
             3,
-            "Google Play Store",
-            "Vem da imagem escolhida no passo 2.",
+            "Google Play Store".into(),
+            t!("sidebar.android_manager.option_play_store_detail"),
             play_store,
             true,
             cx,
@@ -1920,16 +2031,16 @@ impl AndroidDeviceManagerModal {
                                     .color(Color::Warning),
                             )
                             .child(
-                                Label::new("Espaço insuficiente no disco")
+                                Label::new(t!("sidebar.android_manager.low_disk_title"))
                                     .size(LabelSize::Small)
                                     .weight(FontWeight::SEMIBOLD),
                             ),
                     )
                     .child(
-                        Label::new(format!(
-                            "São necessários {} e há {} livres. Libere espaço ou escolha menos armazenamento.",
-                            format_bytes(required),
-                            available.map(format_bytes).unwrap_or_default()
+                        Label::new(t!(
+                            "sidebar.android_manager.low_disk_detail",
+                            required = format_bytes(required),
+                            available = available.map(format_bytes).unwrap_or_default()
                         ))
                         .size(LabelSize::XSmall)
                         .color(Color::Muted),
@@ -1958,14 +2069,14 @@ impl AndroidDeviceManagerModal {
                                     .color(Color::Warning),
                             )
                             .child(
-                                Label::new(format!(
-                                    "Trocar para {} apaga os dados do {}",
-                                    wizard
+                                Label::new(t!(
+                                    "sidebar.android_manager.image_change_title",
+                                    version = wizard
                                         .image
                                         .as_ref()
                                         .map(SystemImageId::android_version)
                                         .unwrap_or_default(),
-                                    editing_name.unwrap_or_default()
+                                    name = editing_name.unwrap_or_default()
                                 ))
                                 .size(LabelSize::Small)
                                 .weight(FontWeight::SEMIBOLD),
@@ -1973,18 +2084,31 @@ impl AndroidDeviceManagerModal {
                     )
                     .child(Label::new(package).size(LabelSize::XSmall).buffer_font(cx))
                     .child(
-                        Label::new(format!(
-                            "Apps, contas e arquivos voltam ao estado de fábrica.{}{}",
-                            match (image_installed, download_bytes) {
-                                (false, Some(bytes)) =>
-                                    format!(" A imagem ({}) é baixada antes.", format_bytes(bytes)),
-                                (false, None) => " A imagem é baixada antes.".to_string(),
-                                (true, _) => String::new(),
-                            },
-                            previous
-                                .map(|previous| format!(" Era {previous}."))
-                                .unwrap_or_default()
-                        ))
+                        Label::new(
+                            [
+                                Some(t!("sidebar.android_manager.image_change_detail")),
+                                match (image_installed, download_bytes) {
+                                    (false, Some(bytes)) => Some(t!(
+                                        "sidebar.android_manager.image_change_download_sized",
+                                        size = format_bytes(bytes)
+                                    )),
+                                    (false, None) => {
+                                        Some(t!("sidebar.android_manager.image_change_download"))
+                                    }
+                                    (true, _) => None,
+                                },
+                                previous.map(|previous| {
+                                    t!(
+                                        "sidebar.android_manager.image_change_previous",
+                                        version = previous
+                                    )
+                                }),
+                            ]
+                            .into_iter()
+                            .flatten()
+                            .collect::<Vec<_>>()
+                            .join(" "),
+                        )
                         .size(LabelSize::XSmall)
                         .color(Color::Muted),
                     ),
@@ -1995,12 +2119,22 @@ impl AndroidDeviceManagerModal {
                 details.push(format_bytes(bytes));
             }
             if creating {
-                details.push(format!(
-                    "o dispositivo ocupa até {storage_gb} GB depois de usado"
-                ));
+                details.push(
+                    t!(
+                        "sidebar.android_manager.device_storage_estimate",
+                        size = storage_gb
+                    )
+                    .to_string(),
+                );
             }
             if let Some(available) = available {
-                details.push(format!("{} livres", format_bytes(available)));
+                details.push(
+                    t!(
+                        "sidebar.android_manager.disk_free",
+                        size = format_bytes(available)
+                    )
+                    .to_string(),
+                );
             }
             Some(
                 v_flex()
@@ -2021,9 +2155,9 @@ impl AndroidDeviceManagerModal {
                             )
                             .child(
                                 Label::new(if creating {
-                                    "Antes de criar, vamos baixar"
+                                    t!("sidebar.android_manager.download_before_create")
                                 } else {
-                                    "Antes de salvar, vamos baixar"
+                                    t!("sidebar.android_manager.download_before_save")
                                 })
                                 .size(LabelSize::Small)
                                 .weight(FontWeight::SEMIBOLD),
@@ -2060,7 +2194,9 @@ impl AndroidDeviceManagerModal {
                         v_flex()
                             .flex_1()
                             .gap_1()
-                            .child(field_label("Orientação inicial"))
+                            .child(field_label(t!(
+                                "sidebar.android_manager.initial_orientation"
+                            )))
                             .child(orientation_menu),
                     ),
             )
@@ -2073,7 +2209,7 @@ impl AndroidDeviceManagerModal {
                         v_flex()
                             .flex_1()
                             .gap_1()
-                            .child(field_label("Memória RAM"))
+                            .child(field_label(t!("sidebar.android_manager.ram")))
                             .child(ram_track),
                     )
                     .child(div().flex_1().child(self.storage_input.clone())),
@@ -2099,26 +2235,30 @@ impl AndroidDeviceManagerModal {
             _ => false,
         };
         let hint: SharedString = match (wizard.step, &wizard.purpose) {
-            (WizardStep::Hardware, _) => "Perfis vêm do avdmanager list device.".into(),
+            (WizardStep::Hardware, _) => t!("sidebar.android_manager.hint_profiles_source"),
             (WizardStep::SystemImage, _) if !selected_installed && wizard.image.is_some() => {
                 match manager.inventory().available_bytes {
                     Some(available) => format!(
-                        "A imagem será baixada ao criar · {} livres",
-                        format_bytes(available)
+                        "{} · {}",
+                        t!("sidebar.android_manager.hint_image_downloaded_on_create"),
+                        t!(
+                            "sidebar.android_manager.disk_free",
+                            size = format_bytes(available)
+                        )
                     )
                     .into(),
-                    None => "A imagem será baixada ao criar".into(),
+                    None => t!("sidebar.android_manager.hint_image_downloaded_on_create"),
                 }
             }
             (WizardStep::SystemImage, _) => SharedString::default(),
             (WizardStep::Settings, WizardPurpose::Edit { .. }) if image_changes => {
-                "Os outros ajustes não apagam nada.".into()
+                t!("sidebar.android_manager.hint_other_settings_keep_data")
             }
             (WizardStep::Settings, WizardPurpose::Edit { .. }) => {
-                "Os ajustes valem a partir do próximo boot.".into()
+                t!("sidebar.android_manager.hint_settings_next_boot")
             }
             (WizardStep::Settings, _) => {
-                "Licenças do Android SDK serão aceitas em seu nome.".into()
+                t!("sidebar.android_manager.hint_licenses")
             }
         };
         let hint_icon = match wizard.step {
@@ -2127,19 +2267,29 @@ impl AndroidDeviceManagerModal {
             WizardStep::Hardware => None,
         };
         let back_label = match (wizard.step, &wizard.purpose) {
-            (WizardStep::Hardware, _) | (_, WizardPurpose::DownloadImage) => "Cancelar",
-            (WizardStep::Settings, WizardPurpose::Edit { .. }) => "Cancelar",
-            _ => "Voltar",
+            (WizardStep::Hardware, _) | (_, WizardPurpose::DownloadImage) => {
+                t!("sidebar.android_manager.cancel")
+            }
+            (WizardStep::Settings, WizardPurpose::Edit { .. }) => {
+                t!("sidebar.android_manager.cancel")
+            }
+            _ => t!("sidebar.android_manager.back"),
         };
         let primary_label = match (wizard.step, &wizard.purpose) {
-            (WizardStep::SystemImage, WizardPurpose::DownloadImage) => "Baixar",
-            (WizardStep::Settings, WizardPurpose::Edit { .. }) if image_changes => {
-                "Salvar e apagar dados"
+            (WizardStep::SystemImage, WizardPurpose::DownloadImage) => {
+                t!("sidebar.android_manager.download")
             }
-            (WizardStep::Settings, WizardPurpose::Edit { .. }) => "Salvar",
-            (WizardStep::Settings, _) if !selected_installed => "Baixar e criar",
-            (WizardStep::Settings, _) => "Criar",
-            _ => "Próximo",
+            (WizardStep::Settings, WizardPurpose::Edit { .. }) if image_changes => {
+                t!("sidebar.android_manager.save_and_wipe")
+            }
+            (WizardStep::Settings, WizardPurpose::Edit { .. }) => {
+                t!("sidebar.android_manager.save")
+            }
+            (WizardStep::Settings, _) if !selected_installed => {
+                t!("sidebar.android_manager.download_and_create")
+            }
+            (WizardStep::Settings, _) => t!("sidebar.android_manager.create"),
+            _ => t!("sidebar.android_manager.next"),
         };
         let primary = if image_changes && wizard.step == WizardStep::Settings {
             destructive_button("android-wizard-next", primary_label, can_advance, cx)
@@ -2391,7 +2541,7 @@ fn system_image_row(
                                     .rounded_sm()
                                     .bg(colors.border_focused.opacity(0.22))
                                     .child(
-                                        Label::new("mais recente")
+                                        Label::new(t!("sidebar.android_manager.newest"))
                                             .size(LabelSize::XSmall)
                                             .color(Color::Accent),
                                     ),
@@ -2408,7 +2558,7 @@ fn system_image_row(
                         .color(Color::Success),
                 )
                 .child(
-                    Label::new("Instalada")
+                    Label::new(t!("sidebar.android_manager.installed"))
                         .size(LabelSize::Small)
                         .color(Color::Success),
                 )
@@ -2419,8 +2569,13 @@ fn system_image_row(
                     Color::Muted
                 };
                 let label = match option.download_bytes.filter(|bytes| *bytes > 0) {
-                    Some(bytes) => format!("Baixar · {}", format_bytes(bytes)),
-                    None => "Baixar".to_string(),
+                    Some(bytes) => format!(
+                        "{} · {}",
+                        t!("sidebar.android_manager.download"),
+                        format_bytes(bytes)
+                    )
+                    .into(),
+                    None => t!("sidebar.android_manager.download"),
                 };
                 this.child(
                     Icon::new(IconName::Download)
@@ -2435,8 +2590,8 @@ fn system_image_row(
 fn option_row(
     colors: &theme::ThemeColors,
     index: usize,
-    label: &'static str,
-    description: &'static str,
+    label: SharedString,
+    description: SharedString,
     on: bool,
     locked: bool,
     cx: &App,
@@ -2471,7 +2626,7 @@ fn option_row(
                                             .color(Color::Placeholder),
                                     )
                                     .child(
-                                        Label::new("fixo")
+                                        Label::new(t!("sidebar.android_manager.locked"))
                                             .size(LabelSize::XSmall)
                                             .color(Color::Placeholder),
                                     ),
@@ -2487,7 +2642,7 @@ fn option_row(
         .child(toggle_switch(("android-option", index), on, !locked, cx))
 }
 
-fn loading_row(label: &'static str) -> impl IntoElement {
+fn loading_row(label: SharedString) -> impl IntoElement {
     h_flex()
         .py_6()
         .gap_2()
@@ -2507,12 +2662,8 @@ fn flavor_label(image: &SystemImageId) -> String {
         .map_or_else(|| image.tag.clone(), |flavor| flavor.label().to_string())
 }
 
-fn plural(count: usize, singular: &str, plural: &str) -> String {
-    if count == 1 {
-        format!("1 {singular}")
-    } else {
-        format!("{count} {plural}")
-    }
+fn plural(count: usize, one: SharedString, other: SharedString) -> SharedString {
+    if count == 1 { one } else { other }
 }
 
 /// `~/Library/Android/zed` instead of the full home path.

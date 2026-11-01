@@ -469,7 +469,7 @@ impl MentionUri {
                         .to_string_lossy();
                     format!("#{number} · {name}")
                 } else if comment_id.is_some() {
-                    format!("#{number} · comentário")
+                    i18n::t!("acp_thread.mention.pull_request_comment", number = number).to_string()
                 } else if title.is_empty() {
                     format!("#{number}")
                 } else {

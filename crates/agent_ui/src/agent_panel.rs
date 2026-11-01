@@ -68,6 +68,7 @@ use gpui::{
     PlatformDisplay, Subscription, Task, TaskExt, WeakEntity, WindowHandle, prelude::*,
     pulsating_between,
 };
+use i18n::t;
 use language::LanguageRegistry;
 use language_model::LanguageModelRegistry;
 use notifications::status_toast::StatusToast;
@@ -5913,10 +5914,10 @@ impl AgentPanel {
                 Some(ContextMenu::build(window, cx, |menu, _window, cx| {
                     menu.context(focus_handle.clone())
                         .keyboard_hints()
-                        .header("New Thread")
+                        .header(t!("agent_ui.agent_panel.new_thread_menu_header"))
                         .item(
                             ContextMenuEntry::new("Asylum Agent")
-                                .description("Built-in agent")
+                                .description(t!("agent_ui.agent_panel.native_agent_description"))
                                 .when(
                                     !showing_terminal && is_agent_selected(Agent::NativeAgent),
                                     |this| this.action(Box::new(NewThread)),
@@ -5949,7 +5950,9 @@ impl AgentPanel {
                         .when(supports_terminal, |menu| {
                             menu.item(
                                 ContextMenuEntry::new("Terminal")
-                                    .description("Terminal thread")
+                                    .description(t!(
+                                        "agent_ui.agent_panel.terminal_thread_description"
+                                    ))
                                     .when(showing_terminal, |this| this.action(Box::new(NewThread)))
                                     .when(!showing_terminal, |this| {
                                         this.action(Box::new(NewTerminalThread))
@@ -6185,7 +6188,11 @@ impl AgentPanel {
         let history_button = IconButton::new("toggle-thread-history", IconName::HistoryRerun)
             .icon_size(IconSize::Small)
             .tooltip(|_, cx| {
-                Tooltip::for_action("Toggle Threads Sidebar", &ToggleWorkspaceSidebar, cx)
+                Tooltip::for_action(
+                    t!("agent_ui.agent_panel.toggle_threads_sidebar"),
+                    &ToggleWorkspaceSidebar,
+                    cx,
+                )
             })
             .on_click(|_, window, cx| {
                 window.dispatch_action(ToggleWorkspaceSidebar.boxed_clone(), cx);

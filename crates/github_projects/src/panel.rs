@@ -11,6 +11,7 @@ use gpui::{
     Action as _, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Hsla, Pixels,
     Subscription, WeakEntity, px,
 };
+use i18n::t;
 use project::{Project as WorkspaceProject, git_store::GitStoreEvent};
 use repo_hosting::api::RemoteRepository;
 use std::{collections::HashSet, time::Instant};
@@ -57,10 +58,11 @@ impl TasksPanel {
         cx: &mut Context<Self>,
     ) -> Self {
         let filter_input = cx.new(|cx| {
-            InputField::new(window, cx, "Filtrar por título, # ou label")
+            InputField::new(window, cx, &t!("github_projects.panel.filter_placeholder"))
                 .start_icon(IconName::MagnifyingGlass)
         });
-        let comment_input = cx.new(|cx| InputField::new(window, cx, "Comentar no item…"));
+        let comment_input = cx
+            .new(|cx| InputField::new(window, cx, &t!("github_projects.item.comment_placeholder")));
         let mut subscriptions = Vec::new();
         let editor = filter_input.read(cx).editor().clone();
         let this = cx.weak_entity();
@@ -271,7 +273,7 @@ impl TasksPanel {
                     .icon_size(IconSize::Small)
                     .icon_color(Color::Muted)
                     .disabled(state.is_syncing())
-                    .tooltip(Tooltip::text("Sincronizar agora"))
+                    .tooltip(Tooltip::text(t!("github_projects.panel.sync_now")))
                     .on_click(cx.listener(|this, _, _, cx| {
                         if let Some(state) = &this.state {
                             state.update(cx, |state, cx| state.sync(cx));
@@ -284,14 +286,14 @@ impl TasksPanel {
                         IconButton::new("tasks-options-trigger", IconName::Sliders)
                             .icon_size(IconSize::Small)
                             .icon_color(Color::Muted),
-                        Tooltip::text("Opções"),
+                        Tooltip::text(t!("github_projects.panel.options")),
                     )
                     .anchor(gpui::Anchor::TopRight)
                     .menu(move |window, cx| {
                         let panel = panel.clone();
                         let project_url = project_url.clone();
                         Some(ContextMenu::build(window, cx, move |menu, _, _| {
-                            menu.entry("Abrir quadro", None, {
+                            menu.entry(t!("github_projects.panel.open_board"), None, {
                                 let panel = panel.clone();
                                 move |window, cx| {
                                     panel
@@ -300,7 +302,11 @@ impl TasksPanel {
                                 }
                             })
                             .when_some(project_url, |menu, url| {
-                                menu.entry("Abrir no GitHub", None, move |_, cx| cx.open_url(&url))
+                                menu.entry(
+                                    t!("github_projects.item.open_on_github"),
+                                    None,
+                                    move |_, cx| cx.open_url(&url),
+                                )
                             })
                         }))
                     }),
@@ -327,7 +333,7 @@ impl TasksPanel {
             PopoverTriggerArea::new(secondary_button(
                 "tasks-focus-move",
                 Some((IconName::ArrowRight, Color::Muted)),
-                "Mover",
+                t!("github_projects.panel.move"),
                 true,
                 cx,
             )),
@@ -344,13 +350,13 @@ impl TasksPanel {
                     h_flex()
                         .gap_2()
                         .child(
-                            Label::new("EM FOCO")
+                            Label::new(t!("github_projects.panel.in_focus"))
                                 .size(LabelSize::XSmall)
                                 .weight(FontWeight::BOLD)
                                 .color(Color::Accent),
                         )
                         .child(
-                            Label::new("branch atual")
+                            Label::new(t!("github_projects.item.current_branch"))
                                 .size(LabelSize::XSmall)
                                 .color(Color::Muted),
                         )
@@ -366,7 +372,9 @@ impl TasksPanel {
                                 IconButton::new("tasks-focus-open", IconName::ArrowUpRight)
                                     .icon_size(IconSize::XSmall)
                                     .icon_color(Color::Muted)
-                                    .tooltip(Tooltip::text("Abrir no GitHub"))
+                                    .tooltip(Tooltip::text(t!(
+                                        "github_projects.item.open_on_github"
+                                    )))
                                     .on_click(move |_, _, cx| cx.open_url(&url)),
                             )
                         }),
@@ -399,16 +407,16 @@ impl TasksPanel {
                         )
                         .child(
                             Label::new(if subtasks.is_empty() {
-                                "sem subtarefas".to_string()
+                                t!("github_projects.panel.no_subtasks")
                             } else {
-                                "subtarefas".to_string()
+                                t!("github_projects.panel.subtasks")
                             })
                             .size(LabelSize::XSmall)
                             .color(Color::Muted),
                         )
                         .when(state.is_pending(&item.id), |this| {
                             this.child(
-                                Label::new("salvando…")
+                                Label::new(t!("github_projects.panel.saving"))
                                     .size(LabelSize::XSmall)
                                     .color(Color::Muted),
                             )
@@ -420,7 +428,7 @@ impl TasksPanel {
                     h_flex()
                         .gap_1()
                         .child(
-                            Button::new("tasks-focus-comment", "Comentar")
+                            Button::new("tasks-focus-comment", t!("github_projects.item.comment"))
                                 .style(ButtonStyle::Subtle)
                                 .label_size(LabelSize::Small)
                                 .start_icon(
@@ -437,17 +445,22 @@ impl TasksPanel {
                                 })),
                         )
                         .child(
-                            Button::new("tasks-focus-board", "Abrir quadro")
-                                .style(ButtonStyle::Subtle)
-                                .label_size(LabelSize::Small)
-                                .start_icon(
-                                    Icon::new(IconName::Blocks)
-                                        .size(IconSize::XSmall)
-                                        .color(Color::Muted),
-                                )
-                                .on_click(cx.listener(move |this, _, window, cx| {
+                            Button::new(
+                                "tasks-focus-board",
+                                t!("github_projects.panel.open_board"),
+                            )
+                            .style(ButtonStyle::Subtle)
+                            .label_size(LabelSize::Small)
+                            .start_icon(
+                                Icon::new(IconName::Blocks)
+                                    .size(IconSize::XSmall)
+                                    .color(Color::Muted),
+                            )
+                            .on_click(cx.listener(
+                                move |this, _, window, cx| {
                                     this.open_board(Some(item_id.clone()), window, cx)
-                                })),
+                                },
+                            )),
                         ),
                 )
                 .when(self.commenting, |this| {
@@ -526,9 +539,7 @@ impl TasksPanel {
                                 )
                                 .icon_size(IconSize::Small)
                                 .icon_color(Color::Muted)
-                                .tooltip(Tooltip::text(
-                                    "Começar: cria o branch e move para em andamento",
-                                ))
+                                .tooltip(Tooltip::text(t!("github_projects.panel.start_tooltip")))
                                 .on_click(cx.listener(
                                     move |this, _, window, cx| {
                                         cx.stop_propagation();
@@ -601,7 +612,7 @@ impl TasksPanel {
                             || (option.map(|option| &option.id) == done_id.as_ref()
                                 && !self.collapsed.contains(&format!("{key}-open")));
                         let title = option.map_or_else(
-                            || "SEM STATUS".to_string(),
+                            || t!("github_projects.panel.no_status").to_string(),
                             |option| option.name.to_uppercase(),
                         );
                         let color = option.map_or(cx.theme().colors().text_muted, |option| {
@@ -673,16 +684,31 @@ impl TasksPanel {
         let today = Local::now().date_naive();
         let synced = state
             .synced_at()
-            .map(|at| format!("Sincronizado {}", ago(at)))
-            .unwrap_or_else(|| "Sincronizando…".to_string());
+            .map(|at| t!("github_projects.panel.synced", ago = ago(at)))
+            .unwrap_or_else(|| t!("github_projects.panel.syncing"));
         let mine = project
             .items
             .iter()
             .filter(|item| item.is_assigned_to(&login))
             .count();
-        let detail = match project.current_iteration(today) {
-            Some(iteration) => format!("{synced} · {mine} itens seus no {}", iteration.title),
-            None => format!("{synced} · {mine} itens seus"),
+        let detail = match (project.current_iteration(today), mine) {
+            (Some(iteration), 1) => t!(
+                "github_projects.panel.footer_mine_in_iteration.one",
+                synced = synced,
+                iteration = iteration.title
+            ),
+            (Some(iteration), _) => t!(
+                "github_projects.panel.footer_mine_in_iteration.other",
+                synced = synced,
+                count = mine,
+                iteration = iteration.title
+            ),
+            (None, 1) => t!("github_projects.panel.footer_mine.one", synced = synced),
+            (None, _) => t!(
+                "github_projects.panel.footer_mine.other",
+                synced = synced,
+                count = mine
+            ),
         };
         let url = project.summary.url.clone();
         h_flex()
@@ -708,7 +734,9 @@ impl TasksPanel {
                 IconButton::new("tasks-open-project", IconName::ArrowUpRight)
                     .icon_size(IconSize::Small)
                     .icon_color(Color::Muted)
-                    .tooltip(Tooltip::text("Abrir o projeto no GitHub"))
+                    .tooltip(Tooltip::text(t!(
+                        "github_projects.panel.open_project_on_github"
+                    )))
                     .on_click(move |_, _, cx| cx.open_url(&url)),
             )
     }
@@ -815,18 +843,27 @@ pub(crate) fn item_chips(
             },
         )
         .children(item.pull_requests.first().map(|pull_request| {
-            let (color, suffix) = match pull_request.state.as_str() {
-                "MERGED" => (Color::Accent.color(cx), " · merge"),
-                "CLOSED" => (cx.theme().colors().text_muted, " · fechado"),
-                _ => (Color::Accent.color(cx), ""),
+            let (color, text) = match pull_request.state.as_str() {
+                "MERGED" => (
+                    Color::Accent.color(cx),
+                    t!(
+                        "github_projects.item.pull_request_merged",
+                        number = pull_request.number
+                    ),
+                ),
+                "CLOSED" => (
+                    cx.theme().colors().text_muted,
+                    t!(
+                        "github_projects.item.pull_request_closed",
+                        number = pull_request.number
+                    ),
+                ),
+                _ => (
+                    Color::Accent.color(cx),
+                    format!("PR #{}", pull_request.number).into(),
+                ),
             };
-            chip(
-                format!("PR #{}{suffix}", pull_request.number),
-                color,
-                Some(IconName::PullRequest),
-                false,
-                cx,
-            )
+            chip(text, color, Some(IconName::PullRequest), false, cx)
         }))
         .children(project.iteration_of(item).map(|iteration| {
             chip(
@@ -860,7 +897,7 @@ pub(crate) fn item_chips(
 pub(crate) fn item_meta(project: &Project, item: &Item) -> String {
     let mut parts = vec![match item.number {
         Some(number) => format!("#{number}"),
-        None => "rascunho".to_string(),
+        None => t!("github_projects.item.draft").to_string(),
     }];
     parts.extend(item.labels.first().map(|label| label.name.clone()));
     parts.extend(
@@ -912,12 +949,12 @@ pub(crate) fn avatar(login: &str, cx: &App) -> impl IntoElement {
         )
 }
 
-pub(crate) fn ago(at: Instant) -> String {
+pub(crate) fn ago(at: Instant) -> SharedString {
     let seconds = at.elapsed().as_secs();
     match seconds {
-        0..=59 => format!("há {seconds} s"),
-        60..=3599 => format!("há {} min", seconds / 60),
-        _ => format!("há {} h", seconds / 3600),
+        0..=59 => t!("github_projects.ago.seconds", count = seconds),
+        60..=3599 => t!("github_projects.ago.minutes", count = seconds / 60),
+        _ => t!("github_projects.ago.hours", count = seconds / 3600),
     }
 }
 
@@ -987,8 +1024,8 @@ impl Render for TasksPanel {
         let content: AnyElement = match self.state.clone() {
             None => self.render_message(
                 IconName::Blocks,
-                "Projeto fora do GitHub",
-                Some("O Tarefas do GitHub Projects aparece quando o origin é um repositório do github.com.".into()),
+                t!("github_projects.empty.not_github_title"),
+                Some(t!("github_projects.empty.not_github_detail")),
                 None,
             ),
             Some(state_entity) => {
@@ -996,49 +1033,75 @@ impl Render for TasksPanel {
                 match state.availability(cx) {
                     Availability::NotConnected => self.render_message(
                         IconName::Disconnected,
-                        "Conecte o GitHub no dock Repo",
-                        Some("Repo e Tarefas usam a mesma conta do GitHub.".into()),
+                        t!("github_projects.empty.connect_title"),
+                        Some(t!("github_projects.empty.connect_detail")),
                         Some(
-                            secondary_button("tasks-open-repo", Some((IconName::PullRequest, Color::Muted)), "Abrir o Repo", true, cx)
-                                .on_click(|_, window, cx| {
-                                    window.dispatch_action(repo_hosting::ToggleFocus.boxed_clone(), cx)
-                                })
-                                .into_any_element(),
+                            secondary_button(
+                                "tasks-open-repo",
+                                Some((IconName::PullRequest, Color::Muted)),
+                                t!("github_projects.empty.open_repo"),
+                                true,
+                                cx,
+                            )
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(repo_hosting::ToggleFocus.boxed_clone(), cx)
+                            })
+                            .into_any_element(),
                         ),
                     ),
-                    Availability::Loading => self.render_message(IconName::LoadCircle, "Carregando o projeto…", None, None),
+                    Availability::Loading => self.render_message(
+                        IconName::LoadCircle,
+                        t!("github_projects.empty.loading"),
+                        None,
+                        None,
+                    ),
                     Availability::NoProjects => self.render_message(
                         IconName::Blocks,
-                        "Nenhum projeto aberto",
-                        Some(format!("Nem {} nem a sua conta têm um GitHub Project aberto.", state.repository().full_name()).into()),
+                        t!("github_projects.empty.no_projects_title"),
+                        Some(t!(
+                            "github_projects.empty.no_projects_detail",
+                            repository = state.repository().full_name()
+                        )),
                         None,
                     ),
                     Availability::MissingScope => self.render_message(
                         IconName::Lock,
-                        "Falta acesso ao GitHub Projects",
-                        Some("Rode gh auth refresh -s project, ou dê Projects ao token fine-grained, e tente de novo.".into()),
+                        t!("github_projects.empty.missing_scope_title"),
+                        Some(t!("github_projects.empty.missing_scope_detail_retry")),
                         Some(
-                            secondary_button("tasks-retry", Some((IconName::RotateCw, Color::Muted)), "Tentar de novo", true, cx)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    if let Some(state) = &this.state {
-                                        state.update(cx, |state, cx| state.retry_with_fresh_token(cx));
-                                    }
-                                }))
-                                .into_any_element(),
+                            secondary_button(
+                                "tasks-retry",
+                                Some((IconName::RotateCw, Color::Muted)),
+                                t!("github_projects.empty.retry"),
+                                true,
+                                cx,
+                            )
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                if let Some(state) = &this.state {
+                                    state.update(cx, |state, cx| state.retry_with_fresh_token(cx));
+                                }
+                            }))
+                            .into_any_element(),
                         ),
                     ),
                     Availability::Failed(error) => self.render_message(
                         IconName::Warning,
-                        "Não deu para carregar o projeto",
+                        t!("github_projects.empty.failed_title"),
                         Some(error),
                         Some(
-                            secondary_button("tasks-retry", Some((IconName::RotateCw, Color::Muted)), "Tentar de novo", true, cx)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    if let Some(state) = &this.state {
-                                        state.update(cx, |state, cx| state.sync(cx));
-                                    }
-                                }))
-                                .into_any_element(),
+                            secondary_button(
+                                "tasks-retry",
+                                Some((IconName::RotateCw, Color::Muted)),
+                                t!("github_projects.empty.retry"),
+                                true,
+                                cx,
+                            )
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                if let Some(state) = &this.state {
+                                    state.update(cx, |state, cx| state.sync(cx));
+                                }
+                            }))
+                            .into_any_element(),
                         ),
                     ),
                     Availability::Ready => {
@@ -1052,12 +1115,19 @@ impl Render for TasksPanel {
                             .and_then(|branch| api::item_for_branch(&project.items, branch));
                         let today = today();
                         let iteration = project.current_iteration(today);
-                        let mine = project.items.iter().filter(|item| item.is_assigned_to(&login)).count();
+                        let mine = project
+                            .items
+                            .iter()
+                            .filter(|item| item.is_assigned_to(&login))
+                            .count();
                         let in_iteration = iteration.map(|iteration| {
                             project
                                 .items
                                 .iter()
-                                .filter(|item| project.iteration_of(item).map(|it| &it.id) == Some(&iteration.id))
+                                .filter(|item| {
+                                    project.iteration_of(item).map(|it| &it.id)
+                                        == Some(&iteration.id)
+                                })
                                 .count()
                         });
                         let mentions = project
@@ -1066,9 +1136,19 @@ impl Render for TasksPanel {
                             .filter(|item| item.body.contains(&format!("@{login}")))
                             .count();
                         let tabs: Vec<(Tab, String, Option<usize>)> = [
-                            Some((Tab::Mine, "Minhas".to_string(), Some(mine))),
-                            iteration.map(|iteration| (Tab::Iteration, iteration.title.clone(), in_iteration)),
-                            Some((Tab::Mentions, "Menções".to_string(), Some(mentions))),
+                            Some((
+                                Tab::Mine,
+                                t!("github_projects.panel.tab_mine").to_string(),
+                                Some(mine),
+                            )),
+                            iteration.map(|iteration| {
+                                (Tab::Iteration, iteration.title.clone(), in_iteration)
+                            }),
+                            Some((
+                                Tab::Mentions,
+                                t!("github_projects.panel.tab_mentions").to_string(),
+                                Some(mentions),
+                            )),
                         ]
                         .into_iter()
                         .flatten()
@@ -1076,33 +1156,39 @@ impl Render for TasksPanel {
                         v_flex()
                             .size_full()
                             .child(self.render_source(state, cx))
-                            .when_some(focus, |this, item| this.child(self.render_focus_card(project, item, state, cx)))
+                            .when_some(focus, |this, item| {
+                                this.child(self.render_focus_card(project, item, state, cx))
+                            })
                             .when_some(self.error.clone(), |this, error| {
                                 this.child(
-                                    div().px_3().py_1().child(Label::new(error).size(LabelSize::XSmall).color(Color::Error)),
+                                    div().px_3().py_1().child(
+                                        Label::new(error)
+                                            .size(LabelSize::XSmall)
+                                            .color(Color::Error),
+                                    ),
                                 )
                             })
-                            .child(
-                                div().px_2().py_1().child(
-                                    segmented_control(cx).children(tabs.into_iter().map(|(tab, label, count)| {
-                                        let label = match count {
-                                            Some(count) => format!("{label} {count}"),
-                                            None => label,
-                                        };
-                                        segment_option(
-                                            SharedString::from(format!("tasks-tab-{label}")),
-                                            label,
-                                            self.tab == tab,
-                                            true,
-                                            cx,
-                                        )
-                                        .on_click(cx.listener(move |this, _, _, cx| {
+                            .child(div().px_2().py_1().child(segmented_control(cx).children(
+                                tabs.into_iter().map(|(tab, label, count)| {
+                                    let label = match count {
+                                        Some(count) => format!("{label} {count}"),
+                                        None => label,
+                                    };
+                                    segment_option(
+                                        SharedString::from(format!("tasks-tab-{label}")),
+                                        label,
+                                        self.tab == tab,
+                                        true,
+                                        cx,
+                                    )
+                                    .on_click(cx.listener(
+                                        move |this, _, _, cx| {
                                             this.tab = tab;
                                             cx.notify();
-                                        }))
-                                    })),
-                                ),
-                            )
+                                        },
+                                    ))
+                                }),
+                            )))
                             .child(
                                 h_flex()
                                     .px_2()
@@ -1113,8 +1199,21 @@ impl Render for TasksPanel {
                                         h_flex()
                                             .gap_1()
                                             .px_1p5()
-                                            .child(Icon::new(IconName::ListTree).size(IconSize::XSmall).color(Color::Muted))
-                                            .child(Label::new(project.status.as_ref().map_or("Status".to_string(), |field| field.name.clone())).size(LabelSize::Small)),
+                                            .child(
+                                                Icon::new(IconName::ListTree)
+                                                    .size(IconSize::XSmall)
+                                                    .color(Color::Muted),
+                                            )
+                                            .child(
+                                                Label::new(
+                                                    project.status.as_ref().map_or(
+                                                        t!("github_projects.item.status_field")
+                                                            .to_string(),
+                                                        |field| field.name.clone(),
+                                                    ),
+                                                )
+                                                .size(LabelSize::Small),
+                                            ),
                                     ),
                             )
                             .child(self.render_list(project, &login, cx))
@@ -1180,7 +1279,10 @@ impl Panel for TasksPanel {
     }
 
     fn icon_tooltip(&self, _window: &Window, _cx: &App) -> Option<&'static str> {
-        Some("Tarefas")
+        Some(match i18n::current_language() {
+            i18n::Language::English => "Tasks",
+            i18n::Language::PortugueseBrazil => "Tarefas",
+        })
     }
 
     fn toggle_action(&self) -> Box<dyn gpui::Action> {

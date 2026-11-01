@@ -338,7 +338,7 @@ fn test_branch_jumps_and_skips() {
     );
     run.agent_submitted(0, "QA", report);
     assert_eq!(run.cursor, 2);
-    assert_eq!(run.steps[1].note.as_deref(), Some("sim"));
+    assert_eq!(run.steps[1].note.as_deref(), Some("yes"));
 }
 
 #[test]

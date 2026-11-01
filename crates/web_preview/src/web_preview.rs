@@ -19,6 +19,7 @@ use gpui::{
     MouseUpEvent, ParentElement, Pixels, Render, ScrollEvent, SharedString, Styled, Subscription,
     Task, Window, actions, canvas, div, px,
 };
+use i18n::t;
 use ui::{
     Color, HeaderBar, HeaderBarLevel, Icon, IconButton, IconName, IconSize, Label, Tooltip, h_flex,
     prelude::*, v_flex,
@@ -87,9 +88,6 @@ pub const fn is_supported() -> bool {
     cfg!(target_os = "macos")
 }
 
-const UNSUPPORTED_HEADLINE: &str = "Web Preview ainda não está disponível neste sistema";
-const UNSUPPORTED_DETAIL: &str = "Por enquanto o browser embutido só funciona no macOS.";
-
 /// Registers the browser toolkit agents use to drive the embedded Chromium.
 #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
 pub fn register_agent_toolkit(cx: &mut App) {
@@ -150,9 +148,9 @@ impl Render for WebPreviewToolkitButton {
         let workspace = self.workspace.clone();
         let browser_is_active = self.browser_is_active;
         let tooltip = if browser_is_active {
-            "Nova aba do Browser"
+            t!("web_preview.toolkit_button.new_tab")
         } else {
-            "Browser"
+            SharedString::new_static("Browser")
         };
         workspace::dock::StatusBarButton::new(
             "toolkit-browser",
@@ -161,7 +159,7 @@ impl Render for WebPreviewToolkitButton {
         )
         .tab_index(0isize)
         .aria_label("Browser")
-        .tooltip(move |_window, cx| Tooltip::simple(tooltip, cx))
+        .tooltip(move |_window, cx| Tooltip::simple(tooltip.clone(), cx))
         .on_click(move |_, window, cx| {
             workspace
                 .update(cx, |workspace, cx| {
@@ -335,7 +333,7 @@ impl WebPreviewView {
 
         let url_editor = cx.new(|cx| {
             let mut editor = Editor::single_line(window, cx);
-            editor.set_placeholder_text("Enter URL...", window, cx);
+            editor.set_placeholder_text(&t!("web_preview.toolbar.url_placeholder"), window, cx);
             editor.set_text("https://", window, cx);
             editor
         });
@@ -611,27 +609,25 @@ impl WebPreviewView {
         let installer = self.cef_installer.clone();
 
         let heading = match &state {
-            CefInstallState::Missing => "Web Preview needs Chromium",
-            CefInstallState::Downloading { .. } => "Downloading Chromium",
-            CefInstallState::Extracting => "Installing Chromium",
-            CefInstallState::Installed => "Chromium installed",
-            CefInstallState::Failed(_) => "Could not install Chromium",
+            CefInstallState::Missing => t!("web_preview.install.heading_missing"),
+            CefInstallState::Downloading { .. } => t!("web_preview.install.heading_downloading"),
+            CefInstallState::Extracting => t!("web_preview.install.heading_extracting"),
+            CefInstallState::Installed => t!("web_preview.install.heading_installed"),
+            CefInstallState::Failed(_) => t!("web_preview.install.heading_failed"),
         };
 
         let detail: SharedString = match &state {
-            CefInstallState::Missing => {
-                SharedString::from("About 120 MB is downloaded once and kept for later.")
-            }
-            CefInstallState::Downloading { received, total } => SharedString::from(match total {
-                0 => format!("{:.0} MB", *received as f32 / MEGABYTE),
-                total => format!(
-                    "{:.0} MB of {:.0} MB",
-                    *received as f32 / MEGABYTE,
-                    *total as f32 / MEGABYTE
+            CefInstallState::Missing => t!("web_preview.install.detail_missing"),
+            CefInstallState::Downloading { received, total } => match total {
+                0 => SharedString::from(format!("{:.0} MB", *received as f32 / MEGABYTE)),
+                total => t!(
+                    "web_preview.install.detail_progress",
+                    received = format!("{:.0}", *received as f32 / MEGABYTE),
+                    total = format!("{:.0}", *total as f32 / MEGABYTE)
                 ),
-            }),
-            CefInstallState::Extracting => SharedString::from("Unpacking the framework…"),
-            CefInstallState::Installed => SharedString::from("Open a page to get started."),
+            },
+            CefInstallState::Extracting => t!("web_preview.install.detail_extracting"),
+            CefInstallState::Installed => t!("web_preview.install.detail_installed"),
             CefInstallState::Failed(error) => error.clone(),
         };
 
@@ -678,8 +674,8 @@ impl WebPreviewView {
                         ui::Button::new(
                             "install-cef",
                             match state {
-                                CefInstallState::Failed(_) => "Try Again",
-                                _ => "Install",
+                                CefInstallState::Failed(_) => t!("web_preview.install.try_again"),
+                                _ => t!("web_preview.install.install"),
                             },
                         )
                         .style(ui::ButtonStyle::Filled)
@@ -785,14 +781,11 @@ impl WebPreviewView {
         self.browser = None;
         self.latest_frame = None;
         self.error = Some(PreviewError {
-            headline: "The browser never rendered a frame".into(),
-            detail: format!(
-                "Chromium started but painted nothing within {} seconds, which usually \
-                 means its renderer process failed to launch. The Zed log has the \
-                 web_preview entries with the reason.",
-                PAINT_GIVE_UP_TIMEOUT.as_secs()
-            )
-            .into(),
+            headline: t!("web_preview.error.no_frame_headline"),
+            detail: t!(
+                "web_preview.error.no_frame_detail",
+                seconds = PAINT_GIVE_UP_TIMEOUT.as_secs()
+            ),
         });
         cx.notify();
     }
@@ -840,7 +833,7 @@ impl WebPreviewView {
             Err(error) => {
                 log::error!("web_preview: {error}");
                 self.error = Some(PreviewError {
-                    headline: "Chromium Embedded Framework not available".into(),
+                    headline: t!("web_preview.error.cef_unavailable_headline"),
                     detail: error.to_string().into(),
                 });
             }
@@ -1265,12 +1258,12 @@ impl Render for WebPreviewView {
                 .gap_2()
                 .p_4()
                 .child(
-                    Label::new(UNSUPPORTED_HEADLINE)
+                    Label::new(t!("web_preview.unsupported.headline"))
                         .size(ui::LabelSize::Large)
                         .color(Color::Muted),
                 )
                 .child(
-                    Label::new(UNSUPPORTED_DETAIL)
+                    Label::new(t!("web_preview.unsupported.detail"))
                         .size(ui::LabelSize::Small)
                         .color(Color::Disabled),
                 );
@@ -1295,7 +1288,7 @@ impl Render for WebPreviewView {
                 IconButton::new("back", IconName::ArrowLeft)
                     .icon_size(IconSize::Small)
                     .disabled(!can_go_back)
-                    .tooltip(Tooltip::text("Back"))
+                    .tooltip(Tooltip::text(t!("web_preview.toolbar.back")))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.handle_go_back(window, cx);
                     }))
@@ -1303,7 +1296,7 @@ impl Render for WebPreviewView {
                 IconButton::new("forward", IconName::ArrowRight)
                     .icon_size(IconSize::Small)
                     .disabled(!can_go_forward)
-                    .tooltip(Tooltip::text("Forward"))
+                    .tooltip(Tooltip::text(t!("web_preview.toolbar.forward")))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.handle_go_forward(window, cx);
                     }))
@@ -1311,7 +1304,7 @@ impl Render for WebPreviewView {
                 if loading {
                     IconButton::new("stop", IconName::Close)
                         .icon_size(IconSize::Small)
-                        .tooltip(Tooltip::text("Stop"))
+                        .tooltip(Tooltip::text(t!("web_preview.toolbar.stop")))
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.handle_stop(window, cx);
                         }))
@@ -1319,7 +1312,7 @@ impl Render for WebPreviewView {
                 } else {
                     IconButton::new("reload", IconName::RotateCw)
                         .icon_size(IconSize::Small)
-                        .tooltip(Tooltip::text("Reload"))
+                        .tooltip(Tooltip::text(t!("web_preview.toolbar.reload")))
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.handle_reload(window, cx);
                         }))
@@ -1355,14 +1348,14 @@ impl Render for WebPreviewView {
             .end_children(vec![
                 IconButton::new("go", IconName::ArrowRight)
                     .icon_size(IconSize::Small)
-                    .tooltip(Tooltip::text("Navigate"))
+                    .tooltip(Tooltip::text(t!("web_preview.toolbar.navigate")))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.submit_url(window, cx);
                     }))
                     .into_any_element(),
                 IconButton::new("devtools", IconName::MagnifyingGlass)
                     .icon_size(IconSize::Small)
-                    .tooltip(Tooltip::text("Open DevTools"))
+                    .tooltip(Tooltip::text(t!("web_preview.toolbar.open_devtools")))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.handle_open_devtools(window, cx);
                     }))
@@ -1370,7 +1363,7 @@ impl Render for WebPreviewView {
             ])
             .when(loading, |this| {
                 this.end_child(
-                    Label::new("Loading…")
+                    Label::new(t!("web_preview.toolbar.loading"))
                         .size(ui::LabelSize::XSmall)
                         .color(Color::Muted),
                 )
@@ -1599,7 +1592,7 @@ impl Render for WebPreviewView {
                         .when(frame.is_none() && self.error.is_none(), |this| {
                             this.child(
                                 div().size_full().items_center().justify_center().child(
-                                    Label::new("Waiting for browser...")
+                                    Label::new(t!("web_preview.waiting_for_browser"))
                                         .size(ui::LabelSize::Small)
                                         .color(Color::Muted),
                                 ),

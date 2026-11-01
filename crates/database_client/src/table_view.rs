@@ -21,6 +21,7 @@ use gpui::{
     AnyElement, ClipboardItem, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
     Subscription, Task, WeakEntity, px,
 };
+use i18n::t;
 use std::{sync::Arc, time::Duration};
 use ui::{
     Indicator, KeyBinding, Tooltip, prelude::*, primary_button, secondary_button, segmented_control,
@@ -51,13 +52,24 @@ impl Tab {
         Self::Ddl,
     ];
 
-    fn label(self) -> &'static str {
+    /// The name the debug hook selects the tab by, independent of the interface language.
+    fn debug_name(self) -> &'static str {
         match self {
             Self::Data => "Dados",
             Self::Structure => "Estrutura",
             Self::Indexes => "Índices",
             Self::Relations => "Relações",
             Self::Ddl => "DDL",
+        }
+    }
+
+    fn label(self) -> SharedString {
+        match self {
+            Self::Data => t!("database_client.table.tab_data"),
+            Self::Structure => t!("database_client.table.tab_structure"),
+            Self::Indexes => t!("database_client.table.tab_indexes"),
+            Self::Relations => t!("database_client.table.tab_relations"),
+            Self::Ddl => t!("database_client.table.tab_ddl"),
         }
     }
 }
@@ -298,7 +310,7 @@ impl TableView {
                 match result {
                     Ok(outcome) => {
                         let Some(mut result_set) = outcome.result_sets.into_iter().next() else {
-                            this.data = Load::Failed("A consulta não devolveu linhas.".into());
+                            this.data = Load::Failed(t!("database_client.table.no_rows_returned"));
                             cx.notify();
                             return;
                         };
@@ -352,11 +364,7 @@ impl TableView {
         if self.pending.is_empty() {
             return false;
         }
-        self.notice = Some((
-            "Aplique ou descarte as alterações antes de trocar de página, ordenar ou filtrar."
-                .into(),
-            Color::Warning,
-        ));
+        self.notice = Some((t!("database_client.table.pending_blocks"), Color::Warning));
         cx.notify();
         true
     }
@@ -470,7 +478,7 @@ impl TableView {
             });
         });
         if opened.is_err() {
-            self.notice = Some(("A janela deste workspace foi fechada.".into(), Color::Error));
+            self.notice = Some((t!("database_client.table.window_closed"), Color::Error));
             cx.notify();
         }
     }
@@ -527,9 +535,9 @@ impl TableView {
                             .update(cx, |grid, cx| grid.set_pending(PendingEdits::default(), cx));
                         this.notice = Some((
                             if count == 1 {
-                                "1 linha atualizada.".into()
+                                t!("database_client.table.rows_updated.one")
                             } else {
-                                format!("{count} linhas atualizadas.").into()
+                                t!("database_client.table.rows_updated.other", count = count)
                             },
                             Color::Success,
                         ));
@@ -611,7 +619,7 @@ impl TableView {
         }
         if let Some(tab) = Tab::ALL
             .into_iter()
-            .find(|tab| tab.label().eq_ignore_ascii_case(label))
+            .find(|tab| tab.debug_name().eq_ignore_ascii_case(label))
         {
             self.select_tab(tab, cx);
         }
@@ -655,8 +663,13 @@ impl TableView {
             RelationKind::View | RelationKind::MaterializedView
         );
         let facts = [
-            self.estimated_rows
-                .map(|rows| format!("{} linhas", crate::panel::format_count(rows))),
+            self.estimated_rows.map(|rows| {
+                t!(
+                    "database_client.table.rows",
+                    count = crate::panel::format_count(rows)
+                )
+                .to_string()
+            }),
             self.total_size.clone(),
         ]
         .into_iter()
@@ -700,7 +713,7 @@ impl TableView {
             .child(Label::new(self.name.clone()).weight(FontWeight::SEMIBOLD))
             .when(is_view, |this| {
                 this.child(
-                    Label::new("view")
+                    Label::new(t!("database_client.table.view_badge"))
                         .size(LabelSize::XSmall)
                         .color(Color::Muted),
                 )
@@ -758,7 +771,7 @@ impl TableView {
             .child(div().w(px(180.)).child(self.order_input.clone()))
             .child(divider())
             .child(
-                Label::new("limite")
+                Label::new(t!("database_client.table.limit"))
                     .size(LabelSize::Small)
                     .color(Color::Muted),
             )
@@ -787,7 +800,7 @@ impl TableView {
                         cx,
                     ))
                     .child(
-                        Label::new("aplica")
+                        Label::new(t!("database_client.table.apply_hint"))
                             .size(LabelSize::XSmall)
                             .color(Color::Muted),
                     )
@@ -805,20 +818,21 @@ impl TableView {
                 let first = self.page * PAGE_SIZE + 1;
                 let last = self.page * PAGE_SIZE + page.shown;
                 let summary = match self.estimated_rows {
-                    Some(total) if !filtered && page.shown > 0 => format!(
-                        "{} de {} linhas",
-                        page.shown,
-                        crate::panel::format_count(total)
-                    ),
-                    _ if page.shown == 1 => "1 linha".to_owned(),
-                    _ => format!("{} linhas", page.shown),
+                    Some(total) if !filtered && page.shown > 0 => t!(
+                        "database_client.table.rows_of_total",
+                        shown = page.shown,
+                        total = crate::panel::format_count(total)
+                    )
+                    .to_string(),
+                    _ if page.shown == 1 => t!("database_client.query.rows.one").to_string(),
+                    _ => t!("database_client.query.rows.other", count = page.shown).to_string(),
                 };
                 let mode = if self.can_edit() {
-                    "duplo clique edita".to_owned()
+                    t!("database_client.table.double_click_edits")
                 } else if self.columns.iter().any(|column| column.primary_key) {
-                    "somente leitura".to_owned()
+                    t!("database_client.panel.read_only")
                 } else {
-                    "somente leitura: sem chave primária".to_owned()
+                    t!("database_client.table.read_only_no_primary_key")
                 };
                 let order = match self.default_order_label(cx) {
                     Some(order) => format!(" · {order}"),
@@ -836,7 +850,7 @@ impl TableView {
                 )
             }
             Load::Loading => (
-                "carregando…".to_owned(),
+                t!("database_client.table.loading_lowercase").to_string(),
                 String::new(),
                 "…".to_owned(),
                 false,
@@ -872,7 +886,7 @@ impl TableView {
                         IconButton::new("db-table-previous", IconName::ChevronLeft)
                             .icon_size(IconSize::XSmall)
                             .disabled(page == 0)
-                            .tooltip(Tooltip::text("Página anterior"))
+                            .tooltip(Tooltip::text(t!("database_client.table.previous_page")))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.go_to_page(page.saturating_sub(1), cx)
                             })),
@@ -882,7 +896,7 @@ impl TableView {
                         IconButton::new("db-table-next", IconName::ChevronRight)
                             .icon_size(IconSize::XSmall)
                             .disabled(!has_more)
-                            .tooltip(Tooltip::text("Próxima página"))
+                            .tooltip(Tooltip::text(t!("database_client.table.next_page")))
                             .on_click(
                                 cx.listener(move |this, _, _, cx| this.go_to_page(page + 1, cx)),
                             ),
@@ -918,9 +932,12 @@ impl TableView {
                                 .child(Indicator::dot().color(Color::Warning))
                                 .child(
                                     Label::new(if count == 1 {
-                                        "1 alteração pendente".to_owned()
+                                        t!("database_client.table.pending_changes.one")
                                     } else {
-                                        format!("{count} alterações pendentes")
+                                        t!(
+                                            "database_client.table.pending_changes.other",
+                                            count = count
+                                        )
                                     })
                                     .size(LabelSize::Small)
                                     .weight(FontWeight::SEMIBOLD)
@@ -928,12 +945,12 @@ impl TableView {
                                 ),
                         )
                         .child(
-                            Label::new("· numa transação")
+                            Label::new(t!("database_client.table.in_a_transaction"))
                                 .size(LabelSize::XSmall)
                                 .color(Color::Muted),
                         )
                         .child(
-                            Button::new("db-edits-sql", "Ver SQL")
+                            Button::new("db-edits-sql", t!("database_client.table.view_sql"))
                                 .style(ButtonStyle::Subtle)
                                 .label_size(LabelSize::Small)
                                 .color(if self.show_sql {
@@ -947,7 +964,7 @@ impl TableView {
                                 })),
                         )
                         .child(
-                            Button::new("db-edits-discard", "Descartar")
+                            Button::new("db-edits-discard", t!("database_client.table.discard"))
                                 .style(ButtonStyle::Subtle)
                                 .label_size(LabelSize::Small)
                                 .disabled(self.applying)
@@ -958,9 +975,9 @@ impl TableView {
                                 "db-edits-apply",
                                 None,
                                 if self.applying {
-                                    "Aplicando…"
+                                    t!("database_client.table.applying")
                                 } else {
-                                    "Aplicar"
+                                    t!("database_client.table.apply")
                                 },
                                 Some(KeyBinding::for_action_in(
                                     &ApplyEdits,
@@ -989,7 +1006,13 @@ impl TableView {
             .filter(|column| column.primary_key)
             .map(|column| column.name.as_str())
             .collect::<Vec<_>>();
-        (!primary_key.is_empty()).then(|| format!("ordem por {}", primary_key.join(", ")))
+        (!primary_key.is_empty()).then(|| {
+            t!(
+                "database_client.table.ordered_by",
+                columns = primary_key.join(", ")
+            )
+            .to_string()
+        })
     }
 
     fn render_message(&self, message: SharedString, error: bool, cx: &App) -> AnyElement {
@@ -1026,7 +1049,7 @@ impl TableView {
             .child(match &self.data {
                 Load::Failed(error) => self.render_message(error.clone(), true, cx),
                 Load::Loading if self.grid.read(cx).row_count() == 0 => {
-                    self.render_message("Carregando…".into(), false, cx)
+                    self.render_message(t!("database_client.table.loading"), false, cx)
                 }
                 _ => div()
                     .flex_1()
@@ -1076,17 +1099,25 @@ impl TableView {
                         .border_b_1()
                         .border_color(colors.border)
                         .child(
-                            Label::new("SQL que vai rodar")
+                            Label::new(t!("database_client.table.sql_to_run"))
                                 .size(LabelSize::Small)
                                 .weight(FontWeight::SEMIBOLD),
                         )
                         .child(
-                            Label::new(format!(
-                                "{updates} {} · numa transação · {} {}",
-                                if updates == 1 { "update" } else { "updates" },
-                                self.connection.name,
-                                self.connection.environment.label()
-                            ))
+                            Label::new(if updates == 1 {
+                                t!(
+                                    "database_client.table.updates_summary.one",
+                                    connection = self.connection.name,
+                                    environment = self.connection.environment.label()
+                                )
+                            } else {
+                                t!(
+                                    "database_client.table.updates_summary.other",
+                                    count = updates,
+                                    connection = self.connection.name,
+                                    environment = self.connection.environment.label()
+                                )
+                            })
                             .size(LabelSize::XSmall)
                             .color(Color::Muted),
                         ),
@@ -1134,13 +1165,9 @@ impl TableView {
                         )
                         .child(
                             div().flex_1().min_w_0().child(
-                                Label::new(
-                                    "As linhas âmbar conferem o valor antigo. Se alguém mudou a \
-                                     linha depois que você abriu a tabela, o update afeta 0 linhas \
-                                     e nada é sobrescrito.",
-                                )
-                                .size(LabelSize::XSmall)
-                                .color(Color::Muted),
+                                Label::new(t!("database_client.table.amber_lines_note"))
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted),
                             ),
                         ),
                 )
@@ -1150,7 +1177,7 @@ impl TableView {
                         .pb_3()
                         .gap_4()
                         .child(
-                            Button::new("db-copy-edits-sql", "Copiar")
+                            Button::new("db-copy-edits-sql", t!("database_client.grid.copy"))
                                 .style(ButtonStyle::Subtle)
                                 .label_size(LabelSize::Small)
                                 .on_click(move |_, _, cx| {
@@ -1158,21 +1185,27 @@ impl TableView {
                                 }),
                         )
                         .child(
-                            Button::new("db-open-edits-sql", "Abrir num .sql")
-                                .style(ButtonStyle::Subtle)
-                                .label_size(LabelSize::Small)
-                                .on_click(cx.listener(move |this, _, window, cx| {
+                            Button::new(
+                                "db-open-edits-sql",
+                                t!("database_client.table.open_in_sql_file"),
+                            )
+                            .style(ButtonStyle::Subtle)
+                            .label_size(LabelSize::Small)
+                            .on_click(cx.listener(
+                                move |this, _, window, cx| {
                                     this.open_in_query(
-                                        "alterações pendentes".to_owned(),
+                                        t!("database_client.table.pending_changes_header")
+                                            .to_string(),
                                         open.clone(),
                                         window,
                                         cx,
                                     )
-                                })),
+                                },
+                            )),
                         )
                         .child(div().flex_1())
                         .child(
-                            Button::new("db-close-edits-sql", "fechar")
+                            Button::new("db-close-edits-sql", t!("database_client.table.close"))
                                 .style(ButtonStyle::Subtle)
                                 .label_size(LabelSize::XSmall)
                                 .color(Color::Muted)
@@ -1211,7 +1244,10 @@ impl TableView {
             Some(panel) => panel.update(cx, |panel, cx| {
                 panel.open_query_with(header, sql, false, window, cx)
             }),
-            None => Err(anyhow::anyhow!("O painel do Banco foi fechado.")),
+            None => Err(anyhow::anyhow!(
+                "{}",
+                t!("database_client.connect.error_panel_closed")
+            )),
         };
         if let Err(error) = result {
             self.notice = Some((format!("{error:#}").into(), Color::Error));
@@ -1222,9 +1258,9 @@ impl TableView {
     #[allow(clippy::too_many_arguments)]
     fn render_section(
         &self,
-        title: &'static str,
+        title: SharedString,
         count: usize,
-        headers: &[(&'static str, f32)],
+        headers: &[(SharedString, f32)],
         rows: Vec<Vec<Option<(String, Color, bool)>>>,
         cx: &App,
     ) -> AnyElement {
@@ -1259,7 +1295,7 @@ impl TableView {
                     .child(h_flex().h(px(32.)).bg(colors.element_background).children(
                         headers.iter().enumerate().map(|(index, (header, _))| {
                             cell(index).child(
-                                Label::new(*header)
+                                Label::new(header.clone())
                                     .size(LabelSize::XSmall)
                                     .weight(FontWeight::MEDIUM)
                                     .color(Color::Muted),
@@ -1291,6 +1327,7 @@ impl TableView {
             .columns
             .iter()
             .map(|column| {
+                let unique = t!("database_client.table.unique").to_string();
                 let mut restrictions = Vec::new();
                 if column.primary_key {
                     restrictions.push("PK".to_owned());
@@ -1310,17 +1347,21 @@ impl TableView {
                         continue;
                     }
                     restrictions.push(if index.unique {
-                        format!("único · {}", index.name)
+                        format!("{unique} · {}", index.name)
                     } else if expression == column.name {
-                        "índice".to_owned()
+                        t!("database_client.table.index").to_string()
                     } else if expression.eq_ignore_ascii_case(&format!("{} desc", column.name)) {
-                        "índice desc".to_owned()
+                        t!("database_client.table.index_desc").to_string()
                     } else {
-                        format!("índice por {expression}")
+                        t!("database_client.table.index_by", expression = expression).to_string()
                     });
                 }
-                if column.unique && !restrictions.iter().any(|r| r.starts_with("único")) {
-                    restrictions.push("único".to_owned());
+                if column.unique
+                    && !restrictions
+                        .iter()
+                        .any(|restriction| restriction.starts_with(&unique))
+                {
+                    restrictions.push(unique);
                 }
                 let restriction_color = if column.primary_key {
                     Color::Warning
@@ -1331,7 +1372,11 @@ impl TableView {
                     mono(column.name.clone(), Color::Default),
                     mono(column.type_name.clone(), Color::Accent),
                     mono(
-                        if column.not_null { "não" } else { "sim" }.to_owned(),
+                        if column.not_null {
+                            t!("database_client.table.no").to_string()
+                        } else {
+                            t!("database_client.table.yes").to_string()
+                        },
                         Color::Muted,
                     ),
                     match &column.default {
@@ -1349,14 +1394,14 @@ impl TableView {
             })
             .collect();
         self.render_section(
-            "Colunas",
+            t!("database_client.table.columns"),
             self.columns.len(),
             &[
-                ("Coluna", 180.),
-                ("Tipo", 170.),
-                ("Null", 70.),
-                ("Default", 260.),
-                ("Restrições", 0.),
+                (t!("database_client.table.column"), 180.),
+                (t!("database_client.table.type"), 170.),
+                ("Null".into(), 70.),
+                ("Default".into(), 260.),
+                (t!("database_client.table.constraints"), 0.),
             ],
             rows,
             cx,
@@ -1378,7 +1423,7 @@ impl TableView {
                 let kind = if index.primary {
                     format!("{method} · PK")
                 } else if index.unique {
-                    format!("{method} · único")
+                    format!("{method} · {}", t!("database_client.table.unique"))
                 } else {
                     method
                 };
@@ -1395,9 +1440,11 @@ impl TableView {
                     Some((index.size.clone(), Color::Muted, true)),
                     Some((
                         match index.scans {
-                            Some(0) if unused => "0 scans · candidato a remover".to_owned(),
+                            Some(0) if unused => {
+                                t!("database_client.table.unused_index").to_string()
+                            }
                             Some(scans) => format!("{} scans", format_scans(scans)),
-                            None => "sem estatística".to_owned(),
+                            None => t!("database_client.table.no_statistics").to_string(),
                         },
                         if unused {
                             Color::Warning
@@ -1410,14 +1457,14 @@ impl TableView {
             })
             .collect();
         self.render_section(
-            "Índices",
+            t!("database_client.table.tab_indexes"),
             structure.indexes.len(),
             &[
-                ("Nome", 260.),
-                ("Colunas", 240.),
-                ("Tipo", 140.),
-                ("Tamanho", 100.),
-                ("Uso (desde o reset)", 0.),
+                (t!("database_client.table.name"), 260.),
+                (t!("database_client.table.columns"), 240.),
+                (t!("database_client.table.type"), 140.),
+                (t!("database_client.table.size"), 100.),
+                (t!("database_client.table.usage_since_reset"), 0.),
             ],
             rows,
             cx,
@@ -1432,10 +1479,14 @@ impl TableView {
                 vec![
                     Some((
                         match foreign_key.direction {
-                            ForeignKeyDirection::References => "referencia",
-                            ForeignKeyDirection::ReferencedBy => "referenciada por",
+                            ForeignKeyDirection::References => {
+                                t!("database_client.table.references")
+                            }
+                            ForeignKeyDirection::ReferencedBy => {
+                                t!("database_client.table.referenced_by")
+                            }
                         }
-                        .to_owned(),
+                        .to_string(),
                         Color::Muted,
                         true,
                     )),
@@ -1462,14 +1513,14 @@ impl TableView {
             })
             .collect();
         self.render_section(
-            "Relações",
+            t!("database_client.table.tab_relations"),
             structure.foreign_keys.len(),
             &[
-                ("Direção", 150.),
-                ("Tabela", 220.),
-                ("Coluna", 200.),
-                ("Ao apagar", 160.),
-                ("Linhas", 0.),
+                (t!("database_client.table.direction"), 150.),
+                (t!("database_client.table.table"), 220.),
+                (t!("database_client.table.column"), 200.),
+                (t!("database_client.table.on_delete"), 160.),
+                (t!("database_client.table.row_count"), 0.),
             ],
             rows,
             cx,
@@ -1497,12 +1548,9 @@ impl TableView {
                             .color(Color::Muted),
                     )
                     .child(
-                        Label::new(
-                            "Mudar coluna, índice ou FK não roda direto: vira um ALTER TABLE num \
-                             .sql novo, que passa pelo editor e pela confirmação de escrita.",
-                        )
-                        .size(LabelSize::Small)
-                        .color(Color::Muted),
+                        Label::new(t!("database_client.table.structure_changes_note"))
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
                     ),
             )
             .child(
@@ -1512,7 +1560,7 @@ impl TableView {
                         secondary_button(
                             "db-open-ddl",
                             Some((IconName::FileCode, Color::Muted)),
-                            "Abrir DDL",
+                            t!("database_client.table.open_ddl"),
                             true,
                             cx,
                         )
@@ -1522,14 +1570,14 @@ impl TableView {
                         secondary_button(
                             "db-new-column",
                             Some((IconName::Plus, Color::Muted)),
-                            "Nova coluna",
+                            t!("database_client.table.new_column"),
                             true,
                             cx,
                         )
                         .on_click(cx.listener(
                             move |this, _, window, cx| {
                                 this.open_in_query(
-                                    "nova coluna".to_owned(),
+                                    t!("database_client.table.new_column_header").to_string(),
                                     new_column.clone(),
                                     window,
                                     cx,
@@ -1541,14 +1589,14 @@ impl TableView {
                         secondary_button(
                             "db-new-index",
                             Some((IconName::Plus, Color::Muted)),
-                            "Novo índice",
+                            t!("database_client.table.new_index"),
                             true,
                             cx,
                         )
                         .on_click(cx.listener(
                             move |this, _, window, cx| {
                                 this.open_in_query(
-                                    "novo índice".to_owned(),
+                                    t!("database_client.table.new_index_header").to_string(),
                                     new_index.clone(),
                                     window,
                                     cx,
@@ -1568,7 +1616,7 @@ impl TableView {
         let pending = match (&self.tab, &self.structure) {
             (Tab::Structure, _) => None,
             (_, None | Some(Load::Loading)) => {
-                Some(self.render_message("Lendo o catálogo…".into(), false, cx))
+                Some(self.render_message(t!("database_client.table.reading_catalog"), false, cx))
             }
             (_, Some(Load::Failed(error))) => Some(self.render_message(error.clone(), true, cx)),
             _ => None,
@@ -1598,15 +1646,12 @@ impl TableView {
                     .child(self.render_structure_actions(cx))
                     .into_any_element(),
                 (Tab::Indexes, Some(structure)) if structure.indexes.is_empty() => {
-                    self.render_message("Esta tabela não tem índices.".into(), false, cx)
+                    self.render_message(t!("database_client.table.no_indexes"), false, cx)
                 }
                 (Tab::Indexes, Some(structure)) => self.indexes_section(structure, cx),
-                (Tab::Relations, Some(structure)) if structure.foreign_keys.is_empty() => self
-                    .render_message(
-                        "Nenhuma chave estrangeira aponta para esta tabela ou sai dela.".into(),
-                        false,
-                        cx,
-                    ),
+                (Tab::Relations, Some(structure)) if structure.foreign_keys.is_empty() => {
+                    self.render_message(t!("database_client.table.no_foreign_keys"), false, cx)
+                }
                 (Tab::Relations, Some(structure)) => self.relations_section(structure, cx),
                 (Tab::Ddl, Some(structure)) => {
                     let ddl = structure.ddl.clone();
@@ -1616,19 +1661,16 @@ impl TableView {
                             h_flex()
                                 .gap_2()
                                 .child(
-                                    Label::new(
-                                        "Montado a partir do catálogo: colunas, defaults, \
-                                         restrições e índices.",
-                                    )
-                                    .size(LabelSize::Small)
-                                    .color(Color::Muted),
+                                    Label::new(t!("database_client.table.ddl_note"))
+                                        .size(LabelSize::Small)
+                                        .color(Color::Muted),
                                 )
                                 .child(div().flex_1())
                                 .child(
                                     secondary_button(
                                         "db-copy-ddl",
                                         Some((IconName::Copy, Color::Muted)),
-                                        "Copiar",
+                                        t!("database_client.grid.copy"),
                                         true,
                                         cx,
                                     )
@@ -1697,7 +1739,8 @@ fn foreign_key_columns(definition: &str) -> Option<String> {
 /// `2412000` → `2,4 M`, `310245` → `310 k`, for index usage.
 fn format_scans(scans: i64) -> String {
     if scans >= 1_000_000 {
-        format!("{:.1} M", scans as f64 / 1_000_000.0).replace('.', ",")
+        let (decimal_separator, _) = crate::panel::number_separators();
+        format!("{:.1} M", scans as f64 / 1_000_000.0).replace('.', &decimal_separator.to_string())
     } else if scans >= 10_000 {
         format!("{} k", scans / 1_000)
     } else {

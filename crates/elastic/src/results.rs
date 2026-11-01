@@ -227,16 +227,30 @@ pub fn open_stack_link(
     true
 }
 
-/// `48213` → `48.213`, `1234567` → `1,2 M`.
+fn portuguese_numbers() -> bool {
+    i18n::current_language() == i18n::Language::PortugueseBrazil
+}
+
+/// `1.5` → `1,5` when the UI is in Portuguese.
+pub(crate) fn localized_decimal(text: String) -> String {
+    if portuguese_numbers() {
+        text.replace('.', ",")
+    } else {
+        text
+    }
+}
+
+/// `48213` → `48,213` (`48.213` in Portuguese), `1234567` → `1.2 M` (`1,2 M`).
 pub fn format_count(count: u64) -> String {
     if count >= 1_000_000 {
-        format!("{:.1} M", count as f64 / 1_000_000.0).replace('.', ",")
+        localized_decimal(format!("{:.1} M", count as f64 / 1_000_000.0))
     } else {
+        let separator = if portuguese_numbers() { '.' } else { ',' };
         let digits = count.to_string();
         let mut result = String::new();
         for (index, digit) in digits.chars().enumerate() {
             if index > 0 && (digits.len() - index).is_multiple_of(3) {
-                result.push('.');
+                result.push(separator);
             }
             result.push(digit);
         }
@@ -244,10 +258,10 @@ pub fn format_count(count: u64) -> String {
     }
 }
 
-/// `10412345` µs → `10,4 s`, `38000` → `38 ms`.
+/// `10412345` µs → `10.4 s`, `38000` → `38 ms`.
 pub fn format_micros(micros: u64) -> String {
     if micros >= 1_000_000 {
-        format!("{:.1} s", micros as f64 / 1_000_000.0).replace('.', ",")
+        localized_decimal(format!("{:.1} s", micros as f64 / 1_000_000.0))
     } else if micros >= 1_000 {
         format!("{} ms", micros / 1_000)
     } else {
@@ -276,9 +290,9 @@ mod tests {
 
     #[test]
     fn values_read_like_the_dock() {
-        assert_eq!(format_count(48213), "48.213");
-        assert_eq!(format_count(1_234_567), "1,2 M");
-        assert_eq!(format_micros(10_412_000), "10,4 s");
+        assert_eq!(format_count(48213), "48,213");
+        assert_eq!(format_count(1_234_567), "1.2 M");
+        assert_eq!(format_micros(10_412_000), "10.4 s");
         assert_eq!(format_micros(38_000), "38 ms");
         assert_eq!(display(&serde_json::json!(["a", "b"])), "a, b");
     }

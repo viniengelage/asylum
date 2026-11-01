@@ -6,7 +6,9 @@ use crate::client::{Auth, Endpoint};
 use anyhow::Context as _;
 use db::kvp::KeyValueStore;
 use fs::Fs;
+use gpui::SharedString;
 use http_client::Url;
+use i18n::t;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -47,10 +49,10 @@ pub enum Via {
 }
 
 impl Via {
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> SharedString {
         match self {
-            Via::Kibana => "Kibana",
-            Via::Direct => "direto",
+            Via::Kibana => "Kibana".into(),
+            Via::Direct => t!("elastic.connection.via_direct"),
         }
     }
 }
@@ -118,11 +120,12 @@ impl SavedConnection {
     }
 
     pub fn endpoint(&self) -> anyhow::Result<Endpoint> {
-        let url =
-            Url::parse(self.url.trim()).with_context(|| format!("URL inválida: {}", self.url))?;
+        let url = Url::parse(self.url.trim())
+            .with_context(|| t!("elastic.connection.invalid_url", url = self.url))?;
         anyhow::ensure!(
             matches!(url.scheme(), "http" | "https"),
-            "a URL precisa começar com http:// ou https://"
+            "{}",
+            t!("elastic.connection.url_scheme")
         );
         Ok(match self.via {
             Via::Kibana => Endpoint::Kibana(url),
@@ -158,8 +161,8 @@ pub async fn load_project(fs: &dyn Fs, root: &Path) -> anyhow::Result<Vec<SavedC
         return Ok(Vec::new());
     }
     let text = fs.load(&path).await?;
-    let file: ConnectionsFile =
-        serde_json::from_str(&text).with_context(|| format!("{} ilegível", path.display()))?;
+    let file: ConnectionsFile = serde_json::from_str(&text)
+        .with_context(|| t!("elastic.connection.unreadable", path = path.display()))?;
     Ok(file.connections)
 }
 
@@ -211,8 +214,8 @@ pub async fn load_project_streams(fs: &dyn Fs, root: &Path) -> anyhow::Result<Ve
         return Ok(Vec::new());
     }
     let text = fs.load(&path).await?;
-    let file: StreamsFile =
-        serde_json::from_str(&text).with_context(|| format!("{} ilegível", path.display()))?;
+    let file: StreamsFile = serde_json::from_str(&text)
+        .with_context(|| t!("elastic.connection.unreadable", path = path.display()))?;
     Ok(file.streams)
 }
 

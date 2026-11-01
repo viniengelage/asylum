@@ -5,6 +5,7 @@
 use collections::HashMap;
 use editor::{CompletionProvider, Editor};
 use gpui::{Context, Entity, Task, Window};
+use i18n::t;
 use language::{CodeLabel, ToOffset as _};
 use project::{
     Completion, CompletionDisplayOptions, CompletionResponse, CompletionSource,
@@ -239,7 +240,9 @@ fn suggestions(cache: &SchemaCache, statement: &str, prefix: &str) -> Vec<Sugges
             .map(|(_, relation)| Suggestion {
                 text: relation.clone(),
                 label: relation.clone(),
-                detail: Some(format!("tabela em {qualifier}")),
+                detail: Some(
+                    t!("database_client.completion.table_in", schema = qualifier).to_string(),
+                ),
             })
             .collect();
     }
@@ -264,7 +267,7 @@ fn suggestions(cache: &SchemaCache, statement: &str, prefix: &str) -> Vec<Sugges
         Suggestion {
             label: text.clone(),
             text,
-            detail: Some("tabela".to_owned()),
+            detail: Some(t!("database_client.completion.table").to_string()),
         }
     }));
     result.extend(KEYWORDS.iter().map(|keyword| Suggestion {

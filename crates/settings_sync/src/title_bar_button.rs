@@ -1,4 +1,5 @@
 use gpui::{Action, AnyElement, App};
+use i18n::t;
 use ui::{Avatar, ButtonLike, ContextMenu, PopoverMenu, Tooltip, prelude::*};
 
 use crate::{SettingsSync, SignIn, SignOut, State, SyncNow, SyncStatus};
@@ -11,16 +12,19 @@ pub fn render_title_bar_button(cx: &App) -> Option<AnyElement> {
     match sync.state() {
         State::Restoring => None,
         State::SignedOut { .. } | State::AwaitingAuthorization { .. } => Some(
-            Button::new("settings-sync-sign-in", "Sign In")
-                .label_size(LabelSize::Small)
-                .start_icon(
-                    Icon::new(IconName::Github)
-                        .size(IconSize::Small)
-                        .color(Color::Muted),
-                )
-                .tooltip(Tooltip::text("Sign in with GitHub to sync your settings"))
-                .on_click(|_, window, cx| window.dispatch_action(SignIn.boxed_clone(), cx))
-                .into_any_element(),
+            Button::new(
+                "settings-sync-sign-in",
+                t!("settings_sync.title_bar.sign_in"),
+            )
+            .label_size(LabelSize::Small)
+            .start_icon(
+                Icon::new(IconName::Github)
+                    .size(IconSize::Small)
+                    .color(Color::Muted),
+            )
+            .tooltip(Tooltip::text(t!("settings_sync.title_bar.sign_in_tooltip")))
+            .on_click(|_, window, cx| window.dispatch_action(SignIn.boxed_clone(), cx))
+            .into_any_element(),
         ),
         State::SignedIn { user, sync, .. } => {
             let login = user.login.clone();
@@ -36,7 +40,7 @@ pub fn render_title_bar_button(cx: &App) -> Option<AnyElement> {
                                     avatar.indicator(ui::Indicator::dot().color(Color::Error))
                                 }),
                         ),
-                        Tooltip::text(format!("Signed in as {login}")),
+                        Tooltip::text(t!("settings_sync.title_bar.signed_in_as", login = login)),
                     )
                     .anchor(gpui::Anchor::TopRight)
                     .menu(move |window, cx| {
@@ -46,8 +50,8 @@ pub fn render_title_bar_button(cx: &App) -> Option<AnyElement> {
                             menu.header(format!("@{login}"))
                                 .item(ui::ContextMenuEntry::new(status).disabled(true))
                                 .separator()
-                                .action("Sync Settings Now", SyncNow.boxed_clone())
-                                .action("Sign Out", SignOut.boxed_clone())
+                                .action(t!("settings_sync.menu.sync_now"), SyncNow.boxed_clone())
+                                .action(t!("settings_sync.menu.sign_out"), SignOut.boxed_clone())
                         }))
                     })
                     .into_any_element(),
@@ -58,15 +62,20 @@ pub fn render_title_bar_button(cx: &App) -> Option<AnyElement> {
 
 fn status_label(sync: &SyncStatus) -> SharedString {
     match sync {
-        SyncStatus::NeverSynced => "Not synced yet".into(),
-        SyncStatus::Syncing => "Syncing…".into(),
+        SyncStatus::NeverSynced => t!("settings_sync.status.never_synced"),
+        SyncStatus::Syncing => t!("settings_sync.status.syncing"),
         SyncStatus::Synced { at, report } => {
-            let mut label = format!("Synced at {}", at.format("%H:%M"));
-            if report.backups > 0 {
-                label.push_str(&format!(" · {} conflict(s) backed up", report.backups));
+            let time = at.format("%H:%M");
+            match report.backups {
+                0 => t!("settings_sync.status.synced", time = time),
+                1 => t!("settings_sync.status.synced_with_backup.one", time = time),
+                count => t!(
+                    "settings_sync.status.synced_with_backup.other",
+                    time = time,
+                    count = count
+                ),
             }
-            label.into()
         }
-        SyncStatus::Failed(error) => format!("Sync failed: {error}").into(),
+        SyncStatus::Failed(error) => t!("settings_sync.status.failed", error = error),
     }
 }

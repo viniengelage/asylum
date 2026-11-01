@@ -16,6 +16,7 @@ use gpui::{
     Anchor, App, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, Global, Hsla,
     Task, WeakEntity, Window, prelude::*, rgb,
 };
+use i18n::t;
 use language_model::LanguageModelRegistry;
 use project::context_server_store::ContextServerStatus;
 use project::project_settings::{ContextServerSettings, ProjectSettings};
@@ -34,6 +35,8 @@ use workspace::{
 
 use crate::zed::{mac_only_instance, profile_launchers};
 
+/// The name the default profile is saved with until it is renamed. It shows translated, but
+/// the registry keeps this value so that it doesn't depend on the language.
 const DEFAULT_PROFILE_NAME: &str = "Padrão";
 /// The color of the icon in the app's own bundle.
 const BUNDLE_ICON_COLOR: Option<ProfileColor> = Some(ProfileColor::Purple);
@@ -78,13 +81,23 @@ impl ProfileColor {
         }
     }
 
-    fn label(self) -> &'static str {
+    fn id(self) -> &'static str {
         match self {
-            Self::Amber => "Âmbar",
-            Self::Teal => "Verde-água",
-            Self::Purple => "Roxo",
-            Self::Blue => "Azul",
-            Self::Rose => "Rosa",
+            Self::Amber => "amber",
+            Self::Teal => "teal",
+            Self::Purple => "purple",
+            Self::Blue => "blue",
+            Self::Rose => "rose",
+        }
+    }
+
+    fn label(self) -> SharedString {
+        match self {
+            Self::Amber => t!("zed.profiles.color_amber"),
+            Self::Teal => t!("zed.profiles.color_teal"),
+            Self::Purple => t!("zed.profiles.color_purple"),
+            Self::Blue => t!("zed.profiles.color_blue"),
+            Self::Rose => t!("zed.profiles.color_rose"),
         }
     }
 }
@@ -148,10 +161,13 @@ fn load_profiles() -> Result<Vec<AppProfile>> {
     let default_position = profiles
         .iter()
         .position(|profile| profile.id == paths::DEFAULT_PROFILE_ID);
-    let default = match default_position {
+    let mut default = match default_position {
         Some(position) => profiles.remove(position),
         None => default_profile(),
     };
+    if default.name == DEFAULT_PROFILE_NAME {
+        default.name = t!("zed.profiles.default_name").to_string();
+    }
     profiles.insert(0, default);
     Ok(profiles)
 }
@@ -161,9 +177,18 @@ fn save_profiles(profiles: &[AppProfile]) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).context("failed to create the profiles directory")?;
     }
-    let json = serde_json::to_vec_pretty(&Registry {
-        profiles: profiles.to_vec(),
-    })?;
+    let default_name = t!("zed.profiles.default_name");
+    let profiles = profiles
+        .iter()
+        .cloned()
+        .map(|mut profile| {
+            if profile.id == paths::DEFAULT_PROFILE_ID && profile.name == default_name.as_ref() {
+                profile.name = DEFAULT_PROFILE_NAME.to_string();
+            }
+            profile
+        })
+        .collect();
+    let json = serde_json::to_vec_pretty(&Registry { profiles })?;
     std::fs::write(&path, json).context("failed to write profiles.json")
 }
 
@@ -414,7 +439,7 @@ fn run_in_profile(
                 return Ok(());
             }
         }
-        anyhow::bail!("o perfil abriu, mas não respondeu a tempo")
+        anyhow::bail!("{}", t!("zed.profiles.error_no_response"))
     })
 }
 
@@ -480,13 +505,35 @@ struct ToolkitSummary {
     name: String,
     /// An `IconName` in snake case.
     icon: String,
-    detail: String,
+    #[serde(default)]
+    tool_count: usize,
+    #[serde(default)]
+    mention: Option<String>,
     enabled: bool,
+}
+
+impl ToolkitSummary {
+    fn detail(&self) -> SharedString {
+        let tools = if self.tool_count == 1 {
+            t!("zed.profiles.toolkit_tools.one")
+        } else {
+            t!("zed.profiles.toolkit_tools.other", count = self.tool_count)
+        };
+        match &self.mention {
+            Some(mention) => t!(
+                "zed.profiles.toolkit_mention",
+                tools = tools,
+                mention = mention
+            ),
+            None => tools,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 struct McpServerSummary {
     id: String,
+    /// The command or URL of the server, empty for one an extension provides.
     detail: String,
     enabled: bool,
 }
@@ -522,29 +569,20 @@ fn mcp_server_detail(settings: &ContextServerSettings) -> String {
                 .join(" ")
         }
         ContextServerSettings::Http { url, .. } => url.clone(),
-        ContextServerSettings::Extension { .. } => "extensão".to_string(),
+        ContextServerSettings::Extension { .. } => String::new(),
     }
 }
 
 fn toolkit_summaries(cx: &App) -> Vec<ToolkitSummary> {
     task_agents::toolkits(cx)
         .iter()
-        .map(|toolkit| {
-            let tool_count = toolkit.tools.len();
-            let mut detail = format!(
-                "{tool_count} ferramenta{}",
-                if tool_count == 1 { "" } else { "s" }
-            );
-            if let Some(mention) = &toolkit.mention {
-                detail.push_str(&format!(" · menção {mention}"));
-            }
-            ToolkitSummary {
-                id: toolkit.id.to_string(),
-                name: toolkit.name.to_string(),
-                icon: toolkit.icon.to_string(),
-                detail,
-                enabled: task_agents::toolkit_enabled_in_profile(&toolkit.id, cx),
-            }
+        .map(|toolkit| ToolkitSummary {
+            id: toolkit.id.to_string(),
+            name: toolkit.name.to_string(),
+            icon: toolkit.icon.to_string(),
+            tool_count: toolkit.tools.len(),
+            mention: toolkit.mention.as_ref().map(|mention| mention.to_string()),
+            enabled: task_agents::toolkit_enabled_in_profile(&toolkit.id, cx),
         })
         .collect()
 }
@@ -777,8 +815,12 @@ impl ProfileStore {
                 let unset_missing = value.is_empty() && output.status.code() == Some(5);
                 anyhow::ensure!(
                     output.status.success() || unset_missing,
-                    "git config {key} falhou: {}",
-                    String::from_utf8_lossy(&output.stderr).trim()
+                    "{}",
+                    t!(
+                        "zed.profiles.error_git_config",
+                        key = key,
+                        message = String::from_utf8_lossy(&output.stderr).trim()
+                    )
                 );
             }
             this.update(cx, |this, cx| {
@@ -954,7 +996,7 @@ impl ProfileStore {
                 let profile = profiles
                     .iter_mut()
                     .find(|profile| profile.id == profile_id)
-                    .context("o perfil não existe mais")?;
+                    .with_context(|| t!("zed.profiles.error_profile_gone"))?;
                 change(profile);
                 save_profiles(&profiles)
             })
@@ -974,11 +1016,13 @@ impl ProfileStore {
         cx.spawn(async move |this, cx| {
             anyhow::ensure!(
                 profile_id != paths::DEFAULT_PROFILE_ID,
-                "O perfil padrão não pode ser excluído"
+                "{}",
+                t!("zed.profiles.error_delete_default")
             );
             anyhow::ensure!(
                 profile_id != active_profile_id(),
-                "Não dá para excluir o perfil desta janela"
+                "{}",
+                t!("zed.profiles.error_delete_active")
             );
             let data_dir = paths::profiles_dir().join(&profile_id);
             let credential_urls = cx
@@ -988,7 +1032,8 @@ impl ProfileStore {
                     async move {
                         anyhow::ensure!(
                             !mac_only_instance::is_profile_running(&profile_id),
-                            "Feche o perfil antes de excluí-lo"
+                            "{}",
+                            t!("zed.profiles.error_close_before_delete")
                         );
                         match std::fs::read(data_dir.join("credential_urls.json")) {
                             Ok(json) => serde_json::from_slice::<Vec<String>>(&json)
@@ -1040,7 +1085,11 @@ impl ProfileStore {
     ) -> Task<Result<AppProfile>> {
         let name = name.trim().to_string();
         cx.spawn(async move |this, cx| {
-            anyhow::ensure!(!name.is_empty(), "Dê um nome ao perfil");
+            anyhow::ensure!(
+                !name.is_empty(),
+                "{}",
+                t!("zed.profiles.error_name_required")
+            );
             let profile = cx
                 .background_spawn(async move {
                     let mut profiles = load_profiles()?;
@@ -1119,7 +1168,7 @@ impl Render for ProfileIndicator {
             .trigger_with_tooltip(
                 ButtonLike::new("profile-chip")
                     .tab_index(0isize)
-                    .aria_label(format!("Perfil {}", profile.name))
+                    .aria_label(t!("zed.indicator.aria_label", name = profile.name))
                     .child(
                         h_flex()
                             .gap_1()
@@ -1141,7 +1190,7 @@ impl Render for ProfileIndicator {
                                     .color(Color::Custom(color)),
                             ),
                     ),
-                Tooltip::text("Trocar de perfil"),
+                Tooltip::text(t!("zed.indicator.tooltip")),
             )
     }
 }
@@ -1222,7 +1271,7 @@ impl ProfilePicker {
     fn start_creating(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let name_editor = cx.new(|cx| {
             let mut editor = Editor::single_line(window, cx);
-            editor.set_placeholder_text("Nome do perfil", window, cx);
+            editor.set_placeholder_text(&t!("zed.profiles.name_placeholder"), window, cx);
             editor
         });
         name_editor.focus_handle(cx).focus(window, cx);
@@ -1327,11 +1376,11 @@ impl ProfilePicker {
         let rows = store.profiles.iter().enumerate().map(|(index, profile)| {
             let is_active = profile.id == active_id;
             let status = if is_active {
-                "esta janela"
+                t!("zed.profiles.status_this_window")
             } else if store.running.contains(&profile.id) {
-                "aberto"
+                t!("zed.profiles.status_open")
             } else {
-                "fechado"
+                t!("zed.profiles.status_closed")
             };
             let open_id = profile.id.clone();
             let in_place_id = profile.id.clone();
@@ -1375,7 +1424,7 @@ impl ProfilePicker {
                             IconButton::new(("open-in-place", index), IconName::ThisWindow)
                                 .icon_size(IconSize::Small)
                                 .icon_color(Color::Muted)
-                                .tooltip(Tooltip::text("Abrir nesta janela"))
+                                .tooltip(Tooltip::text(t!("zed.picker.open_in_place")))
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     cx.stop_propagation();
                                     this.open_in_place(in_place_id.clone(), window, cx)
@@ -1388,7 +1437,7 @@ impl ProfilePicker {
         v_flex()
             .gap_0p5()
             .child(
-                Label::new("PERFIS")
+                Label::new(t!("zed.profiles.title"))
                     .size(LabelSize::XSmall)
                     .weight(gpui::FontWeight::SEMIBOLD)
                     .color(Color::Muted)
@@ -1421,7 +1470,7 @@ impl ProfilePicker {
                             .size(IconSize::Small)
                             .color(Color::Muted),
                     )
-                    .child(Label::new("Novo perfil…")),
+                    .child(Label::new(t!("zed.picker.new_profile"))),
             )
             .child(
                 h_flex()
@@ -1438,7 +1487,7 @@ impl ProfilePicker {
                             .size(IconSize::Small)
                             .color(Color::Muted),
                     )
-                    .child(Label::new("Gerenciar perfis…")),
+                    .child(Label::new(t!("zed.picker.manage"))),
             )
     }
 
@@ -1487,16 +1536,16 @@ impl ProfilePicker {
         let (icon, label, detail) = if is_bound {
             (
                 IconName::Check,
-                format!("{project_name} abre sempre aqui"),
-                "Clique para desvincular".to_string(),
+                t!("zed.picker.bound", project = project_name),
+                t!("zed.picker.unbind_hint"),
             )
         } else {
             (
                 IconName::Folder,
-                format!("Sempre abrir {project_name} neste perfil"),
+                t!("zed.picker.bind", project = project_name),
                 match other_owner {
-                    Some(owner) => format!("Hoje pertence a {owner}"),
-                    None => "Pelo terminal ou Finder, abre aqui".to_string(),
+                    Some(owner) => t!("zed.picker.owned_by", owner = owner),
+                    None => t!("zed.picker.opens_here"),
                 },
             )
         };
@@ -1542,7 +1591,7 @@ impl ProfilePicker {
         let swatches = ProfileColor::ALL.into_iter().map(|color| {
             let is_selected = color == selected_color;
             div()
-                .id(color.label())
+                .id(color.id())
                 .size_5()
                 .rounded_full()
                 .cursor_pointer()
@@ -1561,7 +1610,7 @@ impl ProfilePicker {
             .gap_2()
             .p_1p5()
             .child(
-                Label::new("NOVO PERFIL")
+                Label::new(t!("zed.picker.create_title"))
                     .size(LabelSize::XSmall)
                     .weight(gpui::FontWeight::SEMIBOLD)
                     .color(Color::Muted),
@@ -1578,28 +1627,30 @@ impl ProfilePicker {
             )
             .child(h_flex().gap_1p5().children(swatches))
             .child(
-                Label::new(
-                    "Começa com settings, extensões e contas vazios. Keymap e temas são compartilhados.",
-                )
-                .size(LabelSize::XSmall)
-                .color(Color::Muted),
+                Label::new(t!("zed.picker.create_description"))
+                    .size(LabelSize::XSmall)
+                    .color(Color::Muted),
             )
             .when_some(error, |this, error| {
-                this.child(Label::new(error).size(LabelSize::XSmall).color(Color::Error))
+                this.child(
+                    Label::new(error)
+                        .size(LabelSize::XSmall)
+                        .color(Color::Error),
+                )
             })
             .child(
                 h_flex()
                     .justify_end()
                     .gap_1()
                     .child(
-                        Button::new("cancel-profile", "Cancelar")
+                        Button::new("cancel-profile", t!("zed.profiles.cancel"))
                             .label_size(LabelSize::Small)
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.cancel(&menu::Cancel, window, cx)
                             })),
                     )
                     .child(
-                        Button::new("create-profile", "Criar e abrir")
+                        Button::new("create-profile", t!("zed.picker.create_confirm"))
                             .label_size(LabelSize::Small)
                             .style(ButtonStyle::Filled)
                             .disabled(creating)
@@ -1671,7 +1722,7 @@ impl ManageProfilesModal {
         });
         let name_editor = cx.new(|cx| {
             let mut editor = Editor::single_line(window, cx);
-            editor.set_placeholder_text("Nome do perfil", window, cx);
+            editor.set_placeholder_text(&t!("zed.profiles.name_placeholder"), window, cx);
             editor
         });
         let subscriptions = vec![
@@ -1767,7 +1818,7 @@ impl ManageProfilesModal {
             files: false,
             directories: true,
             multiple: true,
-            prompt: Some("Vincular ao perfil".into()),
+            prompt: Some(t!("zed.manager.add_folder_prompt")),
         });
         let profile_id = self.selected_id.clone();
         cx.spawn(async move |this, cx| {
@@ -1804,9 +1855,9 @@ impl ManageProfilesModal {
             .into_iter()
             .find(|color| !taken_colors.contains(color))
             .unwrap_or(ProfileColor::Teal);
-        let task = self
-            .store
-            .update(cx, |store, cx| store.create("Novo perfil", color, cx));
+        let task = self.store.update(cx, |store, cx| {
+            store.create(&t!("zed.manager.new_profile"), color, cx)
+        });
         cx.spawn_in(window, async move |this, cx| {
             let result = task.await;
             this.update_in(cx, |this, window, cx| match result {
@@ -1836,11 +1887,12 @@ impl ManageProfilesModal {
         let fs = workspace.read(cx).app_state().fs.clone();
         let answer = window.prompt(
             gpui::PromptLevel::Warning,
-            &format!("Excluir o perfil {}?", profile.name),
-            Some(
-                "As contas e tokens dele saem do Keychain, e a pasta de dados e o cache do navegador vão para a Lixeira.",
-            ),
-            &["Excluir", "Cancelar"],
+            &t!("zed.manager.delete_title", name = profile.name),
+            Some(t!("zed.manager.delete_detail").as_ref()),
+            &[
+                t!("zed.manager.delete").as_ref(),
+                t!("zed.profiles.cancel").as_ref(),
+            ],
             cx,
         );
         cx.spawn_in(window, async move |this, cx| {
@@ -1883,7 +1935,7 @@ impl ManageProfilesModal {
         self.save_name(cx);
     }
 
-    fn render_section_title(title: &'static str) -> impl IntoElement {
+    fn render_section_title(title: SharedString) -> impl IntoElement {
         Label::new(title)
             .size(LabelSize::XSmall)
             .weight(gpui::FontWeight::SEMIBOLD)
@@ -1895,11 +1947,11 @@ impl ManageProfilesModal {
         let rows = store.profiles.iter().enumerate().map(|(index, profile)| {
             let is_selected = profile.id == self.selected_id;
             let status = if profile.id == active_profile_id() {
-                "esta janela"
+                t!("zed.profiles.status_this_window")
             } else if store.running.contains(&profile.id) {
-                "aberto"
+                t!("zed.profiles.status_open")
             } else {
-                "fechado"
+                t!("zed.profiles.status_closed")
             };
             let profile_id = profile.id.clone();
             h_flex()
@@ -1942,7 +1994,7 @@ impl ManageProfilesModal {
                 div()
                     .px_1p5()
                     .py_1()
-                    .child(Self::render_section_title("PERFIS")),
+                    .child(Self::render_section_title(t!("zed.profiles.title"))),
             )
             .children(rows)
             .child(
@@ -1960,7 +2012,7 @@ impl ManageProfilesModal {
                             .size(IconSize::Small)
                             .color(Color::Muted),
                     )
-                    .child(Label::new("Novo perfil").color(Color::Muted)),
+                    .child(Label::new(t!("zed.manager.new_profile")).color(Color::Muted)),
             )
             .child(div().flex_1())
             .child(
@@ -1969,22 +2021,20 @@ impl ManageProfilesModal {
                     .p_2()
                     .rounded_md()
                     .bg(cx.theme().colors().element_background)
-                    .child(Self::render_section_title("COMPARTILHADO"))
+                    .child(Self::render_section_title(t!("zed.manager.shared_title")))
                     .child(
-                        Label::new(
-                            "Keymap, temas e global_settings.json valem para todos os perfis.",
-                        )
-                        .size(LabelSize::XSmall)
-                        .color(Color::Muted),
+                        Label::new(t!("zed.manager.shared_detail"))
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
                     ),
             )
     }
 
     fn render_card(
-        title: &'static str,
+        title: SharedString,
         action: Option<AnyElement>,
         rows: Vec<AnyElement>,
-        empty: Option<&'static str>,
+        empty: Option<SharedString>,
         cx: &App,
     ) -> impl IntoElement {
         v_flex()
@@ -2058,7 +2108,7 @@ impl ManageProfilesModal {
             .into_any_element()
     }
 
-    fn render_status(label: &'static str, ok: bool) -> AnyElement {
+    fn render_status(label: SharedString, ok: bool) -> AnyElement {
         let color = if ok { Color::Success } else { Color::Muted };
         h_flex()
             .gap_1()
@@ -2120,8 +2170,8 @@ impl ManageProfilesModal {
                     editor
                 })
             };
-        let name_editor = new_editor(name, "Nome", window, cx);
-        let email_editor = new_editor(email, "E-mail", window, cx);
+        let name_editor = new_editor(name, &t!("zed.git.name_placeholder"), window, cx);
+        let email_editor = new_editor(email, &t!("zed.git.email_placeholder"), window, cx);
         name_editor.focus_handle(cx).focus(window, cx);
         self.git_identity_editors = Some((name_editor, email_editor));
         cx.notify();
@@ -2176,7 +2226,7 @@ impl ManageProfilesModal {
     }
 
     /// Whether the MCP server `id` of this window's project is running, as a short label.
-    fn mcp_status(&self, id: &str, cx: &App) -> Option<(&'static str, bool)> {
+    fn mcp_status(&self, id: &str, cx: &App) -> Option<(SharedString, bool)> {
         let workspace = self.workspace.upgrade()?;
         let store = workspace.read(cx).project().read(cx).context_server_store();
         let store = store.read(cx);
@@ -2185,14 +2235,16 @@ impl ManageProfilesModal {
             .iter()
             .find(|server| server.0.as_ref() == id)?;
         Some(match store.status_for_server(server_id)? {
-            ContextServerStatus::Running => ("rodando", true),
+            ContextServerStatus::Running => (t!("zed.mcp.status_running"), true),
             ContextServerStatus::Starting | ContextServerStatus::Authenticating => {
-                ("iniciando", false)
+                (t!("zed.mcp.status_starting"), false)
             }
-            ContextServerStatus::Stopped => ("parado", false),
+            ContextServerStatus::Stopped => (t!("zed.mcp.status_stopped"), false),
             ContextServerStatus::AuthRequired
-            | ContextServerStatus::ClientSecretRequired { .. } => ("pede login", false),
-            ContextServerStatus::Error(_) => ("erro", false),
+            | ContextServerStatus::ClientSecretRequired { .. } => {
+                (t!("zed.mcp.status_needs_login"), false)
+            }
+            ContextServerStatus::Error(_) => (t!("zed.mcp.status_error"), false),
         })
     }
 
@@ -2204,9 +2256,9 @@ impl ManageProfilesModal {
     ) -> impl IntoElement {
         let is_default = profile.id == paths::DEFAULT_PROFILE_ID;
         let source = if is_default {
-            "~/.gitconfig, que os outros perfis herdam"
+            t!("zed.git.source_default")
         } else {
-            "gitconfig deste perfil, herda o ~/.gitconfig"
+            t!("zed.git.source_profile")
         };
         let committer = match &self.git_identity_editors {
             Some((name_editor, email_editor)) => {
@@ -2235,7 +2287,7 @@ impl ManageProfilesModal {
                         h_flex()
                             .justify_between()
                             .child(
-                                Label::new(format!("Grava em {source}"))
+                                Label::new(t!("zed.git.writes_to", source = source))
                                     .size(LabelSize::XSmall)
                                     .color(Color::Muted),
                             )
@@ -2243,14 +2295,19 @@ impl ManageProfilesModal {
                                 h_flex()
                                     .gap_1()
                                     .child(
-                                        Button::new("cancel-git-identity", "Cancelar")
-                                            .label_size(LabelSize::Small)
-                                            .on_click(cx.listener(|this, _, _, cx| {
+                                        Button::new(
+                                            "cancel-git-identity",
+                                            t!("zed.profiles.cancel"),
+                                        )
+                                        .label_size(LabelSize::Small)
+                                        .on_click(
+                                            cx.listener(|this, _, _, cx| {
                                                 this.cancel_git_identity(cx)
-                                            })),
+                                            }),
+                                        ),
                                     )
                                     .child(
-                                        Button::new("save-git-identity", "Salvar")
+                                        Button::new("save-git-identity", t!("zed.git.save"))
                                             .label_size(LabelSize::Small)
                                             .style(ButtonStyle::Filled)
                                             .on_click(cx.listener(|this, _, _, cx| {
@@ -2265,12 +2322,12 @@ impl ManageProfilesModal {
                 IconName::Person,
                 Color::Default,
                 match &summary.git_committer {
-                    Some(committer) => format!("Commits como {committer}"),
-                    None => "Sem user.name no git".to_string(),
+                    Some(committer) => t!("zed.git.commits_as", committer = committer),
+                    None => t!("zed.git.no_name"),
                 },
-                Some(source.into()),
+                Some(source),
                 Some(
-                    Button::new("edit-git-identity", "Editar")
+                    Button::new("edit-git-identity", t!("zed.git.edit"))
                         .label_size(LabelSize::Small)
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.start_editing_git_identity(window, cx)
@@ -2284,10 +2341,10 @@ impl ManageProfilesModal {
         let providers = Self::render_row(
             IconName::GitBranch,
             Color::Muted,
-            "GitHub e Bitbucket",
-            Some("Contas por perfil chegam com o dock Repo".into()),
+            t!("zed.git.providers"),
+            Some(t!("zed.git.providers_detail")),
             Some(
-                Label::new("em breve")
+                Label::new(t!("zed.git.coming_soon"))
                     .size(LabelSize::XSmall)
                     .color(Color::Muted)
                     .into_any_element(),
@@ -2295,7 +2352,13 @@ impl ManageProfilesModal {
             false,
             cx,
         );
-        Self::render_card("CONTAS GIT", None, vec![committer, providers], None, cx)
+        Self::render_card(
+            t!("zed.git.title"),
+            None,
+            vec![committer, providers],
+            None,
+            cx,
+        )
     }
 
     fn render_ai_card(
@@ -2313,7 +2376,7 @@ impl ManageProfilesModal {
                     Color::Default,
                     provider.clone(),
                     None,
-                    Some(Self::render_status("conectado", true)),
+                    Some(Self::render_status(t!("zed.profiles.connected"), true)),
                     false,
                     cx,
                 )
@@ -2323,7 +2386,7 @@ impl ManageProfilesModal {
             rows.push(Self::render_row(
                 IconName::AiZed,
                 Color::Muted,
-                "Nenhum provedor conectado",
+                t!("zed.ai.no_provider"),
                 None,
                 None,
                 false,
@@ -2339,7 +2402,7 @@ impl ManageProfilesModal {
         rows.push(Self::render_row(
             IconName::Sparkle,
             Color::Default,
-            "Modelo padrão",
+            t!("zed.ai.default_model"),
             None,
             Some(text(&summary.default_model)),
             false,
@@ -2348,7 +2411,7 @@ impl ManageProfilesModal {
         rows.push(Self::render_row(
             IconName::Sliders,
             Color::Default,
-            "Perfil do agente",
+            t!("zed.ai.agent_profile"),
             None,
             Some(text(&summary.agent_profile)),
             false,
@@ -2358,9 +2421,9 @@ impl ManageProfilesModal {
             Button::new(
                 "configure-ai",
                 if is_active {
-                    "Configurar"
+                    t!("zed.ai.configure")
                 } else {
-                    "Configurar lá"
+                    t!("zed.ai.configure_there")
                 },
             )
             .label_size(LabelSize::Small)
@@ -2371,7 +2434,7 @@ impl ManageProfilesModal {
             ))
             .into_any_element(),
         );
-        Self::render_card("IA", action, rows, None, cx)
+        Self::render_card(t!("zed.ai.title"), action, rows, None, cx)
     }
 
     fn render_mcp_card(
@@ -2417,9 +2480,9 @@ impl ManageProfilesModal {
                 } else {
                     Self::render_status(
                         if server.enabled {
-                            "ligado"
+                            t!("zed.profiles.on")
                         } else {
-                            "desligado"
+                            t!("zed.profiles.off")
                         },
                         server.enabled,
                     )
@@ -2432,7 +2495,11 @@ impl ManageProfilesModal {
                         Color::Muted
                     },
                     server.id.clone(),
-                    Some(server.detail.clone().into()),
+                    Some(if server.detail.is_empty() {
+                        t!("zed.mcp.extension")
+                    } else {
+                        server.detail.clone().into()
+                    }),
                     Some(trailing),
                     true,
                     cx,
@@ -2443,9 +2510,9 @@ impl ManageProfilesModal {
             Button::new(
                 "add-mcp",
                 if is_active {
-                    "Adicionar"
+                    t!("zed.mcp.add")
                 } else {
-                    "Adicionar lá"
+                    t!("zed.mcp.add_there")
                 },
             )
             .label_size(LabelSize::Small)
@@ -2458,10 +2525,10 @@ impl ManageProfilesModal {
             .into_any_element(),
         );
         Self::render_card(
-            "SERVIDORES MCP",
+            t!("zed.mcp.title"),
             action,
             rows,
-            Some("Nenhum servidor MCP configurado."),
+            Some(t!("zed.mcp.empty")),
             cx,
         )
     }
@@ -2478,7 +2545,7 @@ impl ManageProfilesModal {
                 "clickup-connection",
                 IconName::ListTodo,
                 "ClickUp",
-                "token pessoal no Keychain deste perfil",
+                t!("zed.integrations.clickup_detail"),
                 CLICKUP_OPEN_ACTION,
                 CLICKUP_DISCONNECT_ACTION,
             ),
@@ -2487,7 +2554,7 @@ impl ManageProfilesModal {
                 "bitbucket-connection",
                 IconName::PullRequest,
                 "Bitbucket",
-                "API token e e-mail Atlassian no Keychain deste perfil",
+                t!("zed.integrations.bitbucket_detail"),
                 REPO_OPEN_ACTION,
                 BITBUCKET_DISCONNECT_ACTION,
             ),
@@ -2498,18 +2565,18 @@ impl ManageProfilesModal {
                 |(connected, id, icon, name, detail, open_action, disconnect_action)| {
                     let connected = connected?;
                     let (label, action) = if connected {
-                        ("Desconectar", disconnect_action)
+                        (t!("zed.integrations.disconnect"), disconnect_action)
                     } else {
-                        ("Conectar", open_action)
+                        (t!("zed.integrations.connect"), open_action)
                     };
                     let trailing = h_flex()
                         .gap_2()
                         .when(!is_active, |this| {
                             this.child(Self::render_status(
                                 if connected {
-                                    "conectado"
+                                    t!("zed.profiles.connected")
                                 } else {
-                                    "desconectado"
+                                    t!("zed.profiles.disconnected")
                                 },
                                 connected,
                             ))
@@ -2524,7 +2591,7 @@ impl ManageProfilesModal {
                         icon,
                         Color::Default,
                         name,
-                        Some(detail.into()),
+                        Some(detail),
                         Some(trailing),
                         false,
                         cx,
@@ -2532,7 +2599,8 @@ impl ManageProfilesModal {
                 },
             )
             .collect();
-        (!rows.is_empty()).then(|| Self::render_card("INTEGRAÇÕES", None, rows, None, cx))
+        (!rows.is_empty())
+            .then(|| Self::render_card(t!("zed.integrations.title"), None, rows, None, cx))
     }
 
     fn render_toolkits_card(
@@ -2563,19 +2631,21 @@ impl ManageProfilesModal {
                     enabled_count += 1;
                 }
                 let icon = toolkit.icon.parse::<IconName>().unwrap_or(IconName::Wrench);
+                let on_off = |enabled: bool| {
+                    if enabled {
+                        t!("zed.profiles.on")
+                    } else {
+                        t!("zed.profiles.off")
+                    }
+                };
                 let detail: SharedString = match project_override {
-                    Some(enabled) => format!(
-                        "{} por .zed/settings.json deste projeto · perfil: {}",
-                        if enabled { "ligado" } else { "desligado" },
-                        if toolkit.enabled {
-                            "ligado"
-                        } else {
-                            "desligado"
-                        },
-                    )
-                    .into(),
-                    None if enabled => toolkit.detail.clone().into(),
-                    None => "fora do agente, da status bar e do @".into(),
+                    Some(enabled) => t!(
+                        "zed.toolkits.project_override",
+                        state = on_off(enabled),
+                        profile_state = on_off(toolkit.enabled),
+                    ),
+                    None if enabled => toolkit.detail(),
+                    None => t!("zed.toolkits.disabled_detail"),
                 };
                 let trailing = if is_active {
                     let switch = Switch::new(
@@ -2606,7 +2676,7 @@ impl ManageProfilesModal {
                         .gap_2()
                         .when(project_override.is_some(), |this| {
                             this.child(
-                                Label::new("projeto")
+                                Label::new(t!("zed.toolkits.project"))
                                     .size(LabelSize::XSmall)
                                     .color(Color::Accent),
                             )
@@ -2614,7 +2684,7 @@ impl ManageProfilesModal {
                         .child(switch)
                         .into_any_element()
                 } else {
-                    Self::render_status(if enabled { "ligado" } else { "desligado" }, enabled)
+                    Self::render_status(on_off(enabled), enabled)
                 };
                 Self::render_row(
                     icon,
@@ -2634,19 +2704,23 @@ impl ManageProfilesModal {
         rows.push(Self::render_row(
             IconName::Info,
             Color::Muted,
-            "Vale para todo projeto aberto neste perfil",
-            Some("Um projeto pode sobrescrever em .zed/settings.json".into()),
+            t!("zed.toolkits.scope"),
+            Some(t!("zed.toolkits.scope_detail")),
             None,
             false,
             cx,
         ));
         let total = summary.agent_toolkits.len();
-        let count = Label::new(format!("{enabled_count} de {total} ligados"))
-            .size(LabelSize::XSmall)
-            .color(Color::Muted)
-            .into_any_element();
+        let count = Label::new(t!(
+            "zed.toolkits.count",
+            enabled = enabled_count,
+            total = total
+        ))
+        .size(LabelSize::XSmall)
+        .color(Color::Muted)
+        .into_any_element();
         Some(Self::render_card(
-            "TOOLKIT DO AGENTE",
+            t!("zed.toolkits.title"),
             Some(count),
             rows,
             None,
@@ -2687,7 +2761,7 @@ impl ManageProfilesModal {
                         IconButton::new(("remove-folder", index), IconName::Close)
                             .icon_size(IconSize::XSmall)
                             .icon_color(Color::Muted)
-                            .tooltip(Tooltip::text("Desvincular pasta"))
+                            .tooltip(Tooltip::text(t!("zed.folders.unlink")))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.remove_folder(removed.clone(), cx)
                             }))
@@ -2698,16 +2772,16 @@ impl ManageProfilesModal {
                 )
             })
             .collect();
-        let action = Button::new("add-folder", "Pasta")
+        let action = Button::new("add-folder", t!("zed.folders.add"))
             .label_size(LabelSize::Small)
             .start_icon(Icon::new(IconName::Plus).size(IconSize::XSmall))
             .on_click(cx.listener(|this, _, _, cx| this.add_folder(cx)))
             .into_any_element();
         Self::render_card(
-            "PASTAS DO PERFIL",
+            t!("zed.folders.title"),
             Some(action),
             rows,
-            Some("Pastas vinculadas abrem sempre neste perfil."),
+            Some(t!("zed.folders.empty")),
             cx,
         )
     }
@@ -2721,12 +2795,16 @@ impl ManageProfilesModal {
         let settings_row = Self::render_row(
             IconName::FileCode,
             Color::Default,
-            "settings.json do perfil",
-            Some("sobrepõe o global_settings.json compartilhado".into()),
+            t!("zed.data.settings"),
+            Some(t!("zed.data.settings_detail")),
             Some(
                 Button::new(
                     "open-settings",
-                    if is_active { "Abrir" } else { "Abrir lá" },
+                    if is_active {
+                        t!("zed.data.open")
+                    } else {
+                        t!("zed.data.open_there")
+                    },
                 )
                 .label_size(LabelSize::Small)
                 .on_click(self.profile_action(&profile.id, "zed::OpenSettingsFile", None))
@@ -2738,10 +2816,10 @@ impl ManageProfilesModal {
         let data_row = Self::render_row(
             IconName::Thread,
             Color::Default,
-            "Threads, histórico e workspaces",
-            Some("banco separado, nada vaza para os outros perfis".into()),
+            t!("zed.data.history"),
+            Some(t!("zed.data.history_detail")),
             Some(
-                Label::new("isolado")
+                Label::new(t!("zed.data.isolated"))
                     .size(LabelSize::XSmall)
                     .color(Color::Muted)
                     .into_any_element(),
@@ -2755,10 +2833,10 @@ impl ManageProfilesModal {
             rows.push(Self::render_row(
                 IconName::ThisWindow,
                 Color::Default,
-                "Editar contas, IA e MCPs",
-                Some("Só o próprio perfil mexe no Keychain e nos settings dele".into()),
+                t!("zed.data.edit_elsewhere"),
+                Some(t!("zed.data.edit_elsewhere_detail")),
                 Some(
-                    Button::new("open-profile", "Abrir perfil")
+                    Button::new("open-profile", t!("zed.data.open_profile"))
                         .label_size(LabelSize::Small)
                         .on_click(cx.listener(move |this, _, window, cx| {
                             open_profile(open_id.clone(), cx).detach_and_notify_err(
@@ -2773,7 +2851,7 @@ impl ManageProfilesModal {
                 cx,
             ));
         }
-        Self::render_card("DADOS DO PERFIL", None, rows, None, cx)
+        Self::render_card(t!("zed.data.title"), None, rows, None, cx)
     }
 
     fn render_details(&self, profile: &AppProfile, cx: &mut Context<Self>) -> impl IntoElement {
@@ -2806,7 +2884,7 @@ impl ManageProfilesModal {
             .map(|color| {
                 let is_selected = color == profile.color;
                 div()
-                    .id(color.label())
+                    .id(color.id())
                     .size_4()
                     .rounded_full()
                     .cursor_pointer()
@@ -2823,11 +2901,11 @@ impl ManageProfilesModal {
             .collect::<Vec<_>>();
 
         let delete_hint = if is_default {
-            Some("O perfil padrão é a instalação original e não pode ser excluído.")
+            Some(t!("zed.details.hint_default"))
         } else if is_active {
-            Some("Troque para outro perfil para excluir este.")
+            Some(t!("zed.details.hint_active"))
         } else if is_running {
-            Some("Feche o perfil para excluí-lo.")
+            Some(t!("zed.details.hint_running"))
         } else {
             None
         };
@@ -2858,10 +2936,10 @@ impl ManageProfilesModal {
                     .min_w_0()
                     .gap_3()
                     .child(Self::render_card(
-                        "CONTAS, IA E MCP",
+                        t!("zed.details.unknown_title"),
                         None,
                         Vec::new(),
-                        Some("Abra este perfil uma vez para ver as contas, a IA e os MCPs dele aqui."),
+                        Some(t!("zed.details.unknown_empty")),
                         cx,
                     ))
                     .child(self.render_data_card(profile, is_active, cx))
@@ -2928,14 +3006,15 @@ impl ManageProfilesModal {
                                     )
                                     .when_some(launcher, |this, launcher| {
                                         this.child(
-                                            Button::new("reveal-launcher", "Atalho no Finder")
-                                                .label_size(LabelSize::XSmall)
-                                                .tooltip(Tooltip::text(
-                                                    "Arraste o atalho para o Dock para abrir este perfil com o ícone dele",
-                                                ))
-                                                .on_click(move |_, _, cx| {
-                                                    cx.reveal_path(&launcher)
-                                                }),
+                                            Button::new(
+                                                "reveal-launcher",
+                                                t!("zed.details.reveal_launcher"),
+                                            )
+                                            .label_size(LabelSize::XSmall)
+                                            .tooltip(Tooltip::text(t!(
+                                                "zed.details.reveal_launcher_tooltip"
+                                            )))
+                                            .on_click(move |_, _, cx| cx.reveal_path(&launcher)),
                                         )
                                     }),
                             ),
@@ -2947,17 +3026,17 @@ impl ManageProfilesModal {
                 h_flex()
                     .justify_between()
                     .gap_2()
-                    .child(match (&self.error, delete_hint) {
+                    .child(match (&self.error, &delete_hint) {
                         (Some(error), _) => Label::new(error.clone())
                             .size(LabelSize::Small)
                             .color(Color::Error),
-                        (None, Some(hint)) => {
-                            Label::new(hint).size(LabelSize::Small).color(Color::Muted)
-                        }
+                        (None, Some(hint)) => Label::new(hint.clone())
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
                         (None, None) => Label::new("").size(LabelSize::Small),
                     })
                     .child(
-                        Button::new("delete-profile", "Excluir perfil")
+                        Button::new("delete-profile", t!("zed.details.delete"))
                             .label_size(LabelSize::Small)
                             .color(Color::Error)
                             .disabled(delete_hint.is_some())

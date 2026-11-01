@@ -19,6 +19,7 @@ collections.workspace = true
 fs.workspace = true
 futures.workspace = true
 gpui.workspace = true
+i18n.workspace = true
 image.workspace = true
 log.workspace = true
 paths.workspace = true

@@ -11,6 +11,7 @@ use db::kvp::KeyValueStore;
 use gpui::{
     App, AppContext as _, Context, Entity, EventEmitter, Global, SharedString, Task, TaskExt as _,
 };
+use i18n::t;
 use std::{
     path::{Path, PathBuf},
     time::Duration,
@@ -50,25 +51,25 @@ pub enum ContainerAction {
 }
 
 impl ContainerAction {
-    pub fn in_progress(self) -> &'static str {
+    pub fn in_progress(self) -> SharedString {
         match self {
-            Self::Start => "iniciando…",
-            Self::Stop => "parando…",
-            Self::Restart => "reiniciando…",
-            Self::Pause => "pausando…",
-            Self::Unpause => "retomando…",
-            Self::Remove => "removendo…",
+            Self::Start => t!("docker.action.starting"),
+            Self::Stop => t!("docker.action.stopping"),
+            Self::Restart => t!("docker.action.restarting"),
+            Self::Pause => t!("docker.action.pausing"),
+            Self::Unpause => t!("docker.action.resuming"),
+            Self::Remove => t!("docker.action.removing"),
         }
     }
 
-    pub fn done(self) -> &'static str {
+    pub fn done(self) -> SharedString {
         match self {
-            Self::Start => "iniciado",
-            Self::Stop => "parado",
-            Self::Restart => "reiniciado",
-            Self::Pause => "pausado",
-            Self::Unpause => "retomado",
-            Self::Remove => "removido",
+            Self::Start => t!("docker.action.started"),
+            Self::Stop => t!("docker.action.stopped"),
+            Self::Restart => t!("docker.action.restarted"),
+            Self::Pause => t!("docker.action.paused"),
+            Self::Unpause => t!("docker.action.resumed"),
+            Self::Remove => t!("docker.action.removed"),
         }
     }
 
@@ -107,10 +108,10 @@ impl Group {
         }
     }
 
-    pub fn title(&self) -> &str {
+    pub fn title(&self) -> SharedString {
         match &self.kind {
-            GroupKind::Compose { project, .. } => project,
-            GroupKind::Standalone => "Avulsos",
+            GroupKind::Compose { project, .. } => project.clone().into(),
+            GroupKind::Standalone => t!("docker.group.standalone"),
         }
     }
 }
@@ -377,7 +378,7 @@ impl DockerStore {
                                 .or(candidates.first())
                                 .map(|candidate| candidate.path.clone())
                                 .unwrap_or_else(|| PathBuf::from("/var/run/docker.sock")),
-                            "nenhum socket do Docker encontrado".to_string(),
+                            t!("docker.connection.no_socket_found").to_string(),
                         ),
                     };
                     Connection::Unavailable {
@@ -567,7 +568,7 @@ impl DockerStore {
     }
 
     /// Runs a lifecycle action, showing it on the row until the daemon answers. Errors come back
-    /// in pt-BR for the caller's toast.
+    /// in the interface language for the caller's toast.
     pub fn run(
         &mut self,
         container_id: String,
@@ -575,7 +576,10 @@ impl DockerStore {
         cx: &mut Context<Self>,
     ) -> Task<anyhow::Result<()>> {
         let Some(docker) = self.docker().cloned() else {
-            return Task::ready(Err(anyhow::anyhow!("O Docker não está conectado.")));
+            return Task::ready(Err(anyhow::anyhow!(
+                "{}",
+                t!("docker.connection.not_connected")
+            )));
         };
         self.transitions.insert(container_id.clone(), action);
         cx.notify();
@@ -696,7 +700,7 @@ mod tests {
             assert_eq!(groups.len(), 2);
             assert_eq!(groups[0].title(), "trix");
             assert_eq!(groups[0].containers.len(), 1);
-            assert_eq!(groups[1].title(), "Avulsos");
+            assert_eq!(groups[1].title(), "Standalone");
             assert_eq!(groups[1].containers.len(), 2);
             assert_eq!(
                 store.find("api").map(|container| container.id.as_str()),

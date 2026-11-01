@@ -593,7 +593,7 @@ impl Render for DraggedPane {
             .read(cx)
             .active_item()
             .map(|item| item.tab_content_text(0, cx))
-            .unwrap_or_else(|| "Pane".into());
+            .unwrap_or_else(|| i18n::t!("workspace.pane.fallback_title"));
         let ui_font = ThemeSettings::get_global(cx).ui_font.clone();
         ui::Tab::new("dragged-pane")
             .style(TabStyle::Pill)

@@ -19,6 +19,7 @@ use anyhow::{Context as _, Result};
 use credentials_provider::CredentialsProvider;
 use gpui::{Entity, Global, Subscription, Task, WeakEntity, actions};
 use http_client::HttpClient;
+use i18n::t;
 use project::Project;
 use std::{any::TypeId, collections::HashMap, sync::Arc};
 use ui::prelude::*;
@@ -470,7 +471,7 @@ impl RepoStore {
                 Err(error) => {
                     log::error!("Repo: falha ao ler o token do {name} do keychain: {error:#}");
                     Connection::Unreachable {
-                        message: "Não foi possível ler o token do keychain".into(),
+                        message: t!("repo_hosting.error.keychain_read"),
                     }
                 }
             };
@@ -551,7 +552,10 @@ pub fn checkout_remote_branch(
     cx: &mut App,
 ) -> Task<Result<()>> {
     let Some(repository) = project.read(cx).active_repository(cx) else {
-        return Task::ready(Err(anyhow::anyhow!("o projeto não tem repositório git")));
+        return Task::ready(Err(anyhow::anyhow!(
+            "{}",
+            t!("repo_hosting.error.no_git_repository")
+        )));
     };
     let askpass = panel::askpass_delegate(workspace, "git fetch", window, &mut cx.to_async());
     cx.spawn(async move |cx| {
@@ -574,10 +578,16 @@ pub fn push_current_branch(
     cx: &mut App,
 ) -> Task<Result<String>> {
     let Some(repository) = project.read(cx).active_repository(cx) else {
-        return Task::ready(Err(anyhow::anyhow!("o projeto não tem repositório git")));
+        return Task::ready(Err(anyhow::anyhow!(
+            "{}",
+            t!("repo_hosting.error.no_git_repository")
+        )));
     };
     let Some(branch) = repository.read(cx).branch.clone() else {
-        return Task::ready(Err(anyhow::anyhow!("nenhum branch em checkout")));
+        return Task::ready(Err(anyhow::anyhow!(
+            "{}",
+            t!("repo_hosting.error.no_branch_checked_out")
+        )));
     };
     let local_name = branch.name().to_string();
     let upstream = branch
@@ -602,7 +612,7 @@ pub fn push_current_branch(
             )
         });
         push.await?
-            .with_context(|| format!("falha no git push para {remote_name}"))?;
+            .with_context(|| t!("repo_hosting.error.push_failed", remote = remote_name))?;
         Ok(remote_branch)
     })
 }

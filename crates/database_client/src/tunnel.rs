@@ -3,6 +3,7 @@
 
 use anyhow::{Context as _, anyhow};
 use futures::AsyncReadExt as _;
+use i18n::t;
 use serde::{Deserialize, Serialize};
 use std::{
     net::{Ipv4Addr, SocketAddr, TcpListener},
@@ -107,7 +108,7 @@ pub async fn open(
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
-        .context("não deu para rodar o ssh do sistema")?;
+        .with_context(|| t!("database_client.errors.ssh_spawn_failed").to_string())?;
     let address = SocketAddr::from((Ipv4Addr::LOCALHOST, local_port));
     let started = Instant::now();
     loop {
@@ -117,15 +118,16 @@ pub async fn open(
                 pipe.read_to_string(&mut stderr).await.ok();
             }
             let stderr = stderr.trim();
-            return Err(anyhow!(
-                "o túnel SSH para {} saiu ({status}){}",
-                tunnel.label(),
-                if stderr.is_empty() {
-                    String::new()
-                } else {
-                    format!(": {stderr}")
-                }
-            ));
+            let message = t!(
+                "database_client.errors.ssh_tunnel_exited",
+                host = tunnel.label(),
+                status = status
+            );
+            return Err(if stderr.is_empty() {
+                anyhow!("{message}")
+            } else {
+                anyhow!("{message}: {stderr}")
+            });
         }
         let probe = tokio::time::timeout(
             Duration::from_millis(200),
@@ -141,9 +143,12 @@ pub async fn open(
         if started.elapsed() > READY_TIMEOUT {
             child.kill().ok();
             return Err(anyhow!(
-                "o túnel SSH para {} não abriu em {} s",
-                tunnel.label(),
-                READY_TIMEOUT.as_secs()
+                "{}",
+                t!(
+                    "database_client.errors.ssh_tunnel_timeout",
+                    host = tunnel.label(),
+                    seconds = READY_TIMEOUT.as_secs()
+                )
             ));
         }
         tokio::time::sleep(Duration::from_millis(100)).await;

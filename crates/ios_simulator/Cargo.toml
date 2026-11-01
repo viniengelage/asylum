@@ -17,6 +17,7 @@ anyhow.workspace = true
 futures.workspace = true
 gpui.workspace = true
 http_client.workspace = true
+i18n.workspace = true
 log.workspace = true
 paths.workspace = true
 plist.workspace = true

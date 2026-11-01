@@ -16,6 +16,7 @@ use gpui::{
     App, AppContext as _, AsyncApp, Context, Keystroke, RenderImage, SharedString, Task, WeakEntity,
 };
 use http_client::HttpClient;
+use i18n::t;
 use smol::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -553,7 +554,7 @@ impl AndroidSdkManager {
                             );
                             let java_home = installed_java_home(&paths)
                                 .await
-                                .context("JDK gerenciado pelo Zed não encontrado")?;
+                                .context(t!("android_sdk.error.jdk_not_found"))?;
                             list_device_profiles(&paths, &java_home).await
                         }
                     }
@@ -772,7 +773,8 @@ impl AndroidSdkManager {
             return;
         }
         let http_client = cx.http_client();
-        self.state = AndroidSdkState::Installing(InstallStep::new("Preparando instalação…"));
+        self.state =
+            AndroidSdkState::Installing(InstallStep::new(t!("android_sdk.install.preparing")));
         cx.notify();
         self.install_task = Some(cx.spawn(async move |this, cx| {
             let result = run_install_pipeline(&this, http_client, cx).await;
@@ -836,19 +838,24 @@ impl AndroidSdkManager {
         if package.is_some() {
             steps.push(PrepareStep::new(
                 PrepareStepKind::Licenses,
-                "Licenças do SDK aceitas",
+                t!("android_sdk.prepare.step_licenses"),
             ));
         }
         if package.is_some() || creating {
             steps.push(PrepareStep::new(
                 PrepareStepKind::DiskSpace,
-                "Espaço em disco verificado",
+                t!("android_sdk.prepare.step_disk_checked"),
             ));
         }
         if package.is_some() {
             let label = match &request {
-                PrepareRequest::UpdateComponent(kind) => format!("Baixando {}", kind.label()),
-                _ => "Baixando imagem do sistema".to_string(),
+                PrepareRequest::UpdateComponent(kind) => {
+                    t!(
+                        "android_sdk.prepare.step_download_component",
+                        component = kind.label()
+                    )
+                }
+                _ => t!("android_sdk.prepare.step_download_image"),
             };
             steps.push(PrepareStep::new(PrepareStepKind::Download, label));
         }
@@ -859,22 +866,25 @@ impl AndroidSdkManager {
             } => {
                 steps.push(PrepareStep::new(
                     PrepareStepKind::CreateAvd,
-                    "Criando o dispositivo virtual",
+                    t!("android_sdk.prepare.step_create"),
                 ));
                 if *boot_when_ready {
                     steps.push(PrepareStep::new(
                         PrepareStepKind::FirstBoot,
-                        "Primeira inicialização",
+                        t!("android_sdk.prepare.step_first_boot"),
                     ));
                 }
                 let description = image_to_download.as_ref().map(|image| {
-                    format!(
-                        "A imagem do {} ainda não está no disco. Ela é baixada uma vez e fica disponível para outros dispositivos.",
-                        image.android_version()
+                    t!(
+                        "android_sdk.prepare.description_image_missing",
+                        version = image.android_version()
                     )
                 });
                 (
-                    format!("Criando {}", settings.display_name),
+                    t!(
+                        "android_sdk.prepare.title_create",
+                        name = settings.display_name
+                    ),
                     description,
                     download_bytes + u64::from(settings.storage_gb) * 1024 * 1024 * 1024,
                 )
@@ -886,36 +896,42 @@ impl AndroidSdkManager {
                 steps.push(PrepareStep::new(
                     PrepareStepKind::ApplySettings,
                     if image_changes {
-                        "Apagando os dados e aplicando os ajustes"
+                        t!("android_sdk.prepare.step_wipe_and_apply")
                     } else {
-                        "Aplicando os ajustes"
+                        t!("android_sdk.prepare.step_apply")
                     },
                 ));
                 let description = image_changes.then(|| {
-                    format!(
-                        "A versão do Android mudou para {}, então os dados do dispositivo voltam ao estado de fábrica.",
-                        settings.image.short_label()
+                    t!(
+                        "android_sdk.prepare.description_version_changed",
+                        version = settings.image.short_label()
                     )
                 });
                 (
-                    format!("Atualizando {}", settings.display_name),
+                    t!(
+                        "android_sdk.prepare.title_update",
+                        name = settings.display_name
+                    ),
                     description,
                     download_bytes,
                 )
             }
             PrepareRequest::DownloadImage(image) => (
-                format!("Baixando {}", image.android_version()),
-                Some(format!(
-                    "{} · {}. A imagem fica disponível para qualquer dispositivo.",
-                    image
+                t!(
+                    "android_sdk.prepare.title_download",
+                    name = image.android_version()
+                ),
+                Some(t!(
+                    "android_sdk.prepare.description_download_image",
+                    flavor = image
                         .flavor()
                         .map_or_else(|| image.tag.clone(), |flavor| flavor.label().to_string()),
-                    image.api_label()
+                    api = image.api_label()
                 )),
                 download_bytes,
             ),
             PrepareRequest::UpdateComponent(kind) => (
-                format!("Atualizando {}", kind.label()),
+                t!("android_sdk.prepare.title_update", name = kind.label()),
                 None,
                 download_bytes,
             ),
@@ -931,8 +947,8 @@ impl AndroidSdkManager {
         };
         let job = PrepareJob {
             device,
-            title: title.into(),
-            description: description.map(Into::into),
+            title,
+            description,
             steps,
             current: 0,
             progress: None,
@@ -1071,7 +1087,7 @@ impl AndroidSdkManager {
             return;
         }
         let Some(avd_name) = self.selected_avd.clone() else {
-            self.state = AndroidSdkState::Failed("Nenhum dispositivo virtual selecionado.".into());
+            self.state = AndroidSdkState::Failed(t!("android_sdk.error.no_avd_selected"));
             cx.notify();
             return;
         };
@@ -1120,9 +1136,10 @@ impl AndroidSdkManager {
                 self.spawn_adb_poll(cx);
             }
             Err(error) => {
-                self.state = AndroidSdkState::Failed(
-                    format!("Não foi possível iniciar o emulador: {error:#}").into(),
-                );
+                self.state = AndroidSdkState::Failed(t!(
+                    "android_sdk.error.emulator_start_failed",
+                    error = format!("{error:#}")
+                ));
             }
         }
         cx.notify();
@@ -1131,11 +1148,11 @@ impl AndroidSdkManager {
     fn ensure_not_running(&self, name: &str) -> Result<()> {
         anyhow::ensure!(
             self.running_avd() != Some(name),
-            "Pare o dispositivo primeiro."
+            t!("android_sdk.error.stop_device_first")
         );
         anyhow::ensure!(
             self.install_task.is_none(),
-            "Espere a operação em andamento terminar."
+            t!("android_sdk.error.wait_for_operation")
         );
         Ok(())
     }
@@ -1185,9 +1202,12 @@ impl AndroidSdkManager {
             return Task::ready(Err(error));
         }
         let Some(label) = self.avd(&name).map(AndroidAvd::label) else {
-            return Task::ready(Err(anyhow!("Dispositivo {name} não encontrado.")));
+            return Task::ready(Err(anyhow!(t!(
+                "android_sdk.error.device_not_found",
+                name = name
+            ))));
         };
-        let display_name = format!("{label} (cópia)");
+        let display_name = t!("android_sdk.copy_name", name = label).to_string();
         let existing: Vec<String> = self.avds.iter().map(|avd| avd.name.clone()).collect();
         let new_name = avds::avd_name_for_display_name(&display_name, &existing);
         self.run_disk_action(cx, async move {
@@ -1207,13 +1227,13 @@ impl AndroidSdkManager {
         cx: &mut Context<Self>,
     ) -> Task<Result<()>> {
         if self.install_task.is_some() {
-            return Task::ready(Err(anyhow!("Espere a operação em andamento terminar.")));
+            return Task::ready(Err(anyhow!(t!("android_sdk.error.wait_for_operation"))));
         }
         if self.image_used_by_other_avd(&image, "") {
-            return Task::ready(Err(anyhow!(
-                "Algum dispositivo ainda usa {}.",
-                image.short_label()
-            )));
+            return Task::ready(Err(anyhow!(t!(
+                "android_sdk.error.image_in_use",
+                image = image.short_label()
+            ))));
         }
         self.run_disk_action(cx, async move {
             uninstall_package(&AndroidPaths::new(), &image.package()).await
@@ -1358,17 +1378,17 @@ impl AndroidSdkManager {
     /// Captures the emulator screen to a PNG file and resolves with its path.
     pub fn screenshot(&self, cx: &App) -> Task<Result<PathBuf>> {
         let Some(serial) = self.running_serial().map(str::to_string) else {
-            return Task::ready(Err(anyhow!("nenhum emulador Android em execução")));
+            return Task::ready(Err(anyhow!(t!("android_sdk.error.no_emulator_running"))));
         };
         cx.background_spawn(async move {
             // `exec-out` keeps the PNG bytes binary-clean, unlike `shell`, which would
             // translate line endings.
             let png = run_adb(&serial, &["exec-out", "screencap", "-p"]).await?;
-            anyhow::ensure!(!png.is_empty(), "screencap não retornou nenhuma imagem");
+            anyhow::ensure!(!png.is_empty(), t!("android_sdk.error.screencap_empty"));
             let path = std::env::temp_dir().join("zed_emulator_screenshot.png");
             smol::fs::write(&path, png)
                 .await
-                .with_context(|| format!("não foi possível gravar {}", path.display()))?;
+                .with_context(|| avds::writing_error(&path.display()))?;
             Ok(path)
         })
     }
@@ -1376,11 +1396,11 @@ impl AndroidSdkManager {
     /// Captures the emulator screen at its native resolution as PNG bytes.
     pub fn screenshot_png(&self, cx: &App) -> Task<Result<Vec<u8>>> {
         let Some(serial) = self.running_serial().map(str::to_string) else {
-            return Task::ready(Err(anyhow!("nenhum emulador Android em execução")));
+            return Task::ready(Err(anyhow!(t!("android_sdk.error.no_emulator_running"))));
         };
         cx.background_spawn(async move {
             let png = run_adb(&serial, &["exec-out", "screencap", "-p"]).await?;
-            anyhow::ensure!(!png.is_empty(), "screencap não retornou nenhuma imagem");
+            anyhow::ensure!(!png.is_empty(), t!("android_sdk.error.screencap_empty"));
             Ok(png)
         })
     }
@@ -1388,7 +1408,7 @@ impl AndroidSdkManager {
     /// The display resolution that taps and swipes are expressed in.
     pub fn native_screen_size(&self, cx: &App) -> Task<Result<(u32, u32)>> {
         let Some(serial) = self.running_serial().map(str::to_string) else {
-            return Task::ready(Err(anyhow!("nenhum emulador Android em execução")));
+            return Task::ready(Err(anyhow!(t!("android_sdk.error.no_emulator_running"))));
         };
         cx.background_spawn(async move { fetch_native_screen_size(&serial).await })
     }
@@ -1396,7 +1416,7 @@ impl AndroidSdkManager {
     /// The last `lines` lines of the device log, optionally only those mentioning `filter`.
     pub fn logcat(&self, lines: usize, filter: Option<String>, cx: &App) -> Task<Result<String>> {
         let Some(serial) = self.running_serial().map(str::to_string) else {
-            return Task::ready(Err(anyhow!("nenhum emulador Android em execução")));
+            return Task::ready(Err(anyhow!(t!("android_sdk.error.no_emulator_running"))));
         };
         cx.background_spawn(async move {
             let lines_argument = lines.max(1).to_string();
@@ -1418,7 +1438,7 @@ impl AndroidSdkManager {
     /// Opens a URL or deep link on the emulator, as tapping a link would.
     pub fn open_url(&self, url: String, cx: &App) -> Task<Result<()>> {
         let Some(serial) = self.running_serial().map(str::to_string) else {
-            return Task::ready(Err(anyhow!("nenhum emulador Android em execução")));
+            return Task::ready(Err(anyhow!(t!("android_sdk.error.no_emulator_running"))));
         };
         cx.background_spawn(async move {
             run_adb(
@@ -1441,7 +1461,7 @@ impl AndroidSdkManager {
     /// Force-stops and relaunches the given package's launcher activity.
     pub fn launch_package(&self, package: String, cx: &App) -> Task<Result<()>> {
         let Some(serial) = self.running_serial().map(str::to_string) else {
-            return Task::ready(Err(anyhow!("nenhum emulador Android em execução")));
+            return Task::ready(Err(anyhow!(t!("android_sdk.error.no_emulator_running"))));
         };
         cx.background_spawn(async move {
             // Stopping first is best-effort: the app may simply not be running.
@@ -1468,7 +1488,7 @@ impl AndroidSdkManager {
     /// Moves the emulator's simulated GPS position.
     pub fn set_location(&self, latitude: f64, longitude: f64, cx: &App) -> Task<Result<()>> {
         let Some(serial) = self.running_serial().map(str::to_string) else {
-            return Task::ready(Err(anyhow!("nenhum emulador Android em execução")));
+            return Task::ready(Err(anyhow!(t!("android_sdk.error.no_emulator_running"))));
         };
         cx.background_spawn(async move {
             // `geo fix` takes longitude before latitude, unlike every other API here.
@@ -1494,7 +1514,7 @@ impl AndroidSdkManager {
     /// rather than a trade.
     pub fn set_software_keyboard_visible(&self, visible: bool, cx: &App) -> Task<Result<()>> {
         let Some(serial) = self.running_serial().map(str::to_string) else {
-            return Task::ready(Err(anyhow!("nenhum emulador Android em execução")));
+            return Task::ready(Err(anyhow!(t!("android_sdk.error.no_emulator_running"))));
         };
         cx.background_spawn(async move {
             run_adb(
@@ -1515,7 +1535,7 @@ impl AndroidSdkManager {
 
     pub fn dark_appearance(&self, cx: &App) -> Task<Result<bool>> {
         let Some(serial) = self.running_serial().map(str::to_string) else {
-            return Task::ready(Err(anyhow!("nenhum emulador Android em execução")));
+            return Task::ready(Err(anyhow!(t!("android_sdk.error.no_emulator_running"))));
         };
         cx.background_spawn(async move {
             let output = run_adb(&serial, &["shell", "cmd", "uimode", "night"]).await?;
@@ -1525,7 +1545,7 @@ impl AndroidSdkManager {
 
     pub fn set_dark_appearance(&self, dark: bool, cx: &App) -> Task<Result<()>> {
         let Some(serial) = self.running_serial().map(str::to_string) else {
-            return Task::ready(Err(anyhow!("nenhum emulador Android em execução")));
+            return Task::ready(Err(anyhow!(t!("android_sdk.error.no_emulator_running"))));
         };
         cx.background_spawn(async move {
             run_adb(
@@ -1755,9 +1775,10 @@ impl AndroidSdkManager {
                 if let Some(status) = exit_status {
                     this.update(cx, |this, cx| {
                         this.emulator_process = None;
-                        this.state = AndroidSdkState::Failed(
-                            format!("O emulador encerrou inesperadamente ({status}).").into(),
-                        );
+                        this.state = AndroidSdkState::Failed(t!(
+                            "android_sdk.error.emulator_exited",
+                            status = status
+                        ));
                         cx.notify();
                     })
                     .ok();
@@ -1792,8 +1813,7 @@ impl AndroidSdkManager {
                 if let Some(mut child) = this.emulator_process.take() {
                     child.kill().log_err();
                 }
-                this.state =
-                    AndroidSdkState::Failed("O emulador não ficou online em 120 segundos.".into());
+                this.state = AndroidSdkState::Failed(t!("android_sdk.error.emulator_boot_timeout"));
                 cx.notify();
             })
             .ok();
@@ -1827,7 +1847,7 @@ async fn check_emulator_acceleration(paths: &AndroidPaths) -> Result<()> {
     let output = command
         .output()
         .await
-        .context("Não foi possível executar emulator -accel-check")?;
+        .context(t!("android_sdk.error.accel_check_failed"))?;
     if output.status.success() {
         return Ok(());
     }
@@ -1837,15 +1857,15 @@ async fn check_emulator_acceleration(paths: &AndroidPaths) -> Result<()> {
         reason = String::from_utf8_lossy(&output.stderr).trim().to_string();
     }
     let hint = match paths.platform.os {
-        HostOs::Windows => {
-            "Ative a \"Plataforma do Hipervisor do Windows\" nos recursos do Windows e reinicie."
-        }
-        HostOs::Linux => {
-            "Habilite a virtualização na BIOS, carregue o módulo KVM e dê ao seu usuário acesso a /dev/kvm (grupo kvm)."
-        }
-        HostOs::MacOs => "",
+        HostOs::Windows => t!("android_sdk.acceleration.hint_windows"),
+        HostOs::Linux => t!("android_sdk.acceleration.hint_linux"),
+        HostOs::MacOs => SharedString::default(),
     };
-    anyhow::bail!("A aceleração de hardware do emulador não está disponível: {reason}. {hint}")
+    anyhow::bail!(t!(
+        "android_sdk.acceleration.unavailable",
+        reason = reason,
+        hint = hint
+    ))
 }
 
 async fn exists(path: &Path) -> bool {
@@ -2047,7 +2067,7 @@ fn avd_name_for_device(device_profile: &str) -> String {
 fn set_step(
     this: &WeakEntity<AndroidSdkManager>,
     cx: &mut AsyncApp,
-    label: &'static str,
+    label: SharedString,
 ) -> Result<()> {
     this.update(cx, |this, cx| {
         this.state = AndroidSdkState::Installing(InstallStep::new(label));
@@ -2072,26 +2092,26 @@ async fn run_install_pipeline(
     {
         Some(java_home) => java_home,
         None => {
-            set_step(this, cx, "Baixando JDK…")?;
+            set_step(this, cx, t!("android_sdk.install.downloading_jdk"))?;
             let archive = paths
                 .downloads_dir
                 .join(format!("jdk.{}", platform.jdk_archive_format().extension()));
             download_step(this, cx, http_client.clone(), &platform.jdk_url(), &archive)
                 .await
-                .context("Não foi possível baixar o JDK")?;
-            set_step(this, cx, "Instalando JDK…")?;
+                .context(t!("android_sdk.error.download_jdk_failed"))?;
+            set_step(this, cx, t!("android_sdk.install.installing_jdk"))?;
             cx.background_spawn({
                 let paths = paths.clone();
                 let archive = archive.clone();
                 async move { install_jdk(&paths, &archive).await }
             })
             .await
-            .context("Não foi possível instalar o JDK")?
+            .context(t!("android_sdk.error.install_jdk_failed"))?
         }
     };
 
     if !exists(&paths.sdkmanager()).await {
-        set_step(this, cx, "Baixando ferramentas do Android SDK…")?;
+        set_step(this, cx, t!("android_sdk.install.downloading_tools"))?;
         let archive = paths.downloads_dir.join("cmdline-tools.zip");
         download_step(
             this,
@@ -2101,31 +2121,35 @@ async fn run_install_pipeline(
             &archive,
         )
         .await
-        .context("Não foi possível baixar as ferramentas do Android SDK")?;
-        set_step(this, cx, "Instalando ferramentas do Android SDK…")?;
+        .context(t!("android_sdk.error.download_tools_failed"))?;
+        set_step(this, cx, t!("android_sdk.install.installing_tools"))?;
         cx.background_spawn({
             let paths = paths.clone();
             let archive = archive.clone();
             async move { install_cmdline_tools(&paths, &archive).await }
         })
         .await
-        .context("Não foi possível instalar as ferramentas do Android SDK")?;
+        .context(t!("android_sdk.error.install_tools_failed"))?;
     }
 
-    set_step(this, cx, "Aceitando licenças do Android SDK…")?;
+    set_step(this, cx, t!("android_sdk.install.accepting_licenses"))?;
     cx.background_spawn({
         let paths = paths.clone();
         let java_home = java_home.clone();
         async move { run_sdkmanager(&paths, &java_home, &["--licenses"]).await }
     })
     .await
-    .context("Não foi possível aceitar as licenças do Android SDK")?;
+    .context(t!("android_sdk.error.accept_licenses_failed"))?;
 
     if !exists(&paths.adb()).await
         || !exists(&paths.emulator()).await
         || !exists(&paths.platform_dir()).await
     {
-        set_step(this, cx, "Instalando platform-tools e emulador…")?;
+        set_step(
+            this,
+            cx,
+            t!("android_sdk.install.installing_platform_tools"),
+        )?;
         cx.background_spawn({
             let paths = paths.clone();
             let java_home = java_home.clone();
@@ -2140,12 +2164,12 @@ async fn run_install_pipeline(
             }
         })
         .await
-        .context("Não foi possível instalar o platform-tools e o emulador")?;
+        .context(t!("android_sdk.error.install_platform_tools_failed"))?;
     }
 
     let image = default_system_image(platform);
     if !avds::system_image_installed(&paths.sdk_dir, &image) {
-        set_step(this, cx, "Baixando imagem do sistema Android…")?;
+        set_step(this, cx, t!("android_sdk.install.downloading_image"))?;
         cx.background_spawn({
             let paths = paths.clone();
             let java_home = java_home.clone();
@@ -2153,11 +2177,11 @@ async fn run_install_pipeline(
             async move { run_sdkmanager(&paths, &java_home, &[&package]).await }
         })
         .await
-        .context("Não foi possível baixar a imagem do sistema Android")?;
+        .context(t!("android_sdk.error.download_image_failed"))?;
     }
 
     if avds::list_avds(&paths.avd_home, &paths.sdk_dir).is_empty() {
-        set_step(this, cx, "Criando dispositivo virtual…")?;
+        set_step(this, cx, t!("android_sdk.install.creating_avd"))?;
         cx.background_spawn({
             let paths = paths.clone();
             let java_home = java_home.clone();
@@ -2182,7 +2206,7 @@ async fn run_install_pipeline(
             }
         })
         .await
-        .context("Não foi possível criar o dispositivo virtual")?;
+        .context(t!("android_sdk.error.create_avd_failed"))?;
     }
 
     Ok(())
@@ -2240,11 +2264,14 @@ async fn download_file(
     let mut response = http_client
         .get(url, Default::default(), true)
         .await
-        .with_context(|| format!("requisição para {url}"))?;
+        .with_context(|| t!("android_sdk.error.request", url = url))?;
     anyhow::ensure!(
         response.status().is_success(),
-        "download de {url} falhou com status {}",
-        response.status()
+        t!(
+            "android_sdk.error.download_status",
+            url = url,
+            status = response.status()
+        )
     );
     let total = response
         .headers()
@@ -2255,7 +2282,7 @@ async fn download_file(
     let partial_name = destination
         .file_name()
         .map(|name| format!("{}.partial", name.to_string_lossy()))
-        .context("destino do download sem nome de arquivo")?;
+        .context(t!("android_sdk.error.download_destination_without_name"))?;
     let partial_path = destination.with_file_name(partial_name);
 
     let mut file = smol::fs::File::create(&partial_path).await?;
@@ -2318,17 +2345,17 @@ async fn install_jdk(paths: &AndroidPaths, archive: &Path) -> Result<PathBuf> {
             Archive::new(decompressed)
                 .unpack(&paths.jdk_dir)
                 .await
-                .context("extração do JDK")?;
+                .context(t!("android_sdk.error.jdk_extraction"))?;
         }
         ArchiveFormat::Zip => {
             util::archive::extract_zip(&paths.jdk_dir, file)
                 .await
-                .context("extração do JDK")?;
+                .context(t!("android_sdk.error.jdk_extraction"))?;
         }
     }
     let java_home = find_java_home(&paths.jdk_dir, paths.platform)
         .await
-        .context("JAVA_HOME não encontrado após a extração do JDK")?;
+        .context(t!("android_sdk.error.java_home_not_found"))?;
     smol::fs::write(paths.jdk_version_marker(), JDK_VERSION).await?;
     smol::fs::remove_file(archive).await.log_err();
     Ok(java_home)
@@ -2346,7 +2373,7 @@ async fn install_cmdline_tools(paths: &AndroidPaths, archive: &Path) -> Result<(
     let file = smol::fs::File::open(archive).await?;
     util::archive::extract_zip(&staging, file)
         .await
-        .context("extração das ferramentas do Android SDK")?;
+        .context(t!("android_sdk.error.tools_extraction"))?;
 
     let latest_parent = paths.sdk_dir.join("cmdline-tools");
     smol::fs::create_dir_all(&latest_parent).await?;
@@ -2394,7 +2421,7 @@ async fn create_avd_on_disk(
 async fn uninstall_package(paths: &AndroidPaths, package: &str) -> Result<()> {
     let java_home = installed_java_home(paths)
         .await
-        .context("JDK gerenciado pelo Zed não encontrado")?;
+        .context(t!("android_sdk.error.jdk_not_found"))?;
     run_sdkmanager(paths, &java_home, &["--uninstall", package]).await
 }
 
@@ -2442,7 +2469,7 @@ async fn run_prepare(
     let paths = AndroidPaths::new();
     let java_home = installed_java_home(&paths)
         .await
-        .context("JDK gerenciado pelo Zed não encontrado")?;
+        .context(t!("android_sdk.error.jdk_not_found"))?;
 
     let creating = matches!(request, PrepareRequest::Create { .. });
     if package.is_some() {
@@ -2453,7 +2480,7 @@ async fn run_prepare(
             async move { run_sdkmanager(&paths, &java_home, &["--licenses"]).await }
         })
         .await
-        .context("Não foi possível aceitar as licenças do Android SDK")?;
+        .context(t!("android_sdk.error.accept_licenses_failed"))?;
     }
 
     let available = if package.is_some() || creating {
@@ -2473,14 +2500,19 @@ async fn run_prepare(
                 .iter_mut()
                 .find(|step| step.kind == PrepareStepKind::DiskSpace)
             {
-                step.detail = Some(format!("{} livres", format_bytes(available)).into());
+                step.detail = Some(t!(
+                    "android_sdk.prepare.disk_free",
+                    available = format_bytes(available)
+                ));
             }
         })?;
         anyhow::ensure!(
             available >= required_bytes,
-            "Espaço insuficiente: são necessários {} e há {} livres.",
-            format_bytes(required_bytes),
-            format_bytes(available)
+            t!(
+                "android_sdk.error.insufficient_space",
+                required = format_bytes(required_bytes),
+                available = format_bytes(available)
+            )
         );
     }
 
@@ -2488,7 +2520,12 @@ async fn run_prepare(
         start_prepare_step(this, cx, PrepareStepKind::Download)?;
         download_package(this, cx, &paths, &java_home, package, download_bytes)
             .await
-            .with_context(|| format!("Não foi possível baixar {package}"))?;
+            .with_context(|| {
+                t!(
+                    "android_sdk.error.download_package_failed",
+                    package = package
+                )
+            })?;
     }
 
     match request {
@@ -2516,7 +2553,7 @@ async fn run_prepare(
                     anyhow::Ok(name)
                 })
                 .await
-                .context("Não foi possível criar o dispositivo virtual")?;
+                .context(t!("android_sdk.error.create_avd_failed"))?;
             Ok(PrepareOutcome {
                 avd: Some(avd),
                 boot: boot_when_ready,
@@ -2530,7 +2567,7 @@ async fn run_prepare(
                     let current = avds::list_avds(&paths.avd_home, &paths.sdk_dir)
                         .into_iter()
                         .find(|existing| existing.name == avd)
-                        .with_context(|| format!("dispositivo {avd} não encontrado"))?;
+                        .with_context(|| t!("android_sdk.error.device_not_found", name = avd))?;
                     let mut entries = settings.config_entries();
                     if current.system_image.as_ref() != Some(&settings.image) {
                         avds::wipe_avd_data(&paths.avd_home, &avd)?;
@@ -2540,7 +2577,7 @@ async fn run_prepare(
                 }
             })
             .await
-            .context("Não foi possível aplicar os ajustes")?;
+            .context(t!("android_sdk.error.apply_settings_failed"))?;
             Ok(PrepareOutcome {
                 avd: Some(avd),
                 boot: false,
@@ -2636,15 +2673,18 @@ fn staged_download_state(temp_dir: &Path) -> (u64, bool) {
     (downloaded, installing)
 }
 
-/// `1,4 GB`, `812 MB`: binary units, one decimal from a gigabyte up, with the decimal comma the
-/// rest of the UI uses.
+/// `1.4 GB`, `812 MB`: binary units, one decimal from a gigabyte up, with the current language's
+/// decimal separator.
 pub fn format_bytes(bytes: u64) -> String {
     const MEGABYTE: f64 = 1024.0 * 1024.0;
     const GIGABYTE: f64 = MEGABYTE * 1024.0;
     let bytes = bytes as f64;
     if bytes >= GIGABYTE {
         let text = format!("{:.1}", bytes / GIGABYTE);
-        let text = text.strip_suffix(".0").unwrap_or(&text).replace('.', ",");
+        let text = text
+            .strip_suffix(".0")
+            .unwrap_or(&text)
+            .replace('.', &t!("android_sdk.format.decimal_separator"));
         format!("{text} GB")
     } else {
         format!("{} MB", (bytes / MEGABYTE).round() as u64)
@@ -2696,7 +2736,7 @@ async fn cached_text_download(
     let mut response = http_client
         .get(url, Default::default(), true)
         .await
-        .with_context(|| format!("requisição para {url}"))?;
+        .with_context(|| t!("android_sdk.error.request", url = url))?;
     anyhow::ensure!(
         response.status().is_success(),
         "{url} respondeu {}",
@@ -2720,7 +2760,7 @@ async fn list_available_images_with_sdkmanager() -> Result<Vec<CatalogImage>> {
     let paths = AndroidPaths::new();
     let java_home = installed_java_home(&paths)
         .await
-        .context("JDK gerenciado pelo Zed não encontrado")?;
+        .context(t!("android_sdk.error.jdk_not_found"))?;
     let mut command = new_command(paths.sdkmanager());
     command.arg(format!("--sdk_root={}", paths.sdk_dir.display()));
     command.arg("--list");
@@ -2775,8 +2815,14 @@ async fn run_command_accepting_prompts(
             log::debug!("failed to write prompt responses to child stdin: {error}");
         }
     }
-    let mut stdout = child.stdout.take().context("stdout do processo ausente")?;
-    let mut stderr = child.stderr.take().context("stderr do processo ausente")?;
+    let mut stdout = child
+        .stdout
+        .take()
+        .context(t!("android_sdk.error.process_without_stdout"))?;
+    let mut stderr = child
+        .stderr
+        .take()
+        .context(t!("android_sdk.error.process_without_stderr"))?;
     let mut stdout_content = String::new();
     let mut stderr_content = String::new();
     futures::try_join!(
@@ -2790,7 +2836,11 @@ async fn run_command_accepting_prompts(
         } else {
             stderr_content
         };
-        anyhow::bail!("processo terminou com {status}: {}", details.trim());
+        anyhow::bail!(t!(
+            "android_sdk.error.process_failed",
+            status = status,
+            details = details.trim()
+        ));
     }
     Ok(())
 }
@@ -3002,8 +3052,10 @@ async fn fetch_native_screen_size(serial: &str) -> Result<(u32, u32)> {
     let output = command.output().await.context("adb shell wm size")?;
     anyhow::ensure!(
         output.status.success(),
-        "wm size falhou: {}",
-        String::from_utf8_lossy(&output.stderr).trim()
+        t!(
+            "android_sdk.error.wm_size_failed",
+            reason = String::from_utf8_lossy(&output.stderr).trim()
+        )
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     // "Physical size: 1080x2400", possibly followed by an "Override size:"
@@ -3017,7 +3069,7 @@ async fn fetch_native_screen_size(serial: &str) -> Result<(u32, u32)> {
             size = Some((width, height));
         }
     }
-    size.context("não foi possível interpretar a saída de wm size")
+    size.context(t!("android_sdk.error.wm_size_unparseable"))
 }
 
 /// Encodes a gRPC-framed `TouchEvent { touches: [Touch { x, y, pressure }] }`
@@ -3369,15 +3421,19 @@ async fn run_adb(serial: &str, arguments: &[&str]) -> Result<Vec<u8>> {
     command.arg("-s").arg(serial).args(arguments);
     apply_env(&mut command, &paths, None);
     command.stdin(Stdio::null());
-    let output = command
-        .output()
-        .await
-        .with_context(|| format!("não foi possível executar adb {}", arguments.join(" ")))?;
+    let output = command.output().await.with_context(|| {
+        t!(
+            "android_sdk.error.adb_spawn_failed",
+            arguments = arguments.join(" ")
+        )
+    })?;
     anyhow::ensure!(
         output.status.success(),
-        "adb {} falhou: {}",
-        arguments.join(" "),
-        String::from_utf8_lossy(&output.stderr).trim()
+        t!(
+            "android_sdk.error.adb_failed",
+            arguments = arguments.join(" "),
+            reason = String::from_utf8_lossy(&output.stderr).trim()
+        )
     );
     Ok(output.stdout)
 }
@@ -3385,10 +3441,12 @@ async fn run_adb(serial: &str, arguments: &[&str]) -> Result<Vec<u8>> {
 /// `cmd uimode night` answers `Night mode: yes`, `no`, or `auto`/`custom` when the device
 /// follows a schedule; those count as light because that is what the toggle would switch from.
 fn parse_night_mode(output: &str) -> Result<bool> {
-    let mode = output
-        .trim()
-        .strip_prefix("Night mode:")
-        .with_context(|| format!("resposta inesperada de cmd uimode night: {}", output.trim()))?;
+    let mode = output.trim().strip_prefix("Night mode:").with_context(|| {
+        t!(
+            "android_sdk.error.unexpected_night_mode",
+            output = output.trim()
+        )
+    })?;
     Ok(mode.trim() == "yes")
 }
 

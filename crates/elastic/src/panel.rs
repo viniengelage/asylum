@@ -17,6 +17,7 @@ use gpui::{
     FontWeight, Global, Pixels, Subscription, Task, WeakEntity, px, uniform_list,
 };
 use http_client::HttpClient;
+use i18n::t;
 use project::Project;
 use std::{
     ops::Range,
@@ -57,8 +58,8 @@ impl Session {
             "Elasticsearch {} · {}",
             self.info.version.number,
             match self.connection.via {
-                connection::Via::Kibana => "via Kibana",
-                connection::Via::Direct => "direto",
+                connection::Via::Kibana => "via Kibana".into(),
+                connection::Via::Direct => t!("elastic.connection.via_direct"),
             }
         )
     }
@@ -184,7 +185,7 @@ impl ElasticPanel {
     pub fn new(workspace: &Workspace, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let project = workspace.project().clone();
         let filter_input = cx.new(|cx| {
-            InputField::new(window, cx, "Filtrar data streams…")
+            InputField::new(window, cx, &t!("elastic.panel.filter_placeholder"))
                 .start_icon(IconName::MagnifyingGlass)
         });
         let mut subscriptions = Vec::new();
@@ -450,7 +451,10 @@ impl ElasticPanel {
         cx: &mut Context<Self>,
     ) -> Task<anyhow::Result<()>> {
         let Some(root) = self.root.clone() else {
-            return Task::ready(Err(anyhow::anyhow!("abra uma pasta de projeto primeiro")));
+            return Task::ready(Err(anyhow::anyhow!(
+                "{}",
+                t!("elastic.panel.open_project_first")
+            )));
         };
         let mut project = self.connections_in(Scope::Project);
         let mut profile = self.connections_in(Scope::Profile);
@@ -618,7 +622,7 @@ impl ElasticPanel {
                 active.connection.name,
                 active.connection.environment.label()
             ),
-            None => "// nova consulta".to_string(),
+            None => t!("elastic.panel.new_query_header").to_string(),
         };
         let fs = self.fs.clone();
         let workspace = self.workspace.clone();
@@ -713,7 +717,7 @@ impl ElasticPanel {
         match &self.apps {
             AppsState::Loading => {
                 rows.push(Row::AppsHeader(0));
-                rows.push(Row::AppsNote("Agrupando logs-* por service.name…".into()));
+                rows.push(Row::AppsNote(t!("elastic.panel.grouping_apps")));
             }
             AppsState::Unavailable(reason) => {
                 rows.push(Row::AppsHeader(0));
@@ -788,7 +792,7 @@ impl ElasticPanel {
             base.cursor_pointer()
                 .hover(|style| style.bg(cx.theme().colors().element_hover))
         };
-        let section = |title: &'static str, count: usize, right: Option<&'static str>| {
+        let section = |title: SharedString, count: usize, right: Option<&'static str>| {
             h_flex()
                 .h(px(34.))
                 .px_2()
@@ -817,18 +821,26 @@ impl ElasticPanel {
                 .into_any_element()
         };
         match row {
-            Row::ProjectHeader(count) => section("DO PROJETO", count, Some(".asylum/elastic")),
+            Row::ProjectHeader(count) => section(
+                t!("elastic.panel.section_project"),
+                count,
+                Some(".asylum/elastic"),
+            ),
             Row::ProjectEmpty => div()
                 .px_2()
                 .pb_1()
                 .child(
-                    Label::new("Marque os data streams do projeto na lista abaixo.")
+                    Label::new(t!("elastic.panel.project_empty"))
                         .size(LabelSize::XSmall)
                         .color(Color::Disabled),
                 )
                 .into_any_element(),
-            Row::AllHeader(count) => section("TODOS", count, None),
-            Row::AppsHeader(count) => section("APPS", count, Some("service.name · 24 h")),
+            Row::AllHeader(count) => section(t!("elastic.panel.section_all"), count, None),
+            Row::AppsHeader(count) => section(
+                t!("elastic.panel.section_apps"),
+                count,
+                Some("service.name · 24 h"),
+            ),
             Row::AppsNote(note) => div()
                 .px_2()
                 .pb_1()
@@ -861,7 +873,7 @@ impl ElasticPanel {
                             IconButton::new(("elastic-query-app", index), IconName::FileCode)
                                 .icon_size(IconSize::XSmall)
                                 .icon_color(Color::Muted)
-                                .tooltip(Tooltip::text("Nova consulta com os logs deste app"))
+                                .tooltip(Tooltip::text(t!("elastic.panel.app_new_query_tooltip")))
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     cx.stop_propagation();
                                     this.new_query(Some(app_query(&queried)), true, window, cx)
@@ -875,9 +887,12 @@ impl ElasticPanel {
                                 .rounded_sm()
                                 .bg(Color::Error.color(cx).opacity(0.12))
                                 .child(
-                                    Label::new(format!("{} erros", format_count(errors)))
-                                        .size(LabelSize::XSmall)
-                                        .color(Color::Error),
+                                    Label::new(t!(
+                                        "elastic.panel.app_errors",
+                                        count = format_count(errors)
+                                    ))
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Error),
                                 ),
                         )
                     })
@@ -887,7 +902,7 @@ impl ElasticPanel {
                             .buffer_font(cx)
                             .color(Color::Muted),
                     )
-                    .tooltip(Tooltip::text("Seguir os logs deste app"))
+                    .tooltip(Tooltip::text(t!("elastic.panel.app_follow_tooltip")))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.follow(
                             "logs-*".to_string(),
@@ -898,7 +913,11 @@ impl ElasticPanel {
                     }))
                     .into_any_element()
             }
-            Row::QueriesHeader(count) => section("QUERIES SALVAS", count, Some(QUERIES_DIR)),
+            Row::QueriesHeader(count) => section(
+                t!("elastic.panel.section_queries"),
+                count,
+                Some(QUERIES_DIR),
+            ),
             Row::Group {
                 key,
                 label,
@@ -950,9 +969,9 @@ impl ElasticPanel {
                     .child(
                         Checkbox::new(("elastic-star", index), starred.into())
                             .tooltip(Tooltip::text(if starred {
-                                format!("Tirar do projeto ({STREAMS_FILE})")
+                                t!("elastic.panel.unmark_stream", file = STREAMS_FILE)
                             } else {
-                                format!("Marcar como do projeto ({STREAMS_FILE})")
+                                t!("elastic.panel.mark_stream", file = STREAMS_FILE)
                             }))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.toggle_project_stream(toggled.clone(), cx)
@@ -971,7 +990,9 @@ impl ElasticPanel {
                             IconButton::new(("elastic-query-stream", index), IconName::FileCode)
                                 .icon_size(IconSize::XSmall)
                                 .icon_color(Color::Muted)
-                                .tooltip(Tooltip::text("Nova consulta neste data stream"))
+                                .tooltip(Tooltip::text(t!(
+                                    "elastic.panel.stream_new_query_tooltip"
+                                )))
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     cx.stop_propagation();
                                     this.new_query(
@@ -993,7 +1014,7 @@ impl ElasticPanel {
                                 .color(Color::Muted),
                         )
                     })
-                    .tooltip(Tooltip::text("Seguir os logs deste data stream"))
+                    .tooltip(Tooltip::text(t!("elastic.panel.stream_follow_tooltip")))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.follow(followed.clone(), None, window, cx)
                     }))
@@ -1109,7 +1130,7 @@ impl ElasticPanel {
                 let current = current.clone();
                 Some(ContextMenu::build(window, cx, move |mut menu, _, _| {
                     if !others.is_empty() {
-                        menu = menu.header("Trocar de conexão");
+                        menu = menu.header(t!("elastic.panel.switch_connection"));
                         for other in others.iter().cloned() {
                             let this = this.clone();
                             let label = format!("{} · {}", other.name, other.environment.label());
@@ -1122,7 +1143,7 @@ impl ElasticPanel {
                     }
                     let edit = current.clone();
                     let reconnect = current.clone();
-                    menu.entry("Reconectar", None, {
+                    menu.entry(t!("elastic.panel.reconnect"), None, {
                         let this = this.clone();
                         move |_, cx| {
                             this.update(cx, |this, cx| this.connect(reconnect.clone(), cx))
@@ -1131,18 +1152,22 @@ impl ElasticPanel {
                     })
                     .when_some(scope, |menu, scope| {
                         let this = this.clone();
-                        menu.entry("Editar conexão…", None, move |window, cx| {
-                            this.update(cx, |this, cx| {
-                                this.open_connect_view(
-                                    Prefill::Edit(edit.clone(), scope),
-                                    window,
-                                    cx,
-                                )
-                            })
-                            .log_err();
-                        })
+                        menu.entry(
+                            t!("elastic.panel.edit_connection"),
+                            None,
+                            move |window, cx| {
+                                this.update(cx, |this, cx| {
+                                    this.open_connect_view(
+                                        Prefill::Edit(edit.clone(), scope),
+                                        window,
+                                        cx,
+                                    )
+                                })
+                                .log_err();
+                            },
+                        )
                     })
-                    .entry("Nova conexão…", None, {
+                    .entry(t!("elastic.panel.new_connection_menu"), None, {
                         let this = this.clone();
                         move |window, cx| {
                             this.update(cx, |this, cx| {
@@ -1152,9 +1177,13 @@ impl ElasticPanel {
                         }
                     })
                     .separator()
-                    .entry("Desconectar", None, move |_, cx| {
-                        this.update(cx, |this, cx| this.disconnect(cx)).log_err();
-                    })
+                    .entry(
+                        t!("elastic.panel.disconnect"),
+                        None,
+                        move |_, cx| {
+                            this.update(cx, |this, cx| this.disconnect(cx)).log_err();
+                        },
+                    )
                 }))
             })
             .into_any_element()
@@ -1162,20 +1191,23 @@ impl ElasticPanel {
 
     fn render_status_row(&self, active: &Active, cx: &mut Context<Self>) -> AnyElement {
         let (dot, status) = match &active.state {
-            ActiveState::Connecting => (Color::Muted, "conectando…".to_string()),
+            ActiveState::Connecting => (Color::Muted, t!("elastic.common.connecting")),
             ActiveState::Connected(session) => (
                 Color::Success,
                 match &session.user {
-                    Some(user) => format!("sessão ok · {}", user.username),
-                    None => format!("conectado · {} ms", session.latency.as_millis()),
+                    Some(user) => t!("elastic.panel.status_session_ok", user = user.username),
+                    None => t!(
+                        "elastic.panel.status_connected",
+                        latency = session.latency.as_millis()
+                    ),
                 },
             ),
             ActiveState::Failed { unauthorized, .. } => (
                 Color::Error,
                 if *unauthorized {
-                    "senha recusada".to_string()
+                    t!("elastic.panel.status_password_rejected")
                 } else {
-                    "falhou".to_string()
+                    t!("elastic.common.failed")
                 },
             ),
         };
@@ -1218,16 +1250,14 @@ impl ElasticPanel {
                                 .color(Color::Muted),
                         )
                         .child(
-                            Label::new("só leitura")
+                            Label::new(t!("elastic.panel.read_only"))
                                 .size(LabelSize::XSmall)
                                 .color(Color::Muted),
                         )
                         .into_any_element(),
                 )
                 .id("elastic-read-only")
-                .tooltip(Tooltip::text(
-                    "O Asylum só lê: ES|QL, campos e data streams. Nada de index, delete ou manage.",
-                )),
+                .tooltip(Tooltip::text(t!("elastic.panel.read_only_tooltip"))),
             )
             .when_some(missing, |this, missing| {
                 this.child(
@@ -1240,7 +1270,7 @@ impl ElasticPanel {
                                     .color(Color::Warning),
                             )
                             .child(
-                                Label::new("privilégios faltando")
+                                Label::new(t!("elastic.panel.missing_privileges"))
                                     .size(LabelSize::XSmall)
                                     .color(Color::Warning),
                             )
@@ -1255,7 +1285,7 @@ impl ElasticPanel {
                 IconButton::new("elastic-refresh", IconName::RotateCw)
                     .icon_size(IconSize::Small)
                     .icon_color(Color::Muted)
-                    .tooltip(Tooltip::text("Recarregar os data streams"))
+                    .tooltip(Tooltip::text(t!("elastic.panel.refresh_tooltip")))
                     .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
             )
             .into_any_element()
@@ -1272,9 +1302,9 @@ impl ElasticPanel {
         let edit = active.connection.clone();
         let scope = self.stored(&edit.id).map(|stored| stored.scope);
         let title = if unauthorized {
-            "O Elasticsearch recusou a senha salva"
+            t!("elastic.panel.failure_unauthorized_title")
         } else {
-            "Não deu para conectar"
+            t!("elastic.panel.failure_title")
         };
         v_flex()
             .m_3()
@@ -1304,18 +1334,17 @@ impl ElasticPanel {
             )
             .when(unauthorized, |this| {
                 this.child(
-                    Label::new(format!(
-                        "A conexão {} entra {} com {}. A senha mudou ou o usuário foi bloqueado; \
-                         nada foi apagado.",
-                        active.connection.name,
-                        match active.connection.via {
-                            connection::Via::Kibana => "pela URL do Kibana",
-                            connection::Via::Direct => "direto no Elasticsearch",
+                    Label::new(t!(
+                        "elastic.panel.failure_unauthorized_body",
+                        name = active.connection.name,
+                        via = match active.connection.via {
+                            connection::Via::Kibana => t!("elastic.panel.via_kibana_url"),
+                            connection::Via::Direct => t!("elastic.panel.via_direct"),
                         },
-                        match active.connection.auth {
-                            AuthKind::Password => "usuário e senha",
-                            AuthKind::ApiKey => "API key",
-                            AuthKind::None => "acesso aberto",
+                        auth = match active.connection.auth {
+                            AuthKind::Password => t!("elastic.panel.auth_password"),
+                            AuthKind::ApiKey => t!("elastic.panel.auth_api_key"),
+                            AuthKind::None => t!("elastic.panel.auth_none"),
                         }
                     ))
                     .size(LabelSize::XSmall)
@@ -1333,7 +1362,7 @@ impl ElasticPanel {
                     .gap_1()
                     .when_some(scope, |this, scope| {
                         this.child(
-                            Button::new("elastic-edit", "Entrar de novo")
+                            Button::new("elastic-edit", t!("elastic.panel.sign_in_again"))
                                 .style(ButtonStyle::Filled)
                                 .label_size(LabelSize::Small)
                                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -1346,7 +1375,7 @@ impl ElasticPanel {
                         )
                     })
                     .child(
-                        Button::new("elastic-retry", "Tentar de novo")
+                        Button::new("elastic-retry", t!("elastic.common.retry"))
                             .style(ButtonStyle::Subtle)
                             .label_size(LabelSize::Small)
                             .on_click(
@@ -1369,26 +1398,31 @@ impl ElasticPanel {
             .border_color(cx.theme().colors().border_variant)
             .bg(cx.theme().colors().element_background)
             .child(
-                Label::new("Hoje nesta conexão")
+                Label::new(t!("elastic.panel.usage_title"))
                     .size(LabelSize::XSmall)
                     .weight(FontWeight::SEMIBOLD)
                     .color(Color::Muted),
             )
             .child(
-                Label::new(format!(
-                    "{} {} · {} docs lidos · {minutes} min seguindo",
-                    self.usage.queries,
-                    if self.usage.queries == 1 {
-                        "consulta"
-                    } else {
-                        "consultas"
-                    },
-                    format_count(self.usage.documents),
-                ))
+                Label::new(if self.usage.queries == 1 {
+                    t!(
+                        "elastic.panel.usage_summary.one",
+                        count = self.usage.queries,
+                        documents = format_count(self.usage.documents),
+                        minutes = minutes
+                    )
+                } else {
+                    t!(
+                        "elastic.panel.usage_summary.other",
+                        count = self.usage.queries,
+                        documents = format_count(self.usage.documents),
+                        minutes = minutes
+                    )
+                })
                 .size(LabelSize::Small),
             )
             .child(
-                Label::new("O Agent lê até 24 h por vez; janelas maiores pedem confirmação.")
+                Label::new(t!("elastic.panel.usage_hint"))
                     .size(LabelSize::XSmall)
                     .color(Color::Disabled),
             )
@@ -1399,10 +1433,10 @@ impl ElasticPanel {
         let rows = self.rows(cx);
         let row_count = rows.len();
         let summary = self.session().map(|session| {
-            format!(
-                "{} data streams · {} no projeto",
-                session.streams.len(),
-                self.project_streams.len()
+            t!(
+                "elastic.panel.footer_summary",
+                streams = session.streams.len(),
+                project = self.project_streams.len()
             )
         });
         v_flex()
@@ -1417,7 +1451,7 @@ impl ElasticPanel {
             .map(|this| match &active.state {
                 ActiveState::Connecting => this.child(
                     div().flex_1().flex().items_center().justify_center().child(
-                        Label::new("Conectando…")
+                        Label::new(t!("elastic.panel.connecting"))
                             .size(LabelSize::Small)
                             .color(Color::Muted),
                     ),
@@ -1455,7 +1489,7 @@ impl ElasticPanel {
             .into_any_element()
     }
 
-    fn render_footer(&self, summary: Option<String>, cx: &mut Context<Self>) -> AnyElement {
+    fn render_footer(&self, summary: Option<SharedString>, cx: &mut Context<Self>) -> AnyElement {
         let follow_target = self.project_streams.first().cloned();
         h_flex()
             .px_3()
@@ -1473,7 +1507,7 @@ impl ElasticPanel {
             .child(div().flex_1())
             .when(self.session().is_some(), |this| {
                 this.child(
-                    Button::new("elastic-new-query", "Nova consulta")
+                    Button::new("elastic-new-query", t!("elastic.common.new_query"))
                         .style(ButtonStyle::Subtle)
                         .label_size(LabelSize::XSmall)
                         .color(Color::Accent)
@@ -1483,11 +1517,14 @@ impl ElasticPanel {
                 )
                 .when_some(follow_target, |this, target| {
                     this.child(
-                        Button::new("elastic-follow", "Seguir")
+                        Button::new("elastic-follow", t!("elastic.panel.follow"))
                             .style(ButtonStyle::Subtle)
                             .label_size(LabelSize::XSmall)
                             .color(Color::Accent)
-                            .tooltip(Tooltip::text(format!("Seguir {target}")))
+                            .tooltip(Tooltip::text(t!(
+                                "elastic.panel.follow_tooltip",
+                                target = target
+                            )))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.follow(target.clone(), None, window, cx)
                             })),
@@ -1528,29 +1565,29 @@ impl ElasticPanel {
                     )
                     .child(
                         Label::new(if has_connections {
-                            "Nenhuma conexão aberta"
+                            t!("elastic.panel.no_open_connection")
                         } else {
-                            "Nenhuma conexão neste projeto"
+                            t!("elastic.panel.no_connections")
                         })
                         .weight(FontWeight::SEMIBOLD),
                     )
                     .child(
                         div().max_w(px(300.)).text_center().child(
-                            Label::new(
-                                "Conecte o Elasticsearch pela URL do Kibana para consultar logs \
-                                 com ES|QL, seguir data streams e abrir traces do APM.",
-                            )
-                            .size(LabelSize::Small)
-                            .color(Color::Muted),
+                            Label::new(t!("elastic.panel.idle_description"))
+                                .size(LabelSize::Small)
+                                .color(Color::Muted),
                         ),
                     )
                     .child(
-                        Button::new("elastic-new-connection", "Nova conexão")
-                            .style(ButtonStyle::Filled)
-                            .start_icon(Icon::new(IconName::Plus).size(IconSize::Small))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.open_connect_view(Prefill::New, window, cx)
-                            })),
+                        Button::new(
+                            "elastic-new-connection",
+                            t!("elastic.common.new_connection"),
+                        )
+                        .style(ButtonStyle::Filled)
+                        .start_icon(Icon::new(IconName::Plus).size(IconSize::Small))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.open_connect_view(Prefill::New, window, cx)
+                        })),
                     ),
             )
             .when_some(self.load_error.clone(), |this, error| {
@@ -1563,7 +1600,7 @@ impl ElasticPanel {
             .when(has_connections, |this| {
                 this.child(
                     h_flex().pt_3().pb_1p5().child(
-                        Label::new("CONEXÕES")
+                        Label::new(t!("elastic.panel.connections_header"))
                             .size(LabelSize::XSmall)
                             .weight(FontWeight::SEMIBOLD)
                             .color(Color::Muted),
@@ -1596,7 +1633,7 @@ impl ElasticPanel {
                             ),
                         )
                         .child(
-                            Label::new("Conectar")
+                            Label::new(t!("elastic.panel.connect"))
                                 .size(LabelSize::XSmall)
                                 .color(Color::Accent),
                         )
@@ -1650,7 +1687,7 @@ async fn open_session(
             elastic
                 .resolved_data_streams()
                 .await
-                .context("não deu para listar os data streams")?
+                .context(t!("elastic.panel.list_streams_failed"))?
         }
     };
     let mut streams: Vec<DataStream> = streams
@@ -1733,7 +1770,7 @@ async fn load_apps(session: &Session) -> AppsState {
                     })
                     .collect();
                 return if apps.is_empty() {
-                    AppsState::Unavailable("Nenhum log com service.name nas últimas 24 h.".into())
+                    AppsState::Unavailable(t!("elastic.panel.apps_no_logs"))
                 } else {
                     AppsState::Loaded(apps)
                 };
@@ -1741,16 +1778,11 @@ async fn load_apps(session: &Session) -> AppsState {
             Err(error) => last_error = Some(error),
         }
     }
-    AppsState::Unavailable(
-        match last_error {
-            Some(ElasticError::BadRequest { .. }) => {
-                "Os logs não têm service.name, então não dá para agrupar por app.".to_string()
-            }
-            Some(error) => format!("Não deu para agrupar por app: {error}"),
-            None => String::new(),
-        }
-        .into(),
-    )
+    AppsState::Unavailable(match last_error {
+        Some(ElasticError::BadRequest { .. }) => t!("elastic.panel.apps_no_service"),
+        Some(error) => t!("elastic.panel.apps_failed", error = error),
+        None => SharedString::default(),
+    })
 }
 
 fn last_used_key(root: &Path) -> String {
@@ -1765,7 +1797,7 @@ fn group_key(kind: &str) -> String {
 pub(crate) fn stream_kind(name: &str) -> String {
     name.split_once('-')
         .map(|(kind, _)| kind.to_string())
-        .unwrap_or_else(|| "outros".to_string())
+        .unwrap_or_else(|| t!("elastic.panel.group_other").to_string())
 }
 
 fn group_order(kind: &str) -> (usize, String) {
@@ -1786,10 +1818,11 @@ fn describe_missing(missing: &MissingPrivileges) -> String {
     for (pattern, privileges) in &missing.index {
         parts.push(format!("{pattern}: {}", privileges.join(", ")));
     }
-    format!(
-        "Sem {}. O que depende disso fica escondido; peça esses privilégios a quem administra o cluster.",
-        parts.join("; ")
+    t!(
+        "elastic.panel.missing_description",
+        privileges = parts.join("; ")
     )
+    .to_string()
 }
 
 /// `18234567890` → `18,2 GB`.
@@ -1804,7 +1837,7 @@ fn format_bytes(bytes: u64) -> String {
     if unit == 0 {
         format!("{bytes} B")
     } else {
-        format!("{value:.1} {}", UNITS[unit]).replace('.', ",")
+        crate::results::localized_decimal(format!("{value:.1} {}", UNITS[unit]))
     }
 }
 
@@ -1855,7 +1888,7 @@ impl Render for ElasticPanel {
                 .items_center()
                 .justify_center()
                 .child(
-                    Label::new("Procurando conexões no projeto…")
+                    Label::new(t!("elastic.panel.looking_for_connections"))
                         .size(LabelSize::Small)
                         .color(Color::Muted),
                 )
@@ -1866,7 +1899,7 @@ impl Render for ElasticPanel {
                 .items_center()
                 .justify_center()
                 .child(
-                    Label::new("Abra uma pasta de projeto para conectar ao Elasticsearch.")
+                    Label::new(t!("elastic.panel.open_project"))
                         .size(LabelSize::Small)
                         .color(Color::Muted),
                 )
@@ -1961,8 +1994,8 @@ mod tests {
     fn streams_group_by_type() {
         assert_eq!(stream_kind("logs-trix-api-prod"), "logs");
         assert_eq!(stream_kind("traces-apm-default"), "traces");
-        assert_eq!(stream_kind("audit"), "outros");
-        assert_eq!(format_bytes(18_234_567_890), "17,0 GB");
+        assert_eq!(stream_kind("audit"), "other");
+        assert_eq!(format_bytes(18_234_567_890), "17.0 GB");
         assert_eq!(format_bytes(512), "512 B");
     }
 }

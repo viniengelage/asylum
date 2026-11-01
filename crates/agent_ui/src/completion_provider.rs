@@ -16,6 +16,7 @@ use fuzzy::{PathMatch, StringMatch, StringMatchCandidate};
 use gpui::{
     App, BackgroundExecutor, Entity, Focusable, Hsla, SharedString, Task, WeakEntity, Window,
 };
+use i18n::t;
 use language::{Buffer, CodeLabel, CodeLabelBuilder, HighlightId};
 use lsp::CompletionContext;
 use multi_buffer::ToOffset as _;
@@ -281,8 +282,8 @@ impl PromptContextType {
         }
     }
 
-    pub fn label(&self) -> &'static str {
-        match self {
+    pub fn label(&self) -> SharedString {
+        let label = match self {
             Self::File => "Files & Directories",
             Self::Symbol => "Symbols",
             Self::Fetch => "Fetch",
@@ -290,12 +291,13 @@ impl PromptContextType {
             Self::Skill => "Skills",
             Self::Diagnostics => "Diagnostics",
             Self::BranchDiff => "Branch Diff",
-            Self::SqlQuery => "SQL Query",
-            Self::PullRequest => "Pull Request",
-            Self::ProjectItem => "Itens do projeto",
-            Self::Logs => "Logs (Elastic)",
-            Self::Container => "Containers (Docker)",
-        }
+            Self::SqlQuery => return t!("agent_ui.context_picker.sql_query"),
+            Self::PullRequest => return t!("agent_ui.context_picker.pull_request"),
+            Self::ProjectItem => return t!("agent_ui.context_picker.project_items"),
+            Self::Logs => return t!("agent_ui.context_picker.logs"),
+            Self::Container => return t!("agent_ui.context_picker.containers"),
+        };
+        label.into()
     }
 
     pub fn icon(&self) -> IconName {
@@ -447,8 +449,18 @@ impl AvailableCommand {
         let (key, label) = match self.category {
             Some(acp_thread::CommandCategory::Native) => ("commands", "Commands"),
             Some(acp_thread::CommandCategory::Mcp) => ("mcp-commands", "MCP Server Commands"),
-            Some(acp_thread::CommandCategory::TaskAgent) => ("task-agents", "Agentes"),
-            Some(acp_thread::CommandCategory::Flow) => ("flows", "Esteiras"),
+            Some(acp_thread::CommandCategory::TaskAgent) => {
+                return CompletionGroup {
+                    key: "task-agents".into(),
+                    label: Some(t!("agent_ui.completion.task_agents_group")),
+                };
+            }
+            Some(acp_thread::CommandCategory::Flow) => {
+                return CompletionGroup {
+                    key: "flows".into(),
+                    label: Some(t!("agent_ui.completion.flows_group")),
+                };
+            }
             None => ("acp-commands", "Commands"),
         };
         CompletionGroup {
@@ -1057,7 +1069,10 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
         Completion {
             replace_range: source_range.clone(),
             new_text,
-            label: CodeLabel::plain(format!("Query {crease_text}"), None),
+            label: CodeLabel::plain(
+                t!("agent_ui.completion.sql_query_label", name = crease_text).to_string(),
+                None,
+            ),
             documentation: None,
             source: project::CompletionSource::Custom,
             icon_path: Some(icon_path),
@@ -1089,7 +1104,12 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
         cx: &mut App,
     ) -> Completion {
         let label = if entry.is_current_branch {
-            format!("#{} {} · do seu branch", entry.number, entry.title)
+            t!(
+                "agent_ui.completion.pull_request_from_your_branch",
+                reference = format!("#{}", entry.number),
+                title = entry.title
+            )
+            .to_string()
         } else {
             format!("#{} {} · {}", entry.number, entry.title, entry.author)
         };
@@ -1140,7 +1160,12 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
         cx: &mut App,
     ) -> Completion {
         let label = match (&entry.status, entry.is_current_branch) {
-            (_, true) => format!("{} {} · do seu branch", entry.reference, entry.title),
+            (_, true) => t!(
+                "agent_ui.completion.pull_request_from_your_branch",
+                reference = entry.reference,
+                title = entry.title
+            )
+            .to_string(),
             (Some(status), false) => format!("{} {} · {status}", entry.reference, entry.title),
             (None, false) => format!("{} {}", entry.reference, entry.title),
         };
@@ -2412,15 +2437,19 @@ impl<T: PromptCompletionProviderDelegate> CompletionProvider for PromptCompletio
                                         }),
                                         Match::PullRequest(_) => Some(CompletionGroup {
                                             key: "pull-requests".into(),
-                                            label: Some("Pull requests".into()),
+                                            label: Some(t!(
+                                                "agent_ui.completion.pull_requests_group"
+                                            )),
                                         }),
                                         Match::ProjectItem(_) => Some(CompletionGroup {
                                             key: "project-items".into(),
-                                            label: Some("Itens do projeto".into()),
+                                            label: Some(t!(
+                                                "agent_ui.context_picker.project_items"
+                                            )),
                                         }),
                                         Match::Logs(_) => Some(CompletionGroup {
                                             key: "logs".into(),
-                                            label: Some("Logs".into()),
+                                            label: Some(t!("agent_ui.completion.logs_group")),
                                         }),
                                         Match::Entry(_) | Match::BranchDiff(_) => {
                                             Some(CompletionGroup {

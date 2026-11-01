@@ -4,6 +4,7 @@ use std::sync::Arc;
 use anyhow::{Context as _, Result, anyhow, bail};
 use futures::AsyncReadExt as _;
 use http_client::{AsyncBody, HttpClient, Method, Request};
+use i18n::t;
 use serde::Deserialize;
 
 /// The "Asylum" GitHub App. Device Flow needs only the client id, which is public by design,
@@ -58,7 +59,7 @@ pub struct Unauthorized;
 
 impl std::fmt::Display for Unauthorized {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("GitHub rejected the saved sign-in")
+        formatter.write_str(&t!("settings_sync.error.unauthorized"))
     }
 }
 
@@ -70,7 +71,7 @@ pub struct NotFound;
 
 impl std::fmt::Display for NotFound {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("not found on GitHub")
+        formatter.write_str(&t!("settings_sync.error.not_found"))
     }
 }
 
@@ -108,7 +109,7 @@ async fn send(
     let mut response = client
         .send(builder.body(body)?)
         .await
-        .with_context(|| format!("failed to reach GitHub at {url}"))?;
+        .with_context(|| t!("settings_sync.error.unreachable", url = url).to_string())?;
     let mut text = String::new();
     response.body_mut().read_to_string(&mut text).await?;
     let status = response.status().as_u16();
@@ -134,9 +135,18 @@ async fn api<T: for<'de> Deserialize<'de>>(
         return Err(NotFound.into());
     }
     if !(200..300).contains(&status) {
-        bail!("GitHub answered {status} for {path}: {text}");
+        bail!(
+            t!(
+                "settings_sync.error.status",
+                status = status,
+                path = path,
+                response = text
+            )
+            .to_string()
+        );
     }
-    serde_json::from_str(&text).with_context(|| format!("unexpected GitHub response for {path}"))
+    serde_json::from_str(&text)
+        .with_context(|| t!("settings_sync.error.unexpected_response", path = path).to_string())
 }
 
 pub async fn request_device_code(client: &Arc<dyn HttpClient>) -> Result<DeviceCode> {
@@ -150,9 +160,17 @@ pub async fn request_device_code(client: &Arc<dyn HttpClient>) -> Result<DeviceC
     )
     .await?;
     if !(200..300).contains(&status) {
-        bail!("GitHub refused to start the sign-in ({status}): {text}");
+        bail!(
+            t!(
+                "settings_sync.error.sign_in_refused",
+                status = status,
+                response = text
+            )
+            .to_string()
+        );
     }
-    serde_json::from_str(&text).context("unexpected response when starting the GitHub sign-in")
+    serde_json::from_str(&text)
+        .with_context(|| t!("settings_sync.error.unexpected_sign_in_response").to_string())
 }
 
 pub async fn poll_for_token(client: &Arc<dyn HttpClient>, device_code: &str) -> Result<TokenPoll> {
@@ -176,23 +194,25 @@ pub async fn poll_for_token(client: &Arc<dyn HttpClient>, device_code: &str) -> 
         Some(("application/x-www-form-urlencoded", body)),
     )
     .await?;
-    let response: Response =
-        serde_json::from_str(&text).context("unexpected response while waiting for GitHub")?;
+    let response: Response = serde_json::from_str(&text)
+        .with_context(|| t!("settings_sync.error.unexpected_poll_response").to_string())?;
     if let Some(token) = response.access_token {
         return Ok(TokenPoll::Authorized(token));
     }
     match response.error.as_deref() {
         Some("authorization_pending") => Ok(TokenPoll::Pending),
         Some("slow_down") => Ok(TokenPoll::SlowDown),
-        Some("expired_token") => Err(anyhow!("the sign-in code expired; start again")),
-        Some("access_denied") => Err(anyhow!("the sign-in was cancelled on GitHub")),
-        _ => Err(anyhow!(
-            "GitHub sign-in failed: {}",
-            response
+        Some("expired_token") => Err(anyhow!(t!("settings_sync.error.code_expired").to_string())),
+        Some("access_denied") => Err(anyhow!(t!("settings_sync.error.cancelled").to_string())),
+        _ => {
+            let reason = response
                 .error_description
                 .or(response.error)
-                .unwrap_or(text)
-        )),
+                .unwrap_or(text);
+            Err(anyhow!(
+                t!("settings_sync.error.sign_in_failed", reason = reason).to_string()
+            ))
+        }
     }
 }
 
@@ -250,7 +270,14 @@ pub async fn gist_files(
             (true, Some(raw_url), _) => {
                 let (status, text) = send(client, Method::GET, &raw_url, Some(token), None).await?;
                 if !(200..300).contains(&status) {
-                    bail!("GitHub answered {status} when downloading {name}");
+                    bail!(
+                        t!(
+                            "settings_sync.error.download_status",
+                            status = status,
+                            name = name
+                        )
+                        .to_string()
+                    );
                 }
                 text
             }

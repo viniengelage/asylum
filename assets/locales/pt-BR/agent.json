@@ -1,0 +1,21 @@
+{
+  "database_schema_tool.title_table": "Lendo o schema de {table}",
+  "database_schema_tool.title_tables": "Listando as tabelas do banco",
+  "flow_command.description.one": "{name} · 1 passo · o texto depois vira “O que construir”",
+  "flow_command.description.other": "{name} · {count} passos · o texto depois vira “O que construir”",
+  "flow_command.input_hint": "<o que construir>",
+  "repo_map_tool.title": "Mapear diretório",
+  "repo_map_tool.title_path": "Mapear {path}",
+  "save_learning_tool.authorize": "Salvar aprendizado em {path}",
+  "save_learning_tool.title": "Salvar aprendizado",
+  "save_learning_tool.title_named": "Salvar aprendizado {title}",
+  "submit_plan_tool.title": "Escrevendo o plano",
+  "submit_step_tool.title": "Entrega do passo",
+  "task_agent_command.input_hint": "<pedido>",
+  "task_agent_command.toolkits_off_in_profile": "{toolkits} desligado neste perfil",
+  "tool_permissions.blocked_by_agent": "Bloqueado pelo agente {agent}: {reason}",
+  "tool_permissions.invalid_pattern": "O agente {agent} tem um padrão inválido para {tool} ({pattern}): {error}",
+  "toolkit_tool.cancelled_by_user": "Cancelado pelo usuário",
+  "update_plan_tool.progress_title": "Progresso do plano: {completed} de {total}",
+  "update_plan_tool.title": "Atualizando o plano"
+}

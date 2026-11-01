@@ -1,0 +1,11 @@
+{
+  "load.too_large": "o arquivo do agente passa de {size}KB",
+  "parse.invalid_yaml": "frontmatter YAML inválido",
+  "parse.no_command": "o agente `{name}` não tem um comando utilizável",
+  "parse.no_name": "o arquivo do agente não tem nome",
+  "parse.unclosed_frontmatter": "falta o `---` que fecha o frontmatter",
+  "toolkit.disabled": "{name} está desligado neste perfil. Ligue em Gerenciar perfis → Toolkit do agente.",
+  "toolkit.missing_database_client": "Este build não tem o cliente de banco de dados.",
+  "toolkit.missing_dock": "Este build não tem o dock {dock}.",
+  "toolkit.tasks_dock": "Tarefas"
+}

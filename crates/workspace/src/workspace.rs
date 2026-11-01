@@ -976,13 +976,21 @@ async fn confirm_opening_foreign_paths(
     let Some(foreign) = foreign else {
         return Ok(true);
     };
-    let open_there = format!("Abrir em {}", foreign.owner_name);
+    let open_there = i18n::t!(
+        "workspace.foreign_paths.open_there",
+        profile = foreign.owner_name
+    );
+    let open_here = i18n::t!("workspace.foreign_paths.open_here");
+    let cancel = i18n::t!("workspace.foreign_paths.cancel");
     let answer = workspace.update_in(cx, |_, window, cx| {
         window.prompt(
             PromptLevel::Info,
-            &format!("Esta pasta pertence ao perfil {}", foreign.owner_name),
-            Some("Lá ela abre com as contas, a IA e os MCPs daquele perfil."),
-            &[open_there.as_str(), "Abrir aqui", "Cancelar"],
+            &i18n::t!(
+                "workspace.foreign_paths.title",
+                profile = foreign.owner_name
+            ),
+            Some(&i18n::t!("workspace.foreign_paths.detail")),
+            &[open_there.as_ref(), open_here.as_ref(), cancel.as_ref()],
             cx,
         )
     })?;

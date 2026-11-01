@@ -10,6 +10,7 @@ use gpui::{
     AnyElement, App, Context, Entity, EventEmitter, FocusHandle, Focusable, ScrollStrategy,
     SharedString, Subscription, Task, UniformListScrollHandle, px, uniform_list,
 };
+use i18n::t;
 use std::{collections::VecDeque, ops::Range, sync::LazyLock};
 use ui::{ContextMenu, PopoverMenu, PopoverTriggerArea, Tooltip, prelude::*};
 use util::ResultExt as _;
@@ -59,11 +60,11 @@ enum LevelFilter {
 }
 
 impl LevelFilter {
-    fn label(self) -> &'static str {
+    fn label(self) -> SharedString {
         match self {
-            Self::All => "Todos os níveis",
-            Self::WarningsAndErrors => "Avisos e erros",
-            Self::Errors => "Só erros",
+            Self::All => t!("docker.logs.level_all"),
+            Self::WarningsAndErrors => t!("docker.logs.level_warnings_and_errors"),
+            Self::Errors => t!("docker.logs.level_errors"),
         }
     }
 
@@ -176,7 +177,7 @@ impl LogsView {
 
     fn start(&mut self, tail: usize, cx: &mut Context<Self>) {
         let Some(docker) = self.store.read(cx).docker().cloned() else {
-            self.error = Some("O Docker não está conectado.".into());
+            self.error = Some(t!("docker.connection.not_connected"));
             return;
         };
         let id = self.container_id.clone();
@@ -185,7 +186,7 @@ impl LogsView {
                 Ok(lines) => lines,
                 Err(error) => {
                     this.update(cx, |this, cx| {
-                        this.error = Some(format!("Os logs não abriram: {error}").into());
+                        this.error = Some(t!("docker.logs.open_failed", error = error));
                         cx.notify();
                     })
                     .log_err();
@@ -361,11 +362,11 @@ impl LogsView {
                     }))
                     .child(
                         Label::new(if following {
-                            "Seguindo".to_string()
+                            t!("docker.logs.following")
                         } else if missed > 0 {
-                            format!("Pausado · {missed} novas")
+                            t!("docker.logs.paused_with_new", count = missed)
                         } else {
-                            "Pausado".to_string()
+                            t!("docker.logs.paused")
                         })
                         .size(LabelSize::Custom(rems_from_px(11.5_f32)))
                         .weight(gpui::FontWeight::MEDIUM)
@@ -376,9 +377,9 @@ impl LogsView {
                         }),
                     )
                     .tooltip(Tooltip::text(if following {
-                        "Pausar a rolagem"
+                        t!("docker.logs.pause_scrolling")
                     } else {
-                        "Voltar a seguir"
+                        t!("docker.logs.resume_following")
                     }))
                     .on_click(cx.listener(|this, _, _, cx| this.toggle_follow(cx))),
             )
@@ -428,14 +429,14 @@ impl LogsView {
                 IconButton::new("docker-logs-agent", IconName::Sparkle)
                     .icon_size(IconSize::Small)
                     .icon_color(Color::Muted)
-                    .tooltip(Tooltip::text("Perguntar ao Agent sobre estes logs"))
+                    .tooltip(Tooltip::text(t!("docker.logs.ask_agent")))
                     .on_click(cx.listener(|this, _, window, cx| this.ask_agent(window, cx))),
             )
             .child(
                 IconButton::new("docker-logs-zoom", IconName::Maximize)
                     .icon_size(IconSize::Small)
                     .icon_color(Color::Muted)
-                    .tooltip(Tooltip::text("Maximizar"))
+                    .tooltip(Tooltip::text(t!("docker.logs.maximize")))
                     .on_click(|_, window, cx| {
                         window.dispatch_action(Box::new(workspace::ToggleZoom), cx)
                     }),
@@ -470,9 +471,9 @@ impl Render for LogsView {
                         } else if is_empty {
                             this.child(
                                 Label::new(if self.ended {
-                                    "O container não escreveu nada."
+                                    t!("docker.logs.empty")
                                 } else {
-                                    "Esperando os logs…"
+                                    t!("docker.logs.waiting")
                                 })
                                 .size(LabelSize::Small)
                                 .color(Color::Muted),
@@ -495,7 +496,7 @@ impl Render for LogsView {
             .when(self.ended && !is_empty, |this| {
                 this.child(
                     h_flex().px(px(16.)).py_1().child(
-                        Label::new("O container parou; os logs voltam quando ele subir.")
+                        Label::new(t!("docker.logs.container_stopped"))
                             .size(LabelSize::Small)
                             .color(Color::Muted),
                     ),

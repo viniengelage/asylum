@@ -6,6 +6,7 @@ use crate::{
     thread_metadata_store::{ThreadId, ThreadMetadataStore},
 };
 use agent_client_protocol::schema::v2 as acp_v2;
+use i18n::t;
 use std::{cell::RefCell, path::Path};
 
 use acp_thread::{
@@ -258,11 +259,22 @@ pub(super) enum PlanCardState {
     Discarded,
 }
 
-const EMPTY_THREAD_SUGGESTIONS: [(IconName, &str); 3] = [
-    (IconName::Sparkle, "Explain the active file"),
-    (IconName::Debug, "Investigate a crash"),
-    (IconName::GitBranch, "Summarize uncommitted changes"),
-];
+fn empty_thread_suggestions() -> [(IconName, SharedString); 3] {
+    [
+        (
+            IconName::Sparkle,
+            t!("agent_ui.thread_view.suggestions.explain_active_file"),
+        ),
+        (
+            IconName::Debug,
+            t!("agent_ui.thread_view.suggestions.investigate_crash"),
+        ),
+        (
+            IconName::GitBranch,
+            t!("agent_ui.thread_view.suggestions.summarize_changes"),
+        ),
+    ]
+}
 
 /// Which side of a session message a transcript shows, and the other participant when it
 /// is known.
@@ -5221,16 +5233,16 @@ impl ThreadView {
                     .color(Color::Accent),
             )
             .child(
-                Label::new("Entrega do passo")
+                Label::new(t!("agent_ui.thread_view.step_delivery.title"))
                     .size(LabelSize::Small)
                     .weight(gpui::FontWeight::SEMIBOLD),
             )
             .child(div().flex_1())
             .child(
                 Label::new(if is_done {
-                    "a esteira confere os critérios"
+                    t!("agent_ui.thread_view.step_delivery.checking")
                 } else {
-                    "escrevendo…"
+                    t!("agent_ui.thread_view.step_delivery.writing")
                 })
                 .size(LabelSize::XSmall)
                 .color(Color::Muted),
@@ -5278,9 +5290,13 @@ impl ThreadView {
                         }),
                     )
                     .child(
-                        Label::new(format!("Critério {} · {}", check.number, check.evidence))
-                            .size(LabelSize::XSmall)
-                            .color(Color::Muted),
+                        Label::new(t!(
+                            "agent_ui.thread_view.step_delivery.criterion",
+                            number = check.number,
+                            evidence = check.evidence
+                        ))
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted),
                     )
             }));
         v_flex()
@@ -5344,26 +5360,36 @@ impl ThreadView {
             .collect::<HashSet<_>>()
             .len();
         let step_count = plan.steps.len();
-        let counts = format!(
-            "· {step_count} {} · {file_count} {}",
-            if step_count == 1 { "passo" } else { "passos" },
-            if file_count == 1 {
-                "arquivo"
+        let counts = t!(
+            "agent_ui.thread_view.plan.counts",
+            steps = if step_count == 1 {
+                t!("agent_ui.thread_view.plan.steps.one")
             } else {
-                "arquivos"
+                t!("agent_ui.thread_view.plan.steps.other", count = step_count)
+            },
+            files = if file_count == 1 {
+                t!("agent_ui.thread_view.plan.files.one")
+            } else {
+                t!("agent_ui.thread_view.plan.files.other", count = file_count)
             },
         );
 
         let status_label: Option<SharedString> = match state {
-            PlanCardState::Writing => Some("Escrevendo…".into()),
+            PlanCardState::Writing => Some(t!("agent_ui.thread_view.plan.status_writing")),
             PlanCardState::Executed => Some(match completed_steps {
-                Some(completed) if completed >= step_count => "Concluído".into(),
-                Some(completed) => format!("{completed} de {step_count}").into(),
-                None if is_executing => "Executando…".into(),
-                None => "Executado".into(),
+                Some(completed) if completed >= step_count => {
+                    t!("agent_ui.thread_view.plan.status_done")
+                }
+                Some(completed) => t!(
+                    "agent_ui.thread_view.plan.status_progress",
+                    completed = completed,
+                    total = step_count
+                ),
+                None if is_executing => t!("agent_ui.thread_view.plan.status_executing"),
+                None => t!("agent_ui.thread_view.plan.status_executed"),
             }),
-            PlanCardState::Superseded => Some("Substituído".into()),
-            PlanCardState::Discarded => Some("Descartado".into()),
+            PlanCardState::Superseded => Some(t!("agent_ui.thread_view.plan.status_superseded")),
+            PlanCardState::Discarded => Some(t!("agent_ui.thread_view.plan.status_discarded")),
             PlanCardState::Ready | PlanCardState::Answered => None,
         };
 
@@ -5415,7 +5441,7 @@ impl ThreadView {
                     }),
             )
             .child(
-                Label::new("Plano")
+                Label::new(t!("agent_ui.thread_view.plan.title"))
                     .size(LabelSize::Small)
                     .color(if is_active {
                         Color::Accent
@@ -5536,7 +5562,7 @@ impl ThreadView {
                                         .color(Color::Warning),
                                 )
                                 .child(
-                                    Label::new("Em aberto")
+                                    Label::new(t!("agent_ui.thread_view.plan.open_questions"))
                                         .size(LabelSize::Small)
                                         .weight(gpui::FontWeight::MEDIUM),
                                 ),
@@ -5575,7 +5601,7 @@ impl ThreadView {
                             .read_with(cx, |this, cx| this.favorite_models_for_plan(cx))
                             .unwrap_or_default();
                         Some(ContextMenu::build(window, cx, move |menu, _, _| {
-                            menu.entry("Executar aqui", None, {
+                            menu.entry(t!("agent_ui.thread_view.plan.execute_here"), None, {
                                 let this = this.clone();
                                 let tool_call_id = tool_call_id.clone();
                                 move |window, cx| {
@@ -5590,21 +5616,25 @@ impl ThreadView {
                                     .log_err();
                                 }
                             })
-                            .entry("Executar em um thread novo", None, {
-                                let this = this.clone();
-                                let tool_call_id = tool_call_id.clone();
-                                move |window, cx| {
-                                    this.update(cx, |this, cx| {
-                                        this.execute_plan(
-                                            &tool_call_id,
-                                            PlanExecutionTarget::NewThread,
-                                            window,
-                                            cx,
-                                        );
-                                    })
-                                    .log_err();
-                                }
-                            })
+                            .entry(
+                                t!("agent_ui.thread_view.plan.execute_in_new_thread"),
+                                None,
+                                {
+                                    let this = this.clone();
+                                    let tool_call_id = tool_call_id.clone();
+                                    move |window, cx| {
+                                        this.update(cx, |this, cx| {
+                                            this.execute_plan(
+                                                &tool_call_id,
+                                                PlanExecutionTarget::NewThread,
+                                                window,
+                                                cx,
+                                            );
+                                        })
+                                        .log_err();
+                                    }
+                                },
+                            )
                             .when(
                                 !other_models.is_empty(),
                                 |mut menu| {
@@ -5613,7 +5643,10 @@ impl ThreadView {
                                         let this = this.clone();
                                         let tool_call_id = tool_call_id.clone();
                                         menu = menu.entry(
-                                            format!("Executar com {}", model.name.0),
+                                            t!(
+                                                "agent_ui.thread_view.plan.execute_with_model",
+                                                model = model.name.0
+                                            ),
                                             None,
                                             move |window, cx| {
                                                 this.update(cx, |this, cx| {
@@ -5647,7 +5680,7 @@ impl ThreadView {
                         .child(
                             Button::new(
                                 SharedString::from(format!("execute-plan-{entry_ix}")),
-                                "Executar",
+                                t!("agent_ui.thread_view.plan.execute"),
                             )
                             .style(ButtonStyle::Tinted(TintColor::Accent))
                             .label_size(LabelSize::Small)
@@ -5661,9 +5694,9 @@ impl ThreadView {
                                     .map(|binding| binding.size(rems_from_px(12_f32))),
                             )
                             .disabled(!is_idle)
-                            .tooltip(Tooltip::text(
-                                "Troca para o perfil de escrita e executa o plano",
-                            ))
+                            .tooltip(Tooltip::text(t!(
+                                "agent_ui.thread_view.plan.execute_tooltip"
+                            )))
                             .on_click(cx.listener({
                                 let tool_call_id = tool_call.id.clone();
                                 move |this, _, window, cx| {
@@ -5681,7 +5714,7 @@ impl ThreadView {
                 .child(
                     Button::new(
                         SharedString::from(format!("edit-plan-{entry_ix}")),
-                        "Editar",
+                        t!("agent_ui.thread_view.plan.edit"),
                     )
                     .label_size(LabelSize::Small)
                     .start_icon(
@@ -5689,9 +5722,7 @@ impl ThreadView {
                             .size(IconSize::XSmall)
                             .color(Color::Muted),
                     )
-                    .tooltip(Tooltip::text(
-                        "Abre o plano como markdown; o texto editado é o que será executado",
-                    ))
+                    .tooltip(Tooltip::text(t!("agent_ui.thread_view.plan.edit_tooltip")))
                     .on_click(cx.listener({
                         let tool_call_id = tool_call.id.clone();
                         let markdown = plan_markdown(&plan);
@@ -5704,7 +5735,7 @@ impl ThreadView {
                 .child(
                     Button::new(
                         SharedString::from(format!("discard-plan-{entry_ix}")),
-                        "Descartar",
+                        t!("agent_ui.thread_view.plan.discard"),
                     )
                     .label_size(LabelSize::Small)
                     .color(Color::Muted)
@@ -5732,7 +5763,7 @@ impl ThreadView {
                         .color(Color::Accent),
                 )
                 .child(
-                    Label::new("Editado — o texto do buffer é o que vai ser executado.")
+                    Label::new(t!("agent_ui.thread_view.plan.edited_notice"))
                         .size(LabelSize::XSmall)
                         .color(Color::Muted),
                 )
@@ -5756,7 +5787,7 @@ impl ThreadView {
             )
             .when(state == PlanCardState::Ready, |this| {
                 this.child(
-                    Label::new("Responda abaixo para ajustar o plano antes de executar.")
+                    Label::new(t!("agent_ui.thread_view.plan.reply_hint"))
                         .size(LabelSize::XSmall)
                         .color(Color::Muted),
                 )
@@ -5788,7 +5819,7 @@ impl ThreadView {
             (completed_steps.min(step_count) as f32) / (step_count as f32)
         };
         let title: SharedString = if plan.title.is_empty() {
-            "Plano".into()
+            t!("agent_ui.thread_view.plan.title")
         } else {
             plan.title.clone().into()
         };
@@ -5834,9 +5865,9 @@ impl ThreadView {
                 .icon_size(IconSize::XSmall)
                 .icon_color(Color::Muted)
                 .tooltip(Tooltip::text(if is_collapsed {
-                    "Mostrar passos"
+                    t!("agent_ui.thread_view.plan.show_steps")
                 } else {
-                    "Esconder passos"
+                    t!("agent_ui.thread_view.plan.hide_steps")
                 }))
                 .on_click(cx.listener({
                     let tool_call_id = tool_call.id.clone();
@@ -5894,8 +5925,10 @@ impl ThreadView {
                     )
                     .child(
                         Label::new(match profile_name {
-                            Some(name) => format!("Plano aprovado · modo {name}"),
-                            None => "Plano aprovado".to_string(),
+                            Some(name) => {
+                                t!("agent_ui.thread_view.plan.approved_with_mode", mode = name)
+                            }
+                            None => t!("agent_ui.thread_view.plan.approved"),
                         })
                         .size(LabelSize::XSmall)
                         .color(Color::Muted),
@@ -6048,9 +6081,9 @@ impl ThreadView {
         workspace.update(cx, |workspace, cx| {
             let editor = cx.new(|cx| {
                 let editor = Editor::for_buffer(buffer, None, window, cx);
-                editor
-                    .buffer()
-                    .update(cx, |buffer, cx| buffer.set_title("Plano".to_string(), cx));
+                editor.buffer().update(cx, |buffer, cx| {
+                    buffer.set_title(t!("agent_ui.thread_view.plan.title").to_string(), cx)
+                });
                 editor
             });
             workspace.add_item_to_active_pane(Box::new(editor), None, true, window, cx);
@@ -7922,15 +7955,14 @@ impl ThreadView {
             .p(DynamicSpacing::Base16.rems(cx))
             .gap(DynamicSpacing::Base12.rems(cx))
             .child(
-                Label::new("Suggestions")
+                Label::new(t!("agent_ui.thread_view.suggestions.title"))
                     .size(LabelSize::Custom(rems_from_px(10.5_f32)))
                     .weight(gpui::FontWeight::SEMIBOLD)
                     .color(Color::Placeholder),
             )
-            .children(EMPTY_THREAD_SUGGESTIONS.iter().enumerate().map(
+            .children(empty_thread_suggestions().into_iter().enumerate().map(
                 |(index, (icon, suggestion))| {
                     let message_editor = self.message_editor.clone();
-                    let suggestion = *suggestion;
 
                     h_flex()
                         .id(("empty-thread-suggestion", index))
@@ -7944,16 +7976,16 @@ impl ThreadView {
                         .rounded_lg()
                         .cursor_pointer()
                         .hover(|style| style.bg(card_hover_background))
-                        .child(Icon::new(*icon).size(IconSize::Small).color(Color::Accent))
+                        .child(Icon::new(icon).size(IconSize::Small).color(Color::Accent))
                         .child(
-                            Label::new(suggestion)
+                            Label::new(suggestion.clone())
                                 .size(LabelSize::Custom(rems_from_px(13_f32)))
                                 .truncate(),
                         )
                         .on_click(move |_, window, cx| {
                             message_editor.focus_handle(cx).focus(window, cx);
                             message_editor.update(cx, |editor, cx| {
-                                editor.insert_text(suggestion, window, cx);
+                                editor.insert_text(&suggestion, window, cx);
                             });
                         })
                 },
@@ -7966,7 +7998,7 @@ impl ThreadView {
         IconButton::new("mention-context", IconName::AtSign)
             .icon_size(IconSize::Small)
             .icon_color(Color::Muted)
-            .tooltip(Tooltip::text("Mention Context"))
+            .tooltip(Tooltip::text(t!("agent_ui.thread_view.mention_context")))
             .on_click(move |_, window, cx| {
                 message_editor.focus_handle(cx).focus(window, cx);
                 message_editor.update(cx, |editor, cx| {
@@ -8182,9 +8214,9 @@ impl ThreadView {
                         .size(IconSize::XSmall)
                         .color(Color::Accent),
                 )
-                .tooltip(Tooltip::text(format!(
-                    "Agente /{} ativo nesta thread. Clique para voltar ao modo normal.",
-                    agent.command
+                .tooltip(Tooltip::text(t!(
+                    "agent_ui.thread_view.task_agent.chip_tooltip",
+                    command = agent.command
                 )))
                 .on_click(cx.listener(move |this, _, _window, cx| {
                     if let Some(thread) = this.as_native_thread(cx) {
@@ -8338,7 +8370,7 @@ impl Render for TokenUsageTooltip {
                             .border_t_1()
                             .border_color(cx.theme().colors().border_variant)
                             .child(
-                                Label::new("Saved by Output Compaction")
+                                Label::new(t!("agent_ui.thread_view.saved_by_output_compaction"))
                                     .color(Color::Muted)
                                     .size(LabelSize::Small),
                             )
@@ -14746,37 +14778,41 @@ impl ThreadView {
             .map(|(id, _)| id.clone())
             .collect::<Vec<_>>();
         let description = if off_in_profile.len() == missing.len() {
-            "O agente roda sem as ferramentas e as menções desses toolkits. O perfil vence a lista de toolkits do agente."
+            t!("agent_ui.thread_view.task_agent.toolkits_off_by_profile")
         } else {
-            "O agente roda sem as ferramentas e as menções desses toolkits. O .zed/settings.json deste projeto desliga pelo menos um deles."
+            t!("agent_ui.thread_view.task_agent.toolkits_off_by_project")
         };
         Some(
             Callout::new()
                 .severity(Severity::Warning)
                 .icon(IconName::Warning)
-                .title(format!(
-                    "/{} usa {names}, desligado neste perfil",
-                    agent.command
+                .title(t!(
+                    "agent_ui.thread_view.task_agent.toolkits_off_title",
+                    command = agent.command,
+                    toolkits = names
                 ))
                 .description(description)
                 .border_position(self.callout_border_position())
                 .when(!off_in_profile.is_empty(), |callout| {
                     callout.actions_slot(
-                        Button::new("enable-task-agent-toolkits", "Ligar no perfil")
-                            .label_size(LabelSize::Small)
-                            .style(ButtonStyle::Filled)
-                            .on_click(move |_, _, cx| {
-                                let off_in_profile = off_in_profile.clone();
-                                let fs = project.read(cx).fs().clone();
-                                update_settings_file(fs, cx, move |settings, _| {
-                                    for id in &off_in_profile {
-                                        settings
-                                            .project
-                                            .agent_toolkits
-                                            .insert(id.as_ref().into(), true);
-                                    }
-                                });
-                            }),
+                        Button::new(
+                            "enable-task-agent-toolkits",
+                            t!("agent_ui.thread_view.task_agent.enable_in_profile"),
+                        )
+                        .label_size(LabelSize::Small)
+                        .style(ButtonStyle::Filled)
+                        .on_click(move |_, _, cx| {
+                            let off_in_profile = off_in_profile.clone();
+                            let fs = project.read(cx).fs().clone();
+                            update_settings_file(fs, cx, move |settings, _| {
+                                for id in &off_in_profile {
+                                    settings
+                                        .project
+                                        .agent_toolkits
+                                        .insert(id.as_ref().into(), true);
+                                }
+                            });
+                        }),
                     )
                 }),
         )

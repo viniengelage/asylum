@@ -18,6 +18,7 @@ use gpui::{
     EventEmitter, FocusHandle, Focusable, FontWeight, Global, Pixels, Subscription, Task,
     WeakEntity, px, relative, uniform_list,
 };
+use i18n::t;
 use project::Project;
 use std::{
     cell::RefCell,
@@ -91,12 +92,12 @@ impl TimeWindow {
         }
     }
 
-    pub fn label(self) -> String {
+    pub fn label(self) -> SharedString {
         match self {
-            TimeWindow::Minutes(minutes) => format!("últimos {minutes} min"),
-            TimeWindow::Hours(1) => "última hora".to_string(),
-            TimeWindow::Hours(hours) => format!("últimas {hours} h"),
-            TimeWindow::Days(days) => format!("últimos {days} dias"),
+            TimeWindow::Minutes(minutes) => t!("elastic.query.window_minutes", count = minutes),
+            TimeWindow::Hours(1) => t!("elastic.query.window_hour"),
+            TimeWindow::Hours(hours) => t!("elastic.query.window_hours", count = hours),
+            TimeWindow::Days(days) => t!("elastic.query.window_days", count = days),
         }
     }
 
@@ -411,7 +412,7 @@ impl EsqlQueryView {
         }
         let Some((query, range)) = self.target(cx) else {
             self.state = RunState::Failed(Failure {
-                message: "Nada para rodar: escreva uma consulta começando por FROM.".into(),
+                message: t!("elastic.query.nothing_to_run"),
                 kind: None,
                 range: None,
                 line: None,
@@ -506,7 +507,12 @@ impl EsqlQueryView {
                     0,
                     HistoryEntry {
                         query,
-                        summary: format!("{count} linhas · {} ms", elapsed.as_millis()),
+                        summary: t!(
+                            "elastic.query.history_summary",
+                            count = count,
+                            elapsed = elapsed.as_millis()
+                        )
+                        .to_string(),
                         failed: false,
                     },
                 );
@@ -635,7 +641,7 @@ impl EsqlQueryView {
             .path
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "consulta".to_string());
+            .unwrap_or_else(|| t!("elastic.query.mention_title").to_string());
         window.dispatch_action(
             Box::new(zed_actions::agent::MentionLogs {
                 id: crate::agent_toolkit::query_mention_id(&self.path),
@@ -743,7 +749,7 @@ impl EsqlQueryView {
             )
             .child(div().flex_1())
             .child(
-                Button::new("elastic-ask-agent", "Pedir ao Agent")
+                Button::new("elastic-ask-agent", t!("elastic.query.ask_agent"))
                     .style(ButtonStyle::Tinted(ui::TintColor::Accent))
                     .label_size(LabelSize::Small)
                     .start_icon(Icon::new(IconName::Sparkle).size(IconSize::Small))
@@ -758,7 +764,7 @@ impl EsqlQueryView {
                     })),
             )
             .child(if running {
-                Button::new("elastic-cancel-query", "Cancelar")
+                Button::new("elastic-cancel-query", t!("elastic.common.cancel"))
                     .style(ButtonStyle::Tinted(ui::TintColor::Error))
                     .label_size(LabelSize::Small)
                     .start_icon(Icon::new(IconName::Stop).size(IconSize::Small))
@@ -772,7 +778,7 @@ impl EsqlQueryView {
                     )
                     .into_any_element()
             } else {
-                Button::new("elastic-run", "Executar")
+                Button::new("elastic-run", t!("elastic.query.run"))
                     .style(ButtonStyle::Filled)
                     .label_size(LabelSize::Small)
                     .start_icon(Icon::new(IconName::PlayFilled).size(IconSize::Small))
@@ -791,13 +797,19 @@ impl EsqlQueryView {
         let (icon, text, color): (Option<IconName>, String, Color) = match &self.state {
             RunState::Idle => (
                 None,
-                "⌘↵ roda a consulta sob o cursor (ou a seleção) · a janela de tempo vai à parte"
-                    .to_string(),
+                t!("elastic.query.idle_hint").to_string(),
                 Color::Muted,
             ),
             RunState::Running { started } => (
                 Some(IconName::LoadCircle),
-                format!("rodando · {:.1} s", started.elapsed().as_secs_f32()),
+                t!(
+                    "elastic.query.running",
+                    seconds = results::localized_decimal(format!(
+                        "{:.1}",
+                        started.elapsed().as_secs_f32()
+                    ))
+                )
+                .to_string(),
                 Color::Warning,
             ),
             RunState::Done {
@@ -810,28 +822,32 @@ impl EsqlQueryView {
                 let ago = finished.elapsed().as_secs();
                 (
                     Some(IconName::Check),
-                    format!(
-                        "{} linhas{} · {}{} · rodou há {}",
-                        self.rows.values.len(),
-                        if documents > 0 {
-                            format!(" de {} docs na janela", results::format_count(documents))
+                    t!(
+                        "elastic.query.done",
+                        rows = self.rows.values.len(),
+                        documents = if documents > 0 {
+                            t!(
+                                "elastic.query.done_documents",
+                                count = results::format_count(documents)
+                            )
                         } else {
-                            String::new()
+                            SharedString::default()
                         },
-                        match took {
+                        took = match took {
                             Some(took) => format!("took {took} ms"),
                             None => format!("{} ms", elapsed.as_millis()),
                         },
-                        match self.session.connection.via {
+                        via = match self.session.connection.via {
                             crate::connection::Via::Kibana => " via Kibana",
                             crate::connection::Via::Direct => "",
                         },
-                        if ago < 60 {
+                        ago = if ago < 60 {
                             format!("{ago} s")
                         } else {
                             format!("{} min", ago / 60)
                         }
-                    ),
+                    )
+                    .to_string(),
                     Color::Success,
                 )
             }
@@ -840,7 +856,7 @@ impl EsqlQueryView {
                 failure
                     .kind
                     .clone()
-                    .unwrap_or_else(|| "a consulta falhou".to_string()),
+                    .unwrap_or_else(|| t!("elastic.query.failed").to_string()),
                 Color::Error,
             ),
         };
@@ -885,12 +901,9 @@ impl EsqlQueryView {
             )
             .when_some(failure.replacement.clone(), |this, replacement| {
                 this.child(
-                    Label::new(format!(
-                        "O Elasticsearch sugere {replacement}. Nesses data streams os campos \
-                         seguem o ECS; o resto da linha pode ficar igual."
-                    ))
-                    .size(LabelSize::Small)
-                    .color(Color::Muted),
+                    Label::new(t!("elastic.query.suggestion", replacement = replacement))
+                        .size(LabelSize::Small)
+                        .color(Color::Muted),
                 )
             })
             .child(
@@ -900,7 +913,7 @@ impl EsqlQueryView {
                         this.child(
                             Button::new(
                                 "elastic-apply-replacement",
-                                format!("Trocar por {replacement}"),
+                                t!("elastic.query.replace_with", replacement = replacement),
                             )
                             .style(ButtonStyle::Filled)
                             .label_size(LabelSize::Small)
@@ -916,8 +929,8 @@ impl EsqlQueryView {
                             Button::new(
                                 "elastic-go-to-error",
                                 match failure.line {
-                                    Some(line) => format!("Ir para a linha {line}"),
-                                    None => "Ir para o erro".to_string(),
+                                    Some(line) => t!("elastic.query.go_to_line", line = line),
+                                    None => t!("elastic.query.go_to_error"),
                                 },
                             )
                             .style(ButtonStyle::Outlined)
@@ -928,7 +941,7 @@ impl EsqlQueryView {
                         )
                     })
                     .child(
-                        Button::new("elastic-explain-error", "Explicar a sintaxe")
+                        Button::new("elastic-explain-error", t!("elastic.query.explain_syntax"))
                             .style(ButtonStyle::Outlined)
                             .label_size(LabelSize::Small)
                             .start_icon(Icon::new(IconName::Sparkle).size(IconSize::Small))
@@ -1031,10 +1044,10 @@ impl EsqlQueryView {
                         )
                         .child(div().flex_1())
                         .child(
-                            Label::new(format!(
-                                "pico · {} · {} docs",
-                                results::short_time(&peak.0),
-                                results::format_count(peak.1)
+                            Label::new(t!(
+                                "elastic.query.peak",
+                                time = results::short_time(&peak.0),
+                                count = results::format_count(peak.1)
                             ))
                             .size(LabelSize::XSmall)
                             .color(if peaked {
@@ -1237,7 +1250,7 @@ impl EsqlQueryView {
             (ResultTab::Documents, RunState::Done { .. }) => div()
                 .p_3()
                 .child(
-                    Label::new("Nenhum documento nessa janela.")
+                    Label::new(t!("elastic.query.no_documents"))
                         .size(LabelSize::Small)
                         .color(Color::Muted),
                 )
@@ -1246,9 +1259,9 @@ impl EsqlQueryView {
                 .p_3()
                 .child(
                     Label::new(if self.is_running() {
-                        "Aguardando o Elasticsearch…"
+                        t!("elastic.query.waiting")
                     } else {
-                        "Rode uma consulta para ver os documentos aqui."
+                        t!("elastic.query.run_to_see")
                     })
                     .size(LabelSize::Small)
                     .color(Color::Muted),
@@ -1268,7 +1281,7 @@ impl EsqlQueryView {
                         .rounded_sm()
                         .cursor_pointer()
                         .hover(|style| style.bg(cx.theme().colors().element_hover))
-                        .tooltip(Tooltip::text("Copiar a consulta"))
+                        .tooltip(Tooltip::text(t!("elastic.query.copy_query")))
                         .child(
                             Label::new(
                                 esql::commands(&query)
@@ -1298,20 +1311,24 @@ impl EsqlQueryView {
         };
         let has_rows = !self.rows.values.is_empty();
         let footer = match &self.state {
-            RunState::Done { from, to, .. } if has_rows => Some(format!(
-                "{} {} · {}–{} (horário local){}",
-                self.rows.values.len(),
-                if self.rows.is_log() { "docs" } else { "linhas" },
-                results::short_time(&esql::iso(*from))
-                    .get(..5)
-                    .unwrap_or_default(),
-                results::short_time(&esql::iso(*to))
-                    .get(..5)
-                    .unwrap_or_default(),
-                if self.rows.is_log() {
-                    " · clique numa linha para abrir o documento"
+            RunState::Done { from, to, .. } if has_rows => Some(t!(
+                "elastic.query.footer",
+                count = self.rows.values.len(),
+                unit = if self.rows.is_log() {
+                    t!("elastic.query.unit_docs")
                 } else {
-                    ""
+                    t!("elastic.query.unit_rows")
+                },
+                from = results::short_time(&esql::iso(*from))
+                    .get(..5)
+                    .unwrap_or_default(),
+                to = results::short_time(&esql::iso(*to))
+                    .get(..5)
+                    .unwrap_or_default(),
+                hint = if self.rows.is_log() {
+                    t!("elastic.query.footer_hint")
+                } else {
+                    SharedString::default()
                 }
             )),
             _ => None,
@@ -1347,7 +1364,7 @@ impl EsqlQueryView {
                     .px_3()
                     .py_1p5()
                     .gap_3()
-                    .child(Label::new("Resultados").weight(FontWeight::SEMIBOLD))
+                    .child(Label::new(t!("elastic.query.results")).weight(FontWeight::SEMIBOLD))
                     .child(div().flex_1().min_w_0().child(self.render_status()))
                     .child(ToggleButtonGroupTabs { selected: self.tab }.render(cx))
                     .child(
@@ -1355,7 +1372,7 @@ impl EsqlQueryView {
                             .icon_size(IconSize::Small)
                             .icon_color(Color::Muted)
                             .disabled(!has_rows)
-                            .tooltip(Tooltip::text("Copiar como CSV"))
+                            .tooltip(Tooltip::text(t!("elastic.query.copy_csv")))
                             .on_click(cx.listener(|this, _, _, cx| this.copy_csv(cx))),
                     ),
             )
@@ -1375,14 +1392,14 @@ impl EsqlQueryView {
                         )
                         .child(div().flex_1())
                         .child(
-                            Button::new("elastic-export-json", "Exportar JSON")
+                            Button::new("elastic-export-json", t!("elastic.query.export_json"))
                                 .style(ButtonStyle::Subtle)
                                 .label_size(LabelSize::XSmall)
                                 .color(Color::Accent)
                                 .on_click(cx.listener(|this, _, _, cx| this.copy_json(cx))),
                         )
                         .child(
-                            Button::new("elastic-open-kibana", "Abrir no Kibana")
+                            Button::new("elastic-open-kibana", t!("elastic.common.open_in_kibana"))
                                 .style(ButtonStyle::Subtle)
                                 .label_size(LabelSize::XSmall)
                                 .color(Color::Accent)
@@ -1403,14 +1420,14 @@ impl ToggleButtonGroupTabs {
     fn render(self, cx: &mut Context<EsqlQueryView>) -> AnyElement {
         let tabs = [
             ui::ToggleButtonSimple::new(
-                "Docs",
+                t!("elastic.query.tab_docs"),
                 cx.listener(|this, _, _, cx| {
                     this.tab = ResultTab::Documents;
                     cx.notify();
                 }),
             ),
             ui::ToggleButtonSimple::new(
-                "Histórico",
+                t!("elastic.query.tab_history"),
                 cx.listener(|this, _, _, cx| {
                     this.tab = ResultTab::History;
                     cx.notify();
@@ -1557,9 +1574,10 @@ pub(crate) fn render_document_detail<V: 'static>(
                             )
                             .when_some(link, move |this, link| {
                                 this.cursor_pointer()
-                                    .tooltip(Tooltip::text(format!(
-                                        "Abrir {}:{}",
-                                        link.path, link.line
+                                    .tooltip(Tooltip::text(t!(
+                                        "elastic.document.open_location",
+                                        path = link.path,
+                                        line = link.line
                                     )))
                                     .on_click(move |_, window, cx| {
                                         results::open_stack_link(
@@ -1587,7 +1605,11 @@ pub(crate) fn render_document_detail<V: 'static>(
                     this.child(
                         Button::new(
                             SharedString::from(format!("{id}-open-file")),
-                            format!("Abrir {file}:{}", link.line),
+                            t!(
+                                "elastic.document.open_location",
+                                path = file,
+                                line = link.line
+                            ),
                         )
                         .style(ButtonStyle::Tinted(ui::TintColor::Accent))
                         .label_size(LabelSize::Small)
@@ -1607,10 +1629,10 @@ pub(crate) fn render_document_detail<V: 'static>(
                     let document = document.clone();
                     let title = message
                         .map(|message| message.chars().take(60).collect::<String>())
-                        .unwrap_or_else(|| "documento".to_string());
+                        .unwrap_or_else(|| t!("elastic.document.untitled").to_string());
                     Button::new(
                         SharedString::from(format!("{id}-ask-agent")),
-                        "Perguntar ao Agent",
+                        t!("elastic.common.ask_agent"),
                     )
                     .style(ButtonStyle::Outlined)
                     .label_size(LabelSize::Small)
@@ -1639,7 +1661,7 @@ pub(crate) fn render_document_detail<V: 'static>(
                     this.child(
                         Button::new(
                             SharedString::from(format!("{id}-trace")),
-                            "Ver trace no APM",
+                            t!("elastic.document.view_trace"),
                         )
                         .style(ButtonStyle::Outlined)
                         .label_size(LabelSize::Small)
@@ -1663,15 +1685,18 @@ pub(crate) fn render_document_detail<V: 'static>(
                     )
                 })
                 .child(
-                    Button::new(SharedString::from(format!("{id}-copy")), "Copiar doc")
-                        .style(ButtonStyle::Outlined)
-                        .label_size(LabelSize::Small)
-                        .start_icon(Icon::new(IconName::Copy).size(IconSize::Small))
-                        .on_click(move |_, _, cx| {
-                            if let Ok(json) = serde_json::to_string_pretty(&document) {
-                                cx.write_to_clipboard(ClipboardItem::new_string(json));
-                            }
-                        }),
+                    Button::new(
+                        SharedString::from(format!("{id}-copy")),
+                        t!("elastic.document.copy"),
+                    )
+                    .style(ButtonStyle::Outlined)
+                    .label_size(LabelSize::Small)
+                    .start_icon(Icon::new(IconName::Copy).size(IconSize::Small))
+                    .on_click(move |_, _, cx| {
+                        if let Ok(json) = serde_json::to_string_pretty(&document) {
+                            cx.write_to_clipboard(ClipboardItem::new_string(json));
+                        }
+                    }),
                 ),
         )
         .into_any_element()

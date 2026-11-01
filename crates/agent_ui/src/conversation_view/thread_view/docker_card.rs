@@ -1,6 +1,7 @@
 use super::{ThreadView, ToolCallLayout};
 use acp_thread::{ToolCall, ToolCallStatus};
 use gpui::{AnyElement, FontWeight};
+use i18n::t;
 use task_agents::{ContainerAction, DOCKER_INSPECT_TOOL, DOCKER_LOGS_TOOL, DockerContainerResult};
 use ui::prelude::*;
 
@@ -46,7 +47,7 @@ impl ThreadView {
         };
         let action = |id: &'static str,
                       icon: IconName,
-                      label: &'static str,
+                      label: SharedString,
                       kind: ContainerAction| {
             let container_id = card.id.clone();
             h_flex()
@@ -147,21 +148,21 @@ impl ThreadView {
                     .child(action(
                         "docker-card-logs",
                         IconName::Reader,
-                        "Abrir logs",
+                        t!("agent_ui.docker_card.open_logs"),
                         ContainerAction::Logs,
                     ))
                     .when(card.state == "running", |this| {
                         this.child(action(
                             "docker-card-terminal",
                             IconName::Terminal,
-                            "Abrir terminal",
+                            t!("agent_ui.docker_card.open_terminal"),
                             ContainerAction::Terminal,
                         ))
                     })
                     .child(action(
                         "docker-card-inspect",
                         IconName::Eye,
-                        "Inspecionar",
+                        t!("agent_ui.docker_card.inspect"),
                         ContainerAction::Inspect,
                     )),
             )

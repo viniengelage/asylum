@@ -8,6 +8,7 @@ use crate::{
 };
 use anyhow::{Context as _, Result};
 use gpui::{App, AsyncApp, Entity, Task};
+use i18n::t;
 use project::Project;
 use repo_hosting::{
     RepoStore,
@@ -51,7 +52,7 @@ fn run(
         "wait_checks" => wait_checks(&project, &request, cx).await,
         "move_item" => move_item(&project, &request, cx).await,
         "comment_item" => comment(&project, &request, cx).await,
-        other => anyhow::bail!("passo do GitHub desconhecido: {other}"),
+        other => anyhow::bail!("{}", t!("github_projects.flow.unknown_step", step = other)),
     })
 }
 
@@ -89,10 +90,16 @@ fn run_item(
             .items
             .iter()
             .find(|item| item.number == Some(number))
-            .with_context(|| format!("#{number} não está em {}", project.summary.title))?,
+            .with_context(|| {
+                t!(
+                    "github_projects.flow.item_not_in_project",
+                    number = number,
+                    project = project.summary.title
+                )
+            })?,
         None => branch
             .and_then(|branch| api::item_for_branch(&project.items, branch))
-            .context("o pedido não cita um item (#204) e o branch atual não é de nenhum")?,
+            .with_context(|| t!("github_projects.flow.no_item_for_run"))?,
     };
     Ok(item.clone())
 }
@@ -111,7 +118,7 @@ async fn start(
         .unwrap_or_else(|| api::branch_name(&item));
     let (window, workspace) = cx
         .update(|cx| window_for(project, cx))
-        .context("nenhuma janela mostra este projeto para fazer o checkout")?;
+        .with_context(|| t!("github_projects.flow.no_window_for_checkout"))?;
     let workspace = workspace.downgrade();
     let state = context.state.clone();
     let item_id = item.id.clone();
@@ -128,14 +135,19 @@ async fn start(
     })?;
     started.await?;
     Ok(passed(
-        format!("{} começado em {branch}", item.reference()),
+        t!(
+            "github_projects.flow.started",
+            item = item.reference(),
+            branch = branch
+        )
+        .to_string(),
         BTreeMap::from([("branch".to_string(), branch)]),
     ))
 }
 
 fn github_client(cx: &mut AsyncApp) -> Result<host::Client> {
     cx.update(|cx| RepoStore::global(cx).read(cx).client(Hosting::GitHub))
-        .context("nenhuma conta do GitHub conectada no dock Repo")
+        .with_context(|| t!("github_projects.flow.no_github_account"))
 }
 
 /// The open pull request from the checked-out branch.
@@ -146,8 +158,8 @@ async fn branch_pull_request(
 ) -> Result<Option<PullRequest>> {
     let (repository, _, branch) = cx
         .update(|cx| github_repository(project, cx))
-        .context("o projeto não está num repositório do GitHub")?;
-    let branch = branch.context("nenhum branch em checkout")?;
+        .with_context(|| t!("github_projects.errors.not_github_repository"))?;
+    let branch = branch.with_context(|| t!("github_projects.flow.no_branch_checked_out"))?;
     let pull_requests = client.list_open_pull_requests(&repository).await?;
     Ok(pull_requests
         .into_iter()
@@ -164,10 +176,10 @@ async fn open_pull_request(
     let client = github_client(cx)?;
     let (repository, remote_name, _) = cx
         .update(|cx| github_repository(project, cx))
-        .context("o projeto não está num repositório do GitHub")?;
+        .with_context(|| t!("github_projects.errors.not_github_repository"))?;
     let (window, workspace) = cx
         .update(|cx| window_for(project, cx))
-        .context("nenhuma janela mostra este projeto para o push")?;
+        .with_context(|| t!("github_projects.flow.no_window_for_push"))?;
     let workspace = workspace.downgrade();
     let push = window.update(cx, |_, window, cx| {
         repo_hosting::push_current_branch(workspace, project, remote_name, window, cx)
@@ -176,10 +188,12 @@ async fn open_pull_request(
 
     if let Some(existing) = branch_pull_request(project, &client, cx).await? {
         return Ok(passed(
-            format!(
-                "o PR #{} de {source_branch} já existia; o push foi feito",
-                existing.number
-            ),
+            t!(
+                "github_projects.flow.pull_request_existed",
+                number = existing.number,
+                branch = source_branch
+            )
+            .to_string(),
             BTreeMap::from([("pr".to_string(), existing.url)]),
         ));
     }
@@ -215,11 +229,22 @@ async fn open_pull_request(
         )
         .await?;
     Ok(passed(
-        format!(
-            "PR #{} aberto{} de {source_branch} para {destination}",
-            created.number,
-            if request.draft { " como rascunho" } else { "" }
-        ),
+        if request.draft {
+            t!(
+                "github_projects.flow.draft_pull_request_opened",
+                number = created.number,
+                source = source_branch,
+                destination = destination
+            )
+        } else {
+            t!(
+                "github_projects.flow.pull_request_opened",
+                number = created.number,
+                source = source_branch,
+                destination = destination
+            )
+        }
+        .to_string(),
         BTreeMap::from([("pr".to_string(), created.url)]),
     ))
 }
@@ -232,22 +257,30 @@ async fn wait_checks(
     let client = github_client(cx)?;
     let (repository, _, _) = cx
         .update(|cx| github_repository(project, cx))
-        .context("o projeto não está num repositório do GitHub")?;
+        .with_context(|| t!("github_projects.errors.not_github_repository"))?;
     let pull_request = branch_pull_request(project, &client, cx)
         .await?
-        .context("o branch atual não tem PR aberto; ponha um passo Abrir PR antes")?;
+        .with_context(|| t!("github_projects.flow.no_open_pull_request"))?;
     let deadline = Instant::now() + Duration::from_secs(u64::from(request.timeout_minutes) * 60);
     let started = Instant::now();
     let mut reran = false;
     loop {
         let checks = client.get_checks(&repository, pull_request.number).await?;
         let summary = CheckSummary::of(&checks);
-        let summary_text = format!("{}/{} checks passaram", summary.passed, summary.total);
+        let summary_text = t!(
+            "github_projects.flow.checks_passed",
+            passed = summary.passed,
+            total = summary.total
+        )
+        .to_string();
         if summary.total == 0 {
             if started.elapsed() > CHECKS_APPEAR_TIMEOUT {
                 return Ok(passed(
-                    "nenhum check configurado no PR".to_string(),
-                    BTreeMap::from([("checks".to_string(), "nenhum".to_string())]),
+                    t!("github_projects.flow.no_checks").to_string(),
+                    BTreeMap::from([(
+                        "checks".to_string(),
+                        t!("github_projects.flow.no_checks_value").to_string(),
+                    )]),
                 ));
             }
         } else if summary.running == 0 {
@@ -295,19 +328,29 @@ async fn wait_checks(
                     outputs.insert("log do que falhou".to_string(), log.clone());
                 }
                 let evidence = if log.is_empty() {
-                    format!("falharam: {}", names.join(", "))
+                    t!(
+                        "github_projects.flow.checks_failed",
+                        names = names.join(", ")
+                    )
+                    .to_string()
                 } else {
-                    format!("falharam: {}\n\nFim do log:\n{log}", names.join(", "))
+                    t!(
+                        "github_projects.flow.checks_failed_with_log",
+                        names = names.join(", "),
+                        log = log
+                    )
+                    .to_string()
                 };
                 return Ok(failed(evidence, outputs));
             }
         }
         if Instant::now() > deadline {
             return Ok(failed(
-                format!(
-                    "os checks não terminaram em {} min",
-                    request.timeout_minutes
-                ),
+                t!(
+                    "github_projects.flow.checks_timed_out",
+                    minutes = request.timeout_minutes
+                )
+                .to_string(),
                 BTreeMap::new(),
             ));
         }
@@ -327,14 +370,24 @@ async fn move_item(
         .columns()
         .iter()
         .find(|option| option.name.eq_ignore_ascii_case(request.status.trim()))
-        .with_context(|| format!("o projeto não tem a coluna “{}”", request.status))?
+        .with_context(|| {
+            t!(
+                "github_projects.flow.no_such_column",
+                column = request.status
+            )
+        })?
         .clone();
     let moved = context.state.update(cx, |state, cx| {
         state.move_item(item.id.clone(), option.id.clone(), cx)
     });
     moved.await?;
     Ok(passed(
-        format!("{} movido para {}", item.reference(), option.name),
+        t!(
+            "github_projects.flow.moved",
+            item = item.reference(),
+            column = option.name
+        )
+        .to_string(),
         BTreeMap::new(),
     ))
 }
@@ -351,13 +404,17 @@ async fn comment(
     } else {
         request.comment.trim().to_string()
     };
-    anyhow::ensure!(!text.is_empty(), "não há o que comentar");
+    anyhow::ensure!(
+        !text.is_empty(),
+        "{}",
+        t!("github_projects.flow.nothing_to_comment")
+    );
     let commented = context
         .state
         .update(cx, |state, cx| state.comment(&item.id, text, cx));
     commented.await?;
     Ok(passed(
-        format!("comentou em {}", item.reference()),
+        t!("github_projects.flow.commented", item = item.reference()).to_string(),
         BTreeMap::new(),
     ))
 }

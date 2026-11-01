@@ -1,6 +1,7 @@
 use gpui::{
     ClipboardItem, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, Subscription, Window,
 };
+use i18n::t;
 use ui::{Divider, prelude::*};
 use workspace::ModalView;
 
@@ -40,10 +41,7 @@ impl SignInModal {
     ) -> AnyElement {
         v_flex()
             .gap_3()
-            .child(
-                Label::new("Enter this code on GitHub to let Asylum sync your settings:")
-                    .color(Color::Muted),
-            )
+            .child(Label::new(t!("settings_sync.sign_in.enter_code")).color(Color::Muted))
             .child(
                 h_flex().justify_center().py_2().child(
                     Label::new(user_code.clone())
@@ -53,13 +51,16 @@ impl SignInModal {
                 ),
             )
             .child(
-                Button::new("settings-sync-copy-and-open", "Copy Code and Open GitHub")
-                    .full_width()
-                    .style(ButtonStyle::Filled)
-                    .on_click(move |_, _, cx| {
-                        cx.write_to_clipboard(ClipboardItem::new_string(user_code.to_string()));
-                        cx.open_url(&verification_uri);
-                    }),
+                Button::new(
+                    "settings-sync-copy-and-open",
+                    t!("settings_sync.sign_in.copy_and_open"),
+                )
+                .full_width()
+                .style(ButtonStyle::Filled)
+                .on_click(move |_, _, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(user_code.to_string()));
+                    cx.open_url(&verification_uri);
+                }),
             )
             .child(
                 h_flex()
@@ -70,7 +71,7 @@ impl SignInModal {
                             .color(Color::Muted),
                     )
                     .child(
-                        Label::new("Waiting for you to authorize Asylum on GitHub…")
+                        Label::new(t!("settings_sync.sign_in.waiting"))
                             .size(LabelSize::Small)
                             .color(Color::Muted),
                     ),
@@ -102,7 +103,7 @@ impl Render for SignInModal {
                 .gap_3()
                 .child(Label::new(error.clone()).color(Color::Error))
                 .child(
-                    Button::new("settings-sync-retry", "Try Again")
+                    Button::new("settings-sync-retry", t!("settings_sync.sign_in.try_again"))
                         .full_width()
                         .style(ButtonStyle::Filled)
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -111,7 +112,7 @@ impl Render for SignInModal {
                 )
                 .into_any_element(),
             State::SignedIn { .. } | State::SignedOut { error: None } | State::Restoring => {
-                Label::new("Contacting GitHub…")
+                Label::new(t!("settings_sync.sign_in.contacting"))
                     .color(Color::Muted)
                     .into_any_element()
             }
@@ -126,18 +127,14 @@ impl Render for SignInModal {
             .p_4()
             .gap_3()
             .child(
-                h_flex()
-                    .gap_2()
-                    .child(Icon::new(IconName::Github))
-                    .child(Headline::new("Sign In with GitHub").size(HeadlineSize::Small)),
+                h_flex().gap_2().child(Icon::new(IconName::Github)).child(
+                    Headline::new(t!("settings_sync.sign_in.title")).size(HeadlineSize::Small),
+                ),
             )
             .child(
-                Label::new(
-                    "Your settings, keymap, snippets, themes, agents and flows are kept in a \
-                     private gist on your account. Secrets stay in your keychain.",
-                )
-                .size(LabelSize::Small)
-                .color(Color::Muted),
+                Label::new(t!("settings_sync.sign_in.description"))
+                    .size(LabelSize::Small)
+                    .color(Color::Muted),
             )
             .child(Divider::horizontal())
             .child(body)

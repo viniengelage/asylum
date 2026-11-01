@@ -23,6 +23,7 @@ use fs::Fs;
 use futures::StreamExt as _;
 use gpui::{AppContext as _, AsyncApp, Context, SharedString, Task, TaskExt as _, WeakEntity};
 use http_client::HttpClient;
+use i18n::t;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::{
@@ -274,7 +275,8 @@ impl Collection {
                     })
                     .await
                 }
-                Err(error) => Err(error).context("não foi possível ler o spec"),
+                Err(error) => Err(error)
+                    .with_context(|| t!("api_client.collection.error_read_spec").to_string()),
             };
             this.update(cx, |this, cx| {
                 match loaded {
@@ -388,7 +390,10 @@ impl Collection {
             let result = fs.atomic_write(file_path, text).await;
             if let Err(error) = &result {
                 this.update(cx, |this, cx| {
-                    this.file_error = Some(format!("não foi possível salvar: {error:#}").into());
+                    this.file_error = Some(t!(
+                        "api_client.collection.error_save_file",
+                        error = format!("{error:#}")
+                    ));
                     cx.notify();
                 })
                 .log_err();
@@ -459,7 +464,12 @@ impl Collection {
         let credentials_provider = self.credentials_provider.clone();
         cx.spawn(async move |this, cx| {
             let result = write_json(&credentials_provider, &url, &secrets, cx).await;
-            report_storage_result(&this, "as credenciais", result, cx);
+            report_storage_result(
+                &this,
+                t!("api_client.collection.storage_credentials"),
+                result,
+                cx,
+            );
         })
         .detach();
     }
@@ -534,7 +544,10 @@ impl Collection {
     }
 
     pub fn prepare(&self, operation_key: &str, draft: &RequestDraft) -> Result<PreparedRequest> {
-        let spec = self.spec.as_ref().context("o spec ainda não foi lido")?;
+        let spec = self
+            .spec
+            .as_ref()
+            .with_context(|| t!("api_client.collection.error_spec_not_loaded").to_string())?;
         let mut prepared = send::prepare(
             spec,
             operation_key,
@@ -593,7 +606,12 @@ impl Collection {
         let fs = self.fs.clone();
         cx.spawn(async move |this, cx| {
             let result = write_state_file(&fs, &path, &state).await;
-            report_storage_result(&this, "os cookies", result, cx);
+            report_storage_result(
+                &this,
+                t!("api_client.collection.storage_cookies"),
+                result,
+                cx,
+            );
         })
         .detach();
     }
@@ -679,7 +697,8 @@ impl Collection {
                 return Some(Validation::Invalid {
                     issues: vec![schema::Issue {
                         location: String::new(),
-                        message: format!("JSON inválido: {error}"),
+                        message: t!("api_client.collection.invalid_json", error = error)
+                            .to_string(),
                     }],
                     more: 0,
                 });
@@ -755,11 +774,18 @@ impl Collection {
             .auth
             .login
             .clone()
-            .context("a coleção não tem login configurado")?;
-        let spec = self.spec.as_ref().context("o spec ainda não foi lido")?;
-        let operation = spec
-            .operation(&login.operation)
-            .with_context(|| format!("{} não existe mais no spec", login.operation))?;
+            .with_context(|| t!("api_client.collection.error_no_login").to_string())?;
+        let spec = self
+            .spec
+            .as_ref()
+            .with_context(|| t!("api_client.collection.error_spec_not_loaded").to_string())?;
+        let operation = spec.operation(&login.operation).with_context(|| {
+            t!(
+                "api_client.send.error_operation_gone",
+                operation = &login.operation
+            )
+            .to_string()
+        })?;
         let draft = RequestDraft {
             url: format!("{{{{baseUrl}}}}{}", operation.path),
             body: Some(login.body.clone()),
@@ -768,7 +794,11 @@ impl Collection {
         let prepared = self.prepare(&login.operation, &draft)?;
         if let Some(missing) = prepared.missing.first() {
             return Err(anyhow!(
-                "falta preencher {{{{{missing}}}}} para fazer login"
+                "{}",
+                t!(
+                    "api_client.collection.error_login_missing_variable",
+                    variable = format!("{{{{{missing}}}}}")
+                )
             ));
         }
         Ok((login, prepared))
@@ -780,15 +810,22 @@ impl Collection {
             .auth
             .login
             .clone()
-            .context("a coleção não tem login configurado")?;
+            .with_context(|| t!("api_client.collection.error_no_login").to_string())?;
         let operation_key = login
             .refresh_operation
             .clone()
-            .context("a coleção não tem request de renovação")?;
-        let spec = self.spec.as_ref().context("o spec ainda não foi lido")?;
-        let operation = spec
-            .operation(&operation_key)
-            .with_context(|| format!("{operation_key} não existe mais no spec"))?;
+            .with_context(|| t!("api_client.collection.error_no_refresh").to_string())?;
+        let spec = self
+            .spec
+            .as_ref()
+            .with_context(|| t!("api_client.collection.error_spec_not_loaded").to_string())?;
+        let operation = spec.operation(&operation_key).with_context(|| {
+            t!(
+                "api_client.send.error_operation_gone",
+                operation = &operation_key
+            )
+            .to_string()
+        })?;
         let draft = RequestDraft {
             url: format!("{{{{baseUrl}}}}{}", operation.path),
             body: login.refresh_body.clone(),
@@ -808,7 +845,13 @@ impl Collection {
         cx.spawn(async move |this, cx| {
             let refreshed = async {
                 let (login, prepared) = prepared?;
-                let (step, response, _) = run_step(&this, &prepared, "renovou o token", cx).await;
+                let (step, response, _) = run_step(
+                    &this,
+                    &prepared,
+                    &t!("api_client.collection.step_refreshed"),
+                    cx,
+                )
+                .await;
                 let session =
                     response.and_then(|response| session_from_response(&login, &response));
                 anyhow::Ok((step, session))
@@ -822,7 +865,11 @@ impl Collection {
                     return Ok(steps);
                 }
                 Ok((mut step, Err(error))) => {
-                    step.note = format!("falhou: {error:#}");
+                    step.note = t!(
+                        "api_client.collection.step_failed",
+                        error = format!("{error:#}")
+                    )
+                    .to_string();
                     steps.push(step);
                 }
                 Err(error) => log::warn!("API: renovação indisponível: {error:#}"),
@@ -834,7 +881,8 @@ impl Collection {
                     Ok(steps)
                 }
                 None => Err(anyhow!(
-                    "o token expirou e não há credenciais para logar de novo"
+                    "{}",
+                    t!("api_client.collection.error_token_expired")
                 )),
             }
         })
@@ -851,7 +899,12 @@ impl Collection {
         let credentials_provider = self.credentials_provider.clone();
         cx.spawn(async move |this, cx| {
             let result = write_json(&credentials_provider, &url, &session, cx).await;
-            report_storage_result(&this, "a sessão", result, cx);
+            report_storage_result(
+                &this,
+                t!("api_client.collection.storage_session"),
+                result,
+                cx,
+            );
         })
         .detach();
     }
@@ -867,7 +920,12 @@ impl Collection {
         let credentials_provider = self.credentials_provider.clone();
         cx.spawn(async move |this, cx| {
             let result = credentials_provider.delete_credentials(&url, cx).await;
-            report_storage_result(&this, "o logout", result, cx);
+            report_storage_result(
+                &this,
+                t!("api_client.collection.storage_logout"),
+                result,
+                cx,
+            );
         })
         .detach();
     }
@@ -1056,7 +1114,7 @@ async fn send_with_retries(
         return Ok((prepared, response));
     }
     if let Some(step) = timeline.last_mut() {
-        step.note = "token recusado".to_string();
+        step.note = t!("api_client.collection.step_token_rejected").to_string();
     }
     let renewal = this
         .update(cx, |this, cx| this.renew(cx))
@@ -1069,7 +1127,13 @@ async fn send_with_retries(
         }
     }
     let prepared = prepare(cx)?;
-    let (step, retried, cookies) = run_step(this, &prepared, "repetida com o token novo", cx).await;
+    let (step, retried, cookies) = run_step(
+        this,
+        &prepared,
+        &t!("api_client.collection.step_retried"),
+        cx,
+    )
+    .await;
     timeline.push(step);
     cookies_set.extend(cookies);
     let retried = retried.map_err(|error| Box::new((Some(prepared.clone()), error)))?;
@@ -1127,11 +1191,25 @@ fn session_from_response(login: &LoginConfig, response: &ReceivedResponse) -> Re
                     .find_map(|key| body.get(key).and_then(Value::as_str).map(str::to_string))
             })
             .unwrap_or_default();
-        return Err(anyhow!("o servidor respondeu {} {detail}", response.status));
+        return Err(anyhow!(
+            "{}",
+            t!(
+                "api_client.collection.error_login_status",
+                status = response.status,
+                detail = detail
+            )
+        ));
     }
-    let body = response.json().context("a resposta do login não é JSON")?;
-    let token = jsonpath::select_string(&body, &login.token_path)
-        .with_context(|| format!("a resposta não tem {}", login.token_path))?;
+    let body = response
+        .json()
+        .with_context(|| t!("api_client.collection.error_login_not_json").to_string())?;
+    let token = jsonpath::select_string(&body, &login.token_path).with_context(|| {
+        t!(
+            "api_client.collection.error_login_missing_token",
+            path = &login.token_path
+        )
+        .to_string()
+    })?;
     let refresh_token = login
         .refresh_token_path
         .as_deref()
@@ -1217,14 +1295,24 @@ fn state_file_path(id: &str) -> PathBuf {
 
 async fn write_state_file(fs: &Arc<dyn Fs>, path: &Path, state: &StoredState) -> Result<()> {
     if let Some(directory) = path.parent() {
-        fs.create_dir(directory)
-            .await
-            .with_context(|| format!("falha ao criar {}", directory.display()))?;
+        fs.create_dir(directory).await.with_context(|| {
+            t!(
+                "api_client.collection.error_create_dir",
+                path = directory.display()
+            )
+            .to_string()
+        })?;
     }
     let text = serde_json::to_string(state)?;
     fs.atomic_write(path.to_path_buf(), text)
         .await
-        .with_context(|| format!("falha ao gravar {}", path.display()))
+        .with_context(|| {
+            t!(
+                "api_client.collection.error_write_file",
+                path = path.display()
+            )
+            .to_string()
+        })
 }
 
 /// Reads the stored state from its file. Earlier versions kept it in the keychain, so an entry
@@ -1272,7 +1360,7 @@ async fn load_state(
 /// once a save goes through.
 fn report_storage_result(
     this: &WeakEntity<Collection>,
-    what: &str,
+    what: SharedString,
     result: Result<()>,
     cx: &mut AsyncApp,
 ) {
@@ -1280,9 +1368,11 @@ fn report_storage_result(
         Ok(()) => None,
         Err(error) => {
             log::error!("API: não foi possível salvar {what}: {error:#}");
-            Some(SharedString::from(format!(
-                "Não foi possível salvar {what}: {error:#}"
-            )))
+            Some(t!(
+                "api_client.collection.error_storage",
+                what = what,
+                error = format!("{error:#}")
+            ))
         }
     };
     this.update(cx, |this, cx| {
@@ -1574,7 +1664,7 @@ paths:
             Some(200)
         );
         assert_eq!(exchange.timeline.len(), 3);
-        assert_eq!(exchange.timeline[0].note, "token recusado");
+        assert_eq!(exchange.timeline[0].note, "token rejected");
         assert_eq!(exchange.validation, Some(Validation::Valid));
         assert_eq!(exchange.response_schema_name.as_deref(), Some("Me"));
         let masked = exchange.request.unwrap();

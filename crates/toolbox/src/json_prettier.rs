@@ -3,6 +3,7 @@ use gpui::{
     Action as _, ClipboardItem, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Pixels,
     actions, px,
 };
+use i18n::t;
 use language::LanguageRegistry;
 use std::{fmt, sync::Arc};
 use ui::{HeaderBar, KeyBinding, Tab, TabBar, TabPosition, TabStyle, Tooltip, prelude::*};
@@ -67,8 +68,13 @@ impl fmt::Display for ParseError {
         }
         write!(
             formatter,
-            "line {}, column {}: {}",
-            self.line, self.column, self.message
+            "{}",
+            t!(
+                "toolbox.json.error_position",
+                line = self.line,
+                column = self.column,
+                message = self.message
+            )
         )
     }
 }
@@ -109,9 +115,9 @@ fn minify_json(text: &str) -> Result<String, ParseError> {
 fn describe_size(text: &str) -> String {
     let line_count = text.lines().count().max(1);
     let lines = if line_count == 1 {
-        "1 line".to_string()
+        t!("toolbox.json.one_line")
     } else {
-        format!("{line_count} lines")
+        t!("toolbox.json.line_count", count = line_count)
     };
     let byte_count = text.len();
     let size = if byte_count < 1024 {
@@ -134,11 +140,11 @@ enum Mode {
 impl Mode {
     const ALL: [Mode; 3] = [Mode::Format, Mode::Minify, Mode::Validate];
 
-    fn label(self) -> &'static str {
+    fn label(self) -> SharedString {
         match self {
-            Mode::Format => "Format",
-            Mode::Minify => "Minify",
-            Mode::Validate => "Validate",
+            Mode::Format => t!("toolbox.json.mode_format"),
+            Mode::Minify => t!("toolbox.json.mode_minify"),
+            Mode::Validate => t!("toolbox.json.mode_validate"),
         }
     }
 }
@@ -164,7 +170,7 @@ impl JsonPrettierPanel {
     fn new(languages: Arc<LanguageRegistry>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let editor = cx.new(|cx| {
             let mut editor = Editor::multi_line(window, cx);
-            editor.set_placeholder_text("Paste JSON here…", window, cx);
+            editor.set_placeholder_text(&t!("toolbox.json.placeholder"), window, cx);
             editor
         });
 
@@ -268,7 +274,7 @@ impl JsonPrettierPanel {
                 } else {
                     TabPosition::Middle(std::cmp::Ordering::Equal)
                 };
-                Tab::new(mode.label())
+                Tab::new(("json-prettier-mode", index))
                     .style(TabStyle::Pill)
                     .position(position)
                     .toggle_state(selected)
@@ -287,7 +293,7 @@ impl JsonPrettierPanel {
 
     fn render_status_chip(
         &self,
-        label: &'static str,
+        label: SharedString,
         icon: IconName,
         color: Color,
         cx: &App,
@@ -312,12 +318,22 @@ impl JsonPrettierPanel {
         let (chip, detail, detail_color) = match &self.status {
             Status::Idle => return None,
             Status::Valid { summary } => (
-                self.render_status_chip("Valid JSON", IconName::Check, Color::Success, cx),
+                self.render_status_chip(
+                    t!("toolbox.json.valid"),
+                    IconName::Check,
+                    Color::Success,
+                    cx,
+                ),
                 summary.clone(),
                 Color::Muted,
             ),
             Status::Invalid(message) => (
-                self.render_status_chip("Invalid JSON", IconName::XCircle, Color::Error, cx),
+                self.render_status_chip(
+                    t!("toolbox.json.invalid"),
+                    IconName::XCircle,
+                    Color::Error,
+                    cx,
+                ),
                 message.clone(),
                 Color::Default,
             ),
@@ -358,7 +374,7 @@ impl JsonPrettierPanel {
                     .color(Color::Default),
             )
             .child(
-                Label::new(label)
+                Label::new(label.clone())
                     .size(LabelSize::Small)
                     .weight(FontWeight::SEMIBOLD),
             )
@@ -372,7 +388,7 @@ impl JsonPrettierPanel {
     }
 
     fn render_footer(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let secondary = |id: &'static str, label: &'static str, icon: IconName| {
+        let secondary = |id: &'static str, label: SharedString, icon: IconName| {
             Button::new(id, label)
                 .style(ButtonStyle::Outlined)
                 .size(ButtonSize::Medium)
@@ -382,15 +398,15 @@ impl JsonPrettierPanel {
 
         HeaderBar::footer("json-prettier-footer")
             .start_child(
-                secondary("paste-json", "Paste", IconName::Notepad)
+                secondary("paste-json", t!("toolbox.json.paste"), IconName::Notepad)
                     .on_click(cx.listener(|this, _, window, cx| this.paste(window, cx))),
             )
             .start_child(
-                secondary("clear-json", "Clear", IconName::Close)
+                secondary("clear-json", t!("toolbox.json.clear"), IconName::Close)
                     .on_click(cx.listener(|this, _, window, cx| this.clear(window, cx))),
             )
             .end_child(
-                secondary("copy-json", "Copy", IconName::Copy)
+                secondary("copy-json", t!("toolbox.json.copy"), IconName::Copy)
                     .on_click(cx.listener(|this, _, _, cx| this.copy(cx))),
             )
             .end_child(self.render_primary_action(cx))

@@ -20,6 +20,7 @@ use gpui::{
     Action as _, ClipboardItem, Div, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
     Hsla, Pixels, Stateful, Subscription, Task, WeakEntity, px,
 };
+use i18n::t;
 use project::{
     Project,
     git_store::{GitStoreEvent, Repository},
@@ -72,11 +73,19 @@ enum Group {
 }
 
 impl Group {
-    fn title(self) -> &'static str {
+    fn title(self) -> SharedString {
         match self {
-            Group::AwaitingYourReview => "PEDEM SUA REVISÃO",
-            Group::Yours => "SUAS",
-            Group::Others => "OUTRAS ABERTAS",
+            Group::AwaitingYourReview => t!("repo_hosting.list.group_awaiting_review"),
+            Group::Yours => t!("repo_hosting.list.group_yours"),
+            Group::Others => t!("repo_hosting.list.group_others"),
+        }
+    }
+
+    fn id(self) -> &'static str {
+        match self {
+            Group::AwaitingYourReview => "awaiting-your-review",
+            Group::Yours => "yours",
+            Group::Others => "others",
         }
     }
 
@@ -274,8 +283,10 @@ impl RepoPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let email_input = cx
-            .new(|cx| InputField::new(window, cx, "voce@empresa.com").start_icon(IconName::AtSign));
+        let email_input = cx.new(|cx| {
+            InputField::new(window, cx, &t!("repo_hosting.connect.email_placeholder"))
+                .start_icon(IconName::AtSign)
+        });
         let token_input = cx.new(|cx| {
             InputField::new(window, cx, "ATATT…")
                 .start_icon(IconName::Lock)
@@ -287,7 +298,7 @@ impl RepoPanel {
                 .masked(true)
         });
         let filter_input = cx.new(|cx| {
-            InputField::new(window, cx, "Filtrar por título, # ou autor")
+            InputField::new(window, cx, &t!("repo_hosting.list.filter_placeholder"))
                 .start_icon(IconName::MagnifyingGlass)
         });
 
@@ -466,8 +477,7 @@ impl RepoPanel {
                     Ok(()) => this.replacing_token = false,
                     Err(error) => {
                         log::error!("Repo: falha ao salvar o token no keychain: {error:#}");
-                        this.connect_error =
-                            Some("Não foi possível salvar o token no keychain.".into());
+                        this.connect_error = Some(t!("repo_hosting.connect.keychain_save_failed"));
                     }
                 }
                 cx.notify();
@@ -500,16 +510,19 @@ impl RepoPanel {
                     match saved {
                         Some(saved) => saved.await.map_err(|error| {
                             log::error!("Repo: falha ao salvar o token no keychain: {error:#}");
-                            SharedString::from("Não foi possível salvar o token no keychain.")
+                            t!("repo_hosting.connect.keychain_save_failed")
                         }),
                         None => return,
                     }
                 }
-                Err(error) if crate::is_unauthorized(&error) => Err(
-                    "O GitHub recusou o token. Confira se ele foi copiado inteiro e não expirou."
-                        .into(),
-                ),
-                Err(error) => Err(format!("Não foi possível falar com o GitHub: {error}").into()),
+                Err(error) if crate::is_unauthorized(&error) => {
+                    Err(t!("repo_hosting.github_connect.token_rejected"))
+                }
+                Err(error) => Err(t!(
+                    "repo_hosting.connect.unreachable",
+                    host = "GitHub",
+                    error = error
+                )),
             };
             this.update_in(cx, |this, window, cx| {
                 this.connect_task = None;
@@ -669,8 +682,7 @@ impl RepoPanel {
             return;
         }
         if !email.contains('@') {
-            self.connect_error =
-                Some("Use o e-mail da conta Atlassian, não o usuário do Bitbucket.".into());
+            self.connect_error = Some(t!("repo_hosting.connect.use_atlassian_email"));
             cx.notify();
             return;
         }
@@ -689,21 +701,23 @@ impl RepoPanel {
                     match saved {
                         Some(saved) => saved.await.map_err(|error| {
                             log::error!("Repo: falha ao salvar o token no keychain: {error:#}");
-                            SharedString::from("Não foi possível salvar o token no keychain.")
+                            t!("repo_hosting.connect.keychain_save_failed")
                         }),
                         None => return,
                     }
                 }
-                Err(error) if crate::is_unauthorized(&error) => Err(
-                    "O Bitbucket recusou. Confira o e-mail da conta e se o token foi copiado inteiro."
-                        .into(),
-                ),
+                Err(error) if crate::is_unauthorized(&error) => {
+                    Err(t!("repo_hosting.connect.bitbucket_rejected"))
+                }
                 // Checking the token only reads the account, so a missing scope here is that one.
-                Err(error) if crate::is_forbidden(&error) => Err(
-                    "Falta o escopo read:user:bitbucket. Escopos não podem ser editados: crie outro token marcando-o também."
-                        .into(),
-                ),
-                Err(error) => Err(format!("Não foi possível falar com o Bitbucket: {error}").into()),
+                Err(error) if crate::is_forbidden(&error) => {
+                    Err(t!("repo_hosting.connect.missing_user_scope"))
+                }
+                Err(error) => Err(t!(
+                    "repo_hosting.connect.unreachable",
+                    host = "Bitbucket",
+                    error = error
+                )),
             };
             this.update_in(cx, |this, window, cx| {
                 this.connect_task = None;
@@ -752,7 +766,7 @@ impl RepoPanel {
             )
     }
 
-    fn render_step(&self, number: usize, title: &'static str, cx: &App) -> impl IntoElement {
+    fn render_step(&self, number: usize, title: SharedString, cx: &App) -> impl IntoElement {
         h_flex()
             .items_start()
             .gap(DynamicSpacing::Base10.px(cx))
@@ -808,12 +822,12 @@ impl RepoPanel {
                         .with_rotate_animation(2),
                 )
                 .child(
-                    Label::new("Verificando com o Bitbucket…")
+                    Label::new(t!("repo_hosting.connect.verifying", host = "Bitbucket"))
                         .size(LabelSize::XSmall)
                         .color(Color::Muted),
                 )
                 .into_any_element(),
-            None => Label::new("Autentica com o e-mail Atlassian. Fica no Keychain do perfil.")
+            None => Label::new(t!("repo_hosting.connect.bitbucket_hint"))
                 .size(LabelSize::XSmall)
                 .color(Color::Muted)
                 .into_any_element(),
@@ -830,11 +844,7 @@ impl RepoPanel {
             .child(
                 v_flex()
                     .gap(DynamicSpacing::Base08.px(cx))
-                    .child(self.render_step(
-                        1,
-                        "Crie um API token com escopos para o Bitbucket, marcando estes:",
-                        cx,
-                    ))
+                    .child(self.render_step(1, t!("repo_hosting.connect.step_create_token"), cx))
                     .child(v_flex().pl(DynamicSpacing::Base32.px(cx)).children(
                         bitbucket::TOKEN_SCOPES.iter().map(|scope| {
                             Label::new(*scope)
@@ -845,16 +855,19 @@ impl RepoPanel {
                     ))
                     .child(
                         h_flex().pl(DynamicSpacing::Base32.px(cx)).child(
-                            Button::new("repo-open-token-settings", "Abrir id.atlassian.com")
-                                .style(ButtonStyle::Outlined)
-                                .size(ButtonSize::Medium)
-                                .label_size(LabelSize::Small)
-                                .start_icon(
-                                    Icon::new(IconName::ArrowUpRight)
-                                        .size(IconSize::Small)
-                                        .color(Color::Muted),
-                                )
-                                .on_click(|_, _, cx| cx.open_url(bitbucket::TOKEN_SETTINGS_URL)),
+                            Button::new(
+                                "repo-open-token-settings",
+                                t!("repo_hosting.connect.open_atlassian"),
+                            )
+                            .style(ButtonStyle::Outlined)
+                            .size(ButtonSize::Medium)
+                            .label_size(LabelSize::Small)
+                            .start_icon(
+                                Icon::new(IconName::ArrowUpRight)
+                                    .size(IconSize::Small)
+                                    .color(Color::Muted),
+                            )
+                            .on_click(|_, _, cx| cx.open_url(bitbucket::TOKEN_SETTINGS_URL)),
                         ),
                     ),
             )
@@ -862,13 +875,13 @@ impl RepoPanel {
             .child(
                 v_flex()
                     .gap(DynamicSpacing::Base08.px(cx))
-                    .child(self.render_step(2, "Cole o token e o e-mail da conta", cx))
+                    .child(self.render_step(2, t!("repo_hosting.connect.step_paste_token"), cx))
                     .child(self.email_input.clone())
                     .child(self.token_input.clone())
                     .child(hint),
             )
             .child(
-                Button::new("repo-connect", "Conectar")
+                Button::new("repo-connect", t!("repo_hosting.connect.connect"))
                     .full_width()
                     .style(ButtonStyle::Filled)
                     .size(ButtonSize::Large)
@@ -881,14 +894,17 @@ impl RepoPanel {
             .when(self.replacing_token, |this| {
                 this.child(
                     h_flex().justify_center().child(
-                        Button::new("repo-cancel-replace", "Manter o token atual")
-                            .style(ButtonStyle::Subtle)
-                            .label_size(LabelSize::Small)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.replacing_token = false;
-                                this.connect_error = None;
-                                cx.notify();
-                            })),
+                        Button::new(
+                            "repo-cancel-replace",
+                            t!("repo_hosting.connect.keep_current_token"),
+                        )
+                        .style(ButtonStyle::Subtle)
+                        .label_size(LabelSize::Small)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.replacing_token = false;
+                            this.connect_error = None;
+                            cx.notify();
+                        })),
                     ),
                 )
             });
@@ -910,8 +926,8 @@ impl RepoPanel {
                     .py(DynamicSpacing::Base24.px(cx))
                     .when(show_rejected, |this| {
                         this.child(render_warning(
-                            "O Bitbucket recusou o token salvo",
-                            "Expirou ou foi revogado? Cole um token novo abaixo.",
+                            t!("repo_hosting.connect.bitbucket_rejected_saved_title"),
+                            t!("repo_hosting.connect.bitbucket_rejected_saved_detail"),
                             cx,
                         ))
                     })
@@ -921,14 +937,17 @@ impl RepoPanel {
                             .items_center()
                             .gap(DynamicSpacing::Base06.px(cx))
                             .child(
-                                Label::new(format!("Conecte o {}", repository.hosting.name()))
-                                    .size(LabelSize::Large)
-                                    .weight(FontWeight::SEMIBOLD),
+                                Label::new(t!(
+                                    "repo_hosting.connect.title",
+                                    host = repository.hosting.name()
+                                ))
+                                .size(LabelSize::Large)
+                                .weight(FontWeight::SEMIBOLD),
                             )
                             .child(
-                                Label::new(format!(
-                                    "origin aponta para bitbucket.org/{}.",
-                                    repository.owner
+                                Label::new(t!(
+                                    "repo_hosting.connect.bitbucket_origin",
+                                    owner = repository.owner
                                 ))
                                 .size(LabelSize::Small)
                                 .color(Color::Muted),
@@ -950,11 +969,9 @@ impl RepoPanel {
                             .color(Color::Muted),
                     )
                     .child(
-                        Label::new(
-                            "O token só vale para este perfil. Outros perfis não veem este repositório nem os PRs dele.",
-                        )
-                        .size(LabelSize::XSmall)
-                        .color(Color::Muted),
+                        Label::new(t!("repo_hosting.connect.bitbucket_footer"))
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
                     ),
             )
             .into_any_element()
@@ -982,7 +999,7 @@ impl RepoPanel {
                     true,
                 ))
                 .child(
-                    Label::new("Procurando o login do gh…")
+                    Label::new(t!("repo_hosting.github_connect.looking_for_gh"))
                         .size(LabelSize::Small)
                         .color(Color::Muted),
                 )
@@ -999,7 +1016,10 @@ impl RepoPanel {
                         .border_color(colors.border)
                         .bg(colors.editor_background)
                         .child(avatar(account.user.short_name(), Color::Accent, cx))
-                        .child(Label::new(account.user.short_name().to_string()).size(LabelSize::Small))
+                        .child(
+                            Label::new(account.user.short_name().to_string())
+                                .size(LabelSize::Small),
+                        )
                         .child(div().flex_1())
                         .child(
                             Label::new(account.scopes.join(" · "))
@@ -1011,11 +1031,9 @@ impl RepoPanel {
                 )
                 .when(account.lacks_scope("project"), |this| {
                     this.child(
-                        Label::new(
-                            "Falta o escopo project: Tarefas abre só leitura. Rode gh auth refresh -s project.",
-                        )
-                        .size(LabelSize::XSmall)
-                        .color(Color::Warning),
+                        Label::new(t!("repo_hosting.github_connect.missing_project_scope"))
+                            .size(LabelSize::XSmall)
+                            .color(Color::Warning),
                     )
                 })
                 .child(
@@ -1023,13 +1041,9 @@ impl RepoPanel {
                         primary_button(
                             "repo-use-gh",
                             Some(IconName::Check),
-                            "Usar esta conta",
+                            t!("repo_hosting.github_connect.use_this_account"),
                             (!has_token).then(|| {
-                                KeyBinding::for_action_in(
-                                    &menu::Confirm,
-                                    &self.focus_handle,
-                                    cx,
-                                )
+                                KeyBinding::for_action_in(&menu::Confirm, &self.focus_handle, cx)
                             }),
                             cx,
                         )
@@ -1043,16 +1057,19 @@ impl RepoPanel {
             GhAccount::Missing(reason) => v_flex()
                 .gap_2()
                 .child(
-                    Label::new(format!("{reason}. Rode gh auth login no terminal."))
-                        .size(LabelSize::XSmall)
-                        .color(Color::Muted),
+                    Label::new(t!(
+                        "repo_hosting.github_connect.gh_missing",
+                        reason = reason
+                    ))
+                    .size(LabelSize::XSmall)
+                    .color(Color::Muted),
                 )
                 .child(
                     h_flex().justify_end().child(
                         secondary_button(
                             "repo-retry-gh",
                             Some((IconName::RotateCw, Color::Muted)),
-                            "Procurar de novo",
+                            t!("repo_hosting.github_connect.search_again"),
                             true,
                             cx,
                         )
@@ -1079,29 +1096,23 @@ impl RepoPanel {
                             .color(Color::Accent),
                     )
                     .child(
-                        Label::new("Usar a conta do gh")
+                        Label::new(t!("repo_hosting.github_connect.use_gh_account"))
                             .size(LabelSize::Small)
                             .weight(FontWeight::SEMIBOLD),
                     )
                     .child(div().flex_1())
                     .child(
-                        div()
-                            .px_1p5()
-                            .rounded_sm()
-                            .bg(accent.opacity(0.18))
-                            .child(
-                                Label::new("recomendado")
-                                    .size(LabelSize::XSmall)
-                                    .color(Color::Accent),
-                            ),
+                        div().px_1p5().rounded_sm().bg(accent.opacity(0.18)).child(
+                            Label::new(t!("repo_hosting.github_connect.recommended"))
+                                .size(LabelSize::XSmall)
+                                .color(Color::Accent),
+                        ),
                     ),
             )
             .child(
-                Label::new(
-                    "O GitHub CLI já guarda um login nesta máquina. O token é lido com gh auth token e copiado para o Keychain do perfil.",
-                )
-                .size(LabelSize::XSmall)
-                .color(Color::Muted),
+                Label::new(t!("repo_hosting.github_connect.gh_description"))
+                    .size(LabelSize::XSmall)
+                    .color(Color::Muted),
             )
             .child(gh_body);
 
@@ -1113,7 +1124,7 @@ impl RepoPanel {
                     .into_any_element(),
             ),
             None if is_busy && has_token => Some(
-                Label::new("Verificando com o GitHub…")
+                Label::new(t!("repo_hosting.connect.verifying", host = "GitHub"))
                     .size(LabelSize::XSmall)
                     .color(Color::Muted)
                     .into_any_element(),
@@ -1137,20 +1148,20 @@ impl RepoPanel {
                             .color(Color::Muted),
                     )
                     .child(
-                        Label::new("Token fine-grained")
+                        Label::new(t!("repo_hosting.github_connect.fine_grained_token"))
                             .size(LabelSize::Small)
                             .weight(FontWeight::SEMIBOLD),
                     ),
             )
             .child(
-                Label::new("Para outra conta ou sem o gh instalado. Permissões que o Asylum pede:")
+                Label::new(t!("repo_hosting.github_connect.token_description"))
                     .size(LabelSize::XSmall)
                     .color(Color::Muted),
             )
             .child(
                 v_flex()
                     .gap_1()
-                    .children(github::TOKEN_PERMISSIONS.iter().map(
+                    .children(github::token_permissions().into_iter().map(
                         |(permission, level, purpose)| {
                             h_flex()
                                 .gap_2()
@@ -1159,16 +1170,16 @@ impl RepoPanel {
                                         .size(IconSize::XSmall)
                                         .color(Color::Success),
                                 )
-                                .child(Label::new(*permission).size(LabelSize::Small))
+                                .child(Label::new(permission).size(LabelSize::Small))
                                 .child(
-                                    Label::new(*level)
+                                    Label::new(level)
                                         .size(LabelSize::XSmall)
                                         .buffer_font(cx)
                                         .color(Color::Accent),
                                 )
                                 .child(div().flex_1())
                                 .child(
-                                    Label::new(*purpose)
+                                    Label::new(purpose)
                                         .size(LabelSize::XSmall)
                                         .color(Color::Muted),
                                 )
@@ -1184,7 +1195,7 @@ impl RepoPanel {
                         secondary_button(
                             "repo-github-token-settings",
                             Some((IconName::ArrowUpRight, Color::Muted)),
-                            "Criar token no GitHub",
+                            t!("repo_hosting.github_connect.create_token"),
                             true,
                             cx,
                         )
@@ -1195,7 +1206,7 @@ impl RepoPanel {
                         secondary_button(
                             "repo-github-connect",
                             None,
-                            "Conectar",
+                            t!("repo_hosting.connect.connect"),
                             has_token && !is_busy,
                             cx,
                         )
@@ -1224,22 +1235,22 @@ impl RepoPanel {
                     .pb_6()
                     .when(show_rejected, |this| {
                         this.child(render_warning(
-                            "O GitHub recusou o token salvo",
-                            "Expirou ou foi revogado? Use o gh ou cole um token novo.",
+                            t!("repo_hosting.github_connect.rejected_saved_title"),
+                            t!("repo_hosting.github_connect.rejected_saved_detail"),
                             cx,
                         ))
                     })
                     .child(self.render_badge(cx))
                     .child(
-                        Label::new("Conecte o GitHub")
+                        Label::new(t!("repo_hosting.connect.title", host = "GitHub"))
                             .size(LabelSize::Large)
                             .weight(FontWeight::SEMIBOLD),
                     )
                     .child(
                         div().w_full().text_center().child(
-                            Label::new(format!(
-                                "origin aponta para github.com/{}. A conta fica neste perfil; Repo e Tarefas usam a mesma conexão.",
-                                repository.full_name()
+                            Label::new(t!(
+                                "repo_hosting.github_connect.origin",
+                                repository = repository.full_name()
                             ))
                             .size(LabelSize::Small)
                             .color(Color::Muted),
@@ -1249,12 +1260,18 @@ impl RepoPanel {
                     .child(token_card)
                     .when(self.replacing_token, |this| {
                         this.child(
-                            secondary_button("repo-cancel-replace", None, "Manter a conta atual", true, cx)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.replacing_token = false;
-                                    this.connect_error = None;
-                                    cx.notify();
-                                })),
+                            secondary_button(
+                                "repo-cancel-replace",
+                                None,
+                                t!("repo_hosting.github_connect.keep_current_account"),
+                                true,
+                                cx,
+                            )
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.replacing_token = false;
+                                this.connect_error = None;
+                                cx.notify();
+                            })),
                         )
                     }),
             )
@@ -1266,13 +1283,15 @@ impl RepoPanel {
                     .py_3()
                     .border_t_1()
                     .border_color(colors.border)
-                    .child(Icon::new(IconName::Lock).size(IconSize::XSmall).color(Color::Muted))
                     .child(
-                        Label::new(
-                            "O token só vale para este perfil. Sem o escopo project, Tarefas abre só leitura e avisa o que falta.",
-                        )
-                        .size(LabelSize::XSmall)
-                        .color(Color::Muted),
+                        Icon::new(IconName::Lock)
+                            .size(IconSize::XSmall)
+                            .color(Color::Muted),
+                    )
+                    .child(
+                        Label::new(t!("repo_hosting.github_connect.footer"))
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
                     ),
             )
     }
@@ -1307,7 +1326,7 @@ impl RepoPanel {
             .children(actions)
     }
 
-    fn render_loading(&self, title: &'static str, cx: &App) -> AnyElement {
+    fn render_loading(&self, title: SharedString, cx: &App) -> AnyElement {
         v_flex()
             .size_full()
             .items_center()
@@ -1332,7 +1351,7 @@ impl RepoPanel {
                 IconButton::new("repo-account-settings", IconName::Settings)
                     .icon_size(IconSize::Small)
                     .icon_color(Color::Muted),
-                Tooltip::text(format!("Conta do {}", hosting.name())),
+                Tooltip::text(t!("repo_hosting.account.tooltip", host = hosting.name())),
             )
             .anchor(gpui::Anchor::BottomRight)
             .menu(move |window, cx| {
@@ -1340,7 +1359,7 @@ impl RepoPanel {
                 let store = store.clone();
                 Some(ContextMenu::build(window, cx, move |menu, _, _| {
                     menu.item(
-                        ContextMenuEntry::new("Trocar token")
+                        ContextMenuEntry::new(t!("repo_hosting.account.replace_token"))
                             .icon(IconName::Pencil)
                             .icon_color(Color::Muted)
                             .handler({
@@ -1356,8 +1375,10 @@ impl RepoPanel {
                     )
                     .item(
                         ContextMenuEntry::new(match hosting {
-                            api::Hosting::Bitbucket => "Gerenciar tokens na Atlassian",
-                            api::Hosting::GitHub => "Gerenciar tokens no GitHub",
+                            api::Hosting::Bitbucket => {
+                                t!("repo_hosting.account.manage_tokens_atlassian")
+                            }
+                            api::Hosting::GitHub => t!("repo_hosting.account.manage_tokens_github"),
                         })
                         .icon(IconName::ArrowUpRight)
                         .icon_color(Color::Muted)
@@ -1370,7 +1391,7 @@ impl RepoPanel {
                     )
                     .separator()
                     .item(
-                        ContextMenuEntry::new("Desconectar")
+                        ContextMenuEntry::new(t!("repo_hosting.account.disconnect"))
                             .icon(IconName::Exit)
                             .icon_color(Color::Error)
                             .handler(move |_, cx| {
@@ -1432,7 +1453,10 @@ impl RepoPanel {
                 IconButton::new("repo-open-web", IconName::ArrowUpRight)
                     .icon_size(IconSize::Small)
                     .icon_color(Color::Muted)
-                    .tooltip(Tooltip::text(format!("Abrir no {}", host_name(&web_url))))
+                    .tooltip(Tooltip::text(t!(
+                        "repo_hosting.common.open_in",
+                        host = host_name(&web_url)
+                    )))
                     .on_click(move |_, _, cx| cx.open_url(&web_url)),
             )
             .child(
@@ -1440,7 +1464,7 @@ impl RepoPanel {
                     .icon_size(IconSize::Small)
                     .icon_color(Color::Muted)
                     .disabled(self.pull_requests.is_syncing)
-                    .tooltip(Tooltip::text("Sincronizar agora"))
+                    .tooltip(Tooltip::text(t!("repo_hosting.list.sync_now")))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.sync(cx);
                         this.load_tab_data(cx);
@@ -1475,7 +1499,7 @@ impl RepoPanel {
             h_flex()
                 .gap(DynamicSpacing::Base06.px(cx))
                 .child(
-                    Label::new("PR DO BRANCH")
+                    Label::new(t!("repo_hosting.branch.header"))
                         .size(LabelSize::XSmall)
                         .weight(FontWeight::SEMIBOLD)
                         .color(Color::Accent),
@@ -1515,7 +1539,7 @@ impl RepoPanel {
             return Some(
                 card.child(header(None))
                     .child(
-                        Label::new("Nenhum pull request aberto para este branch")
+                        Label::new(t!("repo_hosting.branch.no_pull_request"))
                             .size(LabelSize::Small)
                             .color(Color::Muted),
                     )
@@ -1523,21 +1547,24 @@ impl RepoPanel {
                         h_flex()
                             .gap(DynamicSpacing::Base04.px(cx))
                             .child(
-                                Button::new("repo-branch-create", "Criar pull request")
-                                    .style(ButtonStyle::Filled)
-                                    .label_size(LabelSize::Small)
-                                    .start_icon(Icon::new(IconName::Plus).size(IconSize::XSmall))
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.start_creating(window, cx)
-                                    })),
+                                Button::new(
+                                    "repo-branch-create",
+                                    t!("repo_hosting.common.create_pull_request"),
+                                )
+                                .style(ButtonStyle::Filled)
+                                .label_size(LabelSize::Small)
+                                .start_icon(Icon::new(IconName::Plus).size(IconSize::XSmall))
+                                .on_click(cx.listener(
+                                    |this, _, window, cx| this.start_creating(window, cx),
+                                )),
                             )
                             .child(
                                 IconButton::new("repo-branch-create-web", IconName::ArrowUpRight)
                                     .icon_size(IconSize::Small)
                                     .icon_color(Color::Muted)
-                                    .tooltip(Tooltip::text(format!(
-                                        "Criar no {}",
-                                        host_name(&new_url)
+                                    .tooltip(Tooltip::text(t!(
+                                        "repo_hosting.branch.create_in",
+                                        host = host_name(&new_url)
                                     )))
                                     .on_click(move |_, _, cx| cx.open_url(&new_url)),
                             ),
@@ -1613,9 +1640,9 @@ impl RepoPanel {
                         })
                         .child(
                             div().flex_1().min_w_0().child(
-                                Label::new(format!(
-                                    "checks · {}",
-                                    approval_label(approvals, reviewer_count)
+                                Label::new(t!(
+                                    "repo_hosting.branch.checks_summary",
+                                    approvals = approval_label(approvals, reviewer_count)
                                 ))
                                 .size(LabelSize::XSmall)
                                 .color(Color::Muted)
@@ -1623,7 +1650,7 @@ impl RepoPanel {
                             ),
                         )
                         .child(
-                            Button::new("repo-branch-open", "Abrir")
+                            Button::new("repo-branch-open", t!("repo_hosting.common.open"))
                                 .style(ButtonStyle::Filled)
                                 .label_size(LabelSize::Small)
                                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -1635,7 +1662,7 @@ impl RepoPanel {
                     h_flex()
                         .gap(DynamicSpacing::Base04.px(cx))
                         .child(
-                            Button::new("repo-branch-comment", "Comentar")
+                            Button::new("repo-branch-comment", t!("repo_hosting.common.comment"))
                                 .style(ButtonStyle::Subtle)
                                 .label_size(LabelSize::Small)
                                 .start_icon(Icon::new(IconName::Chat).size(IconSize::XSmall))
@@ -1654,7 +1681,7 @@ impl RepoPanel {
                                 .label_size(LabelSize::Small)
                                 .tooltip(move |_window, cx| {
                                     Tooltip::for_action(
-                                        "Mencionar no Agent",
+                                        t!("repo_hosting.common.mention_in_agent"),
                                         &zed_actions::repo_hosting::MentionSelectedPullRequest,
                                         cx,
                                     )
@@ -1665,13 +1692,14 @@ impl RepoPanel {
                         )
                         .child(div().flex_1())
                         .child(
-                            Button::new("repo-branch-web", format!("Abrir no {}", host_name(&url)))
-                                .style(ButtonStyle::Subtle)
-                                .label_size(LabelSize::Small)
-                                .start_icon(
-                                    Icon::new(IconName::ArrowUpRight).size(IconSize::XSmall),
-                                )
-                                .on_click(move |_, _, cx| cx.open_url(&url)),
+                            Button::new(
+                                "repo-branch-web",
+                                t!("repo_hosting.common.open_in", host = host_name(&url)),
+                            )
+                            .style(ButtonStyle::Subtle)
+                            .label_size(LabelSize::Small)
+                            .start_icon(Icon::new(IconName::ArrowUpRight).size(IconSize::XSmall))
+                            .on_click(move |_, _, cx| cx.open_url(&url)),
                         ),
                 )
                 .into_any_element(),
@@ -1700,7 +1728,7 @@ impl RepoPanel {
             .account(cx)
             .is_some_and(|account| account.user.id == pull_request.author.id)
         {
-            "você".to_string()
+            t!("repo_hosting.list.you").to_string()
         } else {
             pull_request.author.short_name().to_string()
         };
@@ -1740,7 +1768,7 @@ impl RepoPanel {
                             .gap(DynamicSpacing::Base06.px(cx))
                             .when(pull_request.draft, |this| {
                                 this.child(
-                                    Label::new("Rascunho")
+                                    Label::new(t!("repo_hosting.common.draft"))
                                         .size(LabelSize::XSmall)
                                         .color(Color::Muted),
                                 )
@@ -1815,7 +1843,7 @@ impl RepoPanel {
                         .icon_size(IconSize::Small)
                         .icon_color(Color::Muted)
                         .visible_on_hover(group)
-                        .tooltip(Tooltip::text("Mencionar no Agent"))
+                        .tooltip(Tooltip::text(t!("repo_hosting.common.mention_in_agent")))
                         .on_click(move |_, window, cx| {
                             window.dispatch_action(mention.boxed_clone(), cx)
                         }),
@@ -1846,7 +1874,7 @@ impl RepoPanel {
     ) -> impl IntoElement {
         let is_collapsed = self.collapsed_groups.contains(&group);
         h_flex()
-            .id(SharedString::from(format!("repo-group-{}", group.title())))
+            .id(SharedString::from(format!("repo-group-{}", group.id())))
             .gap(DynamicSpacing::Base06.px(cx))
             .px(DynamicSpacing::Base06.px(cx))
             .py(DynamicSpacing::Base04.px(cx))
@@ -1892,18 +1920,18 @@ impl RepoPanel {
 
         if visible.is_empty() {
             if self.pull_requests.synced_at.is_none() {
-                return self.render_loading("Buscando os pull requests…", cx);
+                return self.render_loading(t!("repo_hosting.list.loading_pull_requests"), cx);
             }
             let (icon, title) = if filter.is_empty() {
-                (IconName::Check, "Nenhum pull request aberto")
+                (IconName::Check, t!("repo_hosting.list.empty"))
             } else {
                 (
                     IconName::MagnifyingGlass,
-                    "Nenhum pull request com esse filtro",
+                    t!("repo_hosting.list.empty_filtered"),
                 )
             };
             return self
-                .render_centered_message(icon, title.into(), None, None, cx)
+                .render_centered_message(icon, title, None, None, cx)
                 .into_any_element();
         }
 
@@ -1947,10 +1975,17 @@ impl RepoPanel {
                 .into_any_element();
         }
         let sync_label = match self.pull_requests.synced_at {
-            None => "Sincronizando…".to_string(),
+            None => t!("repo_hosting.list.syncing"),
             Some(synced_at) => match synced_at.elapsed().as_secs() / 60 {
-                0 => format!("{} · sincronizado agora", repository.hosting.name()),
-                minutes => format!("{} · há {minutes} min", repository.hosting.name()),
+                0 => t!(
+                    "repo_hosting.list.synced_now",
+                    host = repository.hosting.name()
+                ),
+                minutes => t!(
+                    "repo_hosting.list.synced_minutes_ago",
+                    host = repository.hosting.name(),
+                    minutes = minutes
+                ),
             },
         };
 
@@ -1975,7 +2010,7 @@ impl RepoPanel {
                 )
                 .when_some(self.pull_requests.error.clone(), |this, error| {
                     this.child(render_inline_error(
-                        format!("Falha ao sincronizar: {error}"),
+                        t!("repo_hosting.list.sync_failed", error = error).to_string(),
                         cx,
                     ))
                 })
@@ -2033,7 +2068,10 @@ impl RepoPanel {
             InputField::new(
                 window,
                 cx,
-                &format!("Responder no PR #{}…", pull_request.number),
+                &t!(
+                    "repo_hosting.detail.reply_placeholder",
+                    number = pull_request.number
+                ),
             )
         });
         if focus_composer {
@@ -2110,7 +2148,7 @@ impl RepoPanel {
                 })?,
                 Err(error) => workspace.update(cx, |workspace, cx| {
                     workspace.show_error(
-                        error.context(format!("Não deu para abrir o PR #{number}")),
+                        error.context(t!("repo_hosting.detail.open_failed", number = number)),
                         cx,
                     )
                 })?,
@@ -2182,13 +2220,17 @@ impl RepoPanel {
                 };
                 match result {
                     Ok(()) => {
-                        open_pull_request.notice = Some(format!("{name} rodando de novo.").into());
+                        open_pull_request.notice =
+                            Some(t!("repo_hosting.checks.rerun_started", name = name));
                         this.reload_open_pull_request(cx);
                     }
                     Err(error) => {
                         open_pull_request.rerunning_jobs.remove(&job_id);
-                        open_pull_request.error =
-                            Some(format!("Não deu para re-rodar {name}: {error:#}").into());
+                        open_pull_request.error = Some(t!(
+                            "repo_hosting.checks.rerun_failed",
+                            name = name,
+                            error = format!("{error:#}")
+                        ));
                     }
                 }
                 cx.notify();
@@ -2208,7 +2250,7 @@ impl RepoPanel {
         let colors = cx.theme().colors();
         v_flex()
             .child(Self::render_section_header(
-                "CHECKS · GITHUB ACTIONS",
+                t!("repo_hosting.checks.header"),
                 None,
                 Some(
                     Label::new(format!("{}/{}", summary.passed, summary.total))
@@ -2245,7 +2287,7 @@ impl RepoPanel {
                     .when_some(url, |this, url| {
                         this.cursor_pointer()
                             .hover(|this| this.bg(colors.element_hover))
-                            .tooltip(Tooltip::text("Abrir o log no GitHub"))
+                            .tooltip(Tooltip::text(t!("repo_hosting.checks.open_log")))
                             .on_click(move |_, _, cx| cx.open_url(&url))
                     })
                     .child(spinning_if(
@@ -2265,9 +2307,9 @@ impl RepoPanel {
                             Button::new(
                                 ("repo-check-rerun", index),
                                 if rerunning {
-                                    "Re-rodando…"
+                                    t!("repo_hosting.checks.rerunning")
                                 } else {
-                                    "Re-rodar"
+                                    t!("repo_hosting.checks.rerun")
                                 },
                             )
                             .style(ButtonStyle::Subtle)
@@ -2375,8 +2417,10 @@ impl RepoPanel {
                         this.reload_open_pull_request(cx);
                     }
                     Err(error) => {
-                        open_pull_request.error =
-                            Some(format!("Não deu para comentar: {error:#}").into());
+                        open_pull_request.error = Some(t!(
+                            "repo_hosting.detail.comment_failed",
+                            error = format!("{error:#}")
+                        ));
                     }
                 }
                 cx.notify();
@@ -2413,17 +2457,12 @@ impl RepoPanel {
                 };
                 open_pull_request.pending_action = None;
                 if let Err(error) = result {
-                    open_pull_request.error = Some(
-                        format!(
-                            "Não deu para {}: {error:#}",
-                            if approve {
-                                "aprovar"
-                            } else {
-                                "remover a aprovação"
-                            }
-                        )
-                        .into(),
-                    );
+                    let error = format!("{error:#}");
+                    open_pull_request.error = Some(if approve {
+                        t!("repo_hosting.approval.approve_failed", error = error)
+                    } else {
+                        t!("repo_hosting.approval.unapprove_failed", error = error)
+                    });
                 }
                 this.reload_open_pull_request(cx);
                 this.sync(cx);
@@ -2497,7 +2536,14 @@ impl RepoPanel {
             this.update(cx, |this, cx| {
                 this.set_pending_action(None, cx);
                 if let Err(error) = result {
-                    this.set_open_error(format!("Não deu para fazer checkout: {error:#}"), cx);
+                    this.set_open_error(
+                        t!(
+                            "repo_hosting.detail.checkout_failed",
+                            error = format!("{error:#}")
+                        )
+                        .to_string(),
+                        cx,
+                    );
                 }
             })
         })
@@ -2601,7 +2647,12 @@ impl RepoPanel {
                     this.update(cx, |this, cx| {
                         this.set_pending_action(None, cx);
                         this.set_open_error(
-                            format!("Não deu para fazer checkout de {source_branch}: {error:#}"),
+                            t!(
+                                "repo_hosting.detail.checkout_branch_failed",
+                                branch = source_branch,
+                                error = format!("{error:#}")
+                            )
+                            .to_string(),
                             cx,
                         );
                     })?;
@@ -2631,15 +2682,19 @@ impl RepoPanel {
     ) -> impl IntoElement {
         let detail = open_pull_request.detail.as_ref();
         let tabs = [
-            (DetailTab::Overview, "Visão geral", None),
+            (
+                DetailTab::Overview,
+                t!("repo_hosting.detail.tab_overview"),
+                None,
+            ),
             (
                 DetailTab::Commits,
-                "Commits",
+                t!("repo_hosting.detail.tab_commits"),
                 detail.map(|detail| detail.commits.len()),
             ),
             (
                 DetailTab::Files,
-                "Arquivos",
+                t!("repo_hosting.detail.tab_files"),
                 detail.map(|detail| detail.files.len()),
             ),
         ];
@@ -2653,7 +2708,7 @@ impl RepoPanel {
                         2 => TabPosition::Last,
                         _ => TabPosition::Middle(std::cmp::Ordering::Equal),
                     };
-                    Tab::new(label)
+                    Tab::new(("repo-pr-tab", index))
                         .style(TabStyle::Pill)
                         .position(position)
                         .toggle_state(selected)
@@ -2696,7 +2751,7 @@ impl RepoPanel {
         cx: &Context<Self>,
     ) -> AnyElement {
         let Some(detail) = open_pull_request.detail.as_ref() else {
-            return self.render_loading("Carregando os commits…", cx);
+            return self.render_loading(t!("repo_hosting.detail.loading_commits"), cx);
         };
         let now = Utc::now();
         let opening = matches!(
@@ -2722,7 +2777,7 @@ impl RepoPanel {
             .pt(DynamicSpacing::Base08.px(cx));
         if detail.commits.is_empty() {
             list = list.child(
-                Label::new("Nenhum commit")
+                Label::new(t!("repo_hosting.detail.no_commits"))
                     .size(LabelSize::Small)
                     .color(Color::Muted),
             );
@@ -2739,11 +2794,11 @@ impl RepoPanel {
             .child(list)
             .child(
                 Label::new(if opening {
-                    "Buscando o commit no remoto…".to_string()
+                    t!("repo_hosting.detail.fetching_commit")
                 } else {
-                    format!(
-                        "↑↓ navega · Enter abre no Asylum · ⌘Enter no {}",
-                        self.hosting().name()
+                    t!(
+                        "repo_hosting.detail.commits_hint",
+                        host = self.hosting().name()
                     )
                 })
                 .size(LabelSize::XSmall)
@@ -2789,7 +2844,7 @@ impl RepoPanel {
                 this.cursor_pointer()
                     .hover(|style| style.bg(cx.theme().colors().ghost_element_hover))
             })
-            .tooltip(Tooltip::text("Abrir o commit no Asylum"))
+            .tooltip(Tooltip::text(t!("repo_hosting.detail.open_commit")))
             .on_click(
                 cx.listener(move |this, _, window, cx| this.open_commit(hash.clone(), window, cx)),
             )
@@ -2869,11 +2924,16 @@ impl RepoPanel {
                 v_flex()
                     .flex_1()
                     .min_w_0()
-                    .child(Label::new("PR inteiro no Asylum").size(LabelSize::Small))
                     .child(
-                        Label::new(format!(
-                            "Mudanças desde {remote_name}/{} · {stats}",
-                            open_pull_request.summary.destination_branch
+                        Label::new(t!("repo_hosting.detail.whole_diff_title"))
+                            .size(LabelSize::Small),
+                    )
+                    .child(
+                        Label::new(t!(
+                            "repo_hosting.detail.whole_diff_changes",
+                            remote = remote_name,
+                            branch = open_pull_request.summary.destination_branch,
+                            stats = stats
                         ))
                         .size(LabelSize::XSmall)
                         .color(Color::Muted)
@@ -2881,24 +2941,31 @@ impl RepoPanel {
                     ),
             )
             .child(
-                Button::new("repo-pr-diff", if opening { "Abrindo…" } else { "Abrir" })
-                    .style(ButtonStyle::Outlined)
-                    .label_size(LabelSize::Small)
-                    .disabled(is_fork || self.is_busy())
-                    .tooltip(Tooltip::text(if is_fork {
-                        format!(
-                            "O branch está num fork; abra o diff no {}",
-                            self.hosting().name()
-                        )
-                    } else if is_checked_out {
-                        "Abre o diff no Asylum".to_string()
+                Button::new(
+                    "repo-pr-diff",
+                    if opening {
+                        t!("repo_hosting.common.opening")
                     } else {
-                        format!(
-                            "Faz checkout de {} e abre o diff no Asylum",
-                            open_pull_request.summary.source_branch
-                        )
-                    }))
-                    .on_click(cx.listener(|this, _, window, cx| this.open_branch_diff(window, cx))),
+                        t!("repo_hosting.common.open")
+                    },
+                )
+                .style(ButtonStyle::Outlined)
+                .label_size(LabelSize::Small)
+                .disabled(is_fork || self.is_busy())
+                .tooltip(Tooltip::text(if is_fork {
+                    t!(
+                        "repo_hosting.detail.diff_fork",
+                        host = self.hosting().name()
+                    )
+                } else if is_checked_out {
+                    t!("repo_hosting.detail.diff_open")
+                } else {
+                    t!(
+                        "repo_hosting.detail.diff_checkout",
+                        branch = open_pull_request.summary.source_branch
+                    )
+                }))
+                .on_click(cx.listener(|this, _, window, cx| this.open_branch_diff(window, cx))),
             )
             .into_any_element()
     }
@@ -2910,7 +2977,7 @@ impl RepoPanel {
         cx: &Context<Self>,
     ) -> AnyElement {
         let Some(detail) = open_pull_request.detail.as_ref() else {
-            return self.render_loading("Carregando os arquivos…", cx);
+            return self.render_loading(t!("repo_hosting.detail.loading_files"), cx);
         };
         let added: u64 = detail.files.iter().map(|file| file.lines_added).sum();
         let removed: u64 = detail.files.iter().map(|file| file.lines_removed).sum();
@@ -2929,7 +2996,7 @@ impl RepoPanel {
         list.into_any_element()
     }
 
-    fn render_field(label: &'static str, value: AnyElement, cx: &App) -> impl IntoElement {
+    fn render_field(label: SharedString, value: AnyElement, cx: &App) -> impl IntoElement {
         h_flex()
             .min_h(DynamicSpacing::Base24.px(cx))
             .gap(DynamicSpacing::Base08.px(cx))
@@ -2943,7 +3010,7 @@ impl RepoPanel {
     }
 
     fn render_section_header(
-        title: &'static str,
+        title: SharedString,
         count: Option<usize>,
         trailing: Option<AnyElement>,
         cx: &App,
@@ -2992,11 +3059,11 @@ impl RepoPanel {
             .iter()
             .any(|participant| participant.requested_changes);
         let caption = if requested_changes {
-            "mudanças pedidas".to_string()
+            t!("repo_hosting.approval.changes_requested")
         } else if missing.is_empty() {
-            "nenhuma aprovação pendente".to_string()
+            t!("repo_hosting.approval.none_pending")
         } else {
-            format!("falta {}", missing.join(", "))
+            t!("repo_hosting.approval.missing", names = missing.join(", "))
         };
         let dot = if requested_changes {
             Color::Error
@@ -3053,9 +3120,9 @@ impl RepoPanel {
                         Button::new(
                             "repo-pr-approve",
                             if approved_by_me {
-                                "Aprovado"
+                                t!("repo_hosting.approval.approved")
                             } else {
-                                "Aprovar"
+                                t!("repo_hosting.approval.approve")
                             },
                         )
                         .style(ButtonStyle::Outlined)
@@ -3069,7 +3136,7 @@ impl RepoPanel {
                         ))
                         .disabled(is_pending)
                         .when(approved_by_me, |this| {
-                            this.tooltip(Tooltip::text("Clique para remover sua aprovação"))
+                            this.tooltip(Tooltip::text(t!("repo_hosting.approval.remove_tooltip")))
                         })
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.toggle_approval(!approved_by_me, cx)
@@ -3092,11 +3159,11 @@ impl RepoPanel {
                 Button::new(
                     "repo-pr-checkout",
                     if is_checked_out {
-                        "No branch"
+                        t!("repo_hosting.detail.on_branch")
                     } else if checking_out {
-                        "Checkout…"
+                        t!("repo_hosting.detail.checking_out")
                     } else {
-                        "Checkout"
+                        t!("repo_hosting.detail.checkout")
                     },
                 )
                 .style(ButtonStyle::Outlined)
@@ -3104,7 +3171,7 @@ impl RepoPanel {
                 .start_icon(Icon::new(IconName::GitBranch).size(IconSize::XSmall))
                 .disabled(is_checked_out || is_fork || is_pending)
                 .when(is_fork, |this| {
-                    this.tooltip(Tooltip::text("O branch está num fork"))
+                    this.tooltip(Tooltip::text(t!("repo_hosting.detail.branch_in_fork")))
                 })
                 .on_click(cx.listener(|this, _, window, cx| this.checkout(window, cx))),
             )
@@ -3212,10 +3279,14 @@ impl RepoPanel {
         let detail = open_pull_request.detail.as_ref();
         let reviewers: Vec<&api::Participant> = pull_request.reviewers().collect();
         let reviewers = if reviewers.is_empty() {
-            Label::new(if detail.is_some() { "Ninguém" } else { "…" })
-                .size(LabelSize::Small)
-                .color(Color::Muted)
-                .into_any_element()
+            Label::new(if detail.is_some() {
+                t!("repo_hosting.detail.nobody")
+            } else {
+                SharedString::from("…")
+            })
+            .size(LabelSize::Small)
+            .color(Color::Muted)
+            .into_any_element()
         } else {
             h_flex()
                 .gap(DynamicSpacing::Base04.px(cx))
@@ -3256,24 +3327,34 @@ impl RepoPanel {
                 .size(LabelSize::Small)
                 .color(Color::Muted)
                 .into_any_element(),
-            Some(detail) if detail.checks.is_empty() => Label::new("Nenhum")
-                .size(LabelSize::Small)
-                .color(Color::Muted)
-                .into_any_element(),
+            Some(detail) if detail.checks.is_empty() => {
+                Label::new(t!("repo_hosting.detail.no_checks"))
+                    .size(LabelSize::Small)
+                    .color(Color::Muted)
+                    .into_any_element()
+            }
             Some(detail) => {
                 let summary = CheckSummary::of(&detail.checks);
                 let text = if summary.failed > 0 {
-                    format!(
-                        "{}/{} · {} falhou",
-                        summary.passed, summary.total, summary.failed
+                    t!(
+                        "repo_hosting.detail.checks_failed",
+                        passed = summary.passed,
+                        total = summary.total,
+                        failed = summary.failed
                     )
                 } else if summary.running > 0 {
-                    format!(
-                        "{}/{} · {} rodando",
-                        summary.passed, summary.total, summary.running
+                    t!(
+                        "repo_hosting.detail.checks_running",
+                        passed = summary.passed,
+                        total = summary.total,
+                        running = summary.running
                     )
                 } else {
-                    format!("{}/{} passaram", summary.passed, summary.total)
+                    t!(
+                        "repo_hosting.detail.checks_passed",
+                        passed = summary.passed,
+                        total = summary.total
+                    )
                 };
                 Label::new(text)
                     .size(LabelSize::Small)
@@ -3290,14 +3371,17 @@ impl RepoPanel {
         let task = match clickup_task_id(&pull_request.source_branch) {
             None if let Some(issue) = closed_issue => {
                 let issue_url = format!("{}/issues/{issue}", repository.web_url());
-                Button::new("repo-pr-issue", format!("fecha #{issue}"))
-                    .style(ButtonStyle::Transparent)
-                    .label_size(LabelSize::Small)
-                    .color(Color::Accent)
-                    .end_icon(Icon::new(IconName::ArrowUpRight).size(IconSize::XSmall))
-                    .tooltip(Tooltip::text("Abrir a issue no GitHub"))
-                    .on_click(move |_, _, cx| cx.open_url(&issue_url))
-                    .into_any_element()
+                Button::new(
+                    "repo-pr-issue",
+                    t!("repo_hosting.detail.closes_issue", issue = issue),
+                )
+                .style(ButtonStyle::Transparent)
+                .label_size(LabelSize::Small)
+                .color(Color::Accent)
+                .end_icon(Icon::new(IconName::ArrowUpRight).size(IconSize::XSmall))
+                .tooltip(Tooltip::text(t!("repo_hosting.detail.open_issue")))
+                .on_click(move |_, _, cx| cx.open_url(&issue_url))
+                .into_any_element()
             }
             Some(task_id) => {
                 let task_url = format!(
@@ -3309,11 +3393,11 @@ impl RepoPanel {
                     .label_size(LabelSize::Small)
                     .color(Color::Success)
                     .end_icon(Icon::new(IconName::ArrowUpRight).size(IconSize::XSmall))
-                    .tooltip(Tooltip::text("Abrir a tarefa no ClickUp"))
+                    .tooltip(Tooltip::text(t!("repo_hosting.detail.open_task")))
                     .on_click(move |_, _, cx| cx.open_url(&task_url))
                     .into_any_element()
             }
-            None => Label::new("Nenhuma no nome do branch")
+            None => Label::new(t!("repo_hosting.detail.no_task"))
                 .size(LabelSize::Small)
                 .color(Color::Muted)
                 .into_any_element(),
@@ -3351,18 +3435,34 @@ impl RepoPanel {
         let mut content = content
             .child(div().h(DynamicSpacing::Base04.px(cx)))
             .child(Self::render_field(
-                "Estado",
+                t!("repo_hosting.detail.field_state"),
                 h_flex()
                     .child(state_pill(pull_request, cx))
                     .into_any_element(),
                 cx,
             ))
-            .child(Self::render_field("Revisores", reviewers, cx))
+            .child(Self::render_field(
+                t!("repo_hosting.detail.field_reviewers"),
+                reviewers,
+                cx,
+            ))
             .when(!github_checks, |this| {
-                this.child(Self::render_field("Checks", checks, cx))
+                this.child(Self::render_field(
+                    t!("repo_hosting.detail.field_checks"),
+                    checks,
+                    cx,
+                ))
             })
-            .child(Self::render_field("Tarefa", task, cx))
-            .child(Self::render_field("Mudanças", changes, cx))
+            .child(Self::render_field(
+                t!("repo_hosting.detail.field_task"),
+                task,
+                cx,
+            ))
+            .child(Self::render_field(
+                t!("repo_hosting.detail.field_changes"),
+                changes,
+                cx,
+            ))
             .when_some(detail.filter(|_| github_checks), |this, detail| {
                 this.child(self.render_checks_section(open_pull_request, &detail.checks, cx))
             })
@@ -3377,10 +3477,15 @@ impl RepoPanel {
             });
 
         let description = pull_request.description.trim().to_string();
-        content = content.child(Self::render_section_header("DESCRIÇÃO", None, None, cx));
+        content = content.child(Self::render_section_header(
+            t!("repo_hosting.detail.description_header"),
+            None,
+            None,
+            cx,
+        ));
         content = if description.is_empty() {
             content.child(
-                Label::new("Sem descrição")
+                Label::new(t!("repo_hosting.detail.no_description"))
                     .size(LabelSize::Small)
                     .color(Color::Muted),
             )
@@ -3404,9 +3509,9 @@ impl RepoPanel {
                             Button::new(
                                 "repo-pr-description-toggle",
                                 if expanded {
-                                    "Mostrar menos"
+                                    t!("repo_hosting.detail.show_less")
                                 } else {
-                                    "Mostrar mais"
+                                    t!("repo_hosting.detail.show_more")
                                 },
                             )
                             .style(ButtonStyle::Transparent)
@@ -3428,7 +3533,7 @@ impl RepoPanel {
             .map(|detail| detail.comments.as_slice())
             .unwrap_or_default();
         content = content.child(Self::render_section_header(
-            "COMENTÁRIOS",
+            t!("repo_hosting.detail.comments_header"),
             Some(comments.len()),
             None,
             cx,
@@ -3436,9 +3541,9 @@ impl RepoPanel {
         if comments.is_empty() {
             content = content.child(
                 Label::new(if detail.is_some() {
-                    "Nenhum comentário ainda"
+                    t!("repo_hosting.detail.no_comments")
                 } else {
-                    "…"
+                    SharedString::from("…")
                 })
                 .size(LabelSize::Small)
                 .color(Color::Muted),
@@ -3461,7 +3566,7 @@ impl RepoPanel {
                         .when_some(event.url, |this, url| {
                             this.cursor_pointer()
                                 .hover(|style| style.bg(cx.theme().colors().ghost_element_hover))
-                                .tooltip(Tooltip::text("Abrir no navegador"))
+                                .tooltip(Tooltip::text(t!("repo_hosting.common.open_in_browser")))
                                 .on_click(move |_, _, cx| cx.open_url(&url))
                         })
                         .child(div().size(px(4.)).rounded_full().bg(event.color.color(cx)))
@@ -3513,7 +3618,7 @@ impl RepoPanel {
                             .icon_size(IconSize::Small)
                             .tooltip(move |_window, cx| {
                                 Tooltip::for_action(
-                                    "Mencionar no Agent",
+                                    t!("repo_hosting.common.mention_in_agent"),
                                     &zed_actions::repo_hosting::MentionSelectedPullRequest,
                                     cx,
                                 )
@@ -3525,7 +3630,7 @@ impl RepoPanel {
                     .child(
                         IconButton::new("repo-pr-review-agent", IconName::ZedAgent)
                             .icon_size(IconSize::Small)
-                            .tooltip(Tooltip::text("Revisar com o Agent"))
+                            .tooltip(Tooltip::text(t!("repo_hosting.common.review_with_agent")))
                             .disabled(self.is_busy())
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.review_with_agent(window, cx)
@@ -3534,7 +3639,7 @@ impl RepoPanel {
                     .child(
                         IconButton::new("repo-pr-copy-link", IconName::Copy)
                             .icon_size(IconSize::Small)
-                            .tooltip(Tooltip::text("Copiar link"))
+                            .tooltip(Tooltip::text(t!("repo_hosting.common.copy_link")))
                             .on_click(move |_, _, cx| {
                                 cx.write_to_clipboard(ClipboardItem::new_string(copied_url.clone()))
                             }),
@@ -3542,7 +3647,10 @@ impl RepoPanel {
                     .child(
                         IconButton::new("repo-pr-open", IconName::ArrowUpRight)
                             .icon_size(IconSize::Small)
-                            .tooltip(Tooltip::text(format!("Abrir no {}", host_name(&url))))
+                            .tooltip(Tooltip::text(t!(
+                                "repo_hosting.common.open_in",
+                                host = host_name(&url)
+                            )))
                             .on_click(move |_, _, cx| cx.open_url(&url)),
                     ),
             )
@@ -3566,12 +3674,12 @@ impl RepoPanel {
                 h_flex()
                     .justify_between()
                     .child(
-                        Label::new("Enter envia · vai como comentário geral")
+                        Label::new(t!("repo_hosting.detail.composer_hint"))
                             .size(LabelSize::XSmall)
                             .color(Color::Muted),
                     )
                     .child(
-                        Button::new("repo-pr-comment", "Comentar")
+                        Button::new("repo-pr-comment", t!("repo_hosting.common.comment"))
                             .style(ButtonStyle::Filled)
                             .label_size(LabelSize::Small)
                             .start_icon(Icon::new(IconName::Send).size(IconSize::XSmall))
@@ -3628,10 +3736,15 @@ impl RepoPanel {
         };
         let my_id = self.account(cx).map(|account| account.user.id);
 
-        let title_input = cx.new(|cx| InputField::new(window, cx, "Título do pull request"));
+        let title_input =
+            cx.new(|cx| InputField::new(window, cx, &t!("repo_hosting.create.title_placeholder")));
         let description_editor = cx.new(|cx| {
             let mut editor = Editor::auto_height(4, 14, window, cx);
-            editor.set_placeholder_text("Descrição em Markdown", window, cx);
+            editor.set_placeholder_text(
+                &t!("repo_hosting.create.description_placeholder"),
+                window,
+                cx,
+            );
             editor
         });
         window.focus(&title_input.focus_handle(cx), cx);
@@ -3864,29 +3977,31 @@ impl RepoPanel {
         let title = form.title_input.read(cx).text(cx).trim().to_string();
         let description = form.description_editor.read(cx).text(cx).trim().to_string();
         let problem = match (&form.destination, &status) {
-            _ if title.is_empty() => Some("Dê um título ao pull request.".to_string()),
-            (None, _) => Some("Escolha o branch de destino.".to_string()),
+            _ if title.is_empty() => Some(t!("repo_hosting.create.error_no_title")),
+            (None, _) => Some(t!("repo_hosting.create.error_no_destination")),
             (Some(destination), _) if *destination == form.source_branch => {
-                Some("O destino é o próprio branch.".to_string())
+                Some(t!("repo_hosting.create.error_same_branch"))
             }
-            (_, None) => Some("Nenhum branch em checkout.".to_string()),
-            (_, Some(status)) if status.tracks_other_remote => Some(format!(
-                "O branch acompanha outro remoto (fork); crie esse PR pelo {host_name}."
+            (_, None) => Some(t!("repo_hosting.create.error_no_branch")),
+            (_, Some(status)) if status.tracks_other_remote => Some(t!(
+                "repo_hosting.create.error_other_remote",
+                host = host_name
             )),
-            (_, Some(status)) if status.behind > 0 => Some(format!(
-                "O origin tem {} commit(s) que você não tem. Faça pull antes de criar.",
-                status.behind
-            )),
-            (_, Some(status)) if is_via_collab && (status.needs_upstream || status.ahead > 0) => {
-                Some(
-                    "Numa sessão colaborativa só o dono do projeto pode enviar o branch."
-                        .to_string(),
+            (_, Some(status)) if status.behind > 0 => Some(if status.behind == 1 {
+                t!("repo_hosting.create.error_behind.one")
+            } else {
+                t!(
+                    "repo_hosting.create.error_behind.other",
+                    count = status.behind
                 )
+            }),
+            (_, Some(status)) if is_via_collab && (status.needs_upstream || status.ahead > 0) => {
+                Some(t!("repo_hosting.create.error_collab"))
             }
             _ => None,
         };
         if let Some(problem) = problem {
-            form.error = Some(problem.into());
+            form.error = Some(problem);
             cx.notify();
             return;
         }
@@ -3928,8 +4043,9 @@ impl RepoPanel {
                             cx,
                         )
                     });
-                    push.await?
-                        .with_context(|| format!("falha no git push para {remote_name}"))?;
+                    push.await?.with_context(|| {
+                        t!("repo_hosting.error.push_failed", remote = remote_name)
+                    })?;
                 }
                 cx.background_spawn(async move {
                     client
@@ -3948,7 +4064,10 @@ impl RepoPanel {
                 Err(error) => {
                     if let Some(form) = &mut this.creating {
                         form.submitting = false;
-                        form.error = Some(format!("Não deu para criar: {error:#}").into());
+                        form.error = Some(t!(
+                            "repo_hosting.create.error_failed",
+                            error = format!("{error:#}")
+                        ));
                         cx.notify();
                     }
                 }
@@ -3974,47 +4093,60 @@ impl RepoPanel {
         let (dot, sync_text, sync_note) = match &status {
             Some(status) if status.tracks_other_remote => (
                 Color::Error,
-                "O branch acompanha outro remoto".to_string(),
-                "fork".to_string(),
+                t!("repo_hosting.create.sync_other_remote"),
+                SharedString::from("fork"),
             ),
             Some(status) if status.behind > 0 => (
                 Color::Error,
-                format!(
-                    "{remote_name} tem {} commit(s) que você não tem",
-                    status.behind
-                ),
-                "faça pull antes".to_string(),
+                if status.behind == 1 {
+                    t!("repo_hosting.create.sync_behind.one", remote = remote_name)
+                } else {
+                    t!(
+                        "repo_hosting.create.sync_behind.other",
+                        remote = remote_name,
+                        count = status.behind
+                    )
+                },
+                t!("repo_hosting.create.sync_behind_note"),
             ),
             Some(status) if status.needs_upstream => (
                 Color::Warning,
-                format!("O branch ainda não está no {remote_name}"),
-                "publicado ao criar".to_string(),
+                t!(
+                    "repo_hosting.create.sync_not_published",
+                    remote = remote_name
+                ),
+                t!("repo_hosting.create.sync_not_published_note"),
             ),
             Some(status) if status.ahead > 0 => (
                 Color::Warning,
-                format!(
-                    "{} commit(s) ainda não estão no {remote_name}",
-                    status.ahead
-                ),
-                "enviados ao criar".to_string(),
+                if status.ahead == 1 {
+                    t!("repo_hosting.create.sync_ahead.one", remote = remote_name)
+                } else {
+                    t!(
+                        "repo_hosting.create.sync_ahead.other",
+                        remote = remote_name,
+                        count = status.ahead
+                    )
+                },
+                t!("repo_hosting.create.sync_ahead_note"),
             ),
             Some(_) => (
                 Color::Success,
-                format!("Em dia com o {remote_name}"),
-                String::new(),
+                t!("repo_hosting.create.sync_up_to_date", remote = remote_name),
+                SharedString::default(),
             ),
             None => (
                 Color::Error,
-                "Nenhum branch em checkout".to_string(),
-                String::new(),
+                t!("repo_hosting.create.error_no_branch_label"),
+                SharedString::default(),
             ),
         };
 
         let destination_label: SharedString = form
             .destination
             .clone()
-            .unwrap_or_else(|| "destino…".to_string())
-            .into();
+            .map(SharedString::from)
+            .unwrap_or_else(|| t!("repo_hosting.create.destination_placeholder"));
         let panel = cx.weak_entity();
         let mut branches: Vec<String> = form
             .branches
@@ -4131,7 +4263,7 @@ impl RepoPanel {
                                     .color(Color::Warning),
                             )
                             .child(
-                                Label::new("Mudanças não commitadas ficam de fora do PR")
+                                Label::new(t!("repo_hosting.create.uncommitted_warning"))
                                     .size(LabelSize::XSmall)
                                     .color(Color::Muted),
                             ),
@@ -4139,7 +4271,7 @@ impl RepoPanel {
                 },
             );
 
-        let field_label = |label: &'static str, hint: Option<&'static str>| {
+        let field_label = |label: SharedString, hint: Option<SharedString>| {
             h_flex()
                 .justify_between()
                 .child(
@@ -4171,12 +4303,15 @@ impl RepoPanel {
             .child(
                 v_flex()
                     .child(
-                        Label::new(format!("Em {}", repository.full_name()))
-                            .size(LabelSize::XSmall)
-                            .color(Color::Muted),
+                        Label::new(t!(
+                            "repo_hosting.create.in_repository",
+                            repository = repository.full_name()
+                        ))
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted),
                     )
                     .child(
-                        Label::new("Novo pull request")
+                        Label::new(t!("repo_hosting.create.title"))
                             .size(LabelSize::Large)
                             .weight(FontWeight::SEMIBOLD),
                     ),
@@ -4185,15 +4320,15 @@ impl RepoPanel {
             .child(
                 v_flex()
                     .gap(DynamicSpacing::Base06.px(cx))
-                    .child(field_label("Título", None))
+                    .child(field_label(t!("repo_hosting.create.field_title"), None))
                     .child(form.title_input.clone()),
             )
             .child(
                 v_flex()
                     .gap(DynamicSpacing::Base06.px(cx))
                     .child(field_label(
-                        "Descrição",
-                        Some("Markdown · gerada dos commits"),
+                        t!("repo_hosting.create.field_description"),
+                        Some(t!("repo_hosting.create.field_description_hint")),
                     ))
                     .child(
                         div()
@@ -4208,7 +4343,7 @@ impl RepoPanel {
             .child(
                 v_flex()
                     .gap(DynamicSpacing::Base06.px(cx))
-                    .child(field_label("Revisores", None))
+                    .child(field_label(t!("repo_hosting.detail.field_reviewers"), None))
                     .child(reviewers),
             )
             .child(
@@ -4216,7 +4351,7 @@ impl RepoPanel {
                     .gap(DynamicSpacing::Base06.px(cx))
                     .child(
                         Checkbox::new("repo-create-close-source", form.close_source_branch.into())
-                            .label("Fechar o branch depois do merge")
+                            .label(t!("repo_hosting.create.close_source_branch"))
                             .on_click({
                                 let panel = cx.weak_entity();
                                 move |state, _, cx| {
@@ -4234,7 +4369,7 @@ impl RepoPanel {
                     )
                     .child(
                         Checkbox::new("repo-create-draft", form.draft.into())
-                            .label("Criar como rascunho")
+                            .label(t!("repo_hosting.create.draft"))
                             .on_click({
                                 let panel = cx.weak_entity();
                                 move |state, _, cx| {
@@ -4255,14 +4390,14 @@ impl RepoPanel {
 
         let submit_label = if form.submitting {
             if needs_push {
-                "Enviando…"
+                t!("repo_hosting.create.pushing")
             } else {
-                "Criando…"
+                t!("repo_hosting.create.creating")
             }
         } else if needs_push {
-            "Publicar e criar PR"
+            t!("repo_hosting.create.publish_and_create")
         } else {
-            "Criar pull request"
+            t!("repo_hosting.common.create_pull_request")
         };
 
         v_flex()
@@ -4288,7 +4423,7 @@ impl RepoPanel {
                             })),
                     )
                     .child(
-                        Label::new("novo")
+                        Label::new(t!("repo_hosting.create.new_badge"))
                             .size(LabelSize::XSmall)
                             .color(Color::Muted),
                     ),
@@ -4318,8 +4453,9 @@ impl RepoPanel {
                             ""
                         };
                         this.child(
-                            Label::new(format!(
-                                "git push {flag}{remote_name} {local} antes de criar"
+                            Label::new(t!(
+                                "repo_hosting.create.push_hint",
+                                command = format!("git push {flag}{remote_name} {local}")
                             ))
                             .size(LabelSize::XSmall)
                             .buffer_font(cx)
@@ -4331,7 +4467,7 @@ impl RepoPanel {
                         h_flex()
                             .gap(DynamicSpacing::Base08.px(cx))
                             .child(
-                                Button::new("repo-create-cancel", "Cancelar")
+                                Button::new("repo-create-cancel", t!("repo_hosting.common.cancel"))
                                     .style(ButtonStyle::Outlined)
                                     .label_size(LabelSize::Small)
                                     .on_click(cx.listener(|this, _, window, cx| {
@@ -4366,11 +4502,14 @@ impl RepoPanel {
             .collect();
         let add = PopoverMenu::new("repo-create-reviewers")
             .trigger(
-                Button::new("repo-create-add-reviewer", "Adicionar")
-                    .style(ButtonStyle::Outlined)
-                    .label_size(LabelSize::Small)
-                    .start_icon(Icon::new(IconName::Plus).size(IconSize::XSmall))
-                    .disabled(candidates.is_empty()),
+                Button::new(
+                    "repo-create-add-reviewer",
+                    t!("repo_hosting.create.add_reviewer"),
+                )
+                .style(ButtonStyle::Outlined)
+                .label_size(LabelSize::Small)
+                .start_icon(Icon::new(IconName::Plus).size(IconSize::XSmall))
+                .disabled(candidates.is_empty()),
             )
             .menu(move |window, cx| {
                 let candidates = candidates.clone();
@@ -4456,10 +4595,10 @@ impl RepoPanel {
             }
         });
         let mut list = v_flex().gap_0p5().child(Self::render_section_header(
-            "COMMITS",
+            t!("repo_hosting.create.commits_header"),
             Some(form.commits.len() + unpushed as usize),
             Some(
-                Label::new("clique abre no Asylum")
+                Label::new(t!("repo_hosting.create.commits_hint"))
                     .size(LabelSize::XSmall)
                     .color(Color::Disabled)
                     .into_any_element(),
@@ -4468,15 +4607,13 @@ impl RepoPanel {
         ));
         if status.is_some_and(|status| status.needs_upstream) {
             list = list.child(
-                Label::new(
-                    "O branch ainda não está no remoto; os commits aparecem depois de publicar.",
-                )
-                .size(LabelSize::Small)
-                .color(Color::Muted),
+                Label::new(t!("repo_hosting.create.commits_not_published"))
+                    .size(LabelSize::Small)
+                    .color(Color::Muted),
             );
         } else if !form.commits_loaded {
             list = list.child(
-                Label::new("Carregando os commits…")
+                Label::new(t!("repo_hosting.detail.loading_commits"))
                     .size(LabelSize::Small)
                     .color(Color::Muted),
             );
@@ -4493,9 +4630,11 @@ impl RepoPanel {
                             .color(Color::Warning),
                     )
                     .child(
-                        Label::new(format!(
-                            "{unpushed} commit(s) local(is) ainda não enviado(s)"
-                        ))
+                        Label::new(if unpushed == 1 {
+                            t!("repo_hosting.create.unpushed.one")
+                        } else {
+                            t!("repo_hosting.create.unpushed.other", count = unpushed)
+                        })
                         .size(LabelSize::XSmall)
                         .color(Color::Warning),
                     ),
@@ -4661,9 +4800,9 @@ impl RepoPanel {
         }
     }
 
-    fn set_merge_progress(&mut self, progress: &str, cx: &mut Context<Self>) {
+    fn set_merge_progress(&mut self, progress: SharedString, cx: &mut Context<Self>) {
         if let Some(form) = self.merge_form_mut() {
-            form.progress = Some(progress.to_string().into());
+            form.progress = Some(progress);
             cx.notify();
         }
     }
@@ -4707,7 +4846,7 @@ impl RepoPanel {
         let close_source_branch = form.close_source_branch;
         if form.auto_merge {
             form.submitting = true;
-            form.progress = Some("Ligando o auto-merge…".into());
+            form.progress = Some(t!("repo_hosting.merge.enabling_auto_merge"));
             open_pull_request.error = None;
             cx.notify();
             cx.spawn(async move |this, cx| {
@@ -4723,20 +4862,20 @@ impl RepoPanel {
                         match result {
                             Ok(()) => {
                                 open_pull_request.merging = None;
-                                open_pull_request.notice = Some(
-                                    format!(
-                                        "Auto-merge ligado: entra em {destination} quando os checks e as revisões passarem."
-                                    )
-                                    .into(),
-                                );
+                                open_pull_request.notice = Some(t!(
+                                    "repo_hosting.merge.auto_merge_enabled",
+                                    destination = destination
+                                ));
                             }
                             Err(error) => {
                                 if let Some(form) = &mut open_pull_request.merging {
                                     form.submitting = false;
                                     form.progress = None;
                                 }
-                                open_pull_request.error =
-                                    Some(format!("Auto-merge recusado: {error:#}").into());
+                                open_pull_request.error = Some(t!(
+                                    "repo_hosting.merge.auto_merge_rejected",
+                                    error = format!("{error:#}")
+                                ));
                             }
                         }
                     }
@@ -4761,8 +4900,10 @@ impl RepoPanel {
                 )
             });
         form.submitting = true;
-        form.progress =
-            Some(format!("Fazendo o merge no {}…", remote_repository.hosting.name()).into());
+        form.progress = Some(t!(
+            "repo_hosting.merge.merging",
+            host = remote_repository.hosting.name()
+        ));
         open_pull_request.error = None;
         cx.notify();
 
@@ -4777,13 +4918,15 @@ impl RepoPanel {
                         let client = client.clone();
                         let remote_repository = remote_repository.clone();
                         async move {
-                            client.merge_pull_request(&remote_repository,
-                                number,
-                                strategy,
-                                &message,
-                                close_source_branch,
-                            )
-                            .await
+                            client
+                                .merge_pull_request(
+                                    &remote_repository,
+                                    number,
+                                    strategy,
+                                    &message,
+                                    close_source_branch,
+                                )
+                                .await
                         }
                     })
                     .await?;
@@ -4792,7 +4935,7 @@ impl RepoPanel {
                     MergeOutcome::Pending { task_url } => task_url,
                 };
                 this.update(cx, |this, cx| {
-                    this.set_merge_progress("O Bitbucket ainda está fazendo o merge…", cx)
+                    this.set_merge_progress(t!("repo_hosting.merge.bitbucket_still_merging"), cx)
                 })?;
                 for _ in 0..MERGE_POLL_ATTEMPTS {
                     cx.background_executor().timer(MERGE_POLL_INTERVAL).await;
@@ -4813,7 +4956,7 @@ impl RepoPanel {
                         return Ok(pull_request);
                     }
                 }
-                anyhow::bail!("o merge ainda não terminou; confira no Bitbucket")
+                anyhow::bail!("{}", t!("repo_hosting.merge.not_finished"))
             }
             .await;
 
@@ -4825,7 +4968,11 @@ impl RepoPanel {
                             form.submitting = false;
                             form.progress = None;
                         }
-                        this.set_open_error(format!("Merge bloqueado: {error:#}"), cx);
+                        this.set_open_error(
+                            t!("repo_hosting.merge.blocked", error = format!("{error:#}"))
+                                .to_string(),
+                            cx,
+                        );
                     })?;
                     return anyhow::Ok(());
                 }
@@ -4834,7 +4981,13 @@ impl RepoPanel {
             let cleanup = match clean_up {
                 Some((force_allowed, local_branch, repository)) => {
                     this.update(cx, |this, cx| {
-                        this.set_merge_progress(&format!("Voltando para {destination}…"), cx)
+                        this.set_merge_progress(
+                            t!(
+                                "repo_hosting.merge.switching_back",
+                                destination = destination
+                            ),
+                            cx,
+                        )
                     })?;
                     Some(
                         clean_up_after_merge(
@@ -4857,18 +5010,19 @@ impl RepoPanel {
                 if let Some(open_pull_request) = &mut this.open_pull_request {
                     open_pull_request.summary = merged;
                     open_pull_request.merging = None;
-                    open_pull_request.notice = Some(
-                        match &cleanup {
-                            Some(Ok(local_branch)) => format!(
-                                "Mergeado em {destination}. Você está em {destination} e {local_branch} foi apagado."
-                            ),
-                            _ => format!("Mergeado em {destination}."),
-                        }
-                        .into(),
-                    );
+                    open_pull_request.notice = Some(match &cleanup {
+                        Some(Ok(local_branch)) => t!(
+                            "repo_hosting.merge.merged_and_cleaned",
+                            destination = destination,
+                            branch = local_branch
+                        ),
+                        _ => t!("repo_hosting.merge.merged", destination = destination),
+                    });
                     if let Some(Err(error)) = &cleanup {
-                        open_pull_request.error =
-                            Some(format!("O merge foi feito, mas a limpeza local falhou: {error:#}").into());
+                        open_pull_request.error = Some(t!(
+                            "repo_hosting.merge.cleanup_failed",
+                            error = format!("{error:#}")
+                        ));
                     }
                 }
                 this.reload_open_pull_request(cx);
@@ -4892,14 +5046,16 @@ impl RepoPanel {
             return;
         }
         let number = open_pull_request.summary.number;
+        let decline_label = t!("repo_hosting.merge.decline");
+        let cancel_label = t!("repo_hosting.common.cancel");
         let answer = window.prompt(
             gpui::PromptLevel::Warning,
-            &format!("Recusar o PR #{number}?"),
-            Some(&format!(
-                "Ele fecha sem merge. Dá para reabrir pelo {}, mas não daqui.",
-                self.hosting().name()
+            &t!("repo_hosting.merge.decline_prompt", number = number),
+            Some(&t!(
+                "repo_hosting.merge.decline_prompt_detail",
+                host = self.hosting().name()
             )),
-            &["Recusar", "Cancelar"],
+            &[decline_label.as_ref(), cancel_label.as_ref()],
             cx,
         );
         cx.spawn(async move |this, cx| {
@@ -4920,14 +5076,19 @@ impl RepoPanel {
                     Ok(()) => {
                         if let Some(open_pull_request) = &mut this.open_pull_request {
                             open_pull_request.merging = None;
-                            open_pull_request.notice = Some("Pull request recusado.".into());
+                            open_pull_request.notice = Some(t!("repo_hosting.merge.declined"));
                         }
                         this.reload_open_pull_request(cx);
                         this.sync(cx);
                     }
-                    Err(error) => {
-                        this.set_open_error(format!("Não deu para recusar: {error:#}"), cx)
-                    }
+                    Err(error) => this.set_open_error(
+                        t!(
+                            "repo_hosting.merge.decline_failed",
+                            error = format!("{error:#}")
+                        )
+                        .to_string(),
+                        cx,
+                    ),
                 }
             })
         })
@@ -4952,21 +5113,30 @@ impl RepoPanel {
         let destination = &open_pull_request.summary.destination_branch;
         let (title, dot) = match worst {
             GateLevel::Ok => (
-                format!("Pronto para merge em {destination}"),
+                t!("repo_hosting.merge.title_ready", destination = destination),
                 Color::Success,
             ),
             GateLevel::Warning => (
-                format!("Merge em {destination} com pendências"),
+                t!(
+                    "repo_hosting.merge.title_warnings",
+                    destination = destination
+                ),
                 Color::Warning,
             ),
-            GateLevel::Blocking => (format!("Merge em {destination} bloqueado"), Color::Error),
+            GateLevel::Blocking => (
+                t!(
+                    "repo_hosting.merge.title_blocked",
+                    destination = destination
+                ),
+                Color::Error,
+            ),
         };
         let checked_out_source =
             self.branch.as_deref() == Some(open_pull_request.summary.source_branch.as_str());
 
         let hosting = self.hosting();
         let strategies = if form.strategies.is_empty() {
-            Label::new("Carregando as estratégias do branch…")
+            Label::new(t!("repo_hosting.merge.loading_strategies"))
                 .size(LabelSize::XSmall)
                 .color(Color::Muted)
                 .into_any_element()
@@ -4999,12 +5169,28 @@ impl RepoPanel {
                     .detail
                     .as_ref()
                     .map_or(0, |detail| detail.commits.len());
-                format!("{commits} commit(s) viram 1 em {destination}")
+                if commits == 1 {
+                    t!(
+                        "repo_hosting.merge.hint_squash.one",
+                        destination = destination
+                    )
+                } else {
+                    t!(
+                        "repo_hosting.merge.hint_squash.other",
+                        count = commits,
+                        destination = destination
+                    )
+                }
             }
-            MergeStrategy::MergeCommit => "Mantém os commits e cria um commit de merge".to_string(),
-            MergeStrategy::FastForward => format!("Só avança {destination}; falha se ele andou"),
+            MergeStrategy::MergeCommit => t!("repo_hosting.merge.hint_merge_commit"),
+            MergeStrategy::FastForward => {
+                t!(
+                    "repo_hosting.merge.hint_fast_forward",
+                    destination = destination
+                )
+            }
             MergeStrategy::RebaseFastForward | MergeStrategy::RebaseMerge => {
-                format!("Reescreve os commits por cima de {destination}")
+                t!("repo_hosting.merge.hint_rebase", destination = destination)
             }
         });
 
@@ -5053,7 +5239,7 @@ impl RepoPanel {
                 v_flex()
                     .gap(DynamicSpacing::Base06.px(cx))
                     .child(
-                        Label::new("Estratégia")
+                        Label::new(t!("repo_hosting.merge.strategy"))
                             .size(LabelSize::Small)
                             .weight(FontWeight::SEMIBOLD)
                             .color(Color::Muted),
@@ -5067,7 +5253,7 @@ impl RepoPanel {
                 v_flex()
                     .gap(DynamicSpacing::Base06.px(cx))
                     .child(
-                        Label::new("Mensagem do commit")
+                        Label::new(t!("repo_hosting.merge.commit_message"))
                             .size(LabelSize::Small)
                             .weight(FontWeight::SEMIBOLD)
                             .color(Color::Muted),
@@ -5085,7 +5271,7 @@ impl RepoPanel {
             .when(form.allows_auto_merge, |this| {
                 this.child(
                     Checkbox::new("repo-merge-auto", form.auto_merge.into())
-                        .label("Auto-merge quando os checks passarem")
+                        .label(t!("repo_hosting.merge.auto_merge"))
                         .disabled(form.submitting)
                         .on_click({
                             let panel = cx.weak_entity();
@@ -5106,8 +5292,8 @@ impl RepoPanel {
             .child(
                 Checkbox::new("repo-merge-close-source", form.close_source_branch.into())
                     .label(match hosting {
-                        api::Hosting::Bitbucket => "Fechar o branch no Bitbucket",
-                        api::Hosting::GitHub => "Apagar o branch depois",
+                        api::Hosting::Bitbucket => t!("repo_hosting.merge.close_branch_bitbucket"),
+                        api::Hosting::GitHub => t!("repo_hosting.merge.delete_branch_github"),
                     })
                     .disabled(form.submitting)
                     .on_click({
@@ -5131,8 +5317,9 @@ impl RepoPanel {
                         .gap_0p5()
                         .child(
                             Checkbox::new("repo-merge-clean-up", form.clean_up_local.into())
-                                .label(format!(
-                                    "Depois: voltar para {destination} e apagar o branch local"
+                                .label(t!(
+                                    "repo_hosting.merge.clean_up_local",
+                                    destination = destination
                                 ))
                                 .disabled(form.submitting)
                                 .on_click({
@@ -5177,16 +5364,27 @@ impl RepoPanel {
         let destination = &open_pull_request.summary.destination_branch;
         let label = match form.strategy {
             Some(MergeStrategy::Squash | MergeStrategy::SquashFastForward) => {
-                format!("Squash em {destination}")
+                t!(
+                    "repo_hosting.merge.submit_squash",
+                    destination = destination
+                )
             }
-            Some(MergeStrategy::FastForward) => format!("Fast-forward em {destination}"),
+            Some(MergeStrategy::FastForward) => {
+                t!(
+                    "repo_hosting.merge.submit_fast_forward",
+                    destination = destination
+                )
+            }
             Some(MergeStrategy::RebaseFastForward | MergeStrategy::RebaseMerge) => {
-                format!("Rebase em {destination}")
+                t!(
+                    "repo_hosting.merge.submit_rebase",
+                    destination = destination
+                )
             }
-            _ => format!("Merge em {destination}"),
+            _ => t!("repo_hosting.merge.submit_merge", destination = destination),
         };
         let label = if form.auto_merge {
-            "Ativar auto-merge".to_string()
+            t!("repo_hosting.merge.submit_auto_merge")
         } else {
             label
         };
@@ -5233,7 +5431,7 @@ impl RepoPanel {
                                 .color(Color::Warning),
                         )
                         .child(
-                            Label::new("O merge espera os checks pendentes passarem.")
+                            Label::new(t!("repo_hosting.merge.waiting_on_checks"))
                                 .size(LabelSize::XSmall)
                                 .color(Color::Warning),
                         ),
@@ -5246,7 +5444,7 @@ impl RepoPanel {
                         secondary_button(
                             "repo-merge-cancel",
                             None,
-                            "Cancelar",
+                            t!("repo_hosting.common.cancel"),
                             !form.submitting,
                             cx,
                         )
@@ -5258,7 +5456,11 @@ impl RepoPanel {
                         secondary_button(
                             "repo-merge-decline",
                             Some((IconName::XCircle, Color::Error)),
-                            if declining { "Recusando…" } else { "Recusar" },
+                            if declining {
+                                t!("repo_hosting.merge.declining")
+                            } else {
+                                t!("repo_hosting.merge.decline")
+                            },
                             !(form.submitting || declining),
                             cx,
                         )
@@ -5273,7 +5475,9 @@ impl RepoPanel {
                         primary_button("repo-merge-submit", Some(IconName::Check), label, None, cx)
                             .when(!can_submit, |this| this.opacity(0.5).cursor_default())
                             .when(blocked, |this| {
-                                this.tooltip(Tooltip::text("Resolva os conflitos antes do merge"))
+                                this.tooltip(Tooltip::text(t!(
+                                    "repo_hosting.merge.resolve_conflicts"
+                                )))
                             })
                             .when(can_submit, |this| {
                                 this.on_click(
@@ -5300,36 +5504,45 @@ enum GateLevel {
 
 struct Gate {
     level: GateLevel,
-    text: String,
+    text: SharedString,
 }
 
 /// What the merge card lists before merging. Most are warnings: Bitbucket Cloud doesn't say
 /// which merge checks the branch enforces, so it has the last word.
 fn merge_gates(pull_request: &PullRequest, detail: Option<&PullRequestDetail>) -> Vec<Gate> {
     let mut gates = Vec::new();
-    let mut gate = |level, text: String| gates.push(Gate { level, text });
+    let mut gate = |level, text: SharedString| gates.push(Gate { level, text });
 
     if let Some(detail) = detail {
         let summary = CheckSummary::of(&detail.checks);
         if summary.total == 0 {
-            gate(GateLevel::Ok, "Nenhum check configurado".to_string());
+            gate(GateLevel::Ok, t!("repo_hosting.gate.no_checks"));
         } else if summary.failed > 0 {
             gate(
                 GateLevel::Warning,
-                format!("{} de {} checks falharam", summary.failed, summary.total),
+                t!(
+                    "repo_hosting.gate.checks_failed",
+                    failed = summary.failed,
+                    total = summary.total
+                ),
             );
         } else if summary.running > 0 {
             gate(
                 GateLevel::Warning,
-                format!(
-                    "{} de {} checks ainda rodando",
-                    summary.running, summary.total
+                t!(
+                    "repo_hosting.gate.checks_running",
+                    running = summary.running,
+                    total = summary.total
                 ),
             );
         } else {
             gate(
                 GateLevel::Ok,
-                format!("{}/{} checks passaram", summary.passed, summary.total),
+                t!(
+                    "repo_hosting.gate.checks_passed",
+                    passed = summary.passed,
+                    total = summary.total
+                ),
             );
         }
     }
@@ -5348,17 +5561,27 @@ fn merge_gates(pull_request: &PullRequest, detail: Option<&PullRequestDetail>) -
         if participant.requested_changes {
             gate(
                 GateLevel::Warning,
-                format!("{} pediu mudanças", participant.person.short_name()),
+                t!(
+                    "repo_hosting.gate.changes_requested",
+                    name = participant.person.short_name()
+                ),
             );
         }
     }
     if pull_request.draft {
-        gate(GateLevel::Warning, "É um rascunho".to_string());
+        gate(GateLevel::Warning, t!("repo_hosting.gate.draft"));
     }
     if pull_request.open_task_count > 0 {
         gate(
             GateLevel::Warning,
-            format!("{} tarefa(s) aberta(s) no PR", pull_request.open_task_count),
+            if pull_request.open_task_count == 1 {
+                t!("repo_hosting.gate.open_tasks.one")
+            } else {
+                t!(
+                    "repo_hosting.gate.open_tasks.other",
+                    count = pull_request.open_task_count
+                )
+            },
         );
     }
     if let Some(detail) = detail {
@@ -5370,17 +5593,30 @@ fn merge_gates(pull_request: &PullRequest, detail: Option<&PullRequestDetail>) -
         if conflicts > 0 {
             gate(
                 GateLevel::Blocking,
-                format!("Conflitos em {conflicts} arquivo(s)"),
+                if conflicts == 1 {
+                    t!("repo_hosting.gate.conflicts_in_files.one")
+                } else {
+                    t!(
+                        "repo_hosting.gate.conflicts_in_files.other",
+                        count = conflicts
+                    )
+                },
             );
         } else if detail.has_conflicts {
             gate(
                 GateLevel::Blocking,
-                format!("Conflitos com {}", pull_request.destination_branch),
+                t!(
+                    "repo_hosting.gate.conflicts_with",
+                    branch = pull_request.destination_branch
+                ),
             );
         } else {
             gate(
                 GateLevel::Ok,
-                format!("Sem conflitos com {}", pull_request.destination_branch),
+                t!(
+                    "repo_hosting.gate.no_conflicts_with",
+                    branch = pull_request.destination_branch
+                ),
             );
         }
     }
@@ -5425,7 +5661,10 @@ async fn clean_up_after_merge(
     if let Err(error) = delete.await? {
         // Squash and rebase merges leave commits git doesn't recognize as merged.
         if !force_delete {
-            return Err(error.context(format!("{local_branch} não foi apagado")));
+            return Err(error.context(t!(
+                "repo_hosting.merge.branch_not_deleted",
+                branch = local_branch
+            )));
         }
         let delete = repository.update(cx, |repository, _| {
             repository.delete_branch(false, local_branch.to_string(), true)
@@ -5661,7 +5900,7 @@ impl RepoPanel {
                     .render_centered_message(IconName::Warning, error, None, None, cx)
                     .into_any_element();
             }
-            return self.render_loading("Buscando os pull requests…", cx);
+            return self.render_loading(t!("repo_hosting.list.loading_pull_requests"), cx);
         };
         let filter = self.filter_input.read(cx).text(cx).trim().to_lowercase();
         let visible: Vec<&PullRequest> = list
@@ -5672,7 +5911,7 @@ impl RepoPanel {
             return self
                 .render_centered_message(
                     IconName::MagnifyingGlass,
-                    "Nada por aqui".into(),
+                    t!("repo_hosting.list.nothing_here"),
                     None,
                     None,
                     cx,
@@ -5704,12 +5943,16 @@ impl RepoPanel {
     fn render_tab_status<T>(
         &self,
         loadable: &Loadable<T>,
-        what: &'static str,
+        what: SharedString,
         cx: &App,
     ) -> Option<AnyElement> {
         if loadable.value.is_some() {
             return loadable.error.clone().map(|error| {
-                render_inline_error(format!("Falha ao atualizar: {error}"), cx).into_any_element()
+                render_inline_error(
+                    t!("repo_hosting.list.refresh_failed", error = error).to_string(),
+                    cx,
+                )
+                .into_any_element()
             });
         }
         Some(match &loadable.error {
@@ -5721,7 +5964,8 @@ impl RepoPanel {
     }
 
     fn render_pipelines(&self, cx: &Context<Self>) -> AnyElement {
-        let status = self.render_tab_status(&self.pipelines, "Buscando os pipelines…", cx);
+        let status =
+            self.render_tab_status(&self.pipelines, t!("repo_hosting.pipelines.loading"), cx);
         let Some(pipelines) = self.pipelines.value.as_ref() else {
             return status.unwrap_or_else(|| div().into_any_element());
         };
@@ -5729,10 +5973,10 @@ impl RepoPanel {
             return self
                 .render_centered_message(
                     IconName::PlayOutlined,
-                    "Nenhum pipeline rodou ainda".into(),
+                    t!("repo_hosting.pipelines.empty"),
                     Some(match self.hosting() {
-                        api::Hosting::Bitbucket => "Pipelines aparecem aqui quando o repositório tem um bitbucket-pipelines.yml.".into(),
-                        api::Hosting::GitHub => "Runs aparecem aqui quando o repositório tem workflows em .github/workflows.".into(),
+                        api::Hosting::Bitbucket => t!("repo_hosting.pipelines.empty_bitbucket"),
+                        api::Hosting::GitHub => t!("repo_hosting.pipelines.empty_github"),
                     }),
                     None,
                     cx,
@@ -5762,7 +6006,7 @@ impl RepoPanel {
     }
 
     fn render_issues(&self, cx: &Context<Self>) -> AnyElement {
-        let status = self.render_tab_status(&self.issues, "Buscando as issues…", cx);
+        let status = self.render_tab_status(&self.issues, t!("repo_hosting.issues.loading"), cx);
         let Some(issues) = self.issues.value.as_ref() else {
             return status.unwrap_or_else(|| div().into_any_element());
         };
@@ -5770,8 +6014,8 @@ impl RepoPanel {
             return self
                 .render_centered_message(
                     IconName::ListTodo,
-                    format!("Este repositório não usa as issues do {}", self.hosting().name()).into(),
-                    Some("Times que acompanham o trabalho no Jira ou no ClickUp não têm issues aqui.".into()),
+                    t!("repo_hosting.issues.disabled", host = self.hosting().name()),
+                    Some(t!("repo_hosting.issues.disabled_detail")),
                     None,
                     cx,
                 )
@@ -5781,7 +6025,7 @@ impl RepoPanel {
             return self
                 .render_centered_message(
                     IconName::Check,
-                    "Nenhuma issue aberta".into(),
+                    t!("repo_hosting.issues.empty"),
                     None,
                     None,
                     cx,
@@ -5807,12 +6051,12 @@ impl RepoPanel {
     }
 }
 
-fn state_filter_label(state: PullRequestState) -> &'static str {
+fn state_filter_label(state: PullRequestState) -> SharedString {
     match state {
-        PullRequestState::Open => "Abertas",
-        PullRequestState::Merged => "Mergeadas",
-        PullRequestState::Declined => "Recusadas",
-        PullRequestState::Superseded => "Substituídas",
+        PullRequestState::Open => t!("repo_hosting.state_filter.open"),
+        PullRequestState::Merged => t!("repo_hosting.state_filter.merged"),
+        PullRequestState::Declined => t!("repo_hosting.state_filter.declined"),
+        PullRequestState::Superseded => t!("repo_hosting.state_filter.superseded"),
     }
 }
 
@@ -5830,17 +6074,16 @@ fn describe_tab_error(error: &anyhow::Error) -> String {
     if crate::is_forbidden(error) {
         let text = format!("{error:#}");
         if text.contains("GitHub") {
-            return "O token não tem permissão para isso. Dê leitura de Issues e Actions ao token."
-                .to_string();
+            return t!("repo_hosting.error.github_tab_forbidden").to_string();
         }
         let scope = if text.contains("issue") {
             "read:issue:bitbucket"
         } else if text.contains("pipeline") {
             "read:pipeline:bitbucket"
         } else {
-            "de leitura"
+            return t!("repo_hosting.error.bitbucket_tab_forbidden_read").to_string();
         };
-        return format!("O token não tem o escopo {scope}. Crie outro token incluindo-o.");
+        return t!("repo_hosting.error.bitbucket_tab_forbidden", scope = scope).to_string();
     }
     format!("{error:#}")
 }
@@ -5870,7 +6113,7 @@ fn render_pipeline_row(pipeline: &api::Pipeline, now: DateTime<Utc>, cx: &App) -
     let trigger = match pipeline.trigger.as_str() {
         "PUSH" => "push".to_string(),
         "MANUAL" => "manual".to_string(),
-        "SCHEDULE" => "agendado".to_string(),
+        "SCHEDULE" => t!("repo_hosting.pipelines.trigger_scheduled").to_string(),
         other => other.to_lowercase().replace('_', " "),
     };
     let mut meta = vec![format!("#{}", pipeline.number)];
@@ -5894,7 +6137,10 @@ fn render_pipeline_row(pipeline: &api::Pipeline, now: DateTime<Utc>, cx: &App) -
         .rounded_md()
         .cursor_pointer()
         .hover(|style| style.bg(cx.theme().colors().ghost_element_hover))
-        .tooltip(Tooltip::text(format!("Abrir no {}", host_name(&url))))
+        .tooltip(Tooltip::text(t!(
+            "repo_hosting.common.open_in",
+            host = host_name(&url)
+        )))
         .on_click(move |_, _, cx| cx.open_url(&url))
         .child(h_flex().h(DynamicSpacing::Base20.px(cx)).child(spinning_if(
             Icon::new(icon).size(IconSize::Small).color(color),
@@ -5947,24 +6193,24 @@ fn render_issue_row(issue: &api::Issue, now: DateTime<Utc>, cx: &App) -> impl In
         _ => Color::Muted,
     };
     let kind = match issue.kind.as_str() {
-        "bug" => "bug",
-        "enhancement" => "melhoria",
-        "proposal" => "proposta",
-        "task" => "tarefa",
-        other => other,
+        "bug" => t!("repo_hosting.issues.kind_bug"),
+        "enhancement" => t!("repo_hosting.issues.kind_enhancement"),
+        "proposal" => t!("repo_hosting.issues.kind_proposal"),
+        "task" => t!("repo_hosting.issues.kind_task"),
+        other => SharedString::from(other.to_string()),
     };
     let mut meta = vec![format!("#{}", issue.number), kind.to_string()];
     if matches!(issue.priority.as_str(), "critical" | "blocker" | "major") {
         meta.push(issue.priority.clone());
     }
     if issue.state == "on hold" {
-        meta.push("em espera".to_string());
+        meta.push(t!("repo_hosting.issues.on_hold").to_string());
     }
     meta.push(
         issue
             .assignee
             .clone()
-            .unwrap_or_else(|| "sem responsável".to_string()),
+            .unwrap_or_else(|| t!("repo_hosting.issues.unassigned").to_string()),
     );
     let url = issue.url.clone();
     h_flex()
@@ -5976,7 +6222,10 @@ fn render_issue_row(issue: &api::Issue, now: DateTime<Utc>, cx: &App) -> impl In
         .rounded_md()
         .cursor_pointer()
         .hover(|style| style.bg(cx.theme().colors().ghost_element_hover))
-        .tooltip(Tooltip::text(format!("Abrir no {}", host_name(&url))))
+        .tooltip(Tooltip::text(t!(
+            "repo_hosting.common.open_in",
+            host = host_name(&url)
+        )))
         .on_click(move |_, _, cx| cx.open_url(&url))
         .child(
             h_flex()
@@ -6081,9 +6330,10 @@ impl RepoPanel {
             this.update_in(cx, |this, window, cx| {
                 this.set_pending_action(None, cx);
                 match diff {
-                    Ok(diff) if diff.trim().is_empty() => {
-                        this.set_open_error("O PR não tem mudanças para revisar.".to_string(), cx)
-                    }
+                    Ok(diff) if diff.trim().is_empty() => this.set_open_error(
+                        t!("repo_hosting.detail.no_changes_to_review").to_string(),
+                        cx,
+                    ),
                     Ok(diff) => window.dispatch_action(
                         zed_actions::agent::ReviewBranchDiff {
                             diff_text: diff.into(),
@@ -6092,9 +6342,14 @@ impl RepoPanel {
                         .boxed_clone(),
                         cx,
                     ),
-                    Err(error) => {
-                        this.set_open_error(format!("Não deu para baixar o diff: {error:#}"), cx)
-                    }
+                    Err(error) => this.set_open_error(
+                        t!(
+                            "repo_hosting.detail.diff_download_failed",
+                            error = format!("{error:#}")
+                        )
+                        .to_string(),
+                        cx,
+                    ),
                 }
             })
         })
@@ -6300,27 +6555,45 @@ fn activity_events(
         };
         let name = participant.person.short_name();
         if participant.approved {
-            events.push((at, format!("{name} aprovou"), Color::Success, None));
+            events.push((
+                at,
+                t!("repo_hosting.activity.approved", name = name).to_string(),
+                Color::Success,
+                None,
+            ));
         } else if participant.requested_changes {
-            events.push((at, format!("{name} pediu mudanças"), Color::Error, None));
+            events.push((
+                at,
+                t!("repo_hosting.gate.changes_requested", name = name).to_string(),
+                Color::Error,
+                None,
+            ));
         }
     }
     for check in checks {
         let Some(at) = check.updated_at else {
             continue;
         };
-        let (verb, color) = match check.state {
-            CheckState::Passed => ("passou", Color::Success),
-            CheckState::Failed => ("falhou", Color::Error),
-            CheckState::Running => ("está rodando", Color::Warning),
-            CheckState::Stopped => ("parou", Color::Muted),
+        let name = &check.name;
+        let (text, color) = match check.state {
+            CheckState::Passed => (
+                t!("repo_hosting.activity.check_passed", name = name),
+                Color::Success,
+            ),
+            CheckState::Failed => (
+                t!("repo_hosting.activity.check_failed", name = name),
+                Color::Error,
+            ),
+            CheckState::Running => (
+                t!("repo_hosting.activity.check_running", name = name),
+                Color::Warning,
+            ),
+            CheckState::Stopped => (
+                t!("repo_hosting.activity.check_stopped", name = name),
+                Color::Muted,
+            ),
         };
-        events.push((
-            at,
-            format!("{} {verb}", check.name),
-            color,
-            check.url.clone(),
-        ));
+        events.push((at, text.to_string(), color, check.url.clone()));
     }
     events.sort_by_key(|(at, _, _, _)| std::cmp::Reverse(*at));
     events
@@ -6347,37 +6620,44 @@ fn compact_age(at: DateTime<Utc>, now: DateTime<Utc>) -> String {
 
 fn relative_age(at: DateTime<Utc>, now: DateTime<Utc>) -> String {
     if (now - at).num_minutes() < 1 {
-        "agora".to_string()
+        t!("repo_hosting.common.now").to_string()
     } else {
-        format!("há {}", compact_age(at, now))
+        t!("repo_hosting.common.ago", age = compact_age(at, now)).to_string()
     }
 }
 
-fn approval_label(approvals: usize, reviewers: usize) -> String {
+fn approval_label(approvals: usize, reviewers: usize) -> SharedString {
     match (approvals, reviewers) {
         (_, 0) => match approvals {
-            0 => "sem revisores".to_string(),
-            1 => "1 aprovação".to_string(),
-            count => format!("{count} aprovações"),
+            0 => t!("repo_hosting.approval.no_reviewers"),
+            1 => t!("repo_hosting.approval.count.one"),
+            count => t!("repo_hosting.approval.count.other", count = count),
         },
-        (approvals, 1) => format!("{approvals} de 1 aprovação"),
-        (approvals, reviewers) => format!("{approvals} de {reviewers} aprovações"),
+        (approvals, 1) => t!(
+            "repo_hosting.approval.of_reviewers.one",
+            approvals = approvals
+        ),
+        (approvals, reviewers) => t!(
+            "repo_hosting.approval.of_reviewers.other",
+            approvals = approvals,
+            reviewers = reviewers
+        ),
     }
 }
 
 fn comment_count_label(count: u64) -> String {
     if count == 1 {
-        "1 comentário".to_string()
+        t!("repo_hosting.list.comment_count.one").to_string()
     } else {
-        format!("{count} comentários")
+        t!("repo_hosting.list.comment_count.other", count = count).to_string()
     }
 }
 
-fn file_count_label(count: usize) -> String {
+fn file_count_label(count: usize) -> SharedString {
     if count == 1 {
-        "em 1 arquivo".to_string()
+        t!("repo_hosting.detail.file_count.one")
     } else {
-        format!("em {count} arquivos")
+        t!("repo_hosting.detail.file_count.other", count = count)
     }
 }
 
@@ -6410,11 +6690,13 @@ fn pill(text: String, color: Color, icon: Option<IconName>, cx: &App) -> impl In
 
 fn state_pill(pull_request: &PullRequest, cx: &App) -> impl IntoElement {
     let (label, color) = match pull_request.state {
-        PullRequestState::Open if pull_request.draft => ("Rascunho", Color::Muted),
-        PullRequestState::Open => ("Aberta", Color::Info),
-        PullRequestState::Merged => ("Mergeada", Color::Accent),
-        PullRequestState::Declined => ("Recusada", Color::Error),
-        PullRequestState::Superseded => ("Substituída", Color::Muted),
+        PullRequestState::Open if pull_request.draft => {
+            (t!("repo_hosting.common.draft"), Color::Muted)
+        }
+        PullRequestState::Open => (t!("repo_hosting.state.open"), Color::Info),
+        PullRequestState::Merged => (t!("repo_hosting.state.merged"), Color::Accent),
+        PullRequestState::Declined => (t!("repo_hosting.state.declined"), Color::Error),
+        PullRequestState::Superseded => (t!("repo_hosting.state.superseded"), Color::Muted),
     };
     pill(label.to_string(), color, None, cx)
 }
@@ -6471,36 +6753,50 @@ fn pull_request_menu(
     let url = pull_request.url.clone();
     let copied_url = pull_request.url.clone();
     let checkout_panel = panel.clone();
-    menu.entry("Mencionar no Agent", None, move |window, cx| {
-        window.dispatch_action(mention.boxed_clone(), cx)
-    })
-    .entry("Revisar com o Agent", None, move |window, cx| {
-        window.dispatch_action(review.boxed_clone(), cx)
-    })
-    .entry("Corrigir os checks com o Agent", None, move |window, cx| {
-        window.dispatch_action(fix_checks.boxed_clone(), cx)
-    })
-    .separator()
-    .entry("Checkout", None, move |window, cx| {
-        checkout_panel
-            .update(cx, |panel, cx| {
-                panel.show_pull_request(number, PullRequestFollowup::Checkout, window, cx)
-            })
-            .log_err();
-    })
-    .entry("Abrir diff", None, move |window, cx| {
-        panel
-            .update(cx, |panel, cx| {
-                panel.show_pull_request(number, PullRequestFollowup::Diff, window, cx)
-            })
-            .log_err();
-    })
+    menu.entry(
+        t!("repo_hosting.common.mention_in_agent"),
+        None,
+        move |window, cx| window.dispatch_action(mention.boxed_clone(), cx),
+    )
     .entry(
-        format!("Abrir no {}", host_name(&url)),
+        t!("repo_hosting.common.review_with_agent"),
+        None,
+        move |window, cx| window.dispatch_action(review.boxed_clone(), cx),
+    )
+    .entry(
+        t!("repo_hosting.menu.fix_checks"),
+        None,
+        move |window, cx| window.dispatch_action(fix_checks.boxed_clone(), cx),
+    )
+    .separator()
+    .entry(
+        t!("repo_hosting.detail.checkout"),
+        None,
+        move |window, cx| {
+            checkout_panel
+                .update(cx, |panel, cx| {
+                    panel.show_pull_request(number, PullRequestFollowup::Checkout, window, cx)
+                })
+                .log_err();
+        },
+    )
+    .entry(
+        t!("repo_hosting.menu.open_diff"),
+        None,
+        move |window, cx| {
+            panel
+                .update(cx, |panel, cx| {
+                    panel.show_pull_request(number, PullRequestFollowup::Diff, window, cx)
+                })
+                .log_err();
+        },
+    )
+    .entry(
+        t!("repo_hosting.common.open_in", host = host_name(&url)),
         None,
         move |_, cx| cx.open_url(&url),
     )
-    .entry("Copiar link", None, move |_, cx| {
+    .entry(t!("repo_hosting.common.copy_link"), None, move |_, cx| {
         cx.write_to_clipboard(ClipboardItem::new_string(copied_url.clone()))
     })
 }
@@ -6518,7 +6814,7 @@ fn render_file_row(
         None => (file.path.clone(), String::new()),
     };
     let directory = match &file.old_path {
-        Some(old_path) => format!("de {old_path}"),
+        Some(old_path) => t!("repo_hosting.detail.renamed_from", path = old_path).to_string(),
         None => directory,
     };
     let (letter, color) = match file.change {
@@ -6577,7 +6873,7 @@ fn render_file_row(
                 .icon_size(IconSize::Small)
                 .icon_color(Color::Muted)
                 .visible_on_hover(group)
-                .tooltip(Tooltip::text("Mencionar o arquivo no Agent"))
+                .tooltip(Tooltip::text(t!("repo_hosting.detail.mention_file")))
                 .on_click(move |_, window, cx| window.dispatch_action(mention.boxed_clone(), cx)),
         )
         .child(
@@ -6658,7 +6954,7 @@ fn render_comment(
                             Button::new(("repo-pr-comment-mention", comment.id), "@ Agent")
                                 .style(ButtonStyle::Subtle)
                                 .label_size(LabelSize::XSmall)
-                                .tooltip(Tooltip::text("Mencionar o comentário no Agent"))
+                                .tooltip(Tooltip::text(t!("repo_hosting.detail.mention_comment")))
                                 .on_click(move |_, window, cx| {
                                     window.dispatch_action(mention.boxed_clone(), cx)
                                 }),
@@ -6666,7 +6962,7 @@ fn render_comment(
                         .child(
                             Button::new(
                                 ("repo-pr-comment-resolve", comment.id),
-                                "Pedir ao Agent para resolver",
+                                t!("repo_hosting.detail.ask_agent_to_resolve"),
                             )
                             .style(ButtonStyle::Subtle)
                             .label_size(LabelSize::XSmall)
@@ -6679,7 +6975,7 @@ fn render_comment(
         )
 }
 
-fn render_warning(title: &'static str, detail: &'static str, cx: &App) -> impl IntoElement {
+fn render_warning(title: SharedString, detail: SharedString, cx: &App) -> impl IntoElement {
     let warning = cx.theme().status().warning;
     h_flex()
         .w_full()
@@ -6758,8 +7054,8 @@ impl Render for RepoPanel {
             Target::NoRepository => self
                 .render_centered_message(
                     IconName::GitBranch,
-                    "Nenhum repositório git no projeto".into(),
-                    Some("Abra uma pasta com um .git para ver os pull requests.".into()),
+                    t!("repo_hosting.panel.no_repository"),
+                    Some(t!("repo_hosting.panel.no_repository_detail")),
                     None,
                     cx,
                 )
@@ -6767,23 +7063,20 @@ impl Render for RepoPanel {
             Target::Unsupported { remote_url } => self
                 .render_centered_message(
                     IconName::PullRequest,
-                    "Remoto ainda não suportado".into(),
-                    Some(
-                        match remote_url {
-                            Some(url) => {
-                                format!("{url} não é do bitbucket.org nem do github.com.")
-                            }
-                            None => "O repositório não tem origin.".to_string(),
-                        }
-                        .into(),
-                    ),
+                    t!("repo_hosting.panel.unsupported_remote"),
+                    Some(match remote_url {
+                        Some(url) => t!("repo_hosting.panel.unsupported_remote_detail", url = url),
+                        None => t!("repo_hosting.panel.no_origin"),
+                    }),
                     None,
                     cx,
                 )
                 .into_any_element(),
             Target::Hosted { repository, .. } => {
                 match self.store.read(cx).connection(repository.hosting) {
-                    Connection::Loading => self.render_loading("Carregando a conta…", cx),
+                    Connection::Loading => {
+                        self.render_loading(t!("repo_hosting.panel.loading_account"), cx)
+                    }
                     Connection::Disconnected => self
                         .render_connect(&repository, false, cx)
                         .into_any_element(),
@@ -6804,7 +7097,7 @@ impl Render for RepoPanel {
                         let actions = h_flex()
                             .gap(DynamicSpacing::Base08.px(cx))
                             .child(
-                                Button::new("repo-retry", "Tentar de novo")
+                                Button::new("repo-retry", t!("repo_hosting.panel.retry"))
                                     .style(ButtonStyle::Outlined)
                                     .label_size(LabelSize::Small)
                                     .on_click(move |_, _, cx| {
@@ -6812,21 +7105,29 @@ impl Render for RepoPanel {
                                     }),
                             )
                             .child(
-                                Button::new("repo-replace-unreachable", "Trocar token")
-                                    .style(ButtonStyle::Subtle)
-                                    .label_size(LabelSize::Small)
-                                    .on_click(cx.listener(|this, _, window, cx| {
+                                Button::new(
+                                    "repo-replace-unreachable",
+                                    t!("repo_hosting.account.replace_token"),
+                                )
+                                .style(ButtonStyle::Subtle)
+                                .label_size(LabelSize::Small)
+                                .on_click(cx.listener(
+                                    |this, _, window, cx| {
                                         this.start_replacing_token(window, cx);
                                         let hosting = this.hosting();
                                         this.store
                                             .update(cx, |store, cx| store.disconnect(hosting, cx))
                                             .detach_and_log_err(cx);
-                                    })),
+                                    },
+                                )),
                             )
                             .into_any_element();
                         self.render_centered_message(
                             IconName::Disconnected,
-                            format!("Sem conexão com o {}", repository.hosting.name()).into(),
+                            t!(
+                                "repo_hosting.panel.unreachable",
+                                host = repository.hosting.name()
+                            ),
                             Some(message),
                             Some(actions),
                             cx,
@@ -7117,9 +7418,9 @@ mod tests {
         );
         assert_eq!(compact_age(now - chrono::Duration::hours(3), now), "3 h");
         assert_eq!(compact_age(now - chrono::Duration::days(5), now), "5 d");
-        assert_eq!(relative_age(now, now), "agora");
-        assert_eq!(approval_label(1, 2), "1 de 2 aprovações");
-        assert_eq!(approval_label(0, 0), "sem revisores");
+        assert_eq!(relative_age(now, now), "now");
+        assert_eq!(approval_label(1, 2), "1 of 2 approvals");
+        assert_eq!(approval_label(0, 0), "no reviewers");
         assert_eq!(initials("ana.souza"), "AS");
         assert_eq!(initials("Rafael M"), "RM");
     }

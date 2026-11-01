@@ -17,6 +17,7 @@ pub use panel::DockerPanel;
 pub use store::{ContainerAction, DockerStore};
 
 use gpui::{Subscription, WeakEntity, actions};
+use i18n::t;
 use std::any::TypeId;
 use std::rc::Rc;
 use ui::prelude::*;
@@ -215,7 +216,7 @@ impl StatusItemView for DockerToolkitButton {
     }
 }
 
-/// Human sizes as the boards write them: `182 MB`, `2,1 GB`.
+/// Human sizes as the boards write them: `182 MB`, `2.1 GB` (`2,1 GB` in pt-BR).
 pub(crate) fn format_bytes(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
     let mut value = bytes as f64;
@@ -227,7 +228,7 @@ pub(crate) fn format_bytes(bytes: u64) -> String {
     if unit >= 3 {
         format!(
             "{} {}",
-            format!("{value:.1}").replace('.', ","),
+            format!("{value:.1}").replace('.', &t!("docker.number.decimal_separator")),
             UNITS[unit]
         )
     } else {
@@ -235,10 +236,10 @@ pub(crate) fn format_bytes(bytes: u64) -> String {
     }
 }
 
-/// `0,4%`, `12%`.
+/// `0.4%`, `12%`.
 pub(crate) fn format_percent(percent: f64) -> String {
     if percent < 10.0 {
-        format!("{percent:.1}%").replace('.', ",")
+        format!("{percent:.1}%").replace('.', &t!("docker.number.decimal_separator"))
     } else {
         format!("{percent:.0}%")
     }
@@ -251,8 +252,8 @@ mod tests {
     #[test]
     fn formats_like_the_boards() {
         assert_eq!(format_bytes(182_000_000), "182 MB");
-        assert_eq!(format_bytes(2_100_000_000), "2,1 GB");
-        assert_eq!(format_percent(0.42), "0,4%");
+        assert_eq!(format_bytes(2_100_000_000), "2.1 GB");
+        assert_eq!(format_percent(0.42), "0.4%");
         assert_eq!(format_percent(23.4), "23%");
     }
 }

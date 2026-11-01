@@ -1,7 +1,7 @@
 use crate::{
     FocusFilter, Inspect, NewContainer, OpenLogs, OpenTerminal, Refresh, Remove, Restart,
     ToggleFocus, TogglePause, ToggleStop,
-    client::{Container, ContainerState},
+    client::{Container, ContainerState, health_label},
     discovery, format_bytes, format_percent, logs_view, new_container,
     store::{Connection, ContainerAction, DockerStore, Group, GroupKind, StoreEvent},
 };
@@ -12,6 +12,7 @@ use gpui::{
     FontStyle, FontWeight, PromptLevel, ScrollHandle, Subscription, TextStyle, WeakEntity, px,
     relative,
 };
+use i18n::t;
 use project::Project;
 use settings::Settings as _;
 use std::path::{Path, PathBuf};
@@ -64,7 +65,7 @@ impl DockerPanel {
         let store = DockerStore::global(cx);
         let filter_editor = cx.new(|cx| {
             let mut editor = Editor::single_line(window, cx);
-            editor.set_placeholder_text("Filtrar containers, imagens, portas…", window, cx);
+            editor.set_placeholder_text(&t!("docker.panel.filter_placeholder"), window, cx);
             editor
         });
         let subscriptions = vec![
@@ -234,11 +235,13 @@ impl DockerPanel {
         cx: &mut Context<Self>,
     ) {
         let name = container.display_name().to_string();
+        let confirm = t!("docker.remove.confirm");
+        let cancel = t!("docker.remove.cancel");
         let answer = window.prompt(
             PromptLevel::Warning,
-            &format!("Remover o container {name}?"),
-            Some("O container é apagado, mesmo rodando. A imagem e os volumes nomeados continuam."),
-            &["Remover", "Cancelar"],
+            &t!("docker.remove.title", name = name),
+            Some(&t!("docker.remove.detail")),
+            &[confirm.as_ref(), cancel.as_ref()],
             cx,
         );
         let container = container.clone();
@@ -351,7 +354,12 @@ impl DockerPanel {
             Connection::Connecting => (
                 "Docker".into(),
                 chip(cx)
-                    .child(mono("conectando…", 10.5, Color::Placeholder, cx))
+                    .child(mono(
+                        t!("docker.engine.connecting"),
+                        10.5,
+                        Color::Placeholder,
+                        cx,
+                    ))
                     .into_any_element(),
             ),
             Connection::Unavailable { socket, .. } => (
@@ -359,7 +367,12 @@ impl DockerPanel {
                 chip(cx)
                     .gap(px(6.))
                     .child(dot(6., Color::Error.color(cx)))
-                    .child(mono("sem resposta", 10.5, Color::Error, cx))
+                    .child(mono(
+                        t!("docker.engine.no_response"),
+                        10.5,
+                        Color::Error,
+                        cx,
+                    ))
                     .into_any_element(),
             ),
         };
@@ -382,7 +395,7 @@ impl DockerPanel {
                     false,
                     cx,
                 )
-                .tooltip(Tooltip::text("Recarregar"))
+                .tooltip(Tooltip::text(t!("docker.engine.reload")))
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.store.update(cx, |store, cx| store.reconnect(cx));
                 })),
@@ -452,30 +465,28 @@ impl DockerPanel {
                     .border_1()
                     .border_color(colors.border)
                     .bg(colors.editor_background)
-                    .child(self.render_segment(Segment::All, "Todos", total, segment, cx))
-                    .child(self.render_segment(Segment::Running, "Rodando", running, segment, cx))
-                    .child(self.render_segment(
-                        Segment::Stopped,
-                        "Parados",
-                        total - running,
-                        segment,
-                        cx,
-                    )),
+                    .child(self.render_segment(Segment::All, total, segment, cx))
+                    .child(self.render_segment(Segment::Running, running, segment, cx))
+                    .child(self.render_segment(Segment::Stopped, total - running, segment, cx)),
             )
     }
 
     fn render_segment(
         &self,
         value: Segment,
-        label: &'static str,
         count: usize,
         current: Segment,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let colors = cx.theme().colors();
         let active = value == current;
+        let (id, label) = match value {
+            Segment::All => ("docker-segment-all", t!("docker.segment.all")),
+            Segment::Running => ("docker-segment-running", t!("docker.segment.running")),
+            Segment::Stopped => ("docker-segment-stopped", t!("docker.segment.stopped")),
+        };
         h_flex()
-            .id(label)
+            .id(id)
             .h(px(20.))
             .px(px(8.))
             .gap(px(6.))
@@ -541,7 +552,7 @@ impl DockerPanel {
                 })
                 .size(IconSize::Small),
             )
-            .child(text(group.title().to_string(), 12.).weight(FontWeight::BOLD))
+            .child(text(group.title(), 12.).weight(FontWeight::BOLD))
             .child(mono(count, 10.5, Color::Placeholder, cx))
             .child(div().flex_1())
             .when(is_compose, |this| {
@@ -556,7 +567,7 @@ impl DockerPanel {
                         false,
                         cx,
                     )
-                    .tooltip(Tooltip::text("Reiniciar o compose"))
+                    .tooltip(Tooltip::text(t!("docker.group.restart_compose")))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         cx.stop_propagation();
                         this.run_on_group(&restart_group, ContainerAction::Restart, cx);
@@ -571,7 +582,7 @@ impl DockerPanel {
                         false,
                         cx,
                     )
-                    .tooltip(Tooltip::text("Parar o compose"))
+                    .tooltip(Tooltip::text(t!("docker.group.stop_compose")))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         cx.stop_propagation();
                         this.run_on_group(&stop_group, ContainerAction::Stop, cx);
@@ -664,14 +675,14 @@ impl DockerPanel {
                 quick_chip(
                     "docker-quick-terminal",
                     IconName::Terminal,
-                    "Terminal",
+                    t!("docker.quick.terminal"),
                     running,
                     cx,
                 )
                 .tooltip(Tooltip::text(if running {
-                    "Abrir um shell dentro do container"
+                    t!("docker.quick.terminal_tooltip")
                 } else {
-                    "O container precisa estar rodando"
+                    t!("docker.quick.terminal_needs_running")
                 }))
                 .when(running, |this| {
                     this.on_click(cx.listener(move |this, _, window, cx| {
@@ -680,11 +691,16 @@ impl DockerPanel {
                 }),
             )
             .child(
-                quick_chip("docker-quick-logs", IconName::Reader, "Logs", true, cx).on_click(
-                    cx.listener(move |this, _, window, cx| {
-                        this.open_logs(&logs_container, window, cx)
-                    }),
-                ),
+                quick_chip(
+                    "docker-quick-logs",
+                    IconName::Reader,
+                    t!("docker.quick.logs"),
+                    true,
+                    cx,
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.open_logs(&logs_container, window, cx)
+                })),
             )
             .child(div().flex_1())
             .when(up, |this| {
@@ -701,7 +717,11 @@ impl DockerPanel {
                         true,
                         cx,
                     )
-                    .tooltip(Tooltip::text(if paused { "Retomar" } else { "Pausar" }))
+                    .tooltip(Tooltip::text(if paused {
+                        t!("docker.container.resume")
+                    } else {
+                        t!("docker.container.pause")
+                    }))
                     .when(!busy, |this| {
                         this.on_click(cx.listener(move |this, _, _, cx| {
                             this.toggle_pause(&pause_container, cx)
@@ -718,7 +738,7 @@ impl DockerPanel {
                     true,
                     cx,
                 )
-                .tooltip(Tooltip::text("Reiniciar"))
+                .tooltip(Tooltip::text(t!("docker.container.restart")))
                 .when(!busy, |this| {
                     this.on_click(cx.listener(move |this, _, _, cx| {
                         this.run(&restart_container, ContainerAction::Restart, cx)
@@ -738,7 +758,11 @@ impl DockerPanel {
                     true,
                     cx,
                 )
-                .tooltip(Tooltip::text(if up { "Parar" } else { "Iniciar" }))
+                .tooltip(Tooltip::text(if up {
+                    t!("docker.container.stop")
+                } else {
+                    t!("docker.container.start")
+                }))
                 .when(!busy, |this| {
                     this.on_click(
                         cx.listener(move |this, _, _, cx| this.toggle_stop(&stop_container, cx)),
@@ -779,7 +803,7 @@ impl DockerPanel {
         let store = self.store.read(cx);
         let filter = self.filter_text(cx);
         let open = self.open_sections.contains(&section);
-        let (title, summary, rows): (&str, String, Vec<(String, String)>) = match section {
+        let (title, summary, rows): (SharedString, String, Vec<(String, String)>) = match section {
             Section::Images => {
                 let total: i64 = store.images().iter().map(|image| image.size).sum();
                 let rows = store
@@ -795,7 +819,7 @@ impl DockerPanel {
                     })
                     .collect();
                 (
-                    "IMAGENS",
+                    t!("docker.section.images"),
                     format!(
                         "{} · {}",
                         store.images().len(),
@@ -834,7 +858,7 @@ impl DockerPanel {
                         format_bytes(sizes.iter().sum::<i64>() as u64)
                     )
                 };
-                ("VOLUMES", summary, rows)
+                (t!("docker.section.volumes"), summary, rows)
             }
             Section::Networks => {
                 let rows = store
@@ -842,7 +866,11 @@ impl DockerPanel {
                     .iter()
                     .map(|network| (network.name.clone(), network.driver.clone()))
                     .collect();
-                ("REDES", store.networks().len().to_string(), rows)
+                (
+                    t!("docker.section.networks"),
+                    store.networks().len().to_string(),
+                    rows,
+                )
             }
         };
         let rows: Vec<(String, String)> = rows
@@ -853,7 +881,11 @@ impl DockerPanel {
             .w_full()
             .child(
                 h_flex()
-                    .id(title)
+                    .id(match section {
+                        Section::Images => "docker-section-images",
+                        Section::Volumes => "docker-section-volumes",
+                        Section::Networks => "docker-section-networks",
+                    })
                     .w_full()
                     .h(px(30.))
                     .px(px(6.))
@@ -931,11 +963,11 @@ impl DockerPanel {
                     .child(
                         text(
                             if !loaded {
-                                "Lendo os containers…"
+                                t!("docker.list.loading")
                             } else if filter.is_empty() && self.segment == Segment::All {
-                                "Nenhum container nesta máquina."
+                                t!("docker.list.empty")
                             } else {
-                                "Nenhum container com esse filtro."
+                                t!("docker.list.no_match")
                             },
                             12.,
                         )
@@ -982,15 +1014,16 @@ impl DockerPanel {
             .filter_map(|container| store.stats(&container.id))
             .map(|stats| stats.memory_bytes)
             .sum();
-        let mut summary = format!(
-            "{total} {} · {} rodando",
-            if total == 1 {
-                "container"
-            } else {
-                "containers"
-            },
-            running.len()
-        );
+        let mut summary = if total == 1 {
+            t!("docker.footer.summary.one", running = running.len())
+        } else {
+            t!(
+                "docker.footer.summary.other",
+                count = total,
+                running = running.len()
+            )
+        }
+        .to_string();
         if memory > 0 {
             summary.push_str(&format!(" · {}", format_bytes(memory)));
         }
@@ -1023,7 +1056,7 @@ impl DockerPanel {
                             .size(IconSize::Small)
                             .color(Color::Custom(cx.theme().colors().text)),
                     )
-                    .child(text("Novo container", 12.5).weight(FontWeight::BOLD))
+                    .child(text(t!("docker.footer.new_container"), 12.5).weight(FontWeight::BOLD))
                     .child(
                         KeyBinding::for_action_in(&NewContainer, &focus_handle, cx)
                             .size(rems_from_px(11_f32))
@@ -1066,15 +1099,17 @@ impl DockerPanel {
                     .border_1()
                     .border_color(colors.border)
                     .bg(colors.elevated_surface_background)
-                    .child(Icon::new(IconName::Server).size(IconSize::Custom(rems_from_px(24_f32)))),
+                    .child(
+                        Icon::new(IconName::Server).size(IconSize::Custom(rems_from_px(24_f32))),
+                    ),
             )
-            .child(text("O Docker não está rodando", 14.).weight(FontWeight::BOLD))
+            .child(text(t!("docker.unavailable.title"), 14.).weight(FontWeight::BOLD))
             .child(
                 div().w(px(300.)).child(
                     text(
-                        format!(
-                            "Nenhum daemon respondeu em {}. Abra o Docker Desktop ou aponte para o socket do Colima ou do OrbStack.",
-                            discovery::home_relative(socket)
+                        t!(
+                            "docker.unavailable.detail",
+                            socket = discovery::home_relative(socket)
                         ),
                         12.5,
                     )
@@ -1097,7 +1132,7 @@ impl DockerPanel {
                             .cursor_pointer()
                             .hover(|this| this.bg(colors.ghost_element_hover))
                             .child(
-                                text("Tentar de novo", 12.5)
+                                text(t!("docker.unavailable.retry"), 12.5)
                                     .weight(FontWeight::MEDIUM)
                                     .color(Color::Custom(colors.editor_foreground)),
                             )
@@ -1115,8 +1150,13 @@ impl DockerPanel {
                                 .bg(colors.border_focused)
                                 .cursor_pointer()
                                 .hover(|this| this.opacity(0.9))
-                                .child(text("Abrir Docker Desktop", 12.5).weight(FontWeight::BOLD))
-                                .on_click(cx.listener(|this, _, _, cx| this.open_docker_desktop(cx))),
+                                .child(
+                                    text(t!("docker.unavailable.open_docker_desktop"), 12.5)
+                                        .weight(FontWeight::BOLD),
+                                )
+                                .on_click(
+                                    cx.listener(|this, _, _, cx| this.open_docker_desktop(cx)),
+                                ),
                         )
                     }),
             )
@@ -1130,7 +1170,7 @@ impl DockerPanel {
                         .border_1()
                         .border_color(colors.border)
                         .bg(colors.editor_background)
-                        .child(caption("OUTRO RUNTIME"))
+                        .child(caption(t!("docker.unavailable.other_runtime")))
                         .children(others.into_iter().enumerate().map(|(index, candidate)| {
                             let path = candidate.path.clone();
                             h_flex()
@@ -1145,7 +1185,9 @@ impl DockerPanel {
                                         colors.border_selected
                                     },
                                 ))
-                                .child(text(candidate.runtime.clone(), 12.).weight(FontWeight::MEDIUM))
+                                .child(
+                                    text(candidate.runtime.clone(), 12.).weight(FontWeight::MEDIUM),
+                                )
                                 .child(
                                     div().flex_1().min_w_0().child(
                                         mono(candidate.short_path(), 10.5, Color::Placeholder, cx)
@@ -1156,7 +1198,10 @@ impl DockerPanel {
                                     div()
                                         .id(("docker-use-socket", index))
                                         .cursor_pointer()
-                                        .child(text("Usar", 11.5).color(Color::Accent))
+                                        .child(
+                                            text(t!("docker.unavailable.use"), 11.5)
+                                                .color(Color::Accent),
+                                        )
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             let path = path.clone();
                                             this.store
@@ -1164,7 +1209,7 @@ impl DockerPanel {
                                         }))
                                         .into_any_element()
                                 } else {
-                                    text("não achado", 11.5)
+                                    text(t!("docker.unavailable.not_found"), 11.5)
                                         .color(Color::Placeholder)
                                         .into_any_element()
                                 })
@@ -1253,23 +1298,30 @@ fn row_state(
             } else {
                 RowStatus::Running
             },
-            usage.unwrap_or_else(|| container.health().unwrap_or_default().to_string()),
+            usage.unwrap_or_else(|| {
+                container
+                    .health()
+                    .map(|health| health_label(health).to_string())
+                    .unwrap_or_default()
+            }),
         ),
         ContainerState::Restarting => (
             RowStatus::Failing,
             match restart_count {
-                Some(count) if count > 0 => format!("reiniciando · {count}×"),
-                _ => "reiniciando".to_string(),
+                Some(count) if count > 0 => {
+                    format!("{} · {count}×", t!("docker.state.restarting"))
+                }
+                _ => t!("docker.state.restarting").to_string(),
             },
         ),
-        ContainerState::Paused => (RowStatus::Paused, "pausado".to_string()),
+        ContainerState::Paused => (RowStatus::Paused, t!("docker.state.paused").to_string()),
         ContainerState::Exited | ContainerState::Dead => {
             let mut state = match container.exit_code() {
-                Some(code) => format!("saiu ({code})"),
+                Some(code) => t!("docker.state.exited_with_code", code = code).to_string(),
                 None => container.state.label().to_string(),
             };
-            if let Some(age) = container.status_age().and_then(pt_age) {
-                state.push_str(&format!(" · há {age}"));
+            if let Some(age) = container.status_age().and_then(age_label) {
+                state.push_str(&format!(" · {}", t!("docker.age.ago", age = age)));
             }
             (
                 if container
@@ -1290,10 +1342,10 @@ fn row_state(
 }
 
 /// Docker's "2 hours", "About a minute", "Less than a second" as the boards write them.
-pub(crate) fn pt_age(age: &str) -> Option<String> {
+pub(crate) fn age_label(age: &str) -> Option<String> {
     let age = age.trim().to_lowercase();
     if age.starts_with("less than") {
-        return Some("instantes".into());
+        return Some(t!("docker.age.moments").to_string());
     }
     let mut words = age.split_whitespace();
     let first = words.next()?;
@@ -1310,16 +1362,19 @@ pub(crate) fn pt_age(age: &str) -> Option<String> {
         number => (number.parse::<u64>().ok()?, words.next()?.to_string()),
     };
     let unit = unit.trim_end_matches('s');
-    Some(match unit {
-        "second" => format!("{count} s"),
-        "minute" => format!("{count} min"),
-        "hour" => format!("{count} h"),
-        "day" => format!("{count} d"),
-        "week" => format!("{count} sem"),
-        "month" => format!("{count} {}", if count == 1 { "mês" } else { "meses" }),
-        "year" => format!("{count} {}", if count == 1 { "ano" } else { "anos" }),
+    let label = match unit {
+        "second" => t!("docker.age.seconds", count = count),
+        "minute" => t!("docker.age.minutes", count = count),
+        "hour" => t!("docker.age.hours", count = count),
+        "day" => t!("docker.age.days", count = count),
+        "week" => t!("docker.age.weeks", count = count),
+        "month" if count == 1 => t!("docker.age.months.one", count = count),
+        "month" => t!("docker.age.months.other", count = count),
+        "year" if count == 1 => t!("docker.age.years.one", count = count),
+        "year" => t!("docker.age.years.other", count = count),
         _ => return None,
-    })
+    };
+    Some(label.to_string())
 }
 
 fn short_hash(id: &str) -> String {
@@ -1379,7 +1434,7 @@ pub(crate) fn icon_button(
 fn quick_chip(
     id: &'static str,
     icon: IconName,
-    label: &'static str,
+    label: SharedString,
     enabled: bool,
     cx: &App,
 ) -> gpui::Stateful<Div> {
@@ -1489,7 +1544,7 @@ fn container_menu(
             .first()
             .map(|(public, _)| *public);
 
-        let entry = |label: String,
+        let entry = |label: SharedString,
                      icon: IconName,
                      action: Box<dyn gpui::Action>,
                      run: Box<
@@ -1527,7 +1582,7 @@ fn container_menu(
                         IconButton::new("docker-copy-id", IconName::Copy)
                             .icon_size(IconSize::XSmall)
                             .icon_color(Color::Muted)
-                            .tooltip(Tooltip::text("Copiar o id"))
+                            .tooltip(Tooltip::text(t!("docker.menu.copy_id")))
                             .on_click(move |_, _, cx| {
                                 cx.write_to_clipboard(ClipboardItem::new_string(full_id.clone()))
                             }),
@@ -1535,10 +1590,10 @@ fn container_menu(
                     .into_any_element()
             })
             .separator()
-            .header("Interagir");
+            .header(t!("docker.menu.interact"));
         if running {
             menu = menu.item(entry(
-                "Abrir terminal (sh)".into(),
+                t!("docker.menu.open_terminal"),
                 IconName::Terminal,
                 Box::new(OpenTerminal),
                 Box::new(|panel, container, window, cx| panel.open_terminal(container, window, cx)),
@@ -1546,29 +1601,33 @@ fn container_menu(
         }
         menu = menu
             .item(entry(
-                "Ver logs".into(),
+                t!("docker.menu.view_logs"),
                 IconName::Reader,
                 Box::new(OpenLogs),
                 Box::new(|panel, container, window, cx| panel.open_logs(container, window, cx)),
             ))
             .item(entry(
-                "Inspecionar".into(),
+                t!("docker.menu.inspect"),
                 IconName::Eye,
                 Box::new(Inspect),
                 Box::new(|panel, container, window, cx| panel.inspect(container, window, cx)),
             ));
         if let Some(port) = port.filter(|_| running) {
             menu = menu.item(
-                ContextMenuEntry::new(format!("Abrir localhost:{port}"))
+                ContextMenuEntry::new(t!("docker.menu.open_localhost", port = port))
                     .icon(IconName::ArrowUpRight)
                     .icon_color(Color::Muted)
                     .handler(move |_, cx| cx.open_url(&format!("http://localhost:{port}"))),
             );
         }
-        menu = menu.separator().header("Ciclo de vida");
+        menu = menu.separator().header(t!("docker.menu.lifecycle"));
         if up {
             menu = menu.item(entry(
-                if paused { "Retomar" } else { "Pausar" }.into(),
+                if paused {
+                    t!("docker.container.resume")
+                } else {
+                    t!("docker.container.pause")
+                },
                 if paused {
                     IconName::PlayFilled
                 } else {
@@ -1580,7 +1639,7 @@ fn container_menu(
         }
         menu = menu
             .item(entry(
-                "Reiniciar".into(),
+                t!("docker.container.restart"),
                 IconName::RotateCw,
                 Box::new(Restart),
                 Box::new(|panel, container, _, cx| {
@@ -1588,7 +1647,11 @@ fn container_menu(
                 }),
             ))
             .item(entry(
-                if up { "Parar" } else { "Iniciar" }.into(),
+                if up {
+                    t!("docker.container.stop")
+                } else {
+                    t!("docker.container.start")
+                },
                 if up {
                     IconName::Stop
                 } else {
@@ -1602,17 +1665,14 @@ fn container_menu(
             .item({
                 let panel = panel.clone();
                 let container = container.clone();
-                ContextMenuEntry::new(format!(
-                    "Perguntar ao Agent sobre {}",
-                    container.display_name()
-                ))
-                .icon(IconName::Sparkle)
-                .icon_color(Color::Muted)
-                .handler(move |window, cx| {
-                    panel
-                        .update(cx, |panel, cx| panel.ask_agent(&container, window, cx))
-                        .log_err();
-                })
+                ContextMenuEntry::new(t!("docker.menu.ask_agent", name = container.display_name()))
+                    .icon(IconName::Sparkle)
+                    .icon_color(Color::Muted)
+                    .handler(move |window, cx| {
+                        panel
+                            .update(cx, |panel, cx| panel.ask_agent(&container, window, cx))
+                            .log_err();
+                    })
             })
             .separator();
         let remove_panel = panel.clone();
@@ -1631,7 +1691,7 @@ fn container_menu(
                     .child(
                         div()
                             .flex_1()
-                            .child(text("Remover container…", 12.5).color(Color::Error)),
+                            .child(text(t!("docker.menu.remove"), 12.5).color(Color::Error)),
                     )
                     .when_some(remove_focus.clone(), |this, focus| {
                         this.child(
@@ -1679,11 +1739,12 @@ pub(crate) fn open_terminal(
         .filter(|dir| !dir.is_empty())
         .unwrap_or_else(|| "/".into());
     let banner = format!(
-        "\\033[32m●\\033[0m \\033[1mDentro de {}\\033[0m  \\033[2m{} · usuário {} · {}  —  sai com exit ou ^D; o container continua rodando\\033[0m\\n\\n",
-        shell_escape(&name),
+        "\\033[32m●\\033[0m \\033[1m{}\\033[0m  \\033[2m{} · {} · {}  —  {}\\033[0m\\n\\n",
+        shell_escape(&t!("docker.terminal.inside", name = name)),
         shell_escape(&container.image),
-        shell_escape(&user),
+        shell_escape(&t!("docker.terminal.user", user = user)),
         shell_escape(&working_dir),
+        shell_escape(&t!("docker.terminal.exit_hint")),
     );
     let script = format!(
         "printf '{banner}'; exec docker exec -it {} sh -c 'command -v bash >/dev/null && exec bash || exec sh'",
@@ -1912,10 +1973,10 @@ mod tests {
 
     #[test]
     fn translates_docker_ages() {
-        assert_eq!(pt_age("2 hours").as_deref(), Some("2 h"));
-        assert_eq!(pt_age("About an hour").as_deref(), Some("1 h"));
-        assert_eq!(pt_age("8 minutes").as_deref(), Some("8 min"));
-        assert_eq!(pt_age("Less than a second").as_deref(), Some("instantes"));
-        assert_eq!(pt_age("3 months").as_deref(), Some("3 meses"));
+        assert_eq!(age_label("2 hours").as_deref(), Some("2 h"));
+        assert_eq!(age_label("About an hour").as_deref(), Some("1 h"));
+        assert_eq!(age_label("8 minutes").as_deref(), Some("8 min"));
+        assert_eq!(age_label("Less than a second").as_deref(), Some("moments"));
+        assert_eq!(age_label("3 months").as_deref(), Some("3 months"));
     }
 }

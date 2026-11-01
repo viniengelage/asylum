@@ -16,6 +16,7 @@ use catalog::DownloadLine;
 use futures::AsyncReadExt as _;
 use gpui::{App, AppContext as _, AsyncApp, Context, EventEmitter, SharedString, Task, WeakEntity};
 use http_client::HttpClient;
+use i18n::t;
 use smol::process::Command;
 use std::{
     cmp::Ordering,
@@ -329,24 +330,32 @@ impl IosSimulatorManager {
                 && let Some(sdk_version) = &sdk_version
                 && compare_versions(&option.version, sdk_version) == Ordering::Greater
             {
-                option.unavailable = Some(format!(
-                    "exige Xcode {} ou mais novo",
-                    display_version(&option.version)
-                ));
+                option.unavailable = Some(
+                    t!(
+                        "ios_simulator.runtime.requires_xcode",
+                        version = display_version(&option.version)
+                    )
+                    .to_string(),
+                );
             } else if let Some(model) = model
                 && !model.supports(&option.version)
             {
                 option.unavailable = Some(match (&model.min_runtime, &model.max_runtime) {
                     (Some(min), _) if compare_versions(&option.version, min) == Ordering::Less => {
-                        format!(
-                            "o {} exige iOS {} ou mais novo",
-                            model.name,
-                            display_version(min)
+                        t!(
+                            "ios_simulator.runtime.model_requires_ios",
+                            model = model.name,
+                            version = display_version(min)
                                 .strip_suffix(".0")
                                 .unwrap_or(&display_version(min))
                         )
+                        .to_string()
                     }
-                    _ => format!("o {} não roda esta versão", model.name),
+                    _ => t!(
+                        "ios_simulator.runtime.model_does_not_run",
+                        model = model.name
+                    )
+                    .to_string(),
                 });
             }
         }
@@ -454,17 +463,20 @@ impl IosSimulatorManager {
         if download.is_some() {
             steps.push(step(
                 PrepareStepKind::Licenses,
-                format!("Xcode {xcode_version} e licença verificados"),
+                t!(
+                    "ios_simulator.prepare.step_xcode_checked",
+                    version = xcode_version
+                ),
             ));
             steps.push(step(
                 PrepareStepKind::DiskSpace,
-                "Espaço em disco verificado",
+                t!("ios_simulator.prepare.step_disk_checked"),
             ));
             steps.push(step(
                 PrepareStepKind::Download,
-                format!(
-                    "Baixando o runtime iOS {}",
-                    download
+                t!(
+                    "ios_simulator.prepare.step_download",
+                    version = download
                         .as_ref()
                         .map(|(version, _)| display_version(version))
                         .unwrap_or_default()
@@ -472,9 +484,15 @@ impl IosSimulatorManager {
             ));
         }
         if settings.is_some() {
-            steps.push(step(PrepareStepKind::CreateAvd, "Criando o simulador"));
+            steps.push(step(
+                PrepareStepKind::CreateAvd,
+                t!("ios_simulator.prepare.step_create"),
+            ));
             if boot_when_ready {
-                steps.push(step(PrepareStepKind::FirstBoot, "Primeira inicialização"));
+                steps.push(step(
+                    PrepareStepKind::FirstBoot,
+                    t!("ios_simulator.prepare.step_first_boot"),
+                ));
             }
         }
         let version_label = download
@@ -488,16 +506,17 @@ impl IosSimulatorManager {
             .unwrap_or_default();
         let job = PrepareJob {
             title: match &settings {
-                Some(settings) => format!("Criando {}", settings.name).into(),
-                None => format!("Baixando iOS {version_label}").into(),
+                Some(settings) => t!("ios_simulator.prepare.title_create", name = settings.name),
+                None => t!(
+                    "ios_simulator.prepare.title_download",
+                    version = version_label
+                ),
             },
             description: download.as_ref().map(|_| {
-                format!(
-                    "O runtime do iOS {version_label} ainda não está no Mac. A Apple entrega o \
-                     runtime inteiro de uma vez; depois ele serve para todos os simuladores \
-                     dessa versão."
+                t!(
+                    "ios_simulator.prepare.description_download",
+                    version = version_label
                 )
-                .into()
             }),
             steps,
             current: 0,
@@ -608,10 +627,10 @@ impl IosSimulatorManager {
 
     pub fn duplicate_device(&mut self, udid: String, cx: &mut Context<Self>) -> Task<Result<()>> {
         let Some(device) = self.device(&udid) else {
-            return Task::ready(Err(anyhow!("simulador não encontrado")));
+            return Task::ready(Err(anyhow!(t!("ios_simulator.error.simulator_not_found"))));
         };
         let name = unique_name(
-            &format!("{} (cópia)", device.name),
+            &t!("ios_simulator.copy_name", name = device.name),
             self.inventory
                 .devices
                 .iter()
@@ -631,7 +650,7 @@ impl IosSimulatorManager {
             .find(|image| image.build == build)
             .map(|image| image.image_identifier.clone())
         else {
-            return Task::ready(Err(anyhow!("runtime não encontrado")));
+            return Task::ready(Err(anyhow!(t!("ios_simulator.error.runtime_not_found"))));
         };
         self.run_disk_action(cx, async move {
             simctl(&["runtime", "delete", &image]).await?;
@@ -650,7 +669,7 @@ impl IosSimulatorManager {
         cx: &mut Context<Self>,
     ) -> Task<Result<()>> {
         let Some(device) = self.device(&udid).cloned() else {
-            return Task::ready(Err(anyhow!("simulador não encontrado")));
+            return Task::ready(Err(anyhow!(t!("ios_simulator.error.simulator_not_found"))));
         };
         self.run_disk_action(cx, async move {
             if device.name != name {
@@ -771,10 +790,7 @@ async fn run_prepare(
 ) -> Result<()> {
     if let Some((version, build, download_bytes, prerelease)) = download {
         let xcode = cx.background_spawn(read_xcode_status()).await;
-        anyhow::ensure!(
-            xcode.is_ready(),
-            "o Xcode precisa estar instalado, selecionado e com a licença aceita"
-        );
+        anyhow::ensure!(xcode.is_ready(), t!("ios_simulator.error.xcode_not_ready"));
         advance(this, cx, PrepareStepKind::DiskSpace, None)?;
 
         let available = cx
@@ -785,18 +801,29 @@ async fn run_prepare(
         if let (Some(available), Some(required)) = (available, download_bytes) {
             anyhow::ensure!(
                 available > required,
-                "espaço insuficiente: o runtime precisa de {} e há {} livres",
-                format_bytes(required),
-                format_bytes(available)
+                t!(
+                    "ios_simulator.error.insufficient_space",
+                    required = format_bytes(required),
+                    available = format_bytes(available)
+                )
             );
         }
         let detail = match (available, download_bytes) {
-            (Some(available), Some(required)) => Some(format!(
-                "{} livres · o runtime ocupa {}",
-                format_bytes(available),
-                format_bytes(required)
-            )),
-            (Some(available), None) => Some(format!("{} livres", format_bytes(available))),
+            (Some(available), Some(required)) => Some(
+                t!(
+                    "ios_simulator.prepare.disk_free_runtime_size",
+                    available = format_bytes(available),
+                    required = format_bytes(required)
+                )
+                .to_string(),
+            ),
+            (Some(available), None) => Some(
+                t!(
+                    "ios_simulator.prepare.disk_free",
+                    available = format_bytes(available)
+                )
+                .to_string(),
+            ),
             _ => None,
         };
         advance(this, cx, PrepareStepKind::Download, detail)?;
@@ -870,12 +897,15 @@ async fn download_runtime(
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
-        .context("não foi possível executar xcodebuild -downloadPlatform")?;
-    let mut stdout = child.stdout.take().context("xcodebuild sem saída padrão")?;
+        .context(t!("ios_simulator.error.xcodebuild_spawn_failed"))?;
+    let mut stdout = child
+        .stdout
+        .take()
+        .context(t!("ios_simulator.error.xcodebuild_no_stdout"))?;
     let mut stderr = child
         .stderr
         .take()
-        .context("xcodebuild sem saída de erro")?;
+        .context(t!("ios_simulator.error.xcodebuild_no_stderr"))?;
     let total = download_bytes.unwrap_or(0);
     let started_at = Instant::now();
     let mut pending = String::new();
@@ -921,10 +951,13 @@ async fn download_runtime(
     if !status.success() {
         let mut message = String::new();
         stderr.read_to_string(&mut message).await.log_err();
-        anyhow::bail!(
-            "xcodebuild -downloadPlatform falhou: {}",
-            message.trim().lines().last().unwrap_or("sem detalhes")
-        );
+        let reason = message
+            .trim()
+            .lines()
+            .last()
+            .map(SharedString::from)
+            .unwrap_or_else(|| t!("ios_simulator.error.no_details"));
+        anyhow::bail!(t!("ios_simulator.error.download_failed", reason = reason));
     }
     Ok(())
 }
@@ -941,9 +974,9 @@ async fn create_simulator(settings: &SimulatorSettings) -> Result<String> {
             })
         })
         .with_context(|| {
-            format!(
-                "o runtime iOS {} não apareceu no simctl depois do download",
-                display_version(&settings.runtime_version)
+            t!(
+                "ios_simulator.error.runtime_missing_after_download",
+                version = display_version(&settings.runtime_version)
             )
         })?;
     let output = simctl(&[
@@ -954,7 +987,10 @@ async fn create_simulator(settings: &SimulatorSettings) -> Result<String> {
     ])
     .await?;
     let udid = String::from_utf8_lossy(&output).trim().to_string();
-    anyhow::ensure!(!udid.is_empty(), "xcrun simctl create não devolveu o UDID");
+    anyhow::ensure!(
+        !udid.is_empty(),
+        t!("ios_simulator.error.create_returned_no_udid")
+    );
     let inventory = read_inventory().await?;
     if let Some(device) = inventory.devices.iter().find(|device| device.udid == udid) {
         apply_preferences(device, settings.language, settings.appearance).await?;
@@ -972,11 +1008,11 @@ async fn apply_preferences(
 ) -> Result<()> {
     let directory = device
         .directory()
-        .context("o simctl não informou a pasta do simulador")?;
+        .context(t!("ios_simulator.error.no_simulator_directory"))?;
     let preferences = directory.join("data/Library/Preferences");
     smol::fs::create_dir_all(&preferences)
         .await
-        .with_context(|| format!("criando {}", preferences.display()))?;
+        .with_context(|| t!("ios_simulator.error.creating", path = preferences.display()))?;
     let global = preferences.join(".GlobalPreferences.plist");
     update_plist(&global, |dictionary| {
         dictionary.insert(
@@ -1035,7 +1071,7 @@ fn update_plist(path: &Path, update: impl FnOnce(&mut plist::Dictionary)) -> Res
     update(&mut dictionary);
     plist::Value::Dictionary(dictionary)
         .to_file_binary(path)
-        .with_context(|| format!("gravando {}", path.display()))
+        .with_context(|| t!("ios_simulator.error.writing", path = path.display()))
 }
 
 async fn simctl(arguments: &[&str]) -> Result<Vec<u8>> {
@@ -1046,16 +1082,18 @@ async fn simctl(arguments: &[&str]) -> Result<Vec<u8>> {
         .output()
         .await
         .with_context(|| {
-            format!(
-                "não foi possível executar xcrun simctl {}",
-                arguments.join(" ")
+            t!(
+                "ios_simulator.error.simctl_spawn_failed",
+                arguments = arguments.join(" ")
             )
         })?;
     anyhow::ensure!(
         output.status.success(),
-        "xcrun simctl {} falhou: {}",
-        arguments.first().copied().unwrap_or_default(),
-        String::from_utf8_lossy(&output.stderr).trim()
+        t!(
+            "ios_simulator.error.simctl_failed",
+            command = arguments.first().copied().unwrap_or_default(),
+            reason = String::from_utf8_lossy(&output.stderr).trim()
+        )
     );
     Ok(output.stdout)
 }
@@ -1199,18 +1237,20 @@ async fn fetch_catalog(http_client: Arc<dyn HttpClient>) -> Result<Catalog> {
     let mut response = http_client
         .get(catalog::CATALOG_URL, Default::default(), true)
         .await
-        .context("requisição do índice de runtimes da Apple")?;
+        .context(t!("ios_simulator.error.runtime_index_request"))?;
     anyhow::ensure!(
         response.status().is_success(),
-        "o índice de runtimes respondeu {}",
-        response.status()
+        t!(
+            "ios_simulator.error.runtime_index_status",
+            status = response.status()
+        )
     );
     let mut bytes = Vec::new();
     response
         .body_mut()
         .read_to_end(&mut bytes)
         .await
-        .context("lendo o índice de runtimes")?;
+        .context(t!("ios_simulator.error.reading_runtime_index"))?;
     let catalog = catalog::parse_catalog(&bytes, apple_silicon)?;
     if let Some(parent) = cache.parent() {
         smol::fs::create_dir_all(parent).await.log_err();

@@ -685,7 +685,11 @@ pub async fn handle_cli_connection(
                         Ok(()) => {
                             responses
                                 .send(CliResponse::Stdout {
-                                    message: format!("Aberto no perfil {}", owner.name),
+                                    message: i18n::t!(
+                                        "zed.cli.opened_in_profile",
+                                        name = owner.name
+                                    )
+                                    .to_string(),
                                 })
                                 .log_err();
                             0
@@ -693,10 +697,12 @@ pub async fn handle_cli_connection(
                         Err(error) => {
                             responses
                                 .send(CliResponse::Stderr {
-                                    message: format!(
-                                        "Falha ao abrir no perfil {}: {error:#}",
-                                        owner.name
-                                    ),
+                                    message: i18n::t!(
+                                        "zed.cli.open_in_profile_failed",
+                                        name = owner.name,
+                                        error = format!("{error:#}")
+                                    )
+                                    .to_string(),
                                 })
                                 .log_err();
                             1

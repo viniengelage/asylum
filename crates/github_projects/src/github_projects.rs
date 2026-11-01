@@ -15,6 +15,7 @@ use anyhow::{Context as _, Result};
 use db::kvp::KeyValueStore;
 use gpui::{Entity, Global, Subscription, Task, WeakEntity, actions};
 use http_client::HttpClient;
+use i18n::t;
 use project::Project;
 use repo_hosting::{
     Connection, RepoStore,
@@ -486,14 +487,23 @@ impl RepositoryProjects {
         cx: &mut Context<Self>,
     ) -> Task<Result<()>> {
         let Some((http_client, credentials)) = self.client(cx) else {
-            return Task::ready(Err(anyhow::anyhow!("o GitHub não está conectado")));
+            return Task::ready(Err(anyhow::anyhow!(
+                "{}",
+                t!("github_projects.errors.not_connected")
+            )));
         };
         let Some(project) = &mut self.project else {
-            return Task::ready(Err(anyhow::anyhow!("nenhum projeto carregado")));
+            return Task::ready(Err(anyhow::anyhow!(
+                "{}",
+                t!("github_projects.errors.no_project_loaded")
+            )));
         };
         let project_id = project.summary.id.clone();
         let Some(item) = project.items.iter_mut().find(|item| item.id == item_id) else {
-            return Task::ready(Err(anyhow::anyhow!("o item não está mais no projeto")));
+            return Task::ready(Err(anyhow::anyhow!(
+                "{}",
+                t!("github_projects.errors.item_gone")
+            )));
         };
         let previous = item.values.get(&field_id).cloned();
         match &value {
@@ -570,17 +580,26 @@ impl RepositoryProjects {
             .and_then(|project| project.status.as_ref())
             .map(|field| field.id.clone())
         else {
-            return Task::ready(Err(anyhow::anyhow!("o projeto não tem campo Status")));
+            return Task::ready(Err(anyhow::anyhow!(
+                "{}",
+                t!("github_projects.errors.no_status_field")
+            )));
         };
         self.set_field(item_id, field_id, api::NewValue::Option(option_id), cx)
     }
 
     pub fn assign_me(&mut self, item_id: &str, cx: &mut Context<Self>) -> Task<Result<()>> {
         let Some((http_client, credentials)) = self.client(cx) else {
-            return Task::ready(Err(anyhow::anyhow!("o GitHub não está conectado")));
+            return Task::ready(Err(anyhow::anyhow!(
+                "{}",
+                t!("github_projects.errors.not_connected")
+            )));
         };
         let Some(info) = &self.info else {
-            return Task::ready(Err(anyhow::anyhow!("o repositório ainda não carregou")));
+            return Task::ready(Err(anyhow::anyhow!(
+                "{}",
+                t!("github_projects.errors.repository_loading")
+            )));
         };
         let viewer_id = info.viewer_id.clone();
         let viewer_login = info.viewer_login.clone();
@@ -589,7 +608,10 @@ impl RepositoryProjects {
             .as_mut()
             .and_then(|project| project.items.iter_mut().find(|item| item.id == item_id))
         else {
-            return Task::ready(Err(anyhow::anyhow!("o item não está mais no projeto")));
+            return Task::ready(Err(anyhow::anyhow!(
+                "{}",
+                t!("github_projects.errors.item_gone")
+            )));
         };
         if item.is_assigned_to(&viewer_login) {
             return Task::ready(Ok(()));
@@ -609,17 +631,26 @@ impl RepositoryProjects {
         cx: &mut Context<Self>,
     ) -> Task<Result<()>> {
         let Some((http_client, credentials)) = self.client(cx) else {
-            return Task::ready(Err(anyhow::anyhow!("o GitHub não está conectado")));
+            return Task::ready(Err(anyhow::anyhow!(
+                "{}",
+                t!("github_projects.errors.not_connected")
+            )));
         };
         let Some(item) = self
             .project
             .as_ref()
             .and_then(|project| project.item(item_id))
         else {
-            return Task::ready(Err(anyhow::anyhow!("o item não está mais no projeto")));
+            return Task::ready(Err(anyhow::anyhow!(
+                "{}",
+                t!("github_projects.errors.item_gone")
+            )));
         };
         if item.kind == api::ItemKind::Draft {
-            return Task::ready(Err(anyhow::anyhow!("rascunhos não têm comentários")));
+            return Task::ready(Err(anyhow::anyhow!(
+                "{}",
+                t!("github_projects.errors.drafts_have_no_comments")
+            )));
         }
         let content_id = item.content_id.clone();
         cx.background_spawn(async move {
@@ -635,14 +666,20 @@ impl RepositoryProjects {
         cx: &mut Context<Self>,
     ) -> Task<Result<()>> {
         let Some((http_client, credentials)) = self.client(cx) else {
-            return Task::ready(Err(anyhow::anyhow!("o GitHub não está conectado")));
+            return Task::ready(Err(anyhow::anyhow!(
+                "{}",
+                t!("github_projects.errors.not_connected")
+            )));
         };
         let Some(item) = self
             .project
             .as_mut()
             .and_then(|project| project.items.iter_mut().find(|item| item.id == item_id))
         else {
-            return Task::ready(Err(anyhow::anyhow!("o item não está mais no projeto")));
+            return Task::ready(Err(anyhow::anyhow!(
+                "{}",
+                t!("github_projects.errors.item_gone")
+            )));
         };
         item.body = api::toggle_subtask(&item.body, line, done);
         let item = item.clone();
@@ -654,14 +691,20 @@ impl RepositoryProjects {
 
     pub fn add_draft(&mut self, title: String, cx: &mut Context<Self>) -> Task<Result<()>> {
         let Some((http_client, credentials)) = self.client(cx) else {
-            return Task::ready(Err(anyhow::anyhow!("o GitHub não está conectado")));
+            return Task::ready(Err(anyhow::anyhow!(
+                "{}",
+                t!("github_projects.errors.not_connected")
+            )));
         };
         let Some(project_id) = self
             .project
             .as_ref()
             .map(|project| project.summary.id.clone())
         else {
-            return Task::ready(Err(anyhow::anyhow!("nenhum projeto carregado")));
+            return Task::ready(Err(anyhow::anyhow!(
+                "{}",
+                t!("github_projects.errors.no_project_loaded")
+            )));
         };
         cx.spawn(async move |this, cx| {
             cx.background_spawn(async move {
@@ -682,16 +725,28 @@ impl RepositoryProjects {
         cx: &mut Context<Self>,
     ) -> Task<Result<()>> {
         let Some((http_client, credentials)) = self.client(cx) else {
-            return Task::ready(Err(anyhow::anyhow!("o GitHub não está conectado")));
+            return Task::ready(Err(anyhow::anyhow!(
+                "{}",
+                t!("github_projects.errors.not_connected")
+            )));
         };
         let Some(info) = self.info.clone() else {
-            return Task::ready(Err(anyhow::anyhow!("o repositório ainda não carregou")));
+            return Task::ready(Err(anyhow::anyhow!(
+                "{}",
+                t!("github_projects.errors.repository_loading")
+            )));
         };
         let Some(project) = &self.project else {
-            return Task::ready(Err(anyhow::anyhow!("nenhum projeto carregado")));
+            return Task::ready(Err(anyhow::anyhow!(
+                "{}",
+                t!("github_projects.errors.no_project_loaded")
+            )));
         };
         let Some(item) = project.item(&item_id).cloned() else {
-            return Task::ready(Err(anyhow::anyhow!("o item não está mais no projeto")));
+            return Task::ready(Err(anyhow::anyhow!(
+                "{}",
+                t!("github_projects.errors.item_gone")
+            )));
         };
         let in_progress = project.in_progress_option().map(|option| option.id.clone());
         cx.spawn(async move |this, cx| {
@@ -699,7 +754,7 @@ impl RepositoryProjects {
                 let oid = info
                     .default_branch_oid
                     .clone()
-                    .context("o repositório não tem branch padrão")?;
+                    .with_context(|| t!("github_projects.errors.no_default_branch"))?;
                 cx.background_spawn({
                     let http_client = http_client.clone();
                     let credentials = credentials.clone();
@@ -765,7 +820,8 @@ pub fn start_item(
 ) -> Task<Result<()>> {
     let Some((_, remote_name, _)) = github_repository(&project, cx) else {
         return Task::ready(Err(anyhow::anyhow!(
-            "o projeto não está num repositório do GitHub"
+            "{}",
+            t!("github_projects.errors.not_github_repository")
         )));
     };
     let started = state.update(cx, |state, cx| state.start(item_id, branch.clone(), cx));
@@ -870,7 +926,7 @@ impl StatusItemView for ProjectsToolkitButton {
         let workspace = self.workspace.clone();
         Some(ToolkitEntry {
             icon: IconName::Blocks,
-            label: "Tarefas".into(),
+            label: t!("github_projects.dock.title"),
             is_open,
             action: Box::new(ToggleFocus),
             toggle: Rc::new(move |window, cx| {

@@ -1,5 +1,6 @@
 use editor::Editor;
 use gpui::{AppContext as _, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable};
+use i18n::t;
 use ui::{Divider, Headline, HeadlineSize, Label, LabelSize, prelude::*};
 use workspace::ModalView;
 
@@ -82,7 +83,7 @@ impl DeviceLocationModal {
 
     fn render_field(
         &self,
-        label: &'static str,
+        label: SharedString,
         editor: &Entity<Editor>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
@@ -124,11 +125,20 @@ impl Render for DeviceLocationModal {
                                     .color(Color::Muted),
                             )
                             .child(
-                                Headline::new("Change user location").size(HeadlineSize::XSmall),
+                                Headline::new(t!("sidebar.device_location.title"))
+                                    .size(HeadlineSize::XSmall),
                             ),
                     )
-                    .child(self.render_field("Latitude", &self.latitude_editor, cx))
-                    .child(self.render_field("Longitude", &self.longitude_editor, cx)),
+                    .child(self.render_field(
+                        t!("sidebar.device_location.latitude"),
+                        &self.latitude_editor,
+                        cx,
+                    ))
+                    .child(self.render_field(
+                        t!("sidebar.device_location.longitude"),
+                        &self.longitude_editor,
+                        cx,
+                    )),
             )
             .child(Divider::horizontal())
             .child(
@@ -137,7 +147,7 @@ impl Render for DeviceLocationModal {
                     .p_2()
                     .child(match self.last_error.clone() {
                         Some(error) => Label::new(error).size(LabelSize::Small).color(Color::Error),
-                        None => Label::new("Enter para aplicar, Esc para cancelar.")
+                        None => Label::new(t!("sidebar.device_location.footer_hint"))
                             .size(LabelSize::Small)
                             .color(Color::Muted),
                     }),
@@ -146,23 +156,29 @@ impl Render for DeviceLocationModal {
 }
 
 fn parse_location(latitude: &str, longitude: &str) -> Result<DeviceLocation, SharedString> {
-    let latitude = parse_coordinate(latitude, "latitude", 90.0)?;
-    let longitude = parse_coordinate(longitude, "longitude", 180.0)?;
+    let latitude = parse_coordinate(latitude, t!("sidebar.device_location.latitude"), 90.0)?;
+    let longitude = parse_coordinate(longitude, t!("sidebar.device_location.longitude"), 180.0)?;
     Ok(DeviceLocation {
         latitude,
         longitude,
     })
 }
 
-fn parse_coordinate(value: &str, name: &str, limit: f64) -> Result<f64, SharedString> {
+fn parse_coordinate(value: &str, name: SharedString, limit: f64) -> Result<f64, SharedString> {
     let trimmed = value.trim();
-    let parsed: f64 = trimmed
-        .parse()
-        .map_err(|_| SharedString::from(format!("{name} inválida: \"{trimmed}\"")))?;
+    let parsed: f64 = trimmed.parse().map_err(|_| {
+        t!(
+            "sidebar.device_location.invalid_coordinate",
+            name = name,
+            value = trimmed
+        )
+    })?;
     if !parsed.is_finite() || parsed.abs() > limit {
-        return Err(SharedString::from(format!(
-            "{name} tem de estar entre -{limit} e {limit}"
-        )));
+        return Err(t!(
+            "sidebar.device_location.coordinate_out_of_range",
+            name = name,
+            limit = limit
+        ));
     }
     Ok(parsed)
 }

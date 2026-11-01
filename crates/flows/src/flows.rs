@@ -10,6 +10,8 @@ pub use authoring::*;
 use anyhow::{Context as _, Result};
 use fs::Fs;
 use futures::StreamExt as _;
+use gpui::SharedString;
+use i18n::t;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fmt;
@@ -116,13 +118,13 @@ impl GitHubAction {
         }
     }
 
-    pub fn label(&self) -> &'static str {
+    pub fn label(&self) -> SharedString {
         match self {
-            Self::StartItem => "Começar o item",
-            Self::OpenPullRequest { .. } => "Abrir PR",
-            Self::WaitChecks { .. } => "Esperar checks do Actions",
-            Self::MoveItem { .. } => "Mover no projeto",
-            Self::CommentItem { .. } => "Comentar no item",
+            Self::StartItem => t!("flows.github_action.start_item"),
+            Self::OpenPullRequest { .. } => t!("flows.github_action.open_pull_request"),
+            Self::WaitChecks { .. } => t!("flows.github_action.wait_checks"),
+            Self::MoveItem { .. } => t!("flows.github_action.move_item"),
+            Self::CommentItem { .. } => t!("flows.github_action.comment_item"),
         }
     }
 
@@ -230,12 +232,12 @@ pub enum DesignTool {
 impl DesignTool {
     pub const ALL: [DesignTool; 4] = [Self::Pencil, Self::Penpot, Self::Figma, Self::Code];
 
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> SharedString {
         match self {
-            Self::Pencil => "Pencil",
-            Self::Penpot => "Penpot",
-            Self::Figma => "Figma",
-            Self::Code => "Só código",
+            Self::Pencil => "Pencil".into(),
+            Self::Penpot => "Penpot".into(),
+            Self::Figma => "Figma".into(),
+            Self::Code => t!("flows.design_tool.code"),
         }
     }
 }
@@ -270,12 +272,12 @@ pub enum Verifier {
 }
 
 impl Verifier {
-    pub fn label(&self) -> &'static str {
+    pub fn label(&self) -> SharedString {
         match self {
-            Self::You => "você",
-            Self::SelfCheck => "o próprio agente",
-            Self::Agent(_) => "outro agente",
-            Self::Command(_) => "um comando",
+            Self::You => t!("flows.verifier.you"),
+            Self::SelfCheck => t!("flows.verifier.self_check"),
+            Self::Agent(_) => t!("flows.verifier.agent"),
+            Self::Command(_) => t!("flows.verifier.command"),
         }
     }
 }
@@ -331,10 +333,10 @@ impl FlowStep {
                 .find(|agent| agent.command == step.agent)
                 .map(|agent| agent.name.clone())
                 .unwrap_or_else(|| format!("/{}", step.agent)),
-            StepKind::Gate(_) => "Você aprova".to_string(),
-            StepKind::Run(_) => "Rodar comando".to_string(),
+            StepKind::Gate(_) => t!("flows.step.gate").to_string(),
+            StepKind::Run(_) => t!("flows.step.run").to_string(),
             StepKind::GitHub(github) => github.action.label().to_string(),
-            StepKind::Branch(_) => "Se / senão".to_string(),
+            StepKind::Branch(_) => t!("flows.step.branch").to_string(),
             StepKind::Parallel(parallel) => {
                 let names: Vec<String> = parallel
                     .agents
@@ -348,9 +350,9 @@ impl FlowStep {
                     })
                     .collect();
                 if names.is_empty() {
-                    "Em paralelo".to_string()
+                    t!("flows.step.parallel").to_string()
                 } else {
-                    format!("Em paralelo · {}", names.join(" + "))
+                    t!("flows.step.parallel_with", agents = names.join(" + ")).to_string()
                 }
             }
         }
@@ -609,13 +611,15 @@ impl RawOnFail {
     fn into_on_fail(self) -> Result<OnFail> {
         let check_then = |then: &Option<String>| match then.as_deref() {
             None | Some(ASK_YOU) => Ok(()),
-            Some(other) => anyhow::bail!("`then: {other}` não existe; use `then: ask_you`"),
+            Some(other) => anyhow::bail!(t!("flows.parse.unknown_then", value = other).to_string()),
         };
         Ok(match self {
             Self::Word(word) => match word.as_str() {
                 ASK_YOU => OnFail::AskYou,
                 CONTINUE => OnFail::Continue,
-                other => anyhow::bail!("`on_fail: {other}` não existe; use ask_you ou continue"),
+                other => {
+                    anyhow::bail!(t!("flows.parse.unknown_on_fail", value = other).to_string())
+                }
             },
             Self::Retry { retry, then } => {
                 check_then(&then)?;
@@ -654,9 +658,9 @@ impl RawVerify {
             Self::Word(word) => match word.as_str() {
                 "you" | "voce" | "você" => Verifier::You,
                 "self" => Verifier::SelfCheck,
-                other => anyhow::bail!(
-                    "`verify: {other}` não existe; use you, self, {{ agent }} ou {{ command }}"
-                ),
+                other => {
+                    anyhow::bail!(t!("flows.parse.unknown_verify", value = other).to_string())
+                }
             },
             Self::Agent { agent } => Verifier::Agent(task_agents::command_slug(&agent)),
             Self::Command { command } => Verifier::Command(command),
@@ -689,7 +693,7 @@ impl RawStep {
         ];
         anyhow::ensure!(
             kinds.iter().filter(|is_set| **is_set).count() == 1,
-            "cada passo tem exatamente um de `agent`, `gate`, `run`, `if`, `parallel` ou `github`"
+            t!("flows.parse.one_kind_per_step").to_string()
         );
         if let Some(key) = self.github {
             let action = match GitHubAction::from_key(&key) {
@@ -709,9 +713,9 @@ impl RawStep {
                     text: self.comment.unwrap_or_default().trim().to_string(),
                 },
                 Some(action) => action,
-                None => anyhow::bail!(
-                    "`github: {key}` não existe; use start_item, open_pr, wait_checks, move_item ou comment_item"
-                ),
+                None => {
+                    anyhow::bail!(t!("flows.parse.unknown_github", value = key).to_string())
+                }
             };
             return Ok(StepKind::GitHub(GitHubStep {
                 action,
@@ -744,7 +748,10 @@ impl RawStep {
             }));
         }
         if let Some(gate) = self.gate {
-            anyhow::ensure!(gate == "you", "`gate: {gate}` não existe; use `gate: you`");
+            anyhow::ensure!(
+                gate == "you",
+                t!("flows.parse.unknown_gate", value = gate).to_string()
+            );
             return Ok(StepKind::Gate(GateStep {
                 note: self.note.unwrap_or_default(),
                 adjust_to: self.adjust_to,
@@ -758,7 +765,7 @@ impl RawStep {
             return Ok(StepKind::Run(RunStep { command, on_fail }));
         }
         let agent = task_agents::command_slug(self.agent.as_deref().unwrap_or_default());
-        anyhow::ensure!(!agent.is_empty(), "passo com `agent` vazio");
+        anyhow::ensure!(!agent.is_empty(), t!("flows.parse.empty_agent").to_string());
         let criteria = self
             .criteria
             .into_iter()
@@ -891,7 +898,7 @@ fn parse_minutes(text: &str) -> Result<u32> {
     let number: u32 = number
         .trim()
         .parse()
-        .with_context(|| format!("`timeout: {text}` não é um tempo; use 30m ou 1h"))?;
+        .with_context(|| t!("flows.parse.invalid_timeout", value = text).to_string())?;
     Ok(number * factor)
 }
 
@@ -904,13 +911,12 @@ pub fn flow_id_from_path(path: &Path) -> Option<String> {
 
 pub fn parse_flow(path: &Path, content: &str, source: FlowSource) -> Result<Flow> {
     let id =
-        flow_id_from_path(path).context("o arquivo da esteira precisa terminar em .flow.md")?;
+        flow_id_from_path(path).with_context(|| t!("flows.parse.wrong_extension").to_string())?;
     let (frontmatter, body) = split_frontmatter(content)?;
     let raw: RawFlow = match frontmatter {
-        Some(yaml) if !yaml.trim().is_empty() => {
-            serde_yaml_ng::from_str(yaml).context("YAML da esteira inválido")?
-        }
-        _ => anyhow::bail!("a esteira não tem frontmatter com `name` e `steps`"),
+        Some(yaml) if !yaml.trim().is_empty() => serde_yaml_ng::from_str(yaml)
+            .with_context(|| t!("flows.parse.invalid_yaml").to_string())?,
+        _ => anyhow::bail!(t!("flows.parse.missing_frontmatter").to_string()),
     };
     let mut steps: Vec<FlowStep> = Vec::new();
     for (index, raw_step) in raw.steps.into_iter().enumerate() {
@@ -921,7 +927,7 @@ pub fn parse_flow(path: &Path, content: &str, source: FlowSource) -> Result<Flow
             .filter(|id| !id.is_empty());
         let kind = raw_step
             .into_kind()
-            .with_context(|| format!("passo {}", index + 1))?;
+            .with_context(|| t!("flows.parse.step", number = index + 1).to_string())?;
         let mut step = FlowStep {
             id: String::new(),
             kind,
@@ -989,50 +995,35 @@ impl FlowProblem {
 
 impl fmt::Display for FlowProblem {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::NoSteps => write!(f, "A esteira não tem passos."),
-            Self::DuplicateStepId { id, .. } => write!(f, "Outro passo já usa o id `{id}`."),
-            Self::UnknownAgent { agent, .. } => {
-                write!(f, "Nenhum agente /{agent} nos seus agentes nem no projeto.")
+        let message = match self {
+            Self::NoSteps => t!("flows.problem.no_steps"),
+            Self::DuplicateStepId { id, .. } => t!("flows.problem.duplicate_step_id", id = id),
+            Self::UnknownAgent { agent, .. } => t!("flows.problem.unknown_agent", agent = agent),
+            Self::MissingInput { input, .. } => t!("flows.problem.missing_input", input = input),
+            Self::BackToNotEarlier { target, .. } => {
+                t!("flows.problem.back_to_not_earlier", target = target)
             }
-            Self::MissingInput { input, .. } => write!(
-                f,
-                "Nenhum passo antes entrega {input}. Mova o passo ou adicione quem entrega."
-            ),
-            Self::BackToNotEarlier { target, .. } => write!(
-                f,
-                "“Se não passar” volta para `{target}`, que não é um agente antes deste passo."
-            ),
-            Self::AdjustToNotEarlier { target, .. } => write!(
-                f,
-                "Pedir ajuste volta para `{target}`, que não é um passo antes deste."
-            ),
-            Self::ContinueWithRequiredCriteria { .. } => write!(
-                f,
-                "“Seguir mesmo assim” só vale quando todos os critérios são opcionais."
-            ),
-            Self::EmptyCommand { .. } => write!(f, "O comando está vazio."),
+            Self::AdjustToNotEarlier { target, .. } => {
+                t!("flows.problem.adjust_to_not_earlier", target = target)
+            }
+            Self::ContinueWithRequiredCriteria { .. } => {
+                t!("flows.problem.continue_with_required_criteria")
+            }
+            Self::EmptyCommand { .. } => t!("flows.problem.empty_command"),
             Self::EmptyCriterion { criterion, .. } => {
-                write!(f, "O critério {} está vazio.", criterion + 1)
+                t!("flows.problem.empty_criterion", number = criterion + 1)
             }
             Self::UnknownVerifierAgent { agent, .. } => {
-                write!(f, "O verificador /{agent} não existe.")
+                t!("flows.problem.unknown_verifier_agent", agent = agent)
             }
-            Self::InvalidModel { model, .. } => write!(
-                f,
-                "O modelo `{model}` precisa ser provedor/modelo, ex.: anthropic/claude-opus-5-5."
-            ),
-            Self::BranchTargetNotLater { target, .. } => write!(
-                f,
-                "“Se / senão” vai para `{target}`, que não é um passo depois deste."
-            ),
-            Self::EmptyParallel { .. } => {
-                write!(f, "“Em paralelo” precisa de ao menos dois agentes.")
+            Self::InvalidModel { model, .. } => t!("flows.problem.invalid_model", model = model),
+            Self::BranchTargetNotLater { target, .. } => {
+                t!("flows.problem.branch_target_not_later", target = target)
             }
-            Self::EmptyStatus { .. } => {
-                write!(f, "“Mover no projeto” precisa da coluna para onde mover.")
-            }
-        }
+            Self::EmptyParallel { .. } => t!("flows.problem.empty_parallel"),
+            Self::EmptyStatus { .. } => t!("flows.problem.empty_status"),
+        };
+        f.write_str(&message)
     }
 }
 
@@ -1153,7 +1144,7 @@ pub fn validate_flow(flow: &Flow, agents: &[TaskAgent]) -> Vec<FlowProblem> {
                     problems.push(FlowProblem::MissingInput {
                         step: index,
                         input: if branch.output.is_empty() {
-                            "a saída que a condição olha".to_string()
+                            t!("flows.problem.branch_output_placeholder").to_string()
                         } else {
                             branch.output.clone()
                         },
@@ -1235,10 +1226,9 @@ async fn load_flows_from_directory(
         match fs.metadata(&path).await {
             Ok(Some(metadata)) if metadata.is_dir => continue,
             Ok(Some(metadata)) if metadata.len > MAX_FLOW_FILE_SIZE => {
-                results.push(Err(load_error(format!(
-                    "a esteira passa de {}KB",
-                    MAX_FLOW_FILE_SIZE / 1024
-                ))));
+                results.push(Err(load_error(
+                    t!("flows.load.too_large", size = MAX_FLOW_FILE_SIZE / 1024).to_string(),
+                )));
                 continue;
             }
             Ok(_) => {}

@@ -1,0 +1,11 @@
+{
+  "load.too_large": "agent file exceeds {size}KB",
+  "parse.invalid_yaml": "invalid YAML frontmatter",
+  "parse.no_command": "agent `{name}` has no usable command",
+  "parse.no_name": "agent file has no name",
+  "parse.unclosed_frontmatter": "frontmatter is missing its closing `---`",
+  "toolkit.disabled": "{name} is off in this profile. Turn it on in Manage profiles → Agent toolkit.",
+  "toolkit.missing_database_client": "This build has no database client.",
+  "toolkit.missing_dock": "This build has no {dock} dock.",
+  "toolkit.tasks_dock": "Tasks"
+}

@@ -185,7 +185,7 @@ fn test_reports_missing_input_when_a_step_moves_before_its_source() {
     );
     assert_eq!(
         problems[0].to_string(),
-        "Nenhum passo antes entrega PR. Mova o passo ou adicione quem entrega."
+        "No earlier step delivers PR. Move the step or add one that delivers it."
     );
 }
 

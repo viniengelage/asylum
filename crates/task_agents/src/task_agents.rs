@@ -7,6 +7,7 @@ pub use toolkit::*;
 use anyhow::{Context as _, Result};
 use fs::Fs;
 use futures::StreamExt as _;
+use i18n::t;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -334,13 +335,12 @@ pub fn parse_task_agent(path: &Path, content: &str, source: TaskAgentSource) -> 
     let id = path
         .file_stem()
         .and_then(|stem| stem.to_str())
-        .context("agent file has no name")?
+        .with_context(|| t!("task_agents.parse.no_name").to_string())?
         .to_string();
     let (frontmatter, body) = split_frontmatter(content)?;
     let frontmatter: Frontmatter = match frontmatter {
-        Some(yaml) if !yaml.trim().is_empty() => {
-            serde_yaml_ng::from_str(yaml).context("invalid YAML frontmatter")?
-        }
+        Some(yaml) if !yaml.trim().is_empty() => serde_yaml_ng::from_str(yaml)
+            .with_context(|| t!("task_agents.parse.invalid_yaml").to_string())?,
         _ => Frontmatter::default(),
     };
 
@@ -349,7 +349,10 @@ pub fn parse_task_agent(path: &Path, content: &str, source: TaskAgentSource) -> 
         .filter(|name| !name.trim().is_empty())
         .unwrap_or_else(|| id.clone());
     let command = command_slug(frontmatter.command.as_deref().unwrap_or(&name));
-    anyhow::ensure!(!command.is_empty(), "agent `{name}` has no usable command");
+    anyhow::ensure!(
+        !command.is_empty(),
+        t!("task_agents.parse.no_command", name = name).to_string()
+    );
 
     let imported = matches!(source, TaskAgentSource::Imported { .. });
     let tools = match frontmatter.tools {
@@ -422,7 +425,7 @@ pub fn split_frontmatter(content: &str) -> Result<(Option<&str>, &str)> {
         }
         offset += line.len();
     }
-    anyhow::bail!("frontmatter is missing its closing `---`")
+    anyhow::bail!(t!("task_agents.parse.unclosed_frontmatter").to_string())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -460,10 +463,13 @@ pub async fn load_task_agents_from_directory(
         match fs.metadata(&path).await {
             Ok(Some(metadata)) if metadata.is_dir => continue,
             Ok(Some(metadata)) if metadata.len > MAX_AGENT_FILE_SIZE => {
-                results.push(Err(load_error(format!(
-                    "agent file exceeds {}KB",
-                    MAX_AGENT_FILE_SIZE / 1024
-                ))));
+                results.push(Err(load_error(
+                    t!(
+                        "task_agents.load.too_large",
+                        size = MAX_AGENT_FILE_SIZE / 1024
+                    )
+                    .to_string(),
+                )));
                 continue;
             }
             Ok(_) => {}

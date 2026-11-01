@@ -2019,7 +2019,13 @@ impl NativeAgent {
                 .map(|name| name.as_ref())
                 .collect::<Vec<_>>();
             if !missing.is_empty() {
-                description.push_str(&format!(" · {} desligado neste perfil", missing.join(", ")));
+                description.push_str(&format!(
+                    " · {}",
+                    i18n::t!(
+                        "agent.task_agent_command.toolkits_off_in_profile",
+                        toolkits = missing.join(", ")
+                    )
+                ));
             }
             acp_v2::AvailableCommand::Command(
                 acp_v2::Command::new(agent.command.clone(), description)
@@ -2027,7 +2033,9 @@ impl NativeAgent {
                         acp_thread::CommandCategory::TaskAgent,
                     ))
                     .input(acp_v2::AvailableCommandInput::Text(
-                        acp_v2::TextCommandInput::new("<pedido>"),
+                        acp_v2::TextCommandInput::new(
+                            i18n::t!("agent.task_agent_command.input_hint").to_string(),
+                        ),
                     )),
             )
         });
@@ -2037,17 +2045,24 @@ impl NativeAgent {
             acp_v2::AvailableCommand::Command(
                 acp_v2::Command::new(
                     flow.id.clone(),
-                    format!(
-                        "{} · {steps} passo{} · o texto depois vira “O que construir”",
-                        flow.name,
-                        if steps == 1 { "" } else { "s" }
-                    ),
+                    if steps == 1 {
+                        i18n::t!("agent.flow_command.description.one", name = flow.name).to_string()
+                    } else {
+                        i18n::t!(
+                            "agent.flow_command.description.other",
+                            name = flow.name,
+                            count = steps
+                        )
+                        .to_string()
+                    },
                 )
                 .meta(acp_thread::meta_with_command_category(
                     acp_thread::CommandCategory::Flow,
                 ))
                 .input(acp_v2::AvailableCommandInput::Text(
-                    acp_v2::TextCommandInput::new("<o que construir>"),
+                    acp_v2::TextCommandInput::new(
+                        i18n::t!("agent.flow_command.input_hint").to_string(),
+                    ),
                 )),
             )
         });
@@ -6617,9 +6632,7 @@ mod internal_tests {
                 .find(|command| command.name() == "qa")
                 .expect("the agent's command should still be offered");
             assert!(
-                command
-                    .description()
-                    .contains("Dispositivos desligado neste perfil"),
+                command.description().contains("off in this profile"),
                 "{}",
                 command.description()
             );

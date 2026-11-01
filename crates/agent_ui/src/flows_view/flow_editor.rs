@@ -10,6 +10,7 @@ use flows::{
     GitHubStep, OnFail, ParallelStep, RunStep, StepKind, Verifier, unique_step_id, validate_flow,
 };
 use gpui::{CursorStyle, Entity, FontWeight, Hsla, Subscription, Window};
+use i18n::t;
 use task_agents::{TaskAgent, TaskAgentSource};
 use ui::{
     Checkbox, ContextMenu, PopoverMenu, Tooltip, prelude::*, primary_button, secondary_button,
@@ -93,21 +94,27 @@ fn github_icon(action: &GitHubAction) -> IconName {
 /// The line under a GitHub step's name, as board I writes it.
 fn github_summary(action: &GitHubAction) -> String {
     match action {
-        GitHubAction::StartItem => {
-            "cria o branch do item · move para em andamento · atribui você".to_string()
+        GitHubAction::StartItem => t!("agent_ui.flow_editor.github.start_item_summary").to_string(),
+        GitHubAction::OpenPullRequest { draft: true } => {
+            t!("agent_ui.flow_editor.github.open_pr_draft_summary").to_string()
         }
-        GitHubAction::OpenPullRequest { draft } => format!(
-            "{}fecha o item · revisores do CODEOWNERS",
-            if *draft { "rascunho · " } else { "" }
-        ),
-        GitHubAction::WaitChecks { timeout_minutes } => {
-            format!("checks do PR · até {timeout_minutes} min")
+        GitHubAction::OpenPullRequest { draft: false } => {
+            t!("agent_ui.flow_editor.github.open_pr_summary").to_string()
         }
+        GitHubAction::WaitChecks { timeout_minutes } => t!(
+            "agent_ui.flow_editor.github.wait_checks_summary",
+            minutes = timeout_minutes
+        )
+        .to_string(),
         GitHubAction::MoveItem { status } => format!("Status → {status}"),
         GitHubAction::CommentItem { text } if text.trim().is_empty() => {
-            "comenta o que a esteira entregou".to_string()
+            t!("agent_ui.flow_editor.github.comment_delivered_summary").to_string()
         }
-        GitHubAction::CommentItem { text } => format!("comenta “{}”", text.trim()),
+        GitHubAction::CommentItem { text } => t!(
+            "agent_ui.flow_editor.github.comment_summary",
+            text = text.trim()
+        )
+        .to_string(),
     }
 }
 
@@ -116,6 +123,14 @@ fn chip_colors(color: Color, cx: &App) -> (Hsla, Color) {
     match color {
         Color::Muted => (cx.theme().colors().element_hover, Color::Muted),
         color => (color.color(cx).opacity(0.14), color),
+    }
+}
+
+fn criteria_count(count: usize) -> String {
+    if count == 1 {
+        t!("agent_ui.flow_editor.chip.criteria.one").to_string()
+    } else {
+        t!("agent_ui.flow_editor.chip.criteria.other", count = count).to_string()
     }
 }
 
@@ -147,12 +162,21 @@ struct CriterionEditors {
     command: Entity<Editor>,
 }
 
-const VERIFIERS: [(&str, VerifierKind); 4] = [
-    ("você", VerifierKind::You),
-    ("o próprio agente", VerifierKind::SelfCheck),
-    ("outro agente", VerifierKind::Agent),
-    ("um comando", VerifierKind::Command),
+const VERIFIERS: [VerifierKind; 4] = [
+    VerifierKind::You,
+    VerifierKind::SelfCheck,
+    VerifierKind::Agent,
+    VerifierKind::Command,
 ];
+
+fn verifier_label(kind: VerifierKind) -> SharedString {
+    match kind {
+        VerifierKind::You => t!("agent_ui.flow_editor.verifier.you"),
+        VerifierKind::SelfCheck => t!("agent_ui.flow_editor.verifier.self_check"),
+        VerifierKind::Agent => t!("agent_ui.flow_editor.verifier.agent"),
+        VerifierKind::Command => t!("agent_ui.flow_editor.verifier.command"),
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum VerifierKind {
@@ -171,7 +195,7 @@ fn verifier_kind(verifier: &Verifier) -> VerifierKind {
     }
 }
 
-fn section_label(text: &'static str) -> Label {
+fn section_label(text: impl Into<SharedString>) -> Label {
     Label::new(text).size(LabelSize::XSmall).color(Color::Muted)
 }
 
@@ -203,7 +227,7 @@ impl FlowView {
         change: impl FnOnce(&mut flows::Flow),
     ) -> bool {
         if self.is_running() {
-            self.show_toast("Pare a execução antes de mudar os passos.", cx);
+            self.show_toast(&t!("agent_ui.flow_editor.toast.stop_before_editing"), cx);
             return false;
         }
         change(&mut self.flow);
@@ -513,19 +537,34 @@ impl FlowView {
                 None => Default::default(),
             };
         let limits: flows::StepLimits = limits;
-        let note = text_editor(&note, "Ex.: as telas do passo 2", false, cx);
+        let note = text_editor(
+            &note,
+            &t!("agent_ui.flow_editor.inspector.note_placeholder"),
+            false,
+            cx,
+        );
         let command = text_editor(&command, "npm test", false, cx);
         let instructions = text_editor(
             &instructions,
-            "Somadas às instruções do agente só nesta esteira",
+            &t!("agent_ui.flow_editor.inspector.instructions_placeholder"),
             true,
             cx,
         );
-        let file = text_editor(&file, "Arquivo ou link · página", false, cx);
+        let file = text_editor(
+            &file,
+            &t!("agent_ui.flow_editor.inspector.file_placeholder"),
+            false,
+            cx,
+        );
         let criteria = criteria
             .iter()
             .map(|criterion| CriterionEditors {
-                text: text_editor(&criterion.text, "Descreva o critério", false, cx),
+                text: text_editor(
+                    &criterion.text,
+                    &t!("agent_ui.flow_editor.inspector.criterion_placeholder"),
+                    false,
+                    cx,
+                ),
                 command: text_editor(
                     match &criterion.verify {
                         Verifier::Command(command) => command,
@@ -679,13 +718,19 @@ impl FlowView {
             return gpui::Task::ready(true);
         }
         if self.flow.steps.is_empty() {
-            self.show_toast("Adicione ao menos um passo antes de salvar.", cx);
+            self.show_toast(&t!("agent_ui.flow_editor.toast.add_step_before_saving"), cx);
             return gpui::Task::ready(false);
         }
         let markdown = match self.flow.to_markdown() {
             Ok(markdown) => markdown,
             Err(error) => {
-                self.show_toast(&format!("Não foi possível salvar: {error:#}"), cx);
+                self.show_toast(
+                    &t!(
+                        "agent_ui.flow_editor.toast.save_failed",
+                        error = format!("{error:#}")
+                    ),
+                    cx,
+                );
                 return gpui::Task::ready(false);
             }
         };
@@ -709,7 +754,13 @@ impl FlowView {
                     true
                 }
                 Err(error) => {
-                    this.show_toast(&format!("Não foi possível salvar: {error:#}"), cx);
+                    this.show_toast(
+                        &t!(
+                            "agent_ui.flow_editor.toast.save_failed",
+                            error = format!("{error:#}")
+                        ),
+                        cx,
+                    );
                     false
                 }
             })
@@ -816,7 +867,9 @@ impl FlowView {
                 .child(Label::new(name.clone()).size(LabelSize::Small).truncate())
                 .child(div().flex_1())
                 .child(Label::new("+").color(Color::Muted))
-                .tooltip(Tooltip::text("Clique ou arraste para a esteira"))
+                .tooltip(Tooltip::text(t!(
+                    "agent_ui.flow_editor.library.add_tooltip"
+                )))
                 .on_drag(
                     DraggedNewStep {
                         new_step: new_step.clone(),
@@ -834,7 +887,7 @@ impl FlowView {
                     this.insert_step(at, new_step.clone(), window, cx)
                 }))
         };
-        let section = |title: &'static str, count: Option<usize>| {
+        let section = |title: SharedString, count: Option<usize>| {
             h_flex()
                 .px_3()
                 .pt_3()
@@ -846,7 +899,10 @@ impl FlowView {
                 })
         };
         let mut list = v_flex()
-            .child(section("SÓ PARA MIM", Some(personal.len())))
+            .child(section(
+                t!("agent_ui.flow_editor.library.section_personal"),
+                Some(personal.len()),
+            ))
             .child(
                 v_flex()
                     .px_1()
@@ -863,7 +919,10 @@ impl FlowView {
                         )
                     })),
             )
-            .child(section("DO PROJETO", Some(project.len())))
+            .child(section(
+                t!("agent_ui.flow_editor.library.section_project"),
+                Some(project.len()),
+            ))
             .child(
                 v_flex()
                     .px_1()
@@ -880,7 +939,10 @@ impl FlowView {
                         )
                     })),
             )
-            .child(section("PASSOS", None));
+            .child(section(
+                t!("agent_ui.flow_editor.library.section_steps"),
+                None,
+            ));
         list = list.child(
             v_flex()
                 .px_1()
@@ -890,7 +952,7 @@ impl FlowView {
                     IconName::UserCheck,
                     Color::Warning,
                     None,
-                    "Você aprova".to_string(),
+                    t!("agent_ui.flow_editor.step_kind.gate").to_string(),
                     NewStep::Gate,
                     cx,
                 ))
@@ -899,7 +961,7 @@ impl FlowView {
                     IconName::Terminal,
                     Color::Success,
                     None,
-                    "Rodar comando".to_string(),
+                    t!("agent_ui.flow_editor.step_kind.command").to_string(),
                     NewStep::Command,
                     cx,
                 ))
@@ -908,7 +970,7 @@ impl FlowView {
                     IconName::GitBranch,
                     Color::Accent,
                     None,
-                    "Se / senão".to_string(),
+                    t!("agent_ui.flow_editor.step_kind.branch").to_string(),
                     NewStep::Branch,
                     cx,
                 ))
@@ -917,7 +979,7 @@ impl FlowView {
                     IconName::ListTree,
                     Color::Accent,
                     None,
-                    "Em paralelo".to_string(),
+                    t!("agent_ui.flow_editor.step_kind.parallel").to_string(),
                     NewStep::Parallel,
                     cx,
                 )),
@@ -962,12 +1024,16 @@ impl FlowView {
                     .gap_2()
                     .border_b_1()
                     .border_color(colors.border)
-                    .child(Label::new("Meus agentes").size(LabelSize::Small).weight(FontWeight::SEMIBOLD))
+                    .child(
+                        Label::new(t!("agent_ui.flow_editor.library.title"))
+                            .size(LabelSize::Small)
+                            .weight(FontWeight::SEMIBOLD),
+                    )
                     .child(div().flex_1())
                     .child(
                         IconButton::new("new-task-agent-from-flow", IconName::Plus)
                             .icon_size(IconSize::Small)
-                            .tooltip(Tooltip::text("Novo agente"))
+                            .tooltip(Tooltip::text(t!("agent_ui.flow_editor.library.new_agent")))
                             .on_click(|_, window, cx| {
                                 window.dispatch_action(Box::new(OpenTaskAgents), cx)
                             }),
@@ -983,7 +1049,11 @@ impl FlowView {
                         .border_1()
                         .border_color(colors.border_variant)
                         .bg(colors.editor_background)
-                        .child(Icon::new(IconName::MagnifyingGlass).size(IconSize::Small).color(Color::Muted))
+                        .child(
+                            Icon::new(IconName::MagnifyingGlass)
+                                .size(IconSize::Small)
+                                .color(Color::Muted),
+                        )
                         .child(div().flex_1().min_w_0().child(self.library_search.clone())),
                 ),
             )
@@ -1001,9 +1071,9 @@ impl FlowView {
                     .border_t_1()
                     .border_color(colors.border)
                     .child(description(if self.insert_at.is_some() {
-                        "Clique para inserir no ponto marcado na esteira."
+                        t!("agent_ui.flow_editor.library.hint_insert_marked")
                     } else {
-                        "Clique ou arraste para a esteira. Cada agente traz a sua config; o passo pode sobrescrever só nesta esteira."
+                        t!("agent_ui.flow_editor.library.hint")
                     })),
             )
     }
@@ -1043,7 +1113,7 @@ impl FlowView {
                     .child(
                         segment_option(
                             "board-list",
-                            "Lista",
+                            t!("agent_ui.flow_editor.toolbar.list"),
                             self.board_view == BoardView::List,
                             true,
                             cx,
@@ -1056,7 +1126,7 @@ impl FlowView {
                     .child(
                         segment_option(
                             "board-canvas",
-                            "Canvas",
+                            t!("agent_ui.flow_editor.toolbar.canvas"),
                             self.board_view == BoardView::Canvas,
                             true,
                             cx,
@@ -1068,25 +1138,33 @@ impl FlowView {
                     ),
             )
             .child(
-                secondary_button("suggest-steps", None, "Sugerir passos", can_suggest, cx).when(
+                secondary_button(
+                    "suggest-steps",
+                    None,
+                    t!("agent_ui.flow_editor.toolbar.suggest_steps"),
                     can_suggest,
-                    |this| {
-                        this.on_click(
-                            cx.listener(|this, _, window, cx| this.suggest_steps(window, cx)),
-                        )
-                    },
-                ),
+                    cx,
+                )
+                .when(can_suggest, |this| {
+                    this.on_click(cx.listener(|this, _, window, cx| this.suggest_steps(window, cx)))
+                }),
             )
             .child(
                 secondary_button("show-flow-file", None, ".flow.md", true, cx)
-                    .tooltip(Tooltip::text("Editar como texto"))
+                    .tooltip(Tooltip::text(t!(
+                        "agent_ui.flow_editor.toolbar.edit_as_text"
+                    )))
                     .on_click(cx.listener(|this, _, window, cx| this.open_flow_file(window, cx))),
             )
             .child(
                 secondary_button(
                     "save-flow",
                     None,
-                    if self.saved { "Salva" } else { "Salvar" },
+                    if self.saved {
+                        t!("agent_ui.flow_editor.toolbar.saved")
+                    } else {
+                        t!("agent_ui.flow_editor.toolbar.save")
+                    },
                     !self.saved,
                     cx,
                 )
@@ -1098,20 +1176,24 @@ impl FlowView {
                 secondary_button(
                     "stop-flow",
                     Some((IconName::Stop, Color::Error)),
-                    "Parar",
+                    t!("agent_ui.flow_editor.toolbar.stop"),
                     true,
                     cx,
                 )
-                .on_click(
-                    cx.listener(|this, _, _window, cx| {
-                        this.stop(Some("você parou a esteira."), cx)
-                    }),
-                )
+                .on_click(cx.listener(|this, _, _window, cx| {
+                    this.stop(Some(&t!("agent_ui.flow_editor.toolbar.stopped_by_you")), cx)
+                }))
                 .into_any_element()
             } else {
-                primary_button("run-flow", Some(IconName::PlayFilled), "Rodar", None, cx)
-                    .on_click(cx.listener(|this, _, window, cx| this.rerun(window, cx)))
-                    .into_any_element()
+                primary_button(
+                    "run-flow",
+                    Some(IconName::PlayFilled),
+                    t!("agent_ui.flow_editor.toolbar.run"),
+                    None,
+                    cx,
+                )
+                .on_click(cx.listener(|this, _, window, cx| this.rerun(window, cx)))
+                .into_any_element()
             })
     }
 
@@ -1128,9 +1210,9 @@ impl FlowView {
             .border_color(colors.border_variant)
             .bg(colors.panel_background)
             .child(section_label(if cited.is_some() {
-                "VEM DO GITHUB PROJECTS"
+                t!("agent_ui.flow_editor.board.from_github_projects")
             } else {
-                "O QUE CONSTRUIR"
+                t!("agent_ui.flow_editor.board.what_to_build")
             }))
             .when_some(cited.clone(), |this, item| {
                 let item_id = item.item_id.clone();
@@ -1148,7 +1230,9 @@ impl FlowView {
                                 .border_color(colors.border_focused)
                                 .bg(colors.border_focused.opacity(0.15))
                                 .cursor_pointer()
-                                .tooltip(Tooltip::text("Abrir no quadro"))
+                                .tooltip(Tooltip::text(t!(
+                                    "agent_ui.flow_editor.board.open_on_board"
+                                )))
                                 .on_click(move |_, window, cx| {
                                     window.dispatch_action(
                                         Box::new(zed_actions::github_projects::OpenProjectItem {
@@ -1167,7 +1251,8 @@ impl FlowView {
                                         "{} {}",
                                         item.reference
                                             .find('#')
-                                            .map_or(item.reference.as_str(), |at| &item.reference[at..]),
+                                            .map_or(item.reference.as_str(), |at| &item.reference
+                                                [at..]),
                                         item.title
                                     ))
                                     .size(LabelSize::Small),
@@ -1186,9 +1271,9 @@ impl FlowView {
             })
             .child(self.input_editor.clone())
             .child(description(if cited.is_some() {
-                "Título, corpo, subtarefas e campos do item viram a entrada do 1º passo. Rodar de um item: /esteira #204 no chat."
+                t!("agent_ui.flow_editor.board.cited_input_hint")
             } else {
-                "Vira a entrada do 1º passo. Muda a cada execução sem mexer nos passos."
+                t!("agent_ui.flow_editor.board.input_hint")
             }));
         let mut board = v_flex().child(ask);
         if let Some(error) = &self.load_error {
@@ -1202,7 +1287,7 @@ impl FlowView {
                     .border_color(cx.theme().status().error_border)
                     .bg(cx.theme().status().error_background)
                     .child(
-                        Label::new("O arquivo não abre como esteira.")
+                        Label::new(t!("agent_ui.flow_editor.board.load_error_title"))
                             .weight(FontWeight::SEMIBOLD)
                             .color(Color::Error),
                     )
@@ -1212,11 +1297,14 @@ impl FlowView {
                             .color(Color::Muted),
                     )
                     .child(
-                        Button::new("edit-broken-flow", "Editar como texto")
-                            .style(ButtonStyle::Outlined)
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.open_flow_file(window, cx)),
-                            ),
+                        Button::new(
+                            "edit-broken-flow",
+                            t!("agent_ui.flow_editor.toolbar.edit_as_text"),
+                        )
+                        .style(ButtonStyle::Outlined)
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.open_flow_file(window, cx)),
+                        ),
                     ),
             );
         } else if self.board_view == BoardView::Canvas {
@@ -1254,7 +1342,7 @@ impl FlowView {
                     ui::KeyBinding::for_action_in(action, &self.focus_handle, cx)
                         .size(rems_from_px(11_f32))
                 };
-                let hint = |text: &'static str| {
+                let hint = |text: SharedString| {
                     Label::new(text).size(LabelSize::XSmall).color(Color::Muted)
                 };
                 board = board.child(
@@ -1263,18 +1351,16 @@ impl FlowView {
                         .gap_1()
                         .child(binding(&super::SubirPasso, cx))
                         .child(binding(&super::DescerPasso, cx))
-                        .child(hint("move o passo selecionado ·"))
+                        .child(hint(t!("agent_ui.flow_editor.board.hint_move")))
                         .child(binding(&super::RemoverPasso, cx))
-                        .child(hint("remove · arraste pela alça ou da coluna da esquerda")),
+                        .child(hint(t!("agent_ui.flow_editor.board.hint_remove"))),
                 );
             }
             if self.flow.steps.is_empty() {
-                board = board.child(
-                    div().py_8().flex().justify_center().child(
-                        Label::new("Esteira vazia. Clique ou arraste um agente da esquerda, use + ou peça “Sugerir passos”.")
-                            .color(Color::Muted),
-                    ),
-                );
+                board =
+                    board.child(div().py_8().flex().justify_center().child(
+                        Label::new(t!("agent_ui.flow_editor.board.empty")).color(Color::Muted),
+                    ));
             }
         }
         div()
@@ -1342,7 +1428,9 @@ impl FlowView {
                             .icon_size(IconSize::XSmall)
                             .shape(ui::IconButtonShape::Square)
                             .style(ButtonStyle::Outlined)
-                            .tooltip(Tooltip::text("Adicionar passo aqui")),
+                            .tooltip(Tooltip::text(t!(
+                                "agent_ui.flow_editor.insert.add_step_here"
+                            ))),
                     )
                     .menu(move |window, cx| {
                         let view = view.clone();
@@ -1351,7 +1439,7 @@ impl FlowView {
                             window,
                             cx,
                             move |mut menu, _window, _cx| {
-                                menu = menu.header("Agentes");
+                                menu = menu.header(t!("agent_ui.flow_editor.insert.agents"));
                                 for agent in &agents {
                                     let view = view.clone();
                                     let command = agent.command.clone();
@@ -1371,12 +1459,20 @@ impl FlowView {
                                         },
                                     );
                                 }
-                                menu = menu.separator().header("Passos");
+                                menu = menu
+                                    .separator()
+                                    .header(t!("agent_ui.flow_editor.insert.steps"));
                                 let mut kinds = vec![
-                                    ("Você aprova", NewStep::Gate),
-                                    ("Rodar comando", NewStep::Command),
-                                    ("Se / senão", NewStep::Branch),
-                                    ("Em paralelo", NewStep::Parallel),
+                                    (t!("agent_ui.flow_editor.step_kind.gate"), NewStep::Gate),
+                                    (
+                                        t!("agent_ui.flow_editor.step_kind.command"),
+                                        NewStep::Command,
+                                    ),
+                                    (t!("agent_ui.flow_editor.step_kind.branch"), NewStep::Branch),
+                                    (
+                                        t!("agent_ui.flow_editor.step_kind.parallel"),
+                                        NewStep::Parallel,
+                                    ),
                                 ];
                                 if has_github {
                                     kinds.extend(
@@ -1396,7 +1492,7 @@ impl FlowView {
                                 }
                                 let view = view.clone();
                                 menu.separator().entry(
-                                    "Marcar este ponto para a biblioteca",
+                                    t!("agent_ui.flow_editor.insert.mark_point"),
                                     None,
                                     move |_window, cx| {
                                         view.update(cx, |view, cx| {
@@ -1417,30 +1513,40 @@ impl FlowView {
         match &flow_step.kind {
             StepKind::Agent(agent_step) => {
                 let count = agent_step.criteria.len();
-                chips.push((
-                    format!("{count} critério{}", if count == 1 { "" } else { "s" }),
-                    Color::Muted,
-                ));
+                chips.push((criteria_count(count), Color::Muted));
                 if let Some(agent) = self.agent(&agent_step.agent)
                     && !agent.gives.is_empty()
                 {
                     chips.push((
-                        format!("entrega {}", agent.gives.join(" + ")),
+                        t!(
+                            "agent_ui.flow_editor.chip.gives",
+                            outputs = agent.gives.join(" + ")
+                        )
+                        .to_string(),
                         Color::Accent,
                     ));
                 }
                 if let OnFail::BackTo { step, .. } = &agent_step.on_fail
                     && let Some(target) = self.flow.step_index(step)
                 {
-                    chips.push((format!("volta → {}", target + 1), Color::Error));
+                    chips.push((
+                        t!("agent_ui.flow_editor.chip.back_to", step = target + 1).to_string(),
+                        Color::Error,
+                    ));
                 }
             }
-            StepKind::Gate(_) => chips.push(("portão".to_string(), Color::Warning)),
+            StepKind::Gate(_) => chips.push((
+                t!("agent_ui.flow_editor.chip.gate").to_string(),
+                Color::Warning,
+            )),
             StepKind::Run(run) => {
                 if let OnFail::BackTo { step, .. } = &run.on_fail
                     && let Some(target) = self.flow.step_index(step)
                 {
-                    chips.push((format!("volta → {}", target + 1), Color::Error));
+                    chips.push((
+                        t!("agent_ui.flow_editor.chip.back_to", step = target + 1).to_string(),
+                        Color::Error,
+                    ));
                 }
             }
             StepKind::Branch(branch) => {
@@ -1448,29 +1554,59 @@ impl FlowView {
                     id.as_deref()
                         .and_then(|id| self.flow.step_index(id))
                         .map(|target| format!("{}", target + 1))
-                        .unwrap_or_else(|| "próximo".to_string())
+                        .unwrap_or_else(|| t!("agent_ui.flow_editor.chip.next").to_string())
                 };
-                chips.push((format!("sim → {}", target(&branch.then_to)), Color::Success));
-                chips.push((format!("não → {}", target(&branch.else_to)), Color::Muted));
+                chips.push((
+                    t!(
+                        "agent_ui.flow_editor.chip.yes",
+                        step = target(&branch.then_to)
+                    )
+                    .to_string(),
+                    Color::Success,
+                ));
+                chips.push((
+                    t!(
+                        "agent_ui.flow_editor.chip.no",
+                        step = target(&branch.else_to)
+                    )
+                    .to_string(),
+                    Color::Muted,
+                ));
             }
             StepKind::Parallel(parallel) => {
-                chips.push((format!("{} agentes", parallel.agents.len()), Color::Muted));
+                chips.push((
+                    t!(
+                        "agent_ui.flow_editor.chip.agents",
+                        count = parallel.agents.len()
+                    )
+                    .to_string(),
+                    Color::Muted,
+                ));
                 if parallel.read_only {
-                    chips.push(("só leitura".to_string(), Color::Muted));
+                    chips.push((
+                        t!("agent_ui.flow_editor.chip.read_only").to_string(),
+                        Color::Muted,
+                    ));
                 }
             }
             StepKind::GitHub(github) => {
                 if matches!(github.action, GitHubAction::WaitChecks { .. }) {
-                    chips.push(("1 critério".to_string(), Color::Muted));
+                    chips.push((criteria_count(1), Color::Muted));
                 }
                 let outputs = github.action.outputs();
                 if let Some(output) = outputs.first() {
-                    chips.push((format!("entrega {output}"), Color::Accent));
+                    chips.push((
+                        t!("agent_ui.flow_editor.chip.gives", outputs = output).to_string(),
+                        Color::Accent,
+                    ));
                 }
                 if let OnFail::BackTo { step, .. } = &github.on_fail
                     && let Some(target) = self.flow.step_index(step)
                 {
-                    chips.push((format!("volta → {}", target + 1), Color::Error));
+                    chips.push((
+                        t!("agent_ui.flow_editor.chip.back_to", step = target + 1).to_string(),
+                        Color::Error,
+                    ));
                 }
             }
         }
@@ -1497,14 +1633,17 @@ impl FlowView {
                     .model
                     .clone()
                     .or_else(|| agent.and_then(|agent| agent.model.clone()))
-                    .unwrap_or_else(|| "modelo da thread".to_string());
+                    .unwrap_or_else(|| t!("agent_ui.flow_editor.step.thread_model").to_string());
                 let mut subtitle = String::new();
                 if let Some(target) = agent_step
                     .where_
                     .as_ref()
                     .filter(|target| target.tool != DesignTool::Code)
                 {
-                    subtitle.push_str(&format!("Onde: {}", target.tool.label()));
+                    subtitle.push_str(&t!(
+                        "agent_ui.flow_editor.step.where",
+                        tool = target.tool.label()
+                    ));
                     if let Some(file) = &target.file {
                         subtitle.push_str(&format!(" · {file}"));
                     }
@@ -1515,7 +1654,8 @@ impl FlowView {
                     subtitle.push_str(&format!(" · {profile}"));
                 }
                 if !agent_step.instructions.is_empty() {
-                    subtitle.push_str(" · + instruções");
+                    subtitle.push_str(" · ");
+                    subtitle.push_str(&t!("agent_ui.flow_editor.step.plus_instructions"));
                 }
                 (
                     IconName::Person,
@@ -1528,10 +1668,10 @@ impl FlowView {
             StepKind::Gate(gate) => (
                 IconName::UserCheck,
                 Color::Warning,
-                "Você aprova".to_string(),
+                t!("agent_ui.flow_editor.step_kind.gate").to_string(),
                 None,
                 if gate.note.is_empty() {
-                    "o que o passo anterior entregou".to_string()
+                    t!("agent_ui.flow_editor.step.gate_default").to_string()
                 } else {
                     gate.note.clone()
                 },
@@ -1539,9 +1679,13 @@ impl FlowView {
             StepKind::Run(run_step) => (
                 IconName::Terminal,
                 Color::Success,
-                "Rodar comando".to_string(),
+                t!("agent_ui.flow_editor.step_kind.command").to_string(),
                 None,
-                format!("{} · passa se sair 0", run_step.command),
+                t!(
+                    "agent_ui.flow_editor.step.command_summary",
+                    command = run_step.command
+                )
+                .to_string(),
             ),
             StepKind::GitHub(github) => (
                 github_icon(&github.action),
@@ -1553,12 +1697,17 @@ impl FlowView {
             StepKind::Branch(branch) => (
                 IconName::GitBranch,
                 Color::Accent,
-                "Se / senão".to_string(),
+                t!("agent_ui.flow_editor.step_kind.branch").to_string(),
                 None,
                 if branch.output.is_empty() {
-                    "escolha a saída que a condição olha".to_string()
+                    t!("agent_ui.flow_editor.step.branch_pick_output").to_string()
                 } else {
-                    format!("se {} contém “{}”", branch.output, branch.contains)
+                    t!(
+                        "agent_ui.flow_editor.step.branch_summary",
+                        output = branch.output,
+                        text = branch.contains
+                    )
+                    .to_string()
                 },
             ),
             StepKind::Parallel(parallel) => (
@@ -1567,22 +1716,23 @@ impl FlowView {
                 flow_step.label(&self.agents),
                 None,
                 if parallel.agents.is_empty() {
-                    "adicione os agentes que rodam juntos".to_string()
+                    t!("agent_ui.flow_editor.step.parallel_empty").to_string()
                 } else {
-                    format!(
-                        "{} ao mesmo tempo{}",
-                        parallel
+                    let mut summary = t!(
+                        "agent_ui.flow_editor.step.parallel_summary",
+                        agents = parallel
                             .agents
                             .iter()
                             .map(|command| format!("/{command}"))
                             .collect::<Vec<_>>()
-                            .join(" + "),
-                        if parallel.read_only {
-                            " · só leitura"
-                        } else {
-                            ""
-                        }
+                            .join(" + ")
                     )
+                    .to_string();
+                    if parallel.read_only {
+                        summary.push_str(" · ");
+                        summary.push_str(&t!("agent_ui.flow_editor.chip.read_only"));
+                    }
+                    summary
                 },
             ),
         };
@@ -1646,7 +1796,9 @@ impl FlowView {
                     .id(("step-handle", index))
                     .flex_none()
                     .cursor(CursorStyle::OpenHand)
-                    .tooltip(Tooltip::text("Arraste para mudar a ordem"))
+                    .tooltip(Tooltip::text(t!(
+                        "agent_ui.flow_editor.step.drag_to_reorder"
+                    )))
                     .child(
                         Icon::new(IconName::Menu)
                             .size(IconSize::Small)
@@ -1728,7 +1880,7 @@ impl FlowView {
                 this.child(
                     IconButton::new(("open-step-thread", index), IconName::Thread)
                         .icon_size(IconSize::Small)
-                        .tooltip(Tooltip::text("Abrir a thread do passo"))
+                        .tooltip(Tooltip::text(t!("agent_ui.flow_editor.step.open_thread")))
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.open_thread(thread_id, window, cx)
                         })),
@@ -1740,7 +1892,7 @@ impl FlowView {
                         IconButton::new(("step-up", index), IconName::ChevronUp)
                             .icon_size(IconSize::XSmall)
                             .disabled(index == 0)
-                            .tooltip(Tooltip::text("Mover para cima"))
+                            .tooltip(Tooltip::text(t!("agent_ui.flow_editor.step.move_up")))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.move_step(index, true, window, cx)
                             })),
@@ -1749,7 +1901,7 @@ impl FlowView {
                         IconButton::new(("step-down", index), IconName::ChevronDown)
                             .icon_size(IconSize::XSmall)
                             .disabled(index == last)
-                            .tooltip(Tooltip::text("Mover para baixo"))
+                            .tooltip(Tooltip::text(t!("agent_ui.flow_editor.step.move_down")))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.move_step(index, false, window, cx)
                             })),
@@ -1760,20 +1912,26 @@ impl FlowView {
                     .trigger(
                         IconButton::new(("step-menu-button", index), IconName::Ellipsis)
                             .icon_size(IconSize::Small)
-                            .tooltip(Tooltip::text("Mais ações")),
+                            .tooltip(Tooltip::text(t!("agent_ui.flow_editor.step.more_actions"))),
                     )
                     .menu(move |window, cx| {
                         let view = view.clone();
                         Some(ContextMenu::build(window, cx, move |menu, _window, _cx| {
                             let duplicate = view.clone();
                             let remove = view.clone();
-                            menu.entry("Duplicar", None, move |window, cx| {
-                                duplicate
-                                    .update(cx, |view, cx| view.duplicate_step(index, window, cx))
-                                    .log_err();
-                            })
+                            menu.entry(
+                                t!("agent_ui.flow_editor.step.duplicate"),
+                                None,
+                                move |window, cx| {
+                                    duplicate
+                                        .update(cx, |view, cx| {
+                                            view.duplicate_step(index, window, cx)
+                                        })
+                                        .log_err();
+                                },
+                            )
                             .entry(
-                                "Remover",
+                                t!("agent_ui.flow_editor.step.remove"),
                                 None,
                                 move |window, cx| {
                                     remove
@@ -1797,14 +1955,27 @@ impl FlowView {
             let subtitle = match &flow_step.kind {
                 StepKind::Agent(agent_step) => self
                     .agent(&agent_step.agent)
-                    .map(|agent| format!("entrega {}", agent.gives.join(" + ")))
+                    .map(|agent| {
+                        t!(
+                            "agent_ui.flow_editor.chip.gives",
+                            outputs = agent.gives.join(" + ")
+                        )
+                        .to_string()
+                    })
                     .unwrap_or_default(),
-                StepKind::Gate(_) => "pausa a esteira".to_string(),
+                StepKind::Gate(_) => t!("agent_ui.flow_editor.canvas.gate").to_string(),
                 StepKind::Run(run) => run.command.clone(),
-                StepKind::Branch(branch) => {
-                    format!("se {} contém “{}”", branch.output, branch.contains)
-                }
-                StepKind::Parallel(parallel) => format!("{} juntos", parallel.agents.len()),
+                StepKind::Branch(branch) => t!(
+                    "agent_ui.flow_editor.step.branch_summary",
+                    output = branch.output,
+                    text = branch.contains
+                )
+                .to_string(),
+                StepKind::Parallel(parallel) => t!(
+                    "agent_ui.flow_editor.canvas.parallel",
+                    count = parallel.agents.len()
+                )
+                .to_string(),
                 StepKind::GitHub(github) => github_summary(&github.action),
             };
             let state = self
@@ -1885,12 +2056,13 @@ impl FlowView {
                                 .size(IconSize::XSmall)
                                 .color(Color::Error),
                         )
-                        .child(description(format!(
-                            "{} {} → {} {} se reprovar (máx. {max})",
-                            index + 1,
-                            flow_step.label(&self.agents),
-                            target + 1,
-                            self.step_label(target)
+                        .child(description(t!(
+                            "agent_ui.flow_editor.canvas.loop_back",
+                            from = index + 1,
+                            from_label = flow_step.label(&self.agents),
+                            to = target + 1,
+                            to_label = self.step_label(target),
+                            max = max
                         ))),
                 );
             }
@@ -1910,11 +2082,11 @@ impl FlowView {
                                     .color(Color::Warning),
                             )
                             .child(
-                                Label::new(format!(
-                                    "{} ajuste → {} {}",
-                                    index + 1,
-                                    target + 1,
-                                    self.step_label(target)
+                                Label::new(t!(
+                                    "agent_ui.flow_editor.canvas.adjust",
+                                    from = index + 1,
+                                    to = target + 1,
+                                    to_label = self.step_label(target)
                                 ))
                                 .size(LabelSize::XSmall)
                                 .color(Color::Warning),
@@ -1923,12 +2095,11 @@ impl FlowView {
                 }
             }
         }
-        v_flex()
-            .child(nodes)
-            .child(loops)
-            .child(div().pt_3().child(description(
-                "A visão canvas desenha a mesma lista; Se / senão e Em paralelo ganham ramos aqui.",
-            )))
+        v_flex().child(nodes).child(loops).child(
+            div()
+                .pt_3()
+                .child(description(t!("agent_ui.flow_editor.canvas.hint"))),
+        )
     }
 
     pub(super) fn render_inspector(
@@ -1941,7 +2112,10 @@ impl FlowView {
                 .p_8()
                 .flex()
                 .justify_center()
-                .child(Label::new("Selecione um passo para configurar.").color(Color::Muted))
+                .child(
+                    Label::new(t!("agent_ui.flow_editor.inspector.select_step"))
+                        .color(Color::Muted),
+                )
                 .into_any_element();
         };
         let index = inspector.step;
@@ -1956,13 +2130,24 @@ impl FlowView {
             .gap_2()
             .border_b_1()
             .border_color(colors.border)
-            .child(Label::new(format!("Passo {}", index + 1)).weight(FontWeight::SEMIBOLD))
-            .child(description(format!("de {}", self.flow.steps.len())))
+            .child(
+                Label::new(t!(
+                    "agent_ui.flow_editor.inspector.step_title",
+                    number = index + 1
+                ))
+                .weight(FontWeight::SEMIBOLD),
+            )
+            .child(description(t!(
+                "agent_ui.flow_editor.inspector.step_of",
+                count = self.flow.steps.len()
+            )))
             .child(div().flex_1())
             .child(
                 IconButton::new("remove-selected-step", IconName::Trash)
                     .icon_size(IconSize::Small)
-                    .tooltip(Tooltip::text("Remover passo"))
+                    .tooltip(Tooltip::text(t!(
+                        "agent_ui.flow_editor.inspector.remove_step"
+                    )))
                     .on_click(
                         cx.listener(move |this, _, window, cx| this.remove_step(index, window, cx)),
                     ),
@@ -2046,8 +2231,13 @@ impl FlowView {
             .into_iter()
             .map(|input| {
                 let origin = match input.from_step {
-                    None => "da esteira".to_string(),
-                    Some(step) => format!("do passo {} · {}", step + 1, self.step_label(step)),
+                    None => t!("agent_ui.flow_editor.io.from_flow").to_string(),
+                    Some(step) => t!(
+                        "agent_ui.flow_editor.io.from_step",
+                        number = step + 1,
+                        label = self.step_label(step)
+                    )
+                    .to_string(),
                 };
                 (input.name, origin)
             })
@@ -2059,29 +2249,32 @@ impl FlowView {
         id: &'static str,
         current: Option<usize>,
         candidates: Vec<usize>,
-        prefix: &'static str,
-        empty: Option<&'static str>,
+        back_to: bool,
+        empty: Option<SharedString>,
         on_select: impl Fn(&mut Self, Option<usize>, &mut Context<Self>) + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let step_text = |step: usize| {
+            let text = format!("{} · {}", step + 1, self.step_label(step));
+            if back_to {
+                t!("agent_ui.flow_editor.on_fail.go_back_to", step = text).to_string()
+            } else {
+                text
+            }
+        };
         let label = match current {
-            Some(step) => format!("{prefix}{} · {}", step + 1, self.step_label(step)),
-            None => empty.unwrap_or("").to_string(),
+            Some(step) => step_text(step),
+            None => empty.clone().unwrap_or_default().to_string(),
         };
         let view = cx.entity().downgrade();
         let labels: Vec<(usize, String)> = candidates
             .into_iter()
-            .map(|step| {
-                (
-                    step,
-                    format!("{prefix}{} · {}", step + 1, self.step_label(step)),
-                )
-            })
+            .map(|step| (step, step_text(step)))
             .collect();
         let on_select = std::rc::Rc::new(on_select);
         let menu = ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
-            if let Some(empty) = empty {
+            if let Some(empty) = empty.clone() {
                 let view = view.clone();
                 let on_select = on_select.clone();
                 menu = menu.toggleable_entry(
@@ -2129,7 +2322,7 @@ impl FlowView {
         let current_output = branch.output.clone();
         let output_menu = ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
             if outputs.is_empty() {
-                menu = menu.header("Nenhum passo antes entrega algo");
+                menu = menu.header(t!("agent_ui.flow_editor.branch.no_outputs"));
             }
             for (name, origin) in &outputs {
                 let view = view.clone();
@@ -2185,33 +2378,31 @@ impl FlowView {
             .child(
                 v_flex()
                     .gap_2()
-                    .child(section_label("SE A SAÍDA"))
+                    .child(section_label(t!("agent_ui.flow_editor.branch.if_output")))
                     .child(selector(
                         "branch-output",
                         IconName::FileDoc,
                         if branch.output.is_empty() {
-                            "escolha a saída".to_string()
+                            t!("agent_ui.flow_editor.branch.pick_output").to_string()
                         } else {
                             branch.output.clone()
                         },
                         output_menu,
                     ))
-                    .child(section_label("CONTÉM"))
+                    .child(section_label(t!("agent_ui.flow_editor.branch.contains")))
                     .child(field(&inspector.note, cx))
-                    .child(description(
-                        "Compara sem diferenciar maiúsculas. Olha a entrega mais recente da saída.",
-                    )),
+                    .child(description(t!("agent_ui.flow_editor.branch.contains_hint"))),
             )
             .child(
                 v_flex()
                     .gap_2()
-                    .child(section_label("ENTÃO VAI PARA"))
+                    .child(section_label(t!("agent_ui.flow_editor.branch.then")))
                     .child(self.step_dropdown(
                         "branch-then",
                         current(&branch.then_to),
                         later.clone(),
-                        "",
-                        Some("Próximo passo"),
+                        false,
+                        Some(t!("agent_ui.flow_editor.branch.next_step")),
                         set_target(true),
                         window,
                         cx,
@@ -2220,20 +2411,18 @@ impl FlowView {
             .child(
                 v_flex()
                     .gap_2()
-                    .child(section_label("SENÃO VAI PARA"))
+                    .child(section_label(t!("agent_ui.flow_editor.branch.else")))
                     .child(self.step_dropdown(
                         "branch-else",
                         current(&branch.else_to),
                         later,
-                        "",
-                        Some("Próximo passo"),
+                        false,
+                        Some(t!("agent_ui.flow_editor.branch.next_step")),
                         set_target(false),
                         window,
                         cx,
                     ))
-                    .child(description(
-                        "Os passos pulados ficam como pulados nesta execução. Para repetir passos, use “Se não passar”.",
-                    )),
+                    .child(description(t!("agent_ui.flow_editor.branch.skipped_hint"))),
             )
             .into_any_element()
     }
@@ -2268,7 +2457,7 @@ impl FlowView {
             let view = view.clone();
             move |mut menu, _window, _cx| {
                 if candidates.is_empty() {
-                    menu = menu.header("Todos os agentes já estão no passo");
+                    menu = menu.header(t!("agent_ui.flow_editor.parallel.all_added"));
                 }
                 for (command, name) in &candidates {
                     let view = view.clone();
@@ -2291,7 +2480,9 @@ impl FlowView {
             let name = self
                 .agent(command)
                 .map(|agent| agent.name.clone())
-                .unwrap_or_else(|| format!("/{command} (não existe)"));
+                .unwrap_or_else(|| {
+                    t!("agent_ui.flow_editor.agent.missing", command = command).to_string()
+                });
             agents = agents.child(
                 h_flex()
                     .gap_2()
@@ -2317,7 +2508,9 @@ impl FlowView {
                     .child(
                         IconButton::new(("remove-parallel-agent", position), IconName::Close)
                             .icon_size(IconSize::XSmall)
-                            .tooltip(Tooltip::text("Tirar do passo"))
+                            .tooltip(Tooltip::text(t!(
+                                "agent_ui.flow_editor.parallel.remove_agent"
+                            )))
                             .on_click(cx.listener(move |this, _, _window, cx| {
                                 edit_parallel(this, cx, &|parallel| {
                                     if position < parallel.agents.len() {
@@ -2329,22 +2522,25 @@ impl FlowView {
             );
         }
         let on_fail_label = match &parallel.on_fail {
-            OnFail::Retry { .. } => "Refaz o passo com o motivo",
-            OnFail::BackTo { .. } => "Volta para um passo",
-            OnFail::AskYou => "Chama você",
-            OnFail::Continue => "Segue mesmo assim",
+            OnFail::Retry { .. } => t!("agent_ui.flow_editor.on_fail.retry_step"),
+            OnFail::BackTo { .. } => t!("agent_ui.flow_editor.on_fail.back_to_a_step"),
+            OnFail::AskYou => t!("agent_ui.flow_editor.on_fail.ask_you"),
+            OnFail::Continue => t!("agent_ui.flow_editor.on_fail.continue"),
         };
         let on_fail_menu = ContextMenu::build(window, cx, {
             move |mut menu, _window, _cx| {
                 for (label, on_fail) in [
                     (
-                        "Refaz o passo com o motivo",
+                        t!("agent_ui.flow_editor.on_fail.retry_step"),
                         OnFail::Retry {
                             max: OnFail::DEFAULT_MAX,
                         },
                     ),
-                    ("Chama você", OnFail::AskYou),
-                    ("Segue mesmo assim", OnFail::Continue),
+                    (t!("agent_ui.flow_editor.on_fail.ask_you"), OnFail::AskYou),
+                    (
+                        t!("agent_ui.flow_editor.on_fail.continue"),
+                        OnFail::Continue,
+                    ),
                 ] {
                     let view = view.clone();
                     menu = menu.entry(label, None, move |_window, cx| {
@@ -2366,14 +2562,19 @@ impl FlowView {
                     .gap_2()
                     .child(
                         h_flex()
-                            .child(section_label("AGENTES AO MESMO TEMPO"))
+                            .child(section_label(t!(
+                                "agent_ui.flow_editor.parallel.agents_title"
+                            )))
                             .child(div().flex_1())
-                            .child(selector("parallel-add-agent", IconName::Plus, "agente", add_menu)),
+                            .child(selector(
+                                "parallel-add-agent",
+                                IconName::Plus,
+                                t!("agent_ui.flow_editor.parallel.add_agent"),
+                                add_menu,
+                            )),
                     )
                     .child(agents)
-                    .child(description(
-                        "Cada um roda na sua thread. O passo passa quando todos entregam; as entregas seguem juntas.",
-                    )),
+                    .child(description(t!("agent_ui.flow_editor.parallel.hint"))),
             )
             .child(
                 h_flex()
@@ -2387,20 +2588,27 @@ impl FlowView {
                                 ToggleState::Unselected
                             },
                         )
-                        .label("Só leitura")
-                        .on_click(cx.listener(move |this, _, _window, cx| {
-                            edit_parallel(this, cx, &|parallel| parallel.read_only = !read_only)
-                        })),
+                        .label(t!("agent_ui.flow_editor.parallel.read_only"))
+                        .on_click(cx.listener(
+                            move |this, _, _window, cx| {
+                                edit_parallel(this, cx, &|parallel| parallel.read_only = !read_only)
+                            },
+                        )),
                     )
-                    .child(description(
-                        "Desmarcado, os agentes editam o mesmo projeto e podem disputar arquivos.",
-                    )),
+                    .child(description(t!(
+                        "agent_ui.flow_editor.parallel.read_only_hint"
+                    ))),
             )
             .child(
                 v_flex()
                     .gap_2()
-                    .child(section_label("SE NÃO PASSAR"))
-                    .child(selector("parallel-on-fail", IconName::Undo, on_fail_label, on_fail_menu)),
+                    .child(section_label(t!("agent_ui.flow_editor.on_fail.title")))
+                    .child(selector(
+                        "parallel-on-fail",
+                        IconName::Undo,
+                        on_fail_label,
+                        on_fail_menu,
+                    )),
             )
             .into_any_element()
     }
@@ -2422,7 +2630,7 @@ impl FlowView {
         let shows = if shows.is_empty() {
             vec![(
                 String::new(),
-                "nada antes deste passo".to_string(),
+                t!("agent_ui.flow_editor.gate.nothing_before").to_string(),
                 false,
                 "",
             )]
@@ -2443,24 +2651,28 @@ impl FlowView {
             .child(
                 v_flex()
                     .gap_2()
-                    .child(section_label("O QUE VOCÊ APROVA"))
+                    .child(section_label(t!(
+                        "agent_ui.flow_editor.gate.what_you_approve"
+                    )))
                     .child(field(&inspector.note, cx)),
             )
             .child(
                 v_flex()
                     .gap_2()
-                    .child(section_label("MOSTRA PARA VOCÊ"))
+                    .child(section_label(t!("agent_ui.flow_editor.gate.shown_to_you")))
                     .child(self.io_rows(shows, cx)),
             )
             .child(
                 v_flex()
                     .gap_2()
-                    .child(section_label("PEDIR AJUSTE VOLTA PARA"))
+                    .child(section_label(t!(
+                        "agent_ui.flow_editor.gate.adjust_goes_to"
+                    )))
                     .child(self.step_dropdown(
                         "gate-adjust-to",
                         current,
                         (0..index).collect(),
-                        "",
+                        false,
                         None,
                         move |this, step, cx| {
                             let id = step
@@ -2479,9 +2691,7 @@ impl FlowView {
                         window,
                         cx,
                     ))
-                    .child(description(
-                        "Seu texto vai junto como motivo. A esteira pausa até você responder.",
-                    )),
+                    .child(description(t!("agent_ui.flow_editor.gate.adjust_hint"))),
             )
     }
 
@@ -2505,22 +2715,20 @@ impl FlowView {
             .child(
                 v_flex()
                     .gap_2()
-                    .child(section_label("COMANDO"))
+                    .child(section_label(t!("agent_ui.flow_editor.command.title")))
                     .child(field(&inspector.command, cx))
-                    .child(description(
-                        "Roda no terminal do projeto. Passa se sair 0; a saída fica como prova.",
-                    )),
+                    .child(description(t!("agent_ui.flow_editor.command.hint"))),
             )
             .child(
                 v_flex()
                     .gap_2()
-                    .child(section_label("SE NÃO PASSAR"))
+                    .child(section_label(t!("agent_ui.flow_editor.on_fail.title")))
                     .child(self.step_dropdown(
                         "command-on-fail",
                         current,
                         candidates,
-                        "Voltar para ",
-                        Some("Chamar você"),
+                        true,
+                        Some(t!("agent_ui.flow_editor.on_fail.call_you")),
                         move |this, step, cx| {
                             let target = step
                                 .and_then(|step| this.flow.steps.get(step))
@@ -2601,32 +2809,30 @@ impl FlowView {
             GitHubAction::WaitChecks { .. } => Some(
                 v_flex()
                     .gap_2()
-                    .child(section_label("TEMPO MÁXIMO"))
+                    .child(section_label(t!("agent_ui.flow_editor.github.max_time")))
                     .child(field(&inspector.command, cx))
-                    .child(description(
-                        "Minutos. Os checks que falharem rodam mais uma vez antes de o passo reprovar.",
-                    ))
+                    .child(description(t!("agent_ui.flow_editor.github.max_time_hint")))
                     .into_any_element(),
             ),
             GitHubAction::MoveItem { .. } => Some(
                 v_flex()
                     .gap_2()
-                    .child(section_label("COLUNA"))
+                    .child(section_label(t!("agent_ui.flow_editor.github.column")))
                     .child(field(&inspector.note, cx))
-                    .child(description("O nome da coluna no projeto, como Em revisão."))
+                    .child(description(t!("agent_ui.flow_editor.github.column_hint")))
                     .into_any_element(),
             ),
             GitHubAction::CommentItem { .. } => Some(
                 v_flex()
                     .gap_2()
-                    .child(section_label("COMENTÁRIO"))
+                    .child(section_label(t!("agent_ui.flow_editor.github.comment")))
                     .child(field(&inspector.note, cx))
-                    .child(description("Vazio comenta o que a esteira entregou até aqui."))
+                    .child(description(t!("agent_ui.flow_editor.github.comment_hint")))
                     .into_any_element(),
             ),
             GitHubAction::OpenPullRequest { draft } => Some(
                 Checkbox::new("github-step-draft", (*draft).into())
-                    .label("Abrir como rascunho")
+                    .label(t!("agent_ui.flow_editor.github.open_as_draft"))
                     .on_click(cx.listener(move |this, state: &ToggleState, _window, cx| {
                         let draft = state.selected();
                         this.edit_flow(cx, |flow| {
@@ -2661,13 +2867,17 @@ impl FlowView {
             io.push(match source {
                 Some((source, _)) => (
                     "PR".to_string(),
-                    format!("do passo {} · Abrir PR", source + 1),
+                    t!(
+                        "agent_ui.flow_editor.github.pr_from_step",
+                        number = source + 1
+                    )
+                    .to_string(),
                     false,
                     "←",
                 ),
                 None => (
                     "PR".to_string(),
-                    "o do branch atual".to_string(),
+                    t!("agent_ui.flow_editor.github.pr_current_branch").to_string(),
                     false,
                     "←",
                 ),
@@ -2677,9 +2887,9 @@ impl FlowView {
             io.push((
                 output.to_string(),
                 if *output == "log do que falhou" {
-                    "volta junto para quem corrige".to_string()
+                    t!("agent_ui.flow_editor.github.output_back").to_string()
                 } else {
-                    "para os próximos passos".to_string()
+                    t!("agent_ui.flow_editor.io.to_next_steps").to_string()
                 },
                 false,
                 "→",
@@ -2698,23 +2908,21 @@ impl FlowView {
             .child(
                 v_flex()
                     .gap_2()
-                    .child(section_label("PASSO DO GITHUB"))
+                    .child(section_label(t!("agent_ui.flow_editor.github.step_title")))
                     .child(selector(
                         "github-step-action",
                         github_icon(&github.action),
                         github.action.label(),
                         action_menu,
                     ))
-                    .child(description(
-                        "Não chama modelo: usa a conta do GitHub conectada no dock Repo.",
-                    )),
+                    .child(description(t!("agent_ui.flow_editor.github.no_model_hint"))),
             )
             .children(setting)
             .when(!io.is_empty(), |this| {
                 this.child(
                     v_flex()
                         .gap_2()
-                        .child(section_label("RECEBE E ENTREGA"))
+                        .child(section_label(t!("agent_ui.flow_editor.io.title")))
                         .child(self.io_rows(io, cx)),
                 )
             })
@@ -2724,7 +2932,7 @@ impl FlowView {
                     this.child(
                         v_flex()
                             .gap_2()
-                            .child(section_label("CRITÉRIOS DE ACEITE"))
+                            .child(section_label(t!("agent_ui.flow_editor.criteria.title")))
                             .child(
                                 h_flex()
                                     .gap_2()
@@ -2738,11 +2946,13 @@ impl FlowView {
                                             .color(Color::Success),
                                     )
                                     .child(
-                                        Label::new("Todos os checks obrigatórios passam")
+                                        Label::new(t!("agent_ui.flow_editor.github.checks_pass"))
                                             .size(LabelSize::Small),
                                     )
                                     .child(div().flex_1())
-                                    .child(description("verificado pelo GitHub")),
+                                    .child(description(t!(
+                                        "agent_ui.flow_editor.github.verified_by_github"
+                                    ))),
                             ),
                     )
                 },
@@ -2750,13 +2960,13 @@ impl FlowView {
             .child(
                 v_flex()
                     .gap_2()
-                    .child(section_label("SE NÃO PASSAR"))
+                    .child(section_label(t!("agent_ui.flow_editor.on_fail.title")))
                     .child(self.step_dropdown(
                         "github-on-fail",
                         current,
                         candidates,
-                        "Voltar para ",
-                        Some("Chamar você"),
+                        true,
+                        Some(t!("agent_ui.flow_editor.on_fail.call_you")),
                         move |this, step, cx| {
                             let target = step
                                 .and_then(|step| this.flow.steps.get(step))
@@ -2797,16 +3007,14 @@ impl FlowView {
                                         .color(Color::Warning),
                                 )
                                 .child(
-                                    Label::new("ESCRITAS NO GITHUB")
+                                    Label::new(t!("agent_ui.flow_editor.github.writes_title"))
                                         .size(LabelSize::XSmall)
                                         .color(Color::Warning),
                                 ),
                         )
                         .child(
-                            Label::new(
-                                "Rodar mostra a lista do que a esteira escreve (branch, PR, mover, comentar) e você aprova de uma vez. Merge nunca é um passo: fica com você.",
-                            )
-                            .size(LabelSize::Small),
+                            Label::new(t!("agent_ui.flow_editor.github.writes_hint"))
+                                .size(LabelSize::Small),
                         ),
                 )
             })
@@ -2830,13 +3038,19 @@ impl FlowView {
                     agent.name,
                     agent.command,
                     if matches!(agent.source, TaskAgentSource::Personal) {
-                        "só para mim"
+                        t!("agent_ui.flow_editor.agent.personal")
                     } else {
-                        "projeto"
+                        t!("agent_ui.flow_editor.agent.project")
                     }
                 )
             })
-            .unwrap_or_else(|| format!("/{} (não existe)", agent_step.agent));
+            .unwrap_or_else(|| {
+                t!(
+                    "agent_ui.flow_editor.agent.missing",
+                    command = agent_step.agent
+                )
+                .to_string()
+            });
         let agents = self.agents.clone();
         let current_agent = agent_step.agent.clone();
         let agent_menu = ContextMenu::build(window, cx, {
@@ -2872,24 +3086,29 @@ impl FlowView {
                 } else {
                     agent.toolkits.join(", ")
                 };
-                format!(
-                    "{} · {} · {toolkits}. Vem do agente; mudar aqui vale só nesta esteira.",
-                    agent
-                        .model
-                        .clone()
-                        .unwrap_or_else(|| "modelo da thread".to_string()),
-                    agent
+                t!(
+                    "agent_ui.flow_editor.agent.summary",
+                    model =
+                        agent
+                            .model
+                            .clone()
+                            .unwrap_or_else(
+                                || t!("agent_ui.flow_editor.step.thread_model").to_string()
+                            ),
+                    profile = agent
                         .profile
                         .clone()
-                        .unwrap_or_else(|| "perfil da thread".to_string()),
+                        .unwrap_or_else(
+                            || t!("agent_ui.flow_editor.agent.thread_profile").to_string()
+                        ),
+                    toolkits = toolkits
                 )
+                .to_string()
             })
-            .unwrap_or_else(|| {
-                "Esse agente não existe mais. Escolha outro ou crie-o na aba Agentes.".to_string()
-            });
+            .unwrap_or_else(|| t!("agent_ui.flow_editor.agent.deleted").to_string());
 
         let override_chip = |id: &'static str,
-                             label: &'static str,
+                             label: SharedString,
                              value: String,
                              kind: Override,
                              cx: &mut Context<Self>| {
@@ -2934,10 +3153,10 @@ impl FlowView {
             .gap_2()
             .child(
                 h_flex()
-                    .child(section_label("AGENTE"))
+                    .child(section_label(t!("agent_ui.flow_editor.agent.title")))
                     .child(div().flex_1())
                     .child(
-                        Button::new("edit-task-agent", "editar agente")
+                        Button::new("edit-task-agent", t!("agent_ui.flow_editor.agent.edit"))
                             .label_size(LabelSize::XSmall)
                             .style(ButtonStyle::Transparent)
                             .color(Color::Accent)
@@ -2959,21 +3178,24 @@ impl FlowView {
                     .flex_wrap()
                     .child(override_chip(
                         "override-model",
-                        "modelo",
-                        agent_step
-                            .model
-                            .clone()
-                            .unwrap_or_else(|| "do agente".to_string()),
+                        t!("agent_ui.flow_editor.agent.override_model"),
+                        agent_step.model.clone().unwrap_or_else(|| {
+                            t!("agent_ui.flow_editor.agent.from_agent").to_string()
+                        }),
                         Override::Model,
                         cx,
                     ))
                     .child(override_chip(
                         "override-instructions",
-                        "instruções",
-                        if instruction_lines == 0 {
-                            "do agente".to_string()
-                        } else {
-                            format!("+ {instruction_lines} linha(s)")
+                        t!("agent_ui.flow_editor.agent.override_instructions"),
+                        match instruction_lines {
+                            0 => t!("agent_ui.flow_editor.agent.from_agent").to_string(),
+                            1 => t!("agent_ui.flow_editor.agent.instruction_lines.one").to_string(),
+                            count => t!(
+                                "agent_ui.flow_editor.agent.instruction_lines.other",
+                                count = count
+                            )
+                            .to_string(),
                         },
                         Override::Instructions,
                         cx,
@@ -2984,7 +3206,7 @@ impl FlowView {
                 agent_group = agent_group.child(model_dropdown(
                     "step-model",
                     agent_step.model.clone(),
-                    "Do agente",
+                    t!("agent_ui.flow_editor.agent.model_from_agent"),
                     move |model, cx| {
                         view.update(cx, |view, cx| {
                             view.edit_agent_step(index, cx, |agent_step| agent_step.model = model);
@@ -3008,7 +3230,7 @@ impl FlowView {
             .unwrap_or(DesignTool::Code);
         let where_group = v_flex()
             .gap_2()
-            .child(section_label("ONDE ACONTECE"))
+            .child(section_label(t!("agent_ui.flow_editor.where.title")))
             .child(
                 h_flex()
                     .p_0p5()
@@ -3043,7 +3265,7 @@ impl FlowView {
                     })),
             )
             .child(if current_tool == DesignTool::Code {
-                description("Trabalha direto no repositório.").into_any_element()
+                description(t!("agent_ui.flow_editor.where.code_hint")).into_any_element()
             } else {
                 field(&inspector.file, cx).into_any_element()
             });
@@ -3056,7 +3278,7 @@ impl FlowView {
                     Some((_, origin)) => io.push((takes.clone(), origin.clone(), false, "←")),
                     None => io.push((
                         takes.clone(),
-                        "ninguém entrega antes".to_string(),
+                        t!("agent_ui.flow_editor.io.nobody_gives").to_string(),
                         true,
                         "←",
                     )),
@@ -3065,7 +3287,7 @@ impl FlowView {
             for gives in &agent.gives {
                 io.push((
                     gives.clone(),
-                    "para os próximos passos".to_string(),
+                    t!("agent_ui.flow_editor.io.to_next_steps").to_string(),
                     false,
                     "→",
                 ));
@@ -3073,22 +3295,19 @@ impl FlowView {
         }
         let io_group = v_flex()
             .gap_2()
-            .child(section_label("RECEBE E ENTREGA"))
+            .child(section_label(t!("agent_ui.flow_editor.io.title")))
             .child(if io.is_empty() {
-                description(
-                    "O agente não declara o que recebe nem o que entrega (takes/gives no .md).",
-                )
-                .into_any_element()
+                description(t!("agent_ui.flow_editor.io.undeclared")).into_any_element()
             } else {
                 self.io_rows(io, cx).into_any_element()
             });
 
         let mut criteria_group = v_flex().gap_2().child(
             h_flex()
-                .child(section_label("CRITÉRIOS DE ACEITE"))
+                .child(section_label(t!("agent_ui.flow_editor.criteria.title")))
                 .child(div().flex_1())
                 .child(
-                    Button::new("add-criterion", "+ critério")
+                    Button::new("add-criterion", t!("agent_ui.flow_editor.criteria.add"))
                         .label_size(LabelSize::XSmall)
                         .style(ButtonStyle::Transparent)
                         .color(Color::Accent)
@@ -3119,19 +3338,17 @@ impl FlowView {
             ));
         }
         if agent_step.criteria.is_empty() {
-            criteria_group = criteria_group.child(description(
-                "Sem critérios: o passo avança quando o agente entregar.",
-            ));
+            criteria_group =
+                criteria_group.child(description(t!("agent_ui.flow_editor.criteria.empty")));
         }
-        criteria_group = criteria_group.child(description(
-            "Marcado = obrigatório: se falhar, vale o “se não passar”. Opcional vira pergunta para você.",
-        ));
+        criteria_group =
+            criteria_group.child(description(t!("agent_ui.flow_editor.criteria.hint")));
 
         let on_fail_group = self.render_on_fail(index, agent_step, window, cx);
 
         let limits = agent_step.limits;
         let limits_open = inspector.limits_open;
-        let limit_field = |caption: &'static str, editor: &Entity<Editor>, cx: &App| {
+        let limit_field = |caption: SharedString, editor: &Entity<Editor>, cx: &App| {
             v_flex()
                 .flex_1()
                 .gap_1()
@@ -3150,15 +3367,17 @@ impl FlowView {
                     .gap_2()
                     .cursor_pointer()
                     .child(
-                        Label::new("Limites")
+                        Label::new(t!("agent_ui.flow_editor.limits.title"))
                             .size(LabelSize::Small)
                             .weight(FontWeight::SEMIBOLD),
                     )
                     .child(div().flex_1())
                     .child(
-                        Label::new(format!(
-                            "{} turnos · {} min · US$ {}",
-                            limits.turns, limits.minutes, limits.usd
+                        Label::new(t!(
+                            "agent_ui.flow_editor.limits.summary",
+                            turns = limits.turns,
+                            minutes = limits.minutes,
+                            usd = limits.usd
                         ))
                         .size(LabelSize::XSmall)
                         .buffer_font(cx)
@@ -3177,9 +3396,17 @@ impl FlowView {
                         .gap_1p5()
                         .px_2p5()
                         .pb_2p5()
-                        .child(limit_field("turnos", &inspector.turns, cx))
-                        .child(limit_field("minutos", &inspector.minutes, cx))
-                        .child(limit_field("US$", &inspector.usd, cx)),
+                        .child(limit_field(
+                            t!("agent_ui.flow_editor.limits.turns"),
+                            &inspector.turns,
+                            cx,
+                        ))
+                        .child(limit_field(
+                            t!("agent_ui.flow_editor.limits.minutes"),
+                            &inspector.minutes,
+                            cx,
+                        ))
+                        .child(limit_field("US$".into(), &inspector.usd, cx)),
                 )
             });
 
@@ -3206,11 +3433,7 @@ impl FlowView {
     ) -> impl IntoElement {
         let view = cx.entity().downgrade();
         let kind = verifier_kind(&criterion.verify);
-        let kind_label = VERIFIERS
-            .iter()
-            .find(|(_, candidate)| *candidate == kind)
-            .map(|(label, _)| *label)
-            .unwrap_or("você");
+        let kind_label = verifier_label(kind);
         let verifier_menu = ContextMenu::build(window, cx, {
             let view = view.clone();
             let first_other = self
@@ -3220,11 +3443,11 @@ impl FlowView {
                 .map(|agent| agent.command.clone())
                 .unwrap_or_default();
             move |mut menu, _window, _cx| {
-                for (label, candidate) in VERIFIERS {
+                for candidate in VERIFIERS {
                     let view = view.clone();
                     let first_other = first_other.clone();
                     menu = menu.toggleable_entry(
-                        label,
+                        verifier_label(candidate),
                         candidate == kind,
                         IconPosition::Start,
                         None,
@@ -3326,7 +3549,7 @@ impl FlowView {
                         ToggleState::Unselected
                     },
                 )
-                .tooltip(Tooltip::text("Obrigatório"))
+                .tooltip(Tooltip::text(t!("agent_ui.flow_editor.criterion.required")))
                 .on_click(cx.listener(move |this, _, _window, cx| {
                     this.edit_agent_step(step, cx, |agent_step| {
                         if let Some(criterion) = agent_step.criteria.get_mut(criterion_index) {
@@ -3345,7 +3568,9 @@ impl FlowView {
                         h_flex()
                             .gap_1p5()
                             .flex_wrap()
-                            .child(description("verificado por"))
+                            .child(description(t!(
+                                "agent_ui.flow_editor.criterion.verified_by"
+                            )))
                             .child(selector(
                                 "criterion-verifier",
                                 IconName::Check,
@@ -3362,7 +3587,7 @@ impl FlowView {
                                     IconName::Close,
                                 )
                                 .icon_size(IconSize::XSmall)
-                                .tooltip(Tooltip::text("Remover critério"))
+                                .tooltip(Tooltip::text(t!("agent_ui.flow_editor.criterion.remove")))
                                 .on_click(cx.listener(
                                     move |this, _, window, cx| {
                                         this.edit_agent_step(step, cx, |agent_step| {
@@ -3387,16 +3612,18 @@ impl FlowView {
     ) -> AnyElement {
         let view = cx.entity().downgrade();
         let label = match &agent_step.on_fail {
-            OnFail::Retry { .. } => "Refaz este passo com o motivo".to_string(),
-            OnFail::BackTo { step, .. } => format!(
-                "Volta para {}",
-                self.flow
+            OnFail::Retry { .. } => t!("agent_ui.flow_editor.on_fail.retry_this_step").to_string(),
+            OnFail::BackTo { step, .. } => t!(
+                "agent_ui.flow_editor.on_fail.goes_back_to",
+                step = self
+                    .flow
                     .step_index(step)
                     .map(|step| self.step_label(step))
                     .unwrap_or_else(|| step.clone())
-            ),
-            OnFail::AskYou => "Chama você".to_string(),
-            OnFail::Continue => "Segue mesmo assim".to_string(),
+            )
+            .to_string(),
+            OnFail::AskYou => t!("agent_ui.flow_editor.on_fail.ask_you").to_string(),
+            OnFail::Continue => t!("agent_ui.flow_editor.on_fail.continue").to_string(),
         };
         let max = match &agent_step.on_fail {
             OnFail::Retry { max } | OnFail::BackTo { max, .. } => Some(*max),
@@ -3407,7 +3634,11 @@ impl FlowView {
             .map(|step| {
                 (
                     self.flow.steps[step].id.clone(),
-                    format!("Volta para {}", self.step_label(step)),
+                    t!(
+                        "agent_ui.flow_editor.on_fail.goes_back_to",
+                        step = self.step_label(step)
+                    )
+                    .to_string(),
                 )
             })
             .collect();
@@ -3416,7 +3647,7 @@ impl FlowView {
             let view = view.clone();
             move |mut menu, _window, _cx| {
                 let mut options: Vec<(String, OnFail)> = vec![(
-                    "Refaz este passo com o motivo".to_string(),
+                    t!("agent_ui.flow_editor.on_fail.retry_this_step").to_string(),
                     OnFail::Retry {
                         max: max.unwrap_or(OnFail::DEFAULT_MAX),
                     },
@@ -3430,8 +3661,14 @@ impl FlowView {
                         },
                     ));
                 }
-                options.push(("Chama você".to_string(), OnFail::AskYou));
-                options.push(("Segue mesmo assim".to_string(), OnFail::Continue));
+                options.push((
+                    t!("agent_ui.flow_editor.on_fail.ask_you").to_string(),
+                    OnFail::AskYou,
+                ));
+                options.push((
+                    t!("agent_ui.flow_editor.on_fail.continue").to_string(),
+                    OnFail::Continue,
+                ));
                 for (label, on_fail) in options {
                     let toggled = std::mem::discriminant(&on_fail)
                         == std::mem::discriminant(&current)
@@ -3490,18 +3727,20 @@ impl FlowView {
             });
             h_flex()
                 .gap_2()
-                .child(description("até"))
+                .child(description(t!("agent_ui.flow_editor.on_fail.up_to")))
                 .child(selector(
                     "on-fail-max",
                     IconName::Rerun,
                     max.to_string(),
                     menu,
                 ))
-                .child(description("vezes, depois chama você"))
+                .child(description(t!(
+                    "agent_ui.flow_editor.on_fail.times_then_you"
+                )))
         });
         v_flex()
             .gap_2()
-            .child(section_label("SE NÃO PASSAR"))
+            .child(section_label(t!("agent_ui.flow_editor.on_fail.title")))
             .child(selector("on-fail", IconName::Undo, label, menu))
             .children(max_menu)
             .into_any_element()

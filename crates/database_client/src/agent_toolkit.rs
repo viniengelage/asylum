@@ -11,6 +11,7 @@ use crate::{
 };
 use anyhow::{Context as _, anyhow};
 use gpui::{App, AppContext as _, Entity, Window};
+use i18n::t;
 use project::Project;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -409,14 +410,14 @@ pub fn register_toolkit(cx: &mut App) {
     task_agents::register_toolkit(
         Toolkit {
             id: task_agents::toolkit_ids::DATABASE.into(),
-            name: "Banco".into(),
-            description: "Consultas de leitura na conexão do painel Banco".into(),
+            name: t!("database_client.toolkit.short_name"),
+            description: t!("database_client.toolkit.description"),
             icon: "database".into(),
             mention: Some("@SQL".into()),
             tools: vec![
                 ToolkitTool::new(
                     "database_query",
-                    "Consultou o banco",
+                    t!("database_client.toolkit.query_title"),
                     "Runs one read-only SQL statement (SELECT, WITH, VALUES, TABLE) against the \
                      PostgreSQL database connected in the Banco panel, on a separate read-only \
                      connection, and returns the rows as a table. Use it to answer questions \
@@ -431,7 +432,7 @@ pub fn register_toolkit(cx: &mut App) {
                 // brings it back), and nothing reaches the database until the user runs it.
                 ToolkitTool::new(
                     "database_write_query",
-                    "Escreveu a query",
+                    t!("database_client.toolkit.write_query_title"),
                     "Writes SQL into a SQL editor tab of the Banco panel, which the user \
                      mentioned with @. Nothing runs: the user reviews and runs it. After \
                      writing, end the turn without any text.",

@@ -2453,9 +2453,16 @@ pub fn task_agent_permission_decision(
                     _ => tool_rules.always_deny.push(regex),
                 },
                 Err(error) => {
-                    return Some(ToolPermissionDecision::Deny(format!(
-                        "O agente {agent_name} tem um padrão inválido para {tool_name} ({pattern}): {error}"
-                    )));
+                    return Some(ToolPermissionDecision::Deny(
+                        i18n::t!(
+                            "agent.tool_permissions.invalid_pattern",
+                            agent = agent_name,
+                            tool = tool_name,
+                            pattern = pattern,
+                            error = error
+                        )
+                        .to_string(),
+                    ));
                 }
             }
         }
@@ -2484,9 +2491,14 @@ pub fn task_agent_permission_decision(
         return None;
     }
     Some(match with_allow {
-        ToolPermissionDecision::Deny(reason) => {
-            ToolPermissionDecision::Deny(format!("Bloqueado pelo agente {agent_name}: {reason}"))
-        }
+        ToolPermissionDecision::Deny(reason) => ToolPermissionDecision::Deny(
+            i18n::t!(
+                "agent.tool_permissions.blocked_by_agent",
+                agent = agent_name,
+                reason = reason
+            )
+            .to_string(),
+        ),
         decision => decision,
     })
 }

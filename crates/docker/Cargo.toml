@@ -24,6 +24,7 @@ gpui.workspace = true
 http-body-util.workspace = true
 hyper = { workspace = true, features = ["client", "http1"] }
 hyper-util = { workspace = true, features = ["tokio"] }
+i18n.workspace = true
 language.workspace = true
 log.workspace = true
 menu.workspace = true
@@ -41,7 +42,6 @@ task.workspace = true
 task_agents.workspace = true
 terminal_view.workspace = true
 theme_settings.workspace = true
-thiserror.workspace = true
 tokio = { workspace = true, features = ["net", "io-util", "sync", "macros", "time", "rt"] }
 ui.workspace = true
 urlencoding.workspace = true

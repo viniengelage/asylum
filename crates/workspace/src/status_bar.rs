@@ -327,15 +327,15 @@ fn render_toolkit_menu(items: &[&dyn StatusItemViewHandle], cx: &App) -> AnyElem
         .trigger(
             StatusBarButton::new("status-bar-toolkit-button", IconName::Toolbox, any_open)
                 .tab_index(0isize)
-                .aria_label("Toolkit")
-                .tooltip(Tooltip::text("Toolkit")),
+                .aria_label(i18n::t!("workspace.toolkit.title"))
+                .tooltip(Tooltip::text(i18n::t!("workspace.toolkit.title"))),
         )
         .menu(move |window, cx| {
             let entries = entries.clone();
             Some(ContextMenu::build(window, cx, move |menu, _window, _cx| {
-                entries
-                    .iter()
-                    .fold(menu.sectioned().header("Toolkit"), |menu, entry| {
+                entries.iter().fold(
+                    menu.sectioned().header(i18n::t!("workspace.toolkit.title")),
+                    |menu, entry| {
                         let toggle = entry.toggle.clone();
                         menu.item(
                             ContextMenuEntry::new(entry.label.clone())
@@ -344,7 +344,8 @@ fn render_toolkit_menu(items: &[&dyn StatusItemViewHandle], cx: &App) -> AnyElem
                                 .action(entry.action.boxed_clone())
                                 .handler(move |window, cx| toggle(window, cx)),
                         )
-                    })
+                    },
+                )
             }))
         })
         .into_any_element()

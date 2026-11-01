@@ -20,6 +20,7 @@ use gpui::{
     actions,
 };
 use http_client::HttpClient;
+use i18n::t;
 use util::ResultExt as _;
 use workspace::Workspace;
 
@@ -249,7 +250,7 @@ impl SettingsSync {
             credentials
                 .delete_credentials(CREDENTIALS_URL, cx)
                 .await
-                .context("deleting the saved GitHub sign-in")?;
+                .with_context(|| t!("settings_sync.error.delete_sign_in").to_string())?;
             // The next account to sign in may use a different gist, so this machine starts over
             // as if it had never synced.
             cx.background_spawn(async move { local_files::delete_record() })
@@ -298,7 +299,7 @@ impl SettingsSync {
                         log::warn!("settings sync: the GitHub sign-in of {login} is no longer valid");
                         this.sign_out(cx);
                         this.state = State::SignedOut {
-                            error: Some("GitHub rejected the saved sign-in. Sign in again.".into()),
+                            error: Some(t!("settings_sync.error.sign_in_rejected")),
                         };
                     }
                     Err(error) => {
@@ -346,7 +347,7 @@ async fn authorize(
         cx.background_executor().timer(interval).await;
         anyhow::ensure!(
             std::time::Instant::now() < expires_at,
-            "the sign-in code expired; start again"
+            t!("settings_sync.error.code_expired").to_string()
         );
         match github::poll_for_token(http, &code.device_code).await? {
             github::TokenPoll::Pending => {}
@@ -359,7 +360,7 @@ async fn authorize(
     credentials
         .write_credentials(CREDENTIALS_URL, &user.login, token.as_bytes(), cx)
         .await
-        .context("saving the GitHub sign-in")?;
+        .with_context(|| t!("settings_sync.error.save_sign_in").to_string())?;
     Ok((user, token))
 }
 

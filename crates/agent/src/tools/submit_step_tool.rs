@@ -76,7 +76,7 @@ impl AgentTool for SubmitStepTool {
         _input: Result<Self::Input, serde_json::Value>,
         _cx: &mut App,
     ) -> SharedString {
-        "Entrega do passo".into()
+        i18n::t!("agent.submit_step_tool.title")
     }
 
     fn run(

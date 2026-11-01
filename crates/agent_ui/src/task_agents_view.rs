@@ -14,6 +14,7 @@ use gpui::{
     App, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Pixels, Stateful,
     Subscription, Task, WeakEntity, Window, actions,
 };
+use i18n::t;
 use language_model::LanguageModelRegistry;
 use new_agent_modal::NewAgentModal;
 use project::Project;
@@ -266,7 +267,10 @@ const TEMPLATES: &[Template] = &[
 fn template_agent(template: Option<&Template>) -> TaskAgent {
     let (name, command) = match template {
         Some(template) => (template.name.to_string(), template.command.to_string()),
-        None => ("Novo agente".to_string(), "novo-agente".to_string()),
+        None => (
+            t!("agent_ui.task_agents.new_agent").to_string(),
+            "novo-agente".to_string(),
+        ),
     };
     TaskAgent {
         id: command.clone(),
@@ -305,7 +309,7 @@ fn template_agent(template: Option<&Template>) -> TaskAgent {
         enabled: true,
         instructions: template
             .map(|template| template.instructions.to_string())
-            .unwrap_or_else(|| "Descreva aqui o que o agente faz, passo a passo.".to_string()),
+            .unwrap_or_else(|| t!("agent_ui.task_agents.default_instructions").to_string()),
         source: TaskAgentSource::Personal,
         file_path: PathBuf::new(),
     }
@@ -314,56 +318,70 @@ fn template_agent(template: Option<&Template>) -> TaskAgent {
 /// How many times the model may fix its own file before what it wrote is saved as is.
 const MAX_AUTHORING_REPAIRS: usize = 2;
 
-fn permission_label(mode: Option<PermissionMode>) -> &'static str {
+fn permission_label(mode: Option<PermissionMode>) -> SharedString {
     match mode {
-        None => "padrão",
-        Some(PermissionMode::Allow) => "livre",
-        Some(PermissionMode::Confirm) => "pede",
-        Some(PermissionMode::Deny) => "nunca",
+        None => t!("agent_ui.task_agents.permission.default"),
+        Some(PermissionMode::Allow) => t!("agent_ui.task_agents.permission.allow"),
+        Some(PermissionMode::Confirm) => t!("agent_ui.task_agents.permission.confirm"),
+        Some(PermissionMode::Deny) => t!("agent_ui.task_agents.permission.deny"),
     }
 }
 
 /// The Zed Agent's tools that ask before acting, with what they do.
-const BUILTIN_PERMISSION_TOOLS: &[(&str, &str, &str)] = &[
-    (
-        agent::TerminalTool::NAME,
-        "rodar terminal",
-        "Roda comandos no terminal",
-    ),
-    (
-        agent::EditFileTool::NAME,
-        "editar arquivos",
-        "Edita arquivos",
-    ),
-    (
-        agent::WriteFileTool::NAME,
-        "criar arquivos",
-        "Cria e sobrescreve arquivos",
-    ),
-    (
-        agent::DeletePathTool::NAME,
-        "apagar",
-        "Apaga arquivos e pastas",
-    ),
-    (
-        agent::MovePathTool::NAME,
-        "mover",
-        "Move e renomeia arquivos",
-    ),
-    (agent::CopyPathTool::NAME, "copiar", "Copia arquivos"),
-    (
-        agent::CreateDirectoryTool::NAME,
-        "criar pastas",
-        "Cria pastas",
-    ),
-    (agent::FetchTool::NAME, "buscar URL", "Busca uma URL"),
-    (
-        agent::WebSearchTool::NAME,
-        "pesquisar na web",
-        "Pesquisa na web",
-    ),
-    (agent::SkillTool::NAME, "rodar skill", "Roda uma skill"),
-];
+fn builtin_permission_tools() -> [(&'static str, SharedString, SharedString); 10] {
+    [
+        (
+            agent::TerminalTool::NAME,
+            t!("agent_ui.task_agents.tool.terminal.label"),
+            t!("agent_ui.task_agents.tool.terminal.title"),
+        ),
+        (
+            agent::EditFileTool::NAME,
+            t!("agent_ui.task_agents.tool.edit_file.label"),
+            t!("agent_ui.task_agents.tool.edit_file.title"),
+        ),
+        (
+            agent::WriteFileTool::NAME,
+            t!("agent_ui.task_agents.tool.write_file.label"),
+            t!("agent_ui.task_agents.tool.write_file.title"),
+        ),
+        (
+            agent::DeletePathTool::NAME,
+            t!("agent_ui.task_agents.tool.delete_path.label"),
+            t!("agent_ui.task_agents.tool.delete_path.title"),
+        ),
+        (
+            agent::MovePathTool::NAME,
+            t!("agent_ui.task_agents.tool.move_path.label"),
+            t!("agent_ui.task_agents.tool.move_path.title"),
+        ),
+        (
+            agent::CopyPathTool::NAME,
+            t!("agent_ui.task_agents.tool.copy_path.label"),
+            t!("agent_ui.task_agents.tool.copy_path.title"),
+        ),
+        (
+            agent::CreateDirectoryTool::NAME,
+            t!("agent_ui.task_agents.tool.create_directory.label"),
+            t!("agent_ui.task_agents.tool.create_directory.title"),
+        ),
+        (
+            agent::FetchTool::NAME,
+            t!("agent_ui.task_agents.tool.fetch.label"),
+            t!("agent_ui.task_agents.tool.fetch.title"),
+        ),
+        (
+            agent::WebSearchTool::NAME,
+            t!("agent_ui.task_agents.tool.web_search.label"),
+            t!("agent_ui.task_agents.tool.web_search.title"),
+        ),
+        (
+            agent::SkillTool::NAME,
+            t!("agent_ui.task_agents.tool.skill.label"),
+            t!("agent_ui.task_agents.tool.skill.title"),
+        ),
+    ]
+}
 
 fn next_permission(mode: Option<PermissionMode>) -> Option<PermissionMode> {
     match mode {
@@ -435,7 +453,7 @@ impl TaskAgentsView {
         let fs = project.read(cx).fs().clone();
         let search = cx.new(|cx| {
             let mut editor = Editor::single_line(window, cx);
-            editor.set_placeholder_text("Buscar agentes…", window, cx);
+            editor.set_placeholder_text(&t!("agent_ui.task_agents.search_placeholder"), window, cx);
             editor
         });
         let mut this = Self {
@@ -504,7 +522,7 @@ impl TaskAgentsView {
 
     fn render_segment(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let segment = |id: &'static str,
-                       label: &'static str,
+                       label: SharedString,
                        value: Segment,
                        current: Segment,
                        cx: &mut Context<Self>| {
@@ -530,14 +548,14 @@ impl TaskAgentsView {
                 .bg(cx.theme().colors().editor_background)
                 .child(segment(
                     "segment-agents",
-                    "Agentes",
+                    t!("agent_ui.task_agents.segment.agents"),
                     Segment::Agents,
                     self.segment,
                     cx,
                 ))
                 .child(segment(
                     "segment-flows",
-                    "Esteiras",
+                    t!("agent_ui.task_agents.segment.flows"),
                     Segment::Flows,
                     self.segment,
                     cx,
@@ -553,11 +571,11 @@ impl TaskAgentsView {
             .gap_1()
             .p_2()
             .overflow_y_scroll();
-        let sections: [(&str, fn(&flows::FlowSource) -> bool); 2] = [
-            ("DO PROJETO", |source| {
+        let sections: [(SharedString, fn(&flows::FlowSource) -> bool); 2] = [
+            (t!("agent_ui.task_agents.section.project"), |source| {
                 matches!(source, flows::FlowSource::Project { .. })
             }),
-            ("SÓ PARA MIM", |source| {
+            (t!("agent_ui.task_agents.section.personal"), |source| {
                 matches!(source, flows::FlowSource::Personal)
             }),
         ];
@@ -611,9 +629,16 @@ impl TaskAgentsView {
                                 .child(Label::new(flow.name.clone()).single_line().truncate())
                                 .child(
                                     Label::new(format!(
-                                        "/{} · {steps} passo{}",
+                                        "/{} · {}",
                                         flow.id,
-                                        if steps == 1 { "" } else { "s" }
+                                        if steps == 1 {
+                                            t!("agent_ui.task_agents.step_count.one", count = steps)
+                                        } else {
+                                            t!(
+                                                "agent_ui.task_agents.step_count.other",
+                                                count = steps
+                                            )
+                                        }
                                     ))
                                     .size(LabelSize::Small)
                                     .color(Color::Muted),
@@ -631,9 +656,9 @@ impl TaskAgentsView {
                 v_flex()
                     .p_2()
                     .gap_1()
-                    .child(Label::new("Nenhuma esteira ainda."))
+                    .child(Label::new(t!("agent_ui.task_agents.flows.empty_title")))
                     .child(
-                        Label::new("Monte uma com os seus agentes, de um modelo ou pedindo à IA.")
+                        Label::new(t!("agent_ui.task_agents.flows.empty_hint"))
                             .size(LabelSize::Small)
                             .color(Color::Muted),
                     ),
@@ -649,12 +674,15 @@ impl TaskAgentsView {
                 .items_center()
                 .justify_center()
                 .gap_2()
-                .child(Icon::new(IconName::ListTree).size(IconSize::XLarge).color(Color::Muted))
-                .child(Label::new("Esteiras de agentes").size(LabelSize::Large))
                 .child(
-                    Label::new("Cada esteira é um .flow.md com os passos: seus agentes, portões e comandos. Rode com /esteira no composer do Agent.")
+                    Icon::new(IconName::ListTree)
+                        .size(IconSize::XLarge)
                         .color(Color::Muted),
                 )
+                .child(
+                    Label::new(t!("agent_ui.task_agents.flows.intro_title")).size(LabelSize::Large),
+                )
+                .child(Label::new(t!("agent_ui.task_agents.flows.intro_body")).color(Color::Muted))
                 .into_any_element();
         };
         let path = flow.file_path.clone();
@@ -711,7 +739,7 @@ impl TaskAgentsView {
                             ),
                     )
                     .child(
-                        Button::new("open-flow", "Editar")
+                        Button::new("open-flow", t!("agent_ui.task_agents.flows.edit"))
                             .style(ButtonStyle::Outlined)
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 let path = path.clone();
@@ -725,7 +753,7 @@ impl TaskAgentsView {
                             })),
                     )
                     .child(
-                        Button::new("run-flow-from-list", "Rodar")
+                        Button::new("run-flow-from-list", t!("agent_ui.task_agents.flows.run"))
                             .start_icon(Icon::new(IconName::PlayFilled).size(IconSize::Small))
                             .style(ButtonStyle::Filled)
                             .on_click(move |_, window, cx| {
@@ -741,7 +769,7 @@ impl TaskAgentsView {
             )
             .when(!flow.input.is_empty(), |this| {
                 this.child(
-                    Label::new(format!("Exemplo: {}", flow.input))
+                    Label::new(t!("agent_ui.task_agents.flows.example", input = flow.input))
                         .size(LabelSize::Small)
                         .color(Color::Muted),
                 )
@@ -806,9 +834,8 @@ impl TaskAgentsView {
             return;
         };
         let text_editor =
-            |text: &str, placeholder: &str, window: &mut Window, cx: &mut Context<Self>| {
+            |text: &str, placeholder: SharedString, window: &mut Window, cx: &mut Context<Self>| {
                 let text = text.to_string();
-                let placeholder = placeholder.to_string();
                 cx.new(|cx| {
                     let mut editor = Editor::single_line(window, cx);
                     editor.set_placeholder_text(&placeholder, window, cx);
@@ -816,11 +843,21 @@ impl TaskAgentsView {
                     editor
                 })
             };
-        let name = text_editor(&agent.name, "Nome do agente", window, cx);
-        let command = text_editor(&agent.command, "comando", window, cx);
+        let name = text_editor(
+            &agent.name,
+            t!("agent_ui.task_agents.editor.name_placeholder"),
+            window,
+            cx,
+        );
+        let command = text_editor(
+            &agent.command,
+            t!("agent_ui.task_agents.editor.command_placeholder"),
+            window,
+            cx,
+        );
         let description = text_editor(
             &agent.description,
-            "O que ele faz, em uma frase",
+            t!("agent_ui.task_agents.editor.description_placeholder"),
             window,
             cx,
         );
@@ -828,7 +865,11 @@ impl TaskAgentsView {
             let text = agent.instructions.clone();
             cx.new(|cx| {
                 let mut editor = Editor::multi_line(window, cx);
-                editor.set_placeholder_text("Instruções em Markdown", window, cx);
+                editor.set_placeholder_text(
+                    &t!("agent_ui.task_agents.editor.instructions_placeholder"),
+                    window,
+                    cx,
+                );
                 editor.set_text(text, window, cx);
                 editor.set_soft_wrap();
                 editor
@@ -882,7 +923,7 @@ impl TaskAgentsView {
             return;
         };
         if agent.name.is_empty() || agent.command.is_empty() {
-            self.status = Some("Dê um nome e um comando ao agente.".into());
+            self.status = Some(t!("agent_ui.task_agents.status.name_and_command_required"));
             cx.notify();
             return;
         }
@@ -891,16 +932,14 @@ impl TaskAgentsView {
             .flatten()
             .any(|model| task_agents::ModelReference::parse(model).is_none())
         {
-            self.status = Some(
-                "O modelo precisa ser provedor/modelo, ex.: anthropic/claude-opus-5-5.".into(),
-            );
+            self.status = Some(t!("agent_ui.task_agents.status.invalid_model"));
             cx.notify();
             return;
         }
         let markdown = match agent.to_markdown() {
             Ok(markdown) => markdown,
             Err(error) => {
-                self.status = Some(format!("Não foi possível salvar: {error}").into());
+                self.status = Some(t!("agent_ui.task_agents.status.save_failed", error = error));
                 cx.notify();
                 return;
             }
@@ -918,12 +957,16 @@ impl TaskAgentsView {
             this.update(cx, |this, cx| {
                 match result {
                     Ok(()) => {
-                        this.status = Some(format!("Salvo em {}", path.display()).into());
+                        this.status = Some(t!(
+                            "agent_ui.task_agents.status.saved",
+                            path = path.display()
+                        ));
                         this.refresh_agent_commands(cx);
                         this.reload(Some(path), cx);
                     }
                     Err(error) => {
-                        this.status = Some(format!("Não foi possível salvar: {error}").into());
+                        this.status =
+                            Some(t!("agent_ui.task_agents.status.save_failed", error = error));
                     }
                 }
                 cx.notify();
@@ -987,14 +1030,19 @@ impl TaskAgentsView {
                     .worktree_roots(cx)
                     .first()
                     .map(|(name, _)| name.clone())
-                    .unwrap_or_else(|| "projeto".into()),
+                    .unwrap_or_else(|| {
+                        t!("agent_ui.task_agents.source.project").to_string().into()
+                    }),
             }
         };
         agent.file_path = path.clone();
         let markdown = match agent.to_markdown() {
             Ok(markdown) => markdown,
             Err(error) => {
-                self.status = Some(format!("Não foi possível criar: {error}").into());
+                self.status = Some(t!(
+                    "agent_ui.task_agents.status.create_failed",
+                    error = error
+                ));
                 cx.notify();
                 return;
             }
@@ -1013,10 +1061,13 @@ impl TaskAgentsView {
                 let created = result.is_ok();
                 this.status = Some(match result {
                     Ok(()) if generated => {
-                        format!("Criado com IA em {}. Revise antes de usar.", path.display()).into()
+                        t!(
+                            "agent_ui.task_agents.status.created_with_ai",
+                            path = path.display()
+                        )
                     }
-                    Ok(()) => format!("Criado em {}", path.display()).into(),
-                    Err(error) => format!("Não foi possível criar: {error}").into(),
+                    Ok(()) => t!("agent_ui.task_agents.status.created", path = path.display()),
+                    Err(error) => t!("agent_ui.task_agents.status.create_failed", error = error),
                 });
                 this.refresh_agent_commands(cx);
                 this.reload(Some(path), cx);
@@ -1103,14 +1154,18 @@ impl TaskAgentsView {
         let Some(agent) = self.draft.as_ref().map(|draft| draft.agent.clone()) else {
             return;
         };
+        let answers = [
+            gpui::PromptButton::new(t!("agent_ui.task_agents.delete.confirm")),
+            gpui::PromptButton::new(t!("agent_ui.task_agents.delete.cancel")),
+        ];
         let answer = window.prompt(
             gpui::PromptLevel::Warning,
-            &format!("Apagar o agente {}?", agent.name),
-            Some(&format!(
-                "{} vai para a Lixeira.",
-                agent.file_path.display()
+            &t!("agent_ui.task_agents.delete.title", name = agent.name),
+            Some(&t!(
+                "agent_ui.task_agents.delete.detail",
+                path = agent.file_path.display()
             )),
-            &["Apagar", "Cancelar"],
+            &answers,
             cx,
         );
         let fs = self.fs.clone();
@@ -1124,9 +1179,15 @@ impl TaskAgentsView {
                 .map(|_| ());
             this.update(cx, |this, cx| {
                 match result {
-                    Ok(()) => this.status = Some(format!("{} apagado.", agent.name).into()),
+                    Ok(()) => {
+                        this.status =
+                            Some(t!("agent_ui.task_agents.status.deleted", name = agent.name))
+                    }
                     Err(error) => {
-                        this.status = Some(format!("Não foi possível apagar: {error}").into())
+                        this.status = Some(t!(
+                            "agent_ui.task_agents.status.delete_failed",
+                            error = error
+                        ))
                     }
                 }
                 this.refresh_agent_commands(cx);
@@ -1184,7 +1245,7 @@ impl TaskAgentsView {
         let path = self.new_agent_path(&agent.command, false, cx);
         agent.file_path = path;
         agent.source = TaskAgentSource::Project {
-            worktree_root_name: "projeto".into(),
+            worktree_root_name: t!("agent_ui.task_agents.source.project").to_string().into(),
         };
         if let Some(draft) = self.draft.as_mut() {
             draft.agent = agent;
@@ -1257,16 +1318,22 @@ impl TaskAgentsView {
     }
 
     fn render_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let sections: [(&str, Option<&str>, fn(&TaskAgentSource) -> bool); 3] = [
-            ("DO PROJETO", Some(PROJECT_AGENTS_DIR), |source| {
-                matches!(source, TaskAgentSource::Project { .. })
-            }),
-            ("SÓ PARA MIM", None, |source| {
-                matches!(source, TaskAgentSource::Personal)
-            }),
-            ("IMPORTADOS", Some(".claude/agents"), |source| {
-                matches!(source, TaskAgentSource::Imported { .. })
-            }),
+        let sections: [(SharedString, Option<&str>, fn(&TaskAgentSource) -> bool); 3] = [
+            (
+                t!("agent_ui.task_agents.section.project"),
+                Some(PROJECT_AGENTS_DIR),
+                |source| matches!(source, TaskAgentSource::Project { .. }),
+            ),
+            (
+                t!("agent_ui.task_agents.section.personal"),
+                None,
+                |source| matches!(source, TaskAgentSource::Personal),
+            ),
+            (
+                t!("agent_ui.task_agents.section.imported"),
+                Some(".claude/agents"),
+                |source| matches!(source, TaskAgentSource::Imported { .. }),
+            ),
         ];
         let query = self.search.read(cx).text(cx).trim().to_lowercase();
         let matches = |agent: &TaskAgent| {
@@ -1321,11 +1388,11 @@ impl TaskAgentsView {
             for (index, agent) in entries {
                 let selected = self.selected == Some(index);
                 let badge = if selected && dirty {
-                    Some("não salvo")
+                    Some(t!("agent_ui.task_agents.badge.unsaved"))
                 } else if !agent.enabled {
-                    Some("desligado")
+                    Some(t!("agent_ui.task_agents.badge.disabled"))
                 } else if !agent.source.is_editable() {
-                    Some("leitura")
+                    Some(t!("agent_ui.task_agents.badge.read_only"))
                 } else {
                     None
                 };
@@ -1403,13 +1470,11 @@ impl TaskAgentsView {
                 v_flex()
                     .p_3()
                     .gap_1()
-                    .child(Label::new("Nenhum agente ainda."))
+                    .child(Label::new(t!("agent_ui.task_agents.empty.title")))
                     .child(
-                        Label::new(
-                            "Crie um a partir de um modelo, ou peça ao agente para criar um para você.",
-                        )
-                        .size(LabelSize::Small)
-                        .color(Color::Muted),
+                        Label::new(t!("agent_ui.task_agents.empty.hint"))
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
                     ),
             );
         }
@@ -1438,17 +1503,21 @@ impl TaskAgentsView {
     fn agent_detail(&self, agent: &TaskAgent, cx: &App) -> String {
         let flows = self.flows_using(&agent.command).len();
         if flows > 0 {
-            return format!("{flows} esteira{}", if flows == 1 { "" } else { "s" });
+            return if flows == 1 {
+                t!("agent_ui.task_agents.flow_count.one", count = flows).to_string()
+            } else {
+                t!("agent_ui.task_agents.flow_count.other", count = flows).to_string()
+            };
         }
         match agent.profile.as_deref() {
-            Some("ask") => "só leitura".to_string(),
-            Some("write") => "escreve".to_string(),
+            Some("ask") => t!("agent_ui.task_agents.detail.read_only").to_string(),
+            Some("write") => t!("agent_ui.task_agents.detail.writes").to_string(),
             Some(id) => AgentProfile::available_profiles(cx)
                 .iter()
                 .find(|(profile_id, _)| profile_id.0.as_ref() == id)
                 .map(|(_, name)| name.to_string())
                 .unwrap_or_else(|| id.to_string()),
-            None => "perfil da thread".to_string(),
+            None => t!("agent_ui.task_agents.detail.thread_profile").to_string(),
         }
     }
 
@@ -1476,7 +1545,7 @@ impl TaskAgentsView {
         }
     }
 
-    fn render_card(title: &'static str, action: Option<AnyElement>, cx: &App) -> Div {
+    fn render_card(title: impl Into<SharedString>, action: Option<AnyElement>, cx: &App) -> Div {
         v_flex()
             .w_full()
             .rounded_lg()
@@ -1493,7 +1562,7 @@ impl TaskAgentsView {
                     .border_b_1()
                     .border_color(cx.theme().colors().border_variant)
                     .child(
-                        Label::new(title)
+                        Label::new(title.into())
                             .size(LabelSize::XSmall)
                             .weight(FontWeight::SEMIBOLD)
                             .color(Color::Muted),
@@ -1521,15 +1590,19 @@ impl TaskAgentsView {
                     .map(|(_, name)| name.to_string())
                     .unwrap_or_else(|| id.clone())
             })
-            .unwrap_or_else(|| "Perfil atual da thread".to_string());
+            .unwrap_or_else(|| t!("agent_ui.task_agents.profile.current_thread").to_string());
         let view = cx.entity().downgrade();
         let menu = ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
             let keep_view = view.clone();
-            menu = menu.entry("Perfil atual da thread", None, move |_window, cx| {
-                keep_view
-                    .update(cx, |view, cx| view.set_profile(None, cx))
-                    .log_err();
-            });
+            menu = menu.entry(
+                t!("agent_ui.task_agents.profile.current_thread"),
+                None,
+                move |_window, cx| {
+                    keep_view
+                        .update(cx, |view, cx| view.set_profile(None, cx))
+                        .log_err();
+                },
+            );
             for (profile_id, name) in profiles.iter() {
                 let view = view.clone();
                 let id = profile_id.0.to_string();
@@ -1557,7 +1630,7 @@ impl TaskAgentsView {
         model_dropdown(
             "task-agent-model",
             current,
-            "Modelo da thread",
+            t!("agent_ui.task_agents.model.thread"),
             move |model, cx| {
                 view.update(cx, |view, cx| view.set_model(model, cx))
                     .log_err();
@@ -1580,7 +1653,7 @@ impl TaskAgentsView {
         model_dropdown(
             "task-agent-subagent-model",
             current,
-            "Modelo padrão dos subagents",
+            t!("agent_ui.task_agents.model.subagent_default"),
             move |model, cx| {
                 view.update(cx, |view, cx| view.set_subagent_model(model, cx))
                     .log_err();
@@ -1597,21 +1670,22 @@ impl TaskAgentsView {
                 .items_center()
                 .justify_center()
                 .gap_2()
-                .child(Icon::new(IconName::UserGroup).size(IconSize::XLarge).color(Color::Muted))
-                .child(Label::new("Agentes para tarefas").size(LabelSize::Large))
                 .child(
-                    Label::new(
-                        "Cada agente é um .md com instruções, ferramentas e permissões. Chame com /comando no composer do Agent.",
-                    )
-                    .color(Color::Muted),
+                    Icon::new(IconName::UserGroup)
+                        .size(IconSize::XLarge)
+                        .color(Color::Muted),
                 )
+                .child(Label::new(t!("agent_ui.task_agents.intro.title")).size(LabelSize::Large))
+                .child(Label::new(t!("agent_ui.task_agents.intro.body")).color(Color::Muted))
                 .child(
-                    Button::new("empty-new-agent", "Novo agente")
+                    Button::new("empty-new-agent", t!("agent_ui.task_agents.new_agent"))
                         .style(ButtonStyle::Filled)
                         .start_icon(Icon::new(IconName::Plus).size(IconSize::XSmall))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.open_new_agent_modal(window, cx)
-                        })),
+                        .on_click(
+                            cx.listener(|this, _, window, cx| {
+                                this.open_new_agent_modal(window, cx)
+                            }),
+                        ),
                 )
                 .into_any_element();
         };
@@ -1634,7 +1708,11 @@ impl TaskAgentsView {
                     .child(draft.description.clone()),
             )
             .when_some(self.status.clone(), |this, status| {
-                this.child(Label::new(status).size(LabelSize::Small).color(Color::Muted))
+                this.child(
+                    Label::new(status)
+                        .size(LabelSize::Small)
+                        .color(Color::Muted),
+                )
             })
             .child(
                 h_flex()
@@ -1654,11 +1732,9 @@ impl TaskAgentsView {
                             .child(self.render_model_card(window, cx))
                             .child(self.render_io_card(cx))
                             .child(
-                                Label::new(
-                                    "As esteiras usam o que ele recebe e entrega para avisar quando falta algo antes deste passo.",
-                                )
-                                .size(LabelSize::XSmall)
-                                .color(Color::Muted),
+                                Label::new(t!("agent_ui.task_agents.io.flows_hint"))
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted),
                             ),
                     )
                     .child(
@@ -1679,9 +1755,9 @@ impl TaskAgentsView {
         let agent = &draft.agent;
         let editable = agent.source.is_editable();
         let source_badge = match &agent.source {
-            TaskAgentSource::Project { .. } => "projeto",
-            TaskAgentSource::Personal => "só para mim",
-            TaskAgentSource::Imported { .. } => "importado · só leitura",
+            TaskAgentSource::Project { .. } => t!("agent_ui.task_agents.source.project"),
+            TaskAgentSource::Personal => t!("agent_ui.task_agents.source.personal"),
+            TaskAgentSource::Imported { .. } => t!("agent_ui.task_agents.source.imported"),
         };
         let name = if self.editing_name {
             div()
@@ -1711,7 +1787,7 @@ impl TaskAgentsView {
                         IconButton::new("rename-agent", IconName::Pencil)
                             .icon_size(IconSize::XSmall)
                             .icon_color(Color::Muted)
-                            .tooltip(Tooltip::text("Renomear"))
+                            .tooltip(Tooltip::text(t!("agent_ui.task_agents.rename")))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.editing_name = true;
                                 if let Some(draft) = this.draft.as_ref() {
@@ -1728,57 +1804,51 @@ impl TaskAgentsView {
             .gap_3()
             .child(agent_tile(agent, px(40.), IconSize::Medium, cx))
             .child(
-                v_flex()
-                    .min_w_0()
-                    .gap_0p5()
-                    .child(name)
-                    .child(
-                        Label::new(self.display_path(&agent.file_path, cx))
-                            .size(LabelSize::XSmall)
-                            .color(Color::Muted)
-                            .buffer_font(cx)
-                            .truncate(),
-                    ),
+                v_flex().min_w_0().gap_0p5().child(name).child(
+                    Label::new(self.display_path(&agent.file_path, cx))
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted)
+                        .buffer_font(cx)
+                        .truncate(),
+                ),
             )
             .child(list_badge(source_badge, cx))
             .child(div().flex_1())
             .when(editable, |this| {
                 this.child(
-                    h_flex()
-                        .gap_2()
-                        .child(
-                            Switch::new(
-                                "task-agent-enabled",
-                                if agent.enabled {
-                                    ToggleState::Selected
-                                } else {
-                                    ToggleState::Unselected
-                                },
-                            )
-                            .label("Ativo")
-                            .on_click(cx.listener(|this, _, _window, cx| {
-                                if let Some(draft) = this.draft.as_mut() {
-                                    draft.agent.enabled = !draft.agent.enabled;
-                                    cx.notify();
-                                }
-                            })),
-                        ),
+                    h_flex().gap_2().child(
+                        Switch::new(
+                            "task-agent-enabled",
+                            if agent.enabled {
+                                ToggleState::Selected
+                            } else {
+                                ToggleState::Unselected
+                            },
+                        )
+                        .label(t!("agent_ui.task_agents.enabled"))
+                        .on_click(cx.listener(|this, _, _window, cx| {
+                            if let Some(draft) = this.draft.as_mut() {
+                                draft.agent.enabled = !draft.agent.enabled;
+                                cx.notify();
+                            }
+                        })),
+                    ),
                 )
                 .child(
                     IconButton::new("delete-agent", IconName::Trash)
                         .icon_size(IconSize::Small)
                         .icon_color(Color::Muted)
-                        .tooltip(Tooltip::text("Apagar o agente"))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.delete_selected(window, cx)
-                        })),
+                        .tooltip(Tooltip::text(t!("agent_ui.task_agents.delete.tooltip")))
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.delete_selected(window, cx)),
+                        ),
                 )
             })
             .child(
-                Button::new("run-agent", "Chamar")
+                Button::new("run-agent", t!("agent_ui.task_agents.run"))
                     .style(ButtonStyle::Outlined)
                     .start_icon(Icon::new(IconName::PlayOutlined).size(IconSize::XSmall))
-                    .tooltip(Tooltip::text("Abre uma thread nova com /comando"))
+                    .tooltip(Tooltip::text(t!("agent_ui.task_agents.run_tooltip")))
                     .on_click(cx.listener(|this, _, window, cx| this.run_selected(window, cx))),
             )
             .map(|this| {
@@ -1787,7 +1857,7 @@ impl TaskAgentsView {
                         primary_button(
                             "save-agent",
                             None,
-                            "Salvar",
+                            t!("agent_ui.task_agents.save"),
                             Some(KeyBinding::for_action_in(
                                 &workspace::Save { save_intent: None },
                                 &self.focus_handle,
@@ -1799,11 +1869,11 @@ impl TaskAgentsView {
                     )
                 } else {
                     this.child(
-                        Button::new("copy-agent", "Copiar para o projeto")
+                        Button::new("copy-agent", t!("agent_ui.task_agents.copy_to_project"))
                             .style(ButtonStyle::Filled)
-                            .tooltip(Tooltip::text(
-                                "Agentes do .claude/agents são só leitura; a cópia vira um agente do projeto",
-                            ))
+                            .tooltip(Tooltip::text(t!(
+                                "agent_ui.task_agents.copy_to_project_tooltip"
+                            )))
                             .on_click(cx.listener(|this, _, _window, cx| this.copy_to_project(cx))),
                     )
                 }
@@ -1834,18 +1904,25 @@ impl TaskAgentsView {
             .map(|flow| flow.name.clone())
             .collect::<Vec<_>>();
         let flows_text = match flow_names.as_slice() {
-            [] => "ainda não é passo de nenhuma esteira".to_string(),
-            [only] => format!("passo de {only}"),
-            [rest @ .., last] => format!("passo de {} e {last}", rest.join(", ")),
+            [] => t!("agent_ui.task_agents.call.flows_none"),
+            [only] => t!("agent_ui.task_agents.call.flows_one", flow = only),
+            [rest @ .., last] => t!(
+                "agent_ui.task_agents.call.flows_many",
+                flows = rest.join(", "),
+                last = last
+            ),
         };
         let first_flow = using.first().copied();
         div().child(
-            Self::render_card("QUANDO CHAMAR", None, cx)
+            Self::render_card(t!("agent_ui.task_agents.call.title"), None, cx)
                 .child(card_row(
                     Some(IconName::AtSign),
                     h_flex()
                         .gap_2()
-                        .child(Label::new("Composer do Agent").weight(FontWeight::MEDIUM))
+                        .child(
+                            Label::new(t!("agent_ui.task_agents.call.composer"))
+                                .weight(FontWeight::MEDIUM),
+                        )
                         .child(
                             h_flex()
                                 .h(px(22.))
@@ -1864,19 +1941,19 @@ impl TaskAgentsView {
                                 .child(div().w(px(120.)).child(draft.command.clone())),
                         )
                         .into_any_element(),
-                    "digite no chat; o que vier depois vira o pedido",
+                    t!("agent_ui.task_agents.call.composer_hint"),
                     None,
                     false,
                     cx,
                 ))
                 .child(card_row(
                     Some(IconName::ListTree),
-                    Label::new("Esteiras")
+                    Label::new(t!("agent_ui.task_agents.call.flows"))
                         .weight(FontWeight::MEDIUM)
                         .into_any_element(),
                     flows_text,
                     first_flow.map(|index| {
-                        Button::new("agent-flows", "Ver")
+                        Button::new("agent-flows", t!("agent_ui.task_agents.call.view"))
                             .style(ButtonStyle::Transparent)
                             .color(Color::Accent)
                             .label_size(LabelSize::Small)
@@ -1940,7 +2017,7 @@ impl TaskAgentsView {
         let mut server_chips = h_flex().flex_wrap().gap_1p5();
         if servers.is_empty() {
             server_chips = server_chips.child(
-                Label::new("Nenhum MCP configurado (Configurações → MCP).")
+                Label::new(t!("agent_ui.task_agents.model_card.no_mcp"))
                     .size(LabelSize::Small)
                     .color(Color::Muted),
             );
@@ -1964,7 +2041,9 @@ impl TaskAgentsView {
                     cx,
                 )
                 .when(missing, |this| {
-                    this.tooltip(Tooltip::text("Não está configurado neste Asylum"))
+                    this.tooltip(Tooltip::text(t!(
+                        "agent_ui.task_agents.model_card.mcp_missing"
+                    )))
                 })
                 .when(editable, |this| {
                     this.on_click(cx.listener(move |this, _, _window, cx| {
@@ -1978,16 +2057,9 @@ impl TaskAgentsView {
         let all_mode = mode_of(ALL_TOOLS_PERMISSION_KEY);
         let mut permission_chips = h_flex().flex_wrap().gap_1p5();
         let mut permission_tools: Vec<(String, SharedString, SharedString, Option<ToolAccess>)> =
-            BUILTIN_PERMISSION_TOOLS
-                .iter()
-                .map(|(name, label, title)| {
-                    (
-                        name.to_string(),
-                        SharedString::from(*label),
-                        SharedString::from(*title),
-                        None,
-                    )
-                })
+            builtin_permission_tools()
+                .into_iter()
+                .map(|(name, label, title)| (name.to_string(), label, title, None))
                 .collect();
         for toolkit in registered.iter() {
             if !agent.toolkits.iter().any(|id| id == toolkit.id.as_ref()) {
@@ -2020,8 +2092,10 @@ impl TaskAgentsView {
                 (None, None) => ChipLook::Off,
             };
             let mode_label = match (effective, access) {
-                (None, Some(ToolAccess::Read)) => "padrão (livre)",
-                (None, Some(_)) => "padrão (pede)",
+                (None, Some(ToolAccess::Read)) => {
+                    t!("agent_ui.task_agents.permission.default_allow")
+                }
+                (None, Some(_)) => t!("agent_ui.task_agents.permission.default_confirm"),
                 (mode, _) => permission_label(mode),
             };
             let key = name.clone();
@@ -2033,8 +2107,10 @@ impl TaskAgentsView {
                     false,
                     cx,
                 )
-                .tooltip(Tooltip::text(format!(
-                    "{title} · {mode_label}. Clique para trocar (padrão → livre → pede → nunca)."
+                .tooltip(Tooltip::text(t!(
+                    "agent_ui.task_agents.permission.tooltip",
+                    title = title,
+                    mode = mode_label
                 )))
                 .when(editable, |this| {
                     this.on_click(cx.listener(move |this, _, _window, cx| {
@@ -2046,11 +2122,13 @@ impl TaskAgentsView {
 
         let dropdown = |element: AnyElement| div().w(px(210.)).flex().justify_end().child(element);
         div().child(
-            Self::render_card("MODELO E PERMISSÕES", None, cx)
+            Self::render_card(t!("agent_ui.task_agents.model_card.title"), None, cx)
                 .child(card_row(
                     None,
-                    Label::new("Modelo").weight(FontWeight::MEDIUM).into_any_element(),
-                    "sobrepõe o modelo da thread",
+                    Label::new(t!("agent_ui.task_agents.model_card.model"))
+                        .weight(FontWeight::MEDIUM)
+                        .into_any_element(),
+                    t!("agent_ui.task_agents.model_card.model_hint"),
                     Some(
                         dropdown(self.render_model_dropdown(window, cx).into_any_element())
                             .into_any_element(),
@@ -2060,8 +2138,10 @@ impl TaskAgentsView {
                 ))
                 .child(card_row(
                     None,
-                    Label::new("Ferramentas").weight(FontWeight::MEDIUM).into_any_element(),
-                    "perfil base; toolkits e MCPs somam a ele",
+                    Label::new(t!("agent_ui.task_agents.model_card.tools"))
+                        .weight(FontWeight::MEDIUM)
+                        .into_any_element(),
+                    t!("agent_ui.task_agents.model_card.tools_hint"),
                     Some(
                         dropdown(self.render_profile_dropdown(window, cx).into_any_element())
                             .into_any_element(),
@@ -2071,8 +2151,10 @@ impl TaskAgentsView {
                 ))
                 .child(card_row(
                     None,
-                    Label::new("Subagents").weight(FontWeight::MEDIUM).into_any_element(),
-                    "modelo dos subagents que ele abre",
+                    Label::new(t!("agent_ui.task_agents.model_card.subagents"))
+                        .weight(FontWeight::MEDIUM)
+                        .into_any_element(),
+                    t!("agent_ui.task_agents.model_card.subagents_hint"),
                     Some(
                         dropdown(
                             self.render_agent_subagent_model_dropdown(window, cx)
@@ -2084,35 +2166,38 @@ impl TaskAgentsView {
                     cx,
                 ))
                 .child(chip_row(
-                    "Toolkits",
-                    "ferramentas do Asylum",
+                    t!("agent_ui.task_agents.model_card.toolkits"),
+                    t!("agent_ui.task_agents.model_card.toolkits_hint"),
                     None,
                     toolkit_chips,
                     false,
                     cx,
                 ))
                 .child(chip_row(
-                    "MCPs",
-                    "servidores ligados inteiros",
+                    t!("agent_ui.task_agents.model_card.mcps"),
+                    t!("agent_ui.task_agents.model_card.mcps_hint"),
                     None,
                     server_chips,
                     false,
                     cx,
                 ))
                 .child(chip_row(
-                    "Permissões",
-                    "clique para trocar: padrão → livre → pede → nunca",
+                    t!("agent_ui.task_agents.model_card.permissions"),
+                    t!("agent_ui.task_agents.model_card.permissions_hint"),
                     Some(
                         Button::new(
                             "builtin-perm-all",
-                            format!("tudo: {}", permission_label(all_mode)),
+                            t!(
+                                "agent_ui.task_agents.model_card.permissions_all",
+                                mode = permission_label(all_mode)
+                            ),
                         )
                         .label_size(LabelSize::XSmall)
                         .style(ButtonStyle::Subtle)
                         .disabled(!editable)
-                        .tooltip(Tooltip::text(
-                            "Vale para toda ferramenta sem permissão própria, toolkits e MCP inclusive",
-                        ))
+                        .tooltip(Tooltip::text(t!(
+                            "agent_ui.task_agents.model_card.permissions_all_tooltip"
+                        )))
                         .on_click(cx.listener(|this, _, _window, cx| {
                             this.cycle_permission(ALL_TOOLS_PERMISSION_KEY, cx);
                         }))
@@ -2134,13 +2219,13 @@ impl TaskAgentsView {
             let (values, title, hint) = match list {
                 IoList::Takes => (
                     &draft.agent.takes,
-                    "Recebe",
-                    "o que pede de passos anteriores",
+                    t!("agent_ui.task_agents.io.takes"),
+                    t!("agent_ui.task_agents.io.takes_hint"),
                 ),
                 IoList::Gives => (
                     &draft.agent.gives,
-                    "Entrega",
-                    "o que passa para os próximos",
+                    t!("agent_ui.task_agents.io.gives"),
+                    t!("agent_ui.task_agents.io.gives_hint"),
                 ),
             };
             let mut chips = h_flex().flex_wrap().gap_1p5();
@@ -2202,14 +2287,19 @@ impl TaskAgentsView {
                 }
                 _ if editable => {
                     chips = chips.child(
-                        Button::new(SharedString::from(format!("io-add-{list:?}")), "adicionar")
-                            .style(ButtonStyle::Outlined)
-                            .label_size(LabelSize::Small)
-                            .color(Color::Muted)
-                            .start_icon(Icon::new(IconName::Plus).size(IconSize::XSmall))
-                            .on_click(cx.listener(move |this, _, window, cx| {
+                        Button::new(
+                            SharedString::from(format!("io-add-{list:?}")),
+                            t!("agent_ui.task_agents.io.add"),
+                        )
+                        .style(ButtonStyle::Outlined)
+                        .label_size(LabelSize::Small)
+                        .color(Color::Muted)
+                        .start_icon(Icon::new(IconName::Plus).size(IconSize::XSmall))
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
                                 this.start_adding_io(list, window, cx);
-                            })),
+                            },
+                        )),
                     );
                 }
                 _ => {}
@@ -2219,7 +2309,7 @@ impl TaskAgentsView {
         let (takes_title, takes_hint, takes_chips) = row(IoList::Takes, cx);
         let (gives_title, gives_hint, gives_chips) = row(IoList::Gives, cx);
         div().child(
-            Self::render_card("ENTRADA E SAÍDA", None, cx)
+            Self::render_card(t!("agent_ui.task_agents.io.title"), None, cx)
                 .child(chip_row(
                     takes_title,
                     takes_hint,
@@ -2254,19 +2344,22 @@ impl TaskAgentsView {
             + 1;
         div().size_full().child(
             Self::render_card(
-                "INSTRUÇÕES",
+                t!("agent_ui.task_agents.instructions.title"),
                 Some(
-                    Button::new("open-agent-file", "Abrir .md")
-                        .style(ButtonStyle::Transparent)
-                        .color(Color::Accent)
-                        .label_size(LabelSize::Small)
-                        .start_icon(
-                            Icon::new(IconName::FileMarkdown)
-                                .size(IconSize::XSmall)
-                                .color(Color::Accent),
-                        )
-                        .on_click(cx.listener(|this, _, window, cx| this.open_file(window, cx)))
-                        .into_any_element(),
+                    Button::new(
+                        "open-agent-file",
+                        t!("agent_ui.task_agents.instructions.open_file"),
+                    )
+                    .style(ButtonStyle::Transparent)
+                    .color(Color::Accent)
+                    .label_size(LabelSize::Small)
+                    .start_icon(
+                        Icon::new(IconName::FileMarkdown)
+                            .size(IconSize::XSmall)
+                            .color(Color::Accent),
+                    )
+                    .on_click(cx.listener(|this, _, window, cx| this.open_file(window, cx)))
+                    .into_any_element(),
                 ),
                 cx,
             )
@@ -2293,16 +2386,23 @@ impl TaskAgentsView {
                             .color(Color::Muted),
                     )
                     .child(
-                        Label::new("Corpo do .md. O frontmatter sai dos campos ao lado.")
+                        Label::new(t!("agent_ui.task_agents.instructions.footer"))
                             .size(LabelSize::Small)
                             .color(Color::Muted),
                     )
                     .child(div().flex_1())
                     .child(
-                        Label::new(format!(
-                            "{lines} linha{} · markdown",
-                            if lines == 1 { "" } else { "s" }
-                        ))
+                        Label::new(if lines == 1 {
+                            t!(
+                                "agent_ui.task_agents.instructions.line_count.one",
+                                count = lines
+                            )
+                        } else {
+                            t!(
+                                "agent_ui.task_agents.instructions.line_count.other",
+                                count = lines
+                            )
+                        })
                         .size(LabelSize::XSmall)
                         .color(Color::Muted)
                         .buffer_font(cx),
@@ -2378,14 +2478,18 @@ fn agent_tile(agent: &TaskAgent, size: Pixels, icon_size: IconSize, cx: &App) ->
         )
 }
 
-fn list_badge(text: &'static str, cx: &App) -> impl IntoElement {
+fn list_badge(text: impl Into<SharedString>, cx: &App) -> impl IntoElement {
     div()
         .flex_none()
         .px_2()
         .py_px()
         .rounded_full()
         .bg(cx.theme().colors().element_hover)
-        .child(Label::new(text).size(LabelSize::XSmall).color(Color::Muted))
+        .child(
+            Label::new(text.into())
+                .size(LabelSize::XSmall)
+                .color(Color::Muted),
+        )
 }
 
 fn card_row(
@@ -2420,8 +2524,8 @@ fn card_row(
 }
 
 fn chip_row(
-    title: &'static str,
-    hint: &'static str,
+    title: SharedString,
+    hint: SharedString,
     action: Option<AnyElement>,
     chips: Div,
     last: bool,
@@ -2529,7 +2633,7 @@ impl TaskAgentsView {
     fn start_adding_io(&mut self, list: IoList, window: &mut Window, cx: &mut Context<Self>) {
         let editor = cx.new(|cx| {
             let mut editor = Editor::single_line(window, cx);
-            editor.set_placeholder_text("ex.: spec.md", window, cx);
+            editor.set_placeholder_text(&t!("agent_ui.task_agents.io.placeholder"), window, cx);
             editor
         });
         editor.focus_handle(cx).focus(window, cx);
@@ -2576,11 +2680,12 @@ impl TaskAgentsView {
 pub(crate) fn model_dropdown(
     id: &'static str,
     current: Option<String>,
-    empty_label: &'static str,
+    empty_label: impl Into<SharedString>,
     on_select: impl Fn(Option<String>, &mut App) + 'static,
     window: &mut Window,
     cx: &mut App,
 ) -> DropdownMenu {
+    let empty_label: SharedString = empty_label.into();
     let registry = LanguageModelRegistry::read_global(cx);
     let mut groups: Vec<(SharedString, Vec<(String, SharedString)>)> = Vec::new();
     for provider in registry.visible_providers() {
@@ -2602,7 +2707,7 @@ pub(crate) fn model_dropdown(
         }
     }
     let label: SharedString = match current.as_deref() {
-        None => empty_label.into(),
+        None => empty_label.clone(),
         Some(reference) => groups
             .iter()
             .find_map(|(_, models)| {
@@ -2612,20 +2717,22 @@ pub(crate) fn model_dropdown(
                     .map(|(_, name)| name.clone())
             })
             // A model whose provider is signed out still shows, so it is not lost silently.
-            .unwrap_or_else(|| format!("{reference} (indisponível)").into()),
+            .unwrap_or_else(|| t!("agent_ui.task_agents.model.unavailable", model = reference)),
     };
     let on_select = Rc::new(on_select);
     let menu = ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
         let keep = on_select.clone();
         menu = menu.toggleable_entry(
-            empty_label,
+            empty_label.clone(),
             current.is_none(),
             IconPosition::Start,
             None,
             move |_window, cx| keep(None, cx),
         );
         if groups.is_empty() {
-            menu = menu.separator().header("Nenhum provedor conectado");
+            menu = menu
+                .separator()
+                .header(t!("agent_ui.task_agents.model.no_provider"));
         }
         for (provider, models) in groups {
             menu = menu.separator().header(provider);
@@ -2753,16 +2860,16 @@ impl Render for TaskAgentsView {
                                 )
                                 .child(
                                     Label::new(if flows_segment {
-                                        "Nova esteira"
+                                        t!("agent_ui.task_agents.new_flow")
                                     } else {
-                                        "Novo agente"
+                                        t!("agent_ui.task_agents.new_agent")
                                     })
                                     .weight(FontWeight::MEDIUM)
                                     .color(Color::Accent),
                                 )
                                 .child(div().flex_1())
                                 .child(
-                                    Label::new("de um modelo ou com IA")
+                                    Label::new(t!("agent_ui.task_agents.new_hint"))
                                         .size(LabelSize::XSmall)
                                         .color(Color::Muted),
                                 )
@@ -2789,20 +2896,21 @@ impl Render for TaskAgentsView {
                                 .border_color(cx.theme().colors().border_variant)
                                 .bg(cx.theme().colors().editor_background)
                                 .child(
-                                    Label::new("COMO FICA NO REPO")
+                                    Label::new(t!("agent_ui.task_agents.repo.title"))
                                         .size(LabelSize::XSmall)
                                         .weight(FontWeight::SEMIBOLD)
                                         .color(Color::Muted),
                                 )
                                 .child(
                                     Label::new(if flows_segment {
-                                        format!(
-                                            "Cada esteira é um .flow.md em {}; vai no git e o time inteiro usa.",
-                                            flows::PROJECT_FLOWS_DIR
+                                        t!(
+                                            "agent_ui.task_agents.repo.flows",
+                                            directory = flows::PROJECT_FLOWS_DIR
                                         )
                                     } else {
-                                        format!(
-                                            "Cada agente é um .md com frontmatter em {PROJECT_AGENTS_DIR}; vai no git e o time inteiro usa."
+                                        t!(
+                                            "agent_ui.task_agents.repo.agents",
+                                            directory = PROJECT_AGENTS_DIR
                                         )
                                     })
                                     .size(LabelSize::Small)
@@ -2811,17 +2919,11 @@ impl Render for TaskAgentsView {
                         ),
                     ),
             )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .h_full()
-                    .child(if flows_segment {
-                        self.render_flow_detail(cx)
-                    } else {
-                        self.render_detail(window, cx)
-                    }),
-            )
+            .child(div().flex_1().min_w_0().h_full().child(if flows_segment {
+                self.render_flow_detail(cx)
+            } else {
+                self.render_detail(window, cx)
+            }))
     }
 }
 
@@ -2837,7 +2939,7 @@ impl Item for TaskAgentsView {
     type Event = ItemEvent;
 
     fn tab_content_text(&self, _detail: usize, _cx: &App) -> SharedString {
-        "Agentes".into()
+        t!("agent_ui.task_agents.segment.agents")
     }
 
     fn tab_content(&self, params: TabContentParams, _window: &Window, cx: &App) -> AnyElement {
@@ -2890,7 +2992,7 @@ impl StatusItemView for TaskAgentsToolkitButton {
         let workspace = self.workspace.clone();
         Some(ToolkitEntry {
             icon: IconName::UserGroup,
-            label: "Agentes".into(),
+            label: t!("agent_ui.task_agents.segment.agents"),
             is_open,
             action: Box::new(OpenTaskAgents),
             toggle: Rc::new(move |window, cx| {

@@ -11,6 +11,7 @@ use gpui::{
     AnyElement, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Subscription, Task,
     WeakEntity, px,
 };
+use i18n::t;
 use std::time::Instant;
 use ui::{
     Switch, SwitchColor, ToggleState, prelude::*, primary_button, secondary_button,
@@ -71,40 +72,52 @@ impl ConnectView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let input =
-            |placeholder: &str, label: &str, window: &mut Window, cx: &mut Context<Self>| {
-                cx.new(|cx| InputField::new(window, cx, placeholder).label(label.to_owned()))
-            };
+        let input = |placeholder: &str,
+                     label: SharedString,
+                     window: &mut Window,
+                     cx: &mut Context<Self>| {
+            cx.new(|cx| InputField::new(window, cx, placeholder).label(label))
+        };
         let url_input = cx.new(|cx| {
-            InputField::new(
-                window,
-                cx,
-                "postgres://usuário:senha@host:5432/banco?sslmode=prefer",
-            )
-            .label("Colar URL de conexão")
-            .start_icon(IconName::Link)
+            InputField::new(window, cx, &t!("database_client.connect.url_placeholder"))
+                .label(t!("database_client.connect.url_label"))
+                .start_icon(IconName::Link)
         });
-        let name_input = input("igual ao banco", "Nome", window, cx);
-        let host_input = input("localhost", "Host", window, cx);
-        let port_input = input("5432", "Porta", window, cx);
-        let database_input = input("postgres", "Banco", window, cx);
-        let user_input = input("postgres", "Usuário", window, cx);
-        // `masked(false)` still shows the reveal toggle, so only the password calls it.
-        let password_input = cx.new(|cx| {
-            InputField::new(window, cx, "fica no Keychain do perfil")
-                .label("Senha")
-                .start_icon(IconName::Lock)
-                .end_hint("Keychain do perfil · nunca no settings nem no repo")
-                .masked(true)
-        });
-
-        let ssh_host_input = input(
-            "bastion ou usuário@bastion.exemplo.com",
-            "Host SSH",
+        let name_input = input(
+            &t!("database_client.connect.name_placeholder"),
+            t!("database_client.connect.name"),
             window,
             cx,
         );
-        let ssh_port_input = input("22", "Porta SSH", window, cx);
+        let host_input = input("localhost", t!("database_client.connect.host"), window, cx);
+        let port_input = input("5432", t!("database_client.connect.port"), window, cx);
+        let database_input = input(
+            "postgres",
+            t!("database_client.connect.database"),
+            window,
+            cx,
+        );
+        let user_input = input("postgres", t!("database_client.connect.user"), window, cx);
+        // `masked(false)` still shows the reveal toggle, so only the password calls it.
+        let password_input = cx.new(|cx| {
+            InputField::new(
+                window,
+                cx,
+                &t!("database_client.connect.password_placeholder"),
+            )
+            .label(t!("database_client.connect.password"))
+            .start_icon(IconName::Lock)
+            .end_hint(t!("database_client.connect.password_hint"))
+            .masked(true)
+        });
+
+        let ssh_host_input = input(
+            &t!("database_client.connect.ssh_host_placeholder"),
+            t!("database_client.connect.ssh_host"),
+            window,
+            cx,
+        );
+        let ssh_port_input = input("22", t!("database_client.connect.ssh_port"), window, cx);
 
         let mut subscriptions = Vec::new();
         {
@@ -183,8 +196,12 @@ impl ConnectView {
             Prefill::New => {}
             Prefill::Suggestion(suggestion) => {
                 let origin = match &suggestion.source {
-                    Source::Env { file, .. } => format!("vindo do {file}"),
-                    Source::Compose { file, .. } => format!("vindo do {file}"),
+                    Source::Env { file, .. } => {
+                        t!("database_client.connect.from_file", file = file).to_string()
+                    }
+                    Source::Compose { file, .. } => {
+                        t!("database_client.connect.from_file", file = file).to_string()
+                    }
                 };
                 self.fill_fields(&suggestion.fields, window, cx);
                 if suggestion.fields.user.is_none() {
@@ -251,10 +268,12 @@ impl ConnectView {
                 Ok(fields) => {
                     let count = fields.count();
                     self.fill_fields(&fields, window, cx);
-                    self.url_status = Some(Ok(format!(
-                        "preencheu {count} {}",
-                        if count == 1 { "campo" } else { "campos" }
-                    )));
+                    let filled = if count == 1 {
+                        t!("database_client.connect.filled_fields.one")
+                    } else {
+                        t!("database_client.connect.filled_fields.other", count = count)
+                    };
+                    self.url_status = Some(Ok(filled.to_string()));
                 }
                 Err(error) => self.url_status = Some(Err(format!("{error:#}").into())),
             }
@@ -280,19 +299,19 @@ impl ConnectView {
         let user = text(&self.user_input);
         let port = text(&self.port_input);
         if host.is_empty() {
-            return Err("Preencha o host.".into());
+            return Err(t!("database_client.connect.error_host_required"));
         }
         if database.is_empty() {
-            return Err("Preencha o banco.".into());
+            return Err(t!("database_client.connect.error_database_required"));
         }
         if user.is_empty() {
-            return Err("Preencha o usuário.".into());
+            return Err(t!("database_client.connect.error_user_required"));
         }
         let port = if port.is_empty() {
             DEFAULT_PORT
         } else {
             port.parse::<u16>()
-                .map_err(|_| SharedString::from(format!("Porta inválida: {port}")))?
+                .map_err(|_| t!("database_client.connect.error_invalid_port", port = port))?
         };
         let name = Some(text(&self.name_input))
             .filter(|name| !name.is_empty())
@@ -306,16 +325,18 @@ impl ConnectView {
         let ssh = if self.ssh_enabled {
             let host = text(&self.ssh_host_input);
             if host.is_empty() {
-                return Err("Preencha o host SSH ou desligue o túnel.".into());
+                return Err(t!("database_client.connect.error_ssh_host_required"));
             }
             let port = text(&self.ssh_port_input);
             let port = if port.is_empty() {
                 None
             } else {
-                Some(
-                    port.parse::<u16>()
-                        .map_err(|_| SharedString::from(format!("Porta SSH inválida: {port}")))?,
-                )
+                Some(port.parse::<u16>().map_err(|_| {
+                    t!(
+                        "database_client.connect.error_invalid_ssh_port",
+                        port = port
+                    )
+                })?)
             };
             Some(SshTunnel { host, port })
         } else {
@@ -382,17 +403,24 @@ impl ConnectView {
                     .next()
                     .unwrap_or_default()
                     .to_owned();
-                anyhow::Ok(format!(
-                    "PostgreSQL {version} · {} · {schemas} schemas, {} relações · {} ms",
-                    if encrypted { "TLS" } else { "sem TLS" },
-                    relations.len(),
-                    connected_in.as_millis()
+                let encryption = if encrypted {
+                    t!("database_client.connect.tls")
+                } else {
+                    t!("database_client.connect.no_tls")
+                };
+                anyhow::Ok(t!(
+                    "database_client.connect.test_summary",
+                    version = version,
+                    encryption = encryption,
+                    schemas = schemas,
+                    relations = relations.len(),
+                    milliseconds = connected_in.as_millis()
                 ))
             }
             .await;
             this.update(cx, |this, cx| {
                 this.test = match result {
-                    Ok(summary) => TestState::Passed(summary.into(), Instant::now()),
+                    Ok(summary) => TestState::Passed(summary, Instant::now()),
                     Err(error) => TestState::Failed(format!("{error:#}").into()),
                 };
                 cx.notify();
@@ -414,7 +442,7 @@ impl ConnectView {
             }
         };
         let Some(panel) = self.panel.upgrade() else {
-            self.save_error = Some("O painel do Banco foi fechado.".into());
+            self.save_error = Some(t!("database_client.connect.error_panel_closed"));
             cx.notify();
             return;
         };
@@ -446,21 +474,21 @@ impl ConnectView {
             TestState::Idle => return None,
             TestState::Running => (
                 IconName::LoadCircle,
-                "Testando…",
+                t!("database_client.connect.testing"),
                 SharedString::default(),
                 Color::Muted,
                 None,
             ),
             TestState::Passed(summary, at) => (
                 IconName::Check,
-                "Conectado",
+                t!("database_client.connect.connected"),
                 summary.clone(),
                 Color::Success,
                 Some(*at),
             ),
             TestState::Failed(error) => (
                 IconName::XCircle,
-                "Falhou",
+                t!("database_client.connect.failed"),
                 error.clone(),
                 Color::Error,
                 None,
@@ -493,9 +521,12 @@ impl ConnectView {
                 )
                 .when_some(when, |this, at| {
                     this.child(
-                        Label::new(format!("há {} s", at.elapsed().as_secs()))
-                            .size(LabelSize::XSmall)
-                            .color(Color::Muted),
+                        Label::new(t!(
+                            "database_client.connect.seconds_ago",
+                            seconds = at.elapsed().as_secs()
+                        ))
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted),
                     )
                 })
                 .into_any_element(),
@@ -520,8 +551,8 @@ fn set_input(input: &Entity<InputField>, text: &str, window: &mut Window, cx: &m
 /// A switch with its title and explanation beside it, half the width of the form.
 fn toggle(
     id: &'static str,
-    title: &'static str,
-    description: &'static str,
+    title: SharedString,
+    description: SharedString,
     on: bool,
     on_click: impl Fn(&ToggleState, &mut Window, &mut App) + 'static,
     cx: &App,
@@ -554,7 +585,7 @@ fn toggle(
         )
 }
 
-fn field_label(text: &'static str) -> impl IntoElement {
+fn field_label(text: impl Into<SharedString>) -> impl IntoElement {
     Label::new(text).size(LabelSize::Small).color(Color::Muted)
 }
 
@@ -568,19 +599,17 @@ impl Render for ConnectView {
             SslMode::VerifyFull,
         ];
         let ssl_hint = match self.ssl_mode {
-            SslMode::Disable => "disable: sem criptografia. Só para bancos na sua máquina.",
-            SslMode::Prefer => {
-                "prefer: tenta TLS e cai para texto puro. Use verify-full fora da máquina local."
-            }
-            SslMode::Require => "require: sempre com TLS, mas não confere quem está do outro lado.",
-            SslMode::VerifyCa => "verify-ca: TLS com certificado confiável, sem conferir o host.",
-            SslMode::VerifyFull => "verify-full: TLS com certificado confiável para este host.",
+            SslMode::Disable => t!("database_client.connect.ssl_hint_disable"),
+            SslMode::Prefer => t!("database_client.connect.ssl_hint_prefer"),
+            SslMode::Require => t!("database_client.connect.ssl_hint_require"),
+            SslMode::VerifyCa => t!("database_client.connect.ssl_hint_verify_ca"),
+            SslMode::VerifyFull => t!("database_client.connect.ssl_hint_verify_full"),
         };
         let saving = self.save_task.is_some();
         let title = if self.editing.is_some() {
-            "Editar conexão"
+            t!("database_client.connect.edit_title")
         } else {
-            "Nova conexão"
+            t!("database_client.connect.new_title")
         };
         let colors = cx.theme().colors();
         let environment_color = environment_color(self.environment).color(cx);
@@ -591,27 +620,31 @@ impl Render for ConnectView {
                 .child(div().flex_1().child(left))
                 .child(div().flex_1().child(right))
         };
-        let environment = v_flex().gap_1().child(field_label("Ambiente")).child(
-            segmented_control(cx)
-                .h(px(36.))
-                .children(Environment::ALL.map(|environment| {
-                    let selected = environment == self.environment;
-                    segment(
-                        ("db-environment", environment as usize),
-                        environment.label(),
-                        selected,
-                        cx,
-                    )
-                    .h(px(28.))
-                    .when(selected, |this| {
-                        this.bg(environment_color.opacity(0.1))
-                            .border_color(environment_color)
-                    })
-                    .on_click(
-                        cx.listener(move |this, _, _, cx| this.set_environment(environment, cx)),
-                    )
-                })),
-        );
+        let environment =
+            v_flex()
+                .gap_1()
+                .child(field_label(t!("database_client.connect.environment")))
+                .child(
+                    segmented_control(cx)
+                        .h(px(36.))
+                        .children(Environment::ALL.map(|environment| {
+                            let selected = environment == self.environment;
+                            segment(
+                                ("db-environment", environment as usize),
+                                environment.label(),
+                                selected,
+                                cx,
+                            )
+                            .h(px(28.))
+                            .when(selected, |this| {
+                                this.bg(environment_color.opacity(0.1))
+                                    .border_color(environment_color)
+                            })
+                            .on_click(cx.listener(
+                                move |this, _, _, cx| this.set_environment(environment, cx),
+                            ))
+                        })),
+                );
         let ssh_open = self.ssh_enabled;
 
         v_flex()
@@ -653,7 +686,7 @@ impl Render for ConnectView {
                                     ),
                             )
                             .child(
-                                Label::new("Outros drivers depois (MySQL, SQLite)")
+                                Label::new(t!("database_client.connect.other_drivers"))
                                     .size(LabelSize::XSmall)
                                     .color(Color::Muted),
                             ),
@@ -719,8 +752,8 @@ impl Render for ConnectView {
                             .items_start()
                             .child(toggle(
                                 "db-read-only",
-                                "Somente leitura",
-                                "Abre toda sessão com default_transaction_read_only.",
+                                t!("database_client.connect.read_only"),
+                                t!("database_client.connect.read_only_description"),
                                 self.read_only,
                                 cx.listener(|this, state: &ToggleState, _, cx| {
                                     this.read_only = state.selected();
@@ -730,9 +763,8 @@ impl Render for ConnectView {
                             ))
                             .child(toggle(
                                 "db-confirm-writes",
-                                "Confirmar escrita",
-                                "UPDATE/DELETE sem WHERE e DDL pedem confirmação. Sempre ligado \
-                                 em prod.",
+                                t!("database_client.connect.confirm_writes"),
+                                t!("database_client.connect.confirm_writes_description"),
                                 self.confirm_writes || self.environment == Environment::Prod,
                                 cx.listener(|this, state: &ToggleState, _, cx| {
                                     this.confirm_writes = state.selected();
@@ -769,19 +801,21 @@ impl Render for ConnectView {
                                             .color(Color::Muted),
                                     )
                                     .child(
-                                        Label::new("Túnel SSH")
+                                        Label::new(t!("database_client.connect.ssh_tunnel"))
                                             .size(LabelSize::Small)
                                             .weight(FontWeight::MEDIUM),
                                     )
                                     .child(
-                                        Label::new("usa o ssh do sistema e o ~/.ssh/config")
-                                            .size(LabelSize::XSmall)
-                                            .color(Color::Muted),
+                                        Label::new(t!(
+                                            "database_client.connect.ssh_tunnel_description"
+                                        ))
+                                        .size(LabelSize::XSmall)
+                                        .color(Color::Muted),
                                     )
                                     .child(div().flex_1())
                                     .when(ssh_open, |this| {
                                         this.child(
-                                            Label::new("ligado")
+                                            Label::new(t!("database_client.connect.ssh_on"))
                                                 .size(LabelSize::XSmall)
                                                 .color(Color::Accent),
                                         )
@@ -814,13 +848,9 @@ impl Render for ConnectView {
                                                 ),
                                         )
                                         .child(
-                                            Label::new(
-                                                "Chaves e agent do sistema, sem prompt de senha. \
-                                                 Host e porta acima são os do banco visto a \
-                                                 partir do servidor SSH.",
-                                            )
-                                            .size(LabelSize::XSmall)
-                                            .color(Color::Muted),
+                                            Label::new(t!("database_client.connect.ssh_note"))
+                                                .size(LabelSize::XSmall)
+                                                .color(Color::Muted),
                                         ),
                                 )
                             }),
@@ -829,7 +859,7 @@ impl Render for ConnectView {
                         v_flex()
                             .pt_1()
                             .gap_1()
-                            .child(field_label("Salvar em"))
+                            .child(field_label(t!("database_client.connect.save_to")))
                             .child(
                                 h_flex().child(
                                     segmented_control(cx)
@@ -837,7 +867,7 @@ impl Render for ConnectView {
                                         .child(
                                             segment(
                                                 "db-scope-profile",
-                                                "Só para mim (perfil)",
+                                                t!("database_client.connect.scope_profile"),
                                                 self.scope == Scope::Profile,
                                                 cx,
                                             )
@@ -852,7 +882,10 @@ impl Render for ConnectView {
                                         .child(
                                             segment(
                                                 "db-scope-project",
-                                                format!("Projeto · {}", connection::PROJECT_FILE),
+                                                t!(
+                                                    "database_client.connect.scope_project",
+                                                    file = connection::PROJECT_FILE
+                                                ),
                                                 self.scope == Scope::Project,
                                                 cx,
                                             )
@@ -867,12 +900,9 @@ impl Render for ConnectView {
                                 ),
                             )
                             .child(
-                                Label::new(
-                                    "No projeto vai só host, porta, banco e usuário. Senha fica \
-                                     no Keychain de cada um.",
-                                )
-                                .size(LabelSize::XSmall)
-                                .color(Color::Muted),
+                                Label::new(t!("database_client.connect.scope_note"))
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted),
                             ),
                     )
                     .children(self.render_test_result(cx))
@@ -887,7 +917,7 @@ impl Render for ConnectView {
                                 secondary_button(
                                     "db-test",
                                     Some((IconName::SignalHigh, Color::Muted)),
-                                    "Testar conexão",
+                                    t!("database_client.connect.test_connection"),
                                     !matches!(self.test, TestState::Running),
                                     cx,
                                 )
@@ -896,7 +926,7 @@ impl Render for ConnectView {
                             )
                             .child(div().flex_1())
                             .child(
-                                Button::new("db-cancel", "Cancelar")
+                                Button::new("db-cancel", t!("database_client.connect.cancel"))
                                     .style(ButtonStyle::Subtle)
                                     .on_click(
                                         cx.listener(|_, _, _, cx| cx.emit(ItemEvent::CloseItem)),
@@ -907,9 +937,9 @@ impl Render for ConnectView {
                                     "db-save",
                                     None,
                                     if saving {
-                                        "Salvando…"
+                                        t!("database_client.connect.saving")
                                     } else {
-                                        "Salvar e conectar"
+                                        t!("database_client.connect.save_and_connect")
                                     },
                                     Some(ui::KeyBinding::for_action_in(
                                         &SaveConnection,
@@ -945,9 +975,9 @@ impl Item for ConnectView {
 
     fn tab_content_text(&self, _detail: usize, _cx: &App) -> SharedString {
         if self.editing.is_some() {
-            "Editar conexão".into()
+            t!("database_client.connect.edit_title")
         } else {
-            "Nova conexão".into()
+            t!("database_client.connect.new_title")
         }
     }
 

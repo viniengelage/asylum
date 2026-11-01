@@ -10,6 +10,7 @@ use crate::{
 use agent::ZED_AGENT_ID;
 use agent_client_protocol::schema::v2 as acp;
 use gpui::{AnyElement, App, Context, SharedString, Window, actions};
+use i18n::t;
 use task_agents::TaskAgent;
 use ui::{ContextMenu, PopoverMenu, Tooltip, prelude::*};
 use util::ResultExt as _;
@@ -414,7 +415,7 @@ impl AgentPanel {
                             .child(
                                 IconButton::new(("close-agent-tab", index), IconName::Close)
                                     .icon_size(IconSize::XSmall)
-                                    .tooltip(Tooltip::text("Fechar aba"))
+                                    .tooltip(Tooltip::text(t!("agent_ui.agent_tabs.close_tab")))
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         cx.stop_propagation();
                                         this.close_agent_tab(index, window, cx);
@@ -467,7 +468,7 @@ impl AgentPanel {
         PopoverMenu::new("new-agent-tab-menu")
             .trigger_with_tooltip(
                 IconButton::new("new-agent-tab", IconName::Plus).icon_size(IconSize::Small),
-                Tooltip::text("Nova aba"),
+                Tooltip::text(t!("agent_ui.agent_tabs.new_tab")),
             )
             .anchor(gpui::Anchor::TopRight)
             .menu(move |window, cx| {
@@ -478,7 +479,7 @@ impl AgentPanel {
                     window,
                     cx,
                     move |mut menu, _window, _cx| {
-                        menu = menu.header("Nova aba");
+                        menu = menu.header(t!("agent_ui.agent_tabs.new_tab"));
                         let open_with =
                             |agent_id: project::AgentId, panel: gpui::WeakEntity<AgentPanel>| {
                                 move |window: &mut Window, cx: &mut App| {
@@ -510,7 +511,9 @@ impl AgentPanel {
                             });
                         }
                         if !task_agents.is_empty() {
-                            menu = menu.separator().header("Do projeto");
+                            menu = menu
+                                .separator()
+                                .header(t!("agent_ui.agent_tabs.from_project"));
                             for (command, name) in task_agents {
                                 let panel = panel.clone();
                                 menu = menu.item(
@@ -531,8 +534,10 @@ impl AgentPanel {
                             }
                         }
                         let manage_panel = panel;
-                        menu.separator()
-                            .entry("Gerenciar agentes…", None, move |window, cx| {
+                        menu.separator().entry(
+                            t!("agent_ui.agent_tabs.manage_agents"),
+                            None,
+                            move |window, cx| {
                                 if let Some(workspace) = manage_panel
                                     .upgrade()
                                     .and_then(|panel| panel.read(cx).workspace.upgrade())
@@ -541,7 +546,8 @@ impl AgentPanel {
                                         crate::task_agents_view::open(workspace, window, cx)
                                     });
                                 }
-                            })
+                            },
+                        )
                     },
                 ))
             })

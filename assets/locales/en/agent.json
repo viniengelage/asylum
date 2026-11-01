@@ -1,0 +1,21 @@
+{
+  "database_schema_tool.title_table": "Reading the schema of {table}",
+  "database_schema_tool.title_tables": "Listing database tables",
+  "flow_command.description.one": "{name} · 1 step · the text after it becomes “What to build”",
+  "flow_command.description.other": "{name} · {count} steps · the text after it becomes “What to build”",
+  "flow_command.input_hint": "<what to build>",
+  "repo_map_tool.title": "Map directory",
+  "repo_map_tool.title_path": "Map {path}",
+  "save_learning_tool.authorize": "Save learning to {path}",
+  "save_learning_tool.title": "Save learning",
+  "save_learning_tool.title_named": "Save learning {title}",
+  "submit_plan_tool.title": "Writing plan",
+  "submit_step_tool.title": "Step delivery",
+  "task_agent_command.input_hint": "<request>",
+  "task_agent_command.toolkits_off_in_profile": "{toolkits} off in this profile",
+  "tool_permissions.blocked_by_agent": "Blocked by the {agent} agent: {reason}",
+  "tool_permissions.invalid_pattern": "The {agent} agent has an invalid pattern for {tool} ({pattern}): {error}",
+  "toolkit_tool.cancelled_by_user": "Cancelled by the user",
+  "update_plan_tool.progress_title": "Plan progress: {completed} of {total}",
+  "update_plan_tool.title": "Updating plan"
+}

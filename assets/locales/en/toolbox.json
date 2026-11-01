@@ -1,0 +1,14 @@
+{
+  "json.mode_format": "Format",
+  "json.mode_minify": "Minify",
+  "json.mode_validate": "Validate",
+  "json.placeholder": "Paste JSON here…",
+  "json.valid": "Valid JSON",
+  "json.invalid": "Invalid JSON",
+  "json.paste": "Paste",
+  "json.clear": "Clear",
+  "json.copy": "Copy",
+  "json.one_line": "1 line",
+  "json.line_count": "{count} lines",
+  "json.error_position": "line {line}, column {column}: {message}"
+}

@@ -4,6 +4,7 @@
 
 use crate::catalog::{qualified_name, quote_ident, quote_literal};
 use collections::BTreeMap;
+use i18n::t;
 
 /// Pending changes of one page: `(row, column)` in the grid → new value (`None` is NULL).
 pub type PendingEdits = BTreeMap<(usize, usize), Option<String>>;
@@ -32,14 +33,21 @@ pub fn row_updates(
     edits: &PendingEdits,
 ) -> Result<Vec<RowUpdate>, String> {
     if primary_key.is_empty() {
-        return Err("A tabela não tem chave primária: sem ela não dá para achar a linha.".into());
+        return Err(t!("database_client.errors.no_primary_key").to_string());
     }
     let mut by_row: BTreeMap<usize, Vec<(usize, Option<&str>)>> = BTreeMap::default();
     for ((row, column), value) in edits {
         let old = rows
             .get(*row)
             .and_then(|values| values.get(*column))
-            .ok_or_else(|| format!("A célula ({row}, {column}) não existe mais nesta página."))?;
+            .ok_or_else(|| {
+                t!(
+                    "database_client.errors.cell_gone",
+                    row = row,
+                    column = column
+                )
+                .to_string()
+            })?;
         if old.as_deref() != value.as_deref() {
             by_row
                 .entry(*row)
@@ -56,7 +64,9 @@ pub fn row_updates(
                 column_names
                     .get(column)
                     .map(|name| quote_ident(name))
-                    .ok_or_else(|| format!("Coluna {column} desconhecida."))
+                    .ok_or_else(|| {
+                        t!("database_client.errors.unknown_column", column = column).to_string()
+                    })
             };
             let assignments = changes
                 .iter()

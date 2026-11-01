@@ -5,6 +5,7 @@ use crate::{ClickUpStore, Connection, api};
 use anyhow::{Context as _, Result, anyhow};
 use gpui::{App, AsyncApp, Entity, Task};
 use http_client::HttpClient;
+use i18n::t;
 use project::Project;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -344,13 +345,13 @@ pub fn register_toolkit(cx: &mut App) {
         Toolkit {
             id: task_agents::toolkit_ids::CLICKUP.into(),
             name: "ClickUp".into(),
-            description: "Tarefas do ClickUp conectado no dock".into(),
+            description: t!("clickup.toolkit.description"),
             icon: "list_todo".into(),
             mention: None,
             tools: vec![
                 ToolkitTool::new(
                     "clickup_task",
-                    "Leu a tarefa do ClickUp",
+                    t!("clickup.toolkit.read_task"),
                     "Reads a ClickUp task with its description and comments. Defaults to the task \
                      whose ID is in the current branch name.",
                     ToolAccess::Read,
@@ -358,28 +359,28 @@ pub fn register_toolkit(cx: &mut App) {
                 ),
                 ToolkitTool::new(
                     "clickup_my_tasks",
-                    "Listou suas tarefas",
+                    t!("clickup.toolkit.listed_tasks"),
                     "Lists the open ClickUp tasks assigned to the user.",
                     ToolAccess::Read,
                     my_tasks,
                 ),
                 ToolkitTool::new(
                     "clickup_comment",
-                    "Comentou na tarefa",
+                    t!("clickup.toolkit.commented"),
                     "Posts a comment on a ClickUp task.",
                     ToolAccess::Act,
                     comment,
                 ),
                 ToolkitTool::new(
                     "clickup_set_status",
-                    "Mudou o status da tarefa",
+                    t!("clickup.toolkit.changed_status"),
                     "Moves a ClickUp task to another status of its list.",
                     ToolAccess::Act,
                     set_status,
                 ),
                 ToolkitTool::new(
                     "clickup_create_task",
-                    "Criou uma tarefa no ClickUp",
+                    t!("clickup.toolkit.created_task"),
                     "Creates a ClickUp task (for example a user story) with a Markdown description.",
                     ToolAccess::Act,
                     create,

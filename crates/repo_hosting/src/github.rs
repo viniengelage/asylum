@@ -9,24 +9,50 @@ use crate::api::{
 use anyhow::{Context as _, Result};
 use chrono::{DateTime, Utc};
 use futures::AsyncReadExt as _;
+use gpui::SharedString;
 use http_client::{AsyncBody, HttpClient, Request};
+use i18n::t;
 use serde::{Deserialize, de::DeserializeOwned};
 use std::{collections::HashMap, sync::Arc};
 
 const API_URL: &str = "https://api.github.com";
-const HOST: &str = "O GitHub";
+const HOST: &str = "GitHub";
 
 /// Where GitHub lets you create fine-grained tokens.
 pub const TOKEN_SETTINGS_URL: &str = "https://github.com/settings/personal-access-tokens/new";
 
 /// The fine-grained permissions the panel and the tasks dock use, with what each is for.
-pub const TOKEN_PERMISSIONS: [(&str, &str, &str); 5] = [
-    ("Contents", "leitura", "diff e commits"),
-    ("Pull requests", "escrita", "criar, comentar, merge"),
-    ("Issues", "escrita", "itens das tarefas"),
-    ("Actions", "escrita", "checks e re-rodar"),
-    ("Projects", "escrita", "status e campos"),
-];
+pub fn token_permissions() -> [(&'static str, SharedString, SharedString); 5] {
+    let read = t!("repo_hosting.github_connect.permission_read");
+    let write = t!("repo_hosting.github_connect.permission_write");
+    [
+        (
+            "Contents",
+            read,
+            t!("repo_hosting.github_connect.permission_contents"),
+        ),
+        (
+            "Pull requests",
+            write.clone(),
+            t!("repo_hosting.github_connect.permission_pull_requests"),
+        ),
+        (
+            "Issues",
+            write.clone(),
+            t!("repo_hosting.github_connect.permission_issues"),
+        ),
+        (
+            "Actions",
+            write.clone(),
+            t!("repo_hosting.github_connect.permission_actions"),
+        ),
+        (
+            "Projects",
+            write,
+            t!("repo_hosting.github_connect.permission_projects"),
+        ),
+    ]
+}
 
 /// Enough for any team's open pull requests while keeping a runaway `next` chain bounded.
 const MAX_PAGES: usize = 5;
@@ -53,14 +79,21 @@ pub async fn token_from_gh_cli() -> Result<String> {
         .args(["auth", "token", "--hostname", "github.com"])
         .output()
         .await
-        .context("o GitHub CLI (gh) não está instalado")?;
+        .context(t!("repo_hosting.error.gh_not_installed"))?;
     anyhow::ensure!(
         output.status.success(),
-        "o gh não está logado: {}",
-        String::from_utf8_lossy(&output.stderr).trim()
+        "{}",
+        t!(
+            "repo_hosting.error.gh_not_logged_in",
+            details = String::from_utf8_lossy(&output.stderr).trim()
+        )
     );
     let token = String::from_utf8(output.stdout)?.trim().to_string();
-    anyhow::ensure!(!token.is_empty(), "o gh não devolveu um token");
+    anyhow::ensure!(
+        !token.is_empty(),
+        "{}",
+        t!("repo_hosting.error.gh_no_token")
+    );
     Ok(token)
 }
 
@@ -916,7 +949,7 @@ pub async fn create_pull_request(
             Some(serde_json::json!({ "reviewers": new.reviewer_ids })),
         )
         .await
-        .context("o PR foi criado, mas o GitHub recusou os revisores")?;
+        .context(t!("repo_hosting.error.github_reviewers_rejected"))?;
     }
     Ok(created.into_pull_request(Vec::new()))
 }
@@ -992,7 +1025,7 @@ pub async fn merge_pull_request(
             None,
         )
         .await
-        .context("o merge entrou, mas o GitHub não apagou o branch")?;
+        .context(t!("repo_hosting.error.github_branch_not_deleted"))?;
     }
     Ok(MergeOutcome::Merged(merged.into_pull_request(Vec::new())))
 }
@@ -1048,7 +1081,8 @@ pub async fn set_approval(
 ) -> Result<()> {
     anyhow::ensure!(
         approve,
-        "o GitHub não deixa retirar uma aprovação; peça mudanças numa nova revisão"
+        "{}",
+        t!("repo_hosting.error.github_cannot_unapprove")
     );
     send::<serde_json::Value>(
         client,
@@ -1139,11 +1173,17 @@ pub async fn graphql<T: DeserializeOwned>(
             }
             .into());
         }
-        anyhow::bail!("o GitHub recusou: {}", error.message);
+        anyhow::bail!(
+            "{}",
+            t!(
+                "repo_hosting.error.github_rejected",
+                message = error.message
+            )
+        );
     }
     response
         .data
-        .context("o GitHub respondeu sem dados nem erros")
+        .context(t!("repo_hosting.error.github_empty_response"))
 }
 
 async fn get_all_pages<T: DeserializeOwned>(
@@ -1233,8 +1273,13 @@ impl RawResponse {
         } else {
             &self.text
         };
-        serde_json::from_str(text)
-            .with_context(|| format!("resposta inesperada do GitHub em {}", self.endpoint))
+        serde_json::from_str(text).with_context(|| {
+            t!(
+                "repo_hosting.error.unexpected_response",
+                host = HOST,
+                endpoint = self.endpoint
+            )
+        })
     }
 }
 
@@ -1270,10 +1315,13 @@ async fn send_raw(
         .next()
         .unwrap_or(url)
         .to_string();
-    let mut response = client
-        .send(request)
-        .await
-        .with_context(|| format!("falha ao chamar o GitHub em {endpoint}"))?;
+    let mut response = client.send(request).await.with_context(|| {
+        t!(
+            "repo_hosting.error.request_failed",
+            host = HOST,
+            endpoint = endpoint
+        )
+    })?;
 
     let mut text = String::new();
     response.body_mut().read_to_string(&mut text).await?;

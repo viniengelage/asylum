@@ -10,6 +10,7 @@ use agent_ui::{
     thread_metadata_store::{ThreadMetadata, ThreadMetadataStore},
 };
 use gpui::{AnyElement, App, Context, SharedString, Window};
+use i18n::t;
 use project::AgentId;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -207,7 +208,7 @@ impl Sidebar {
 
         let mut agents = vec![AgentRow {
             filter: None,
-            name: "Todos os agentes".into(),
+            name: t!("sidebar.agents.all_agents"),
             icon: IconName::UserGroup,
             external_icon: None,
             command: None,
@@ -465,7 +466,7 @@ impl Sidebar {
             .gap_1()
             .cursor_pointer()
             .child(
-                Label::new("AGENTES")
+                Label::new(t!("sidebar.agents.header"))
                     .size(LabelSize::XSmall)
                     .color(Color::Muted),
             )
@@ -505,7 +506,7 @@ impl Sidebar {
             if !project_agents.is_empty() {
                 section = section.child(
                     div().px_3().pt_2().pb_0p5().child(
-                        Label::new("DO PROJETO")
+                        Label::new(t!("sidebar.agents.from_project"))
                             .size(LabelSize::XSmall)
                             .color(Color::Muted),
                     ),
@@ -538,12 +539,17 @@ impl Sidebar {
         let name: SharedString = match &filter {
             AgentFilter::TaskAgent(command) => self
                 .task_agent_named(command)
-                .map(|agent| format!("Nova thread com {}", agent.name).into())
-                .unwrap_or_else(|| format!("Nova thread com /{command}").into()),
+                .map(|agent| t!("sidebar.agents.new_thread_with", name = agent.name))
+                .unwrap_or_else(|| {
+                    t!(
+                        "sidebar.agents.new_thread_with",
+                        name = format!("/{command}")
+                    )
+                }),
             AgentFilter::Agent(agent_id) if agent_id == &*ZED_AGENT_ID => {
-                "Nova thread com o Asylum Agent".into()
+                t!("sidebar.agents.new_thread_with", name = "Asylum Agent")
             }
-            AgentFilter::Agent(agent_id) => format!("Nova thread com {agent_id}").into(),
+            AgentFilter::Agent(agent_id) => t!("sidebar.agents.new_thread_with", name = agent_id),
         };
         h_flex()
             .mx_2()
@@ -554,9 +560,13 @@ impl Sidebar {
             .rounded_md()
             .bg(colors.element_selected)
             .child(
-                Label::new(format!("{shown} de {total} threads"))
-                    .size(LabelSize::XSmall)
-                    .color(Color::Muted),
+                Label::new(t!(
+                    "sidebar.agents.threads_shown",
+                    shown = shown,
+                    total = total
+                ))
+                .size(LabelSize::XSmall)
+                .color(Color::Muted),
             )
             .child(div().flex_1())
             .child(
@@ -570,7 +580,7 @@ impl Sidebar {
             .child(
                 IconButton::new("agent-filter-clear", IconName::Close)
                     .icon_size(IconSize::Small)
-                    .tooltip(Tooltip::text("Mostrar todos os agentes"))
+                    .tooltip(Tooltip::text(t!("sidebar.agents.show_all_agents")))
                     .on_click(cx.listener(|this, _, _window, cx| {
                         this.set_agent_filter(None, cx);
                     })),
@@ -604,8 +614,8 @@ impl Sidebar {
         let filter_for_new = row.filter.clone();
         let filter_for_tab = row.filter.clone();
         let tooltip = match &row.filter {
-            None => "Nova thread".to_string(),
-            Some(_) => format!("Nova thread com {}", row.name),
+            None => t!("sidebar.agents.new_thread"),
+            Some(_) => t!("sidebar.agents.new_thread_with", name = row.name),
         };
 
         let line = h_flex()
@@ -674,7 +684,7 @@ impl Sidebar {
                         IconName::ArrowUpRight,
                     )
                     .icon_size(IconSize::XSmall)
-                    .tooltip(Tooltip::text("Abrir em nova aba"))
+                    .tooltip(Tooltip::text(t!("sidebar.agents.open_in_new_tab")))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         cx.stop_propagation();
                         this.open_agent_in_new_tab(filter_for_tab.clone(), window, cx);
@@ -721,7 +731,7 @@ impl Sidebar {
                     let pin_sidebar = sidebar.clone();
                     let pin_filter = filter.clone();
                     menu.entry(
-                        format!("Nova thread com {name}"),
+                        t!("sidebar.agents.new_thread_with", name = name),
                         None,
                         move |window, cx| {
                             new_sidebar
@@ -735,32 +745,48 @@ impl Sidebar {
                                 .log_err();
                         },
                     )
-                    .entry("Abrir em nova aba", None, move |window, cx| {
-                        tab_sidebar
-                            .update(cx, |sidebar, cx| {
-                                sidebar.open_agent_in_new_tab(Some(tab_filter.clone()), window, cx)
-                            })
-                            .log_err();
-                    })
-                    .entry("Retomar última thread", None, move |window, cx| {
-                        resume_sidebar
-                            .update(cx, |sidebar, cx| {
-                                sidebar.resume_last_thread(&resume_filter, window, cx)
-                            })
-                            .log_err();
-                    })
-                    .entry("Mostrar só as threads dele", None, move |_window, cx| {
-                        show_sidebar
-                            .update(cx, |sidebar, cx| {
-                                sidebar.set_agent_filter(Some(show_filter.clone()), cx)
-                            })
-                            .log_err();
-                    })
+                    .entry(
+                        t!("sidebar.agents.open_in_new_tab"),
+                        None,
+                        move |window, cx| {
+                            tab_sidebar
+                                .update(cx, |sidebar, cx| {
+                                    sidebar.open_agent_in_new_tab(
+                                        Some(tab_filter.clone()),
+                                        window,
+                                        cx,
+                                    )
+                                })
+                                .log_err();
+                        },
+                    )
+                    .entry(
+                        t!("sidebar.agents.resume_last_thread"),
+                        None,
+                        move |window, cx| {
+                            resume_sidebar
+                                .update(cx, |sidebar, cx| {
+                                    sidebar.resume_last_thread(&resume_filter, window, cx)
+                                })
+                                .log_err();
+                        },
+                    )
+                    .entry(
+                        t!("sidebar.agents.show_only_its_threads"),
+                        None,
+                        move |_window, cx| {
+                            show_sidebar
+                                .update(cx, |sidebar, cx| {
+                                    sidebar.set_agent_filter(Some(show_filter.clone()), cx)
+                                })
+                                .log_err();
+                        },
+                    )
                     .entry(
                         if is_pinned {
-                            "Desafixar"
+                            t!("sidebar.agents.unpin")
                         } else {
-                            "Fixar no topo"
+                            t!("sidebar.agents.pin_to_top")
                         },
                         None,
                         move |_window, cx| {
@@ -772,13 +798,17 @@ impl Sidebar {
                         },
                     )
                     .separator()
-                    .entry("Configurar agente…", None, move |window, cx| {
-                        configure_sidebar
-                            .update(cx, |sidebar, cx| {
-                                sidebar.configure_agent(&configure_filter, window, cx)
-                            })
-                            .log_err();
-                    })
+                    .entry(
+                        t!("sidebar.agents.configure_agent"),
+                        None,
+                        move |window, cx| {
+                            configure_sidebar
+                                .update(cx, |sidebar, cx| {
+                                    sidebar.configure_agent(&configure_filter, window, cx)
+                                })
+                                .log_err();
+                        },
+                    )
                 })
             })
             .into_any_element()

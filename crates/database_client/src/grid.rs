@@ -8,6 +8,7 @@ use gpui::{
     AbsoluteLength, Anchor, AnyElement, ClipboardItem, Entity, EventEmitter, FocusHandle,
     Focusable, FontWeight, WeakEntity, actions, anchored, deferred, px,
 };
+use i18n::t;
 use std::ops::Range;
 use ui::{
     ColumnWidthConfig, ResizableColumnsState, Table, TableInteractionState, TableResizeBehavior,
@@ -572,7 +573,7 @@ impl ResultGrid {
                 value.to_owned()
             }
         });
-        let action = |id: &'static str, label: &'static str| {
+        let action = |id: &'static str, label: SharedString| {
             h_flex()
                 .id(id)
                 .gap_1()
@@ -606,9 +607,10 @@ impl ResultGrid {
                                 .weight(FontWeight::SEMIBOLD),
                         )
                         .child(
-                            Label::new(format!(
-                                "{type_name} · linha {}",
-                                self.first_row_number + row_index
+                            Label::new(t!(
+                                "database_client.grid.type_and_row",
+                                type_name = type_name,
+                                row = self.first_row_number + row_index
                             ))
                             .size(LabelSize::XSmall)
                             .color(Color::Muted),
@@ -644,14 +646,16 @@ impl ResultGrid {
                         .gap_4()
                         .border_t_1()
                         .border_color(colors.border)
-                        .child(action("db-grid-copy", "Copiar").on_click(
-                            cx.listener(|this, _, window, cx| {
-                                this.copy_cell(&CopyCell, window, cx)
-                            }),
-                        ))
+                        .child(
+                            action("db-grid-copy", t!("database_client.grid.copy")).on_click(
+                                cx.listener(|this, _, window, cx| {
+                                    this.copy_cell(&CopyCell, window, cx)
+                                }),
+                            ),
+                        )
                         .when(self.editable, |this| {
                             this.child(
-                                action("db-grid-edit", "Editar")
+                                action("db-grid-edit", t!("database_client.grid.edit"))
                                     .child(
                                         Label::new("↵")
                                             .size(LabelSize::XSmall)
@@ -665,7 +669,7 @@ impl ResultGrid {
                             )
                         })
                         .child(
-                            action("db-grid-open", "Abrir no editor")
+                            action("db-grid-open", t!("database_client.grid.open_in_editor"))
                                 .on_click(cx.listener(|this, _, _, cx| this.open_value(cx))),
                         )
                         .child(div().flex_1())
@@ -674,7 +678,7 @@ impl ResultGrid {
                                 h_flex()
                                     .id("db-grid-null")
                                     .cursor_pointer()
-                                    .tooltip(Tooltip::text("Deixar esta célula NULL"))
+                                    .tooltip(Tooltip::text(t!("database_client.grid.set_null")))
                                     .child(
                                         Label::new("NULL")
                                             .size(LabelSize::XSmall)

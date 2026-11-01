@@ -16,6 +16,7 @@ use anyhow::{Context as _, anyhow};
 use chrono::Utc;
 use collections::HashMap;
 use gpui::{App, AppContext as _, Entity, Global, Task, Window};
+use i18n::t;
 use project::Project;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -629,7 +630,7 @@ fn open_query(
     window: &mut Window,
     cx: &mut App,
 ) -> anyhow::Result<()> {
-    let panel = panel_for(project, cx).context("O dock Elastic não está aberto.")?;
+    let panel = panel_for(project, cx).context(t!("elastic.toolkit.dock_not_open"))?;
     panel.update(cx, |panel, cx| {
         panel.open_agent_query(query, window_minutes, window, cx)
     });
@@ -642,10 +643,11 @@ fn follow(
     window: &mut Window,
     cx: &mut App,
 ) -> anyhow::Result<()> {
-    let panel = panel_for(project, cx).context("O dock Elastic não está aberto.")?;
+    let panel = panel_for(project, cx).context(t!("elastic.toolkit.dock_not_open"))?;
     anyhow::ensure!(
         panel.read(cx).session().is_some(),
-        "O dock Elastic não está conectado."
+        "{}",
+        t!("elastic.toolkit.dock_not_connected")
     );
     panel.update(cx, |panel, cx| panel.follow(source, None, window, cx));
     Ok(())
@@ -661,18 +663,18 @@ fn open_mention(
         let view = query_view::query_views(project, cx)
             .into_iter()
             .find(|view| view.read(cx).path() == Path::new(path))
-            .with_context(|| format!("A aba ES|QL {path} foi fechada."))?;
+            .with_context(|| t!("elastic.toolkit.tab_closed", path = path))?;
         return query_view::activate(&view, window, cx);
     }
     if let Some(trace_id) = id.strip_prefix("trace:") {
-        let panel = panel_for(project, cx).context("O dock Elastic não está aberto.")?;
+        let panel = panel_for(project, cx).context(t!("elastic.toolkit.dock_not_open"))?;
         let (workspace, session) = {
             let panel = panel.read(cx);
             (
                 panel.workspace(),
                 panel
                     .session()
-                    .context("O dock Elastic não está conectado.")?,
+                    .context(t!("elastic.toolkit.dock_not_connected"))?,
             )
         };
         trace_view::open(
@@ -693,13 +695,13 @@ pub fn register_toolkit(cx: &mut App) {
         Toolkit {
             id: task_agents::toolkit_ids::ELASTIC.into(),
             name: "Elastic".into(),
-            description: "Logs, traces e erros do Elasticsearch, só leitura".into(),
+            description: t!("elastic.toolkit.description"),
             icon: "cloud_pulse".into(),
             mention: Some("@Logs".into()),
             tools: vec![
                 ToolkitTool::new(
                     "elastic_esql",
-                    "Consultou o Elastic",
+                    t!("elastic.toolkit.tool_esql"),
                     "Runs one ES|QL query (starting with FROM) against the Elasticsearch \
                      connected in the Elastic dock and returns the rows as a table, with \
                      personal data masked. The time window is `window_minutes` back from now \
@@ -715,7 +717,7 @@ pub fn register_toolkit(cx: &mut App) {
                 ),
                 ToolkitTool::new(
                     "elastic_wide_esql",
-                    "Consultou o Elastic (janela grande)",
+                    t!("elastic.toolkit.tool_wide_esql"),
                     "Same as elastic_esql for windows longer than 24 h (up to 30 days). It asks \
                      the user first, since it reads much more of the cluster. Prefer \
                      elastic_esql and narrow the question when you can.",
@@ -726,7 +728,7 @@ pub fn register_toolkit(cx: &mut App) {
                 ),
                 ToolkitTool::new(
                     "elastic_data_streams",
-                    "Listou os data streams",
+                    t!("elastic.toolkit.tool_data_streams"),
                     "Lists the apps writing logs (their service.name, with volume and errors in \
                      the last 24 h) and the data streams of the connected cluster (logs-*, \
                      traces-*, metrics-*), the ones marked as this project's first. Call it \
@@ -736,7 +738,7 @@ pub fn register_toolkit(cx: &mut App) {
                 ),
                 ToolkitTool::new(
                     "elastic_fields",
-                    "Leu os campos",
+                    t!("elastic.toolkit.tool_fields"),
                     "Lists the mapped fields of an index pattern with their types, to write \
                      ES|QL with the right names.",
                     ToolAccess::Read,
@@ -744,7 +746,7 @@ pub fn register_toolkit(cx: &mut App) {
                 ),
                 ToolkitTool::new(
                     "elastic_trace",
-                    "Leu o trace",
+                    t!("elastic.toolkit.tool_trace"),
                     "Reads one APM trace by trace.id: its transactions and spans with timings, \
                      outcomes and HTTP status, the APM errors and the log lines of that trace.",
                     ToolAccess::Read,
@@ -752,7 +754,7 @@ pub fn register_toolkit(cx: &mut App) {
                 ),
                 ToolkitTool::new(
                     "elastic_recent_errors",
-                    "Leu os erros recentes",
+                    t!("elastic.toolkit.tool_recent_errors"),
                     "The most frequent error messages of the last `window_minutes` (default \
                      60), grouped by message and service, with count and last time seen.",
                     ToolAccess::Read,
@@ -762,7 +764,7 @@ pub fn register_toolkit(cx: &mut App) {
                 // it back), and nothing runs until the user does.
                 ToolkitTool::new(
                     "elastic_write_query",
-                    "Escreveu a consulta",
+                    t!("elastic.toolkit.tool_write_query"),
                     "Writes an ES|QL query into an .esql editor tab of the Elastic dock, which \
                      the user mentioned with @. Nothing runs: the user reviews and runs it. \
                      After writing, end the turn without any text.",

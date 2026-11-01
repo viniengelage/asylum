@@ -65,8 +65,11 @@ impl AgentTool for SaveLearningTool {
         _cx: &mut App,
     ) -> SharedString {
         match input {
-            Ok(input) => format!("Save learning {}", MarkdownInlineCode(&input.title)).into(),
-            Err(_) => "Save learning".into(),
+            Ok(input) => i18n::t!(
+                "agent.save_learning_tool.title_named",
+                title = MarkdownInlineCode(&input.title)
+            ),
+            Err(_) => i18n::t!("agent.save_learning_tool.title"),
         }
     }
 
@@ -116,7 +119,10 @@ async fn save_learning(
     // could persist across threads.
     let authorize = cx.update(|cx| {
         event_stream.authorize_always_prompt(
-            format!("Save learning to {}", MarkdownInlineCode(&display_path)),
+            i18n::t!(
+                "agent.save_learning_tool.authorize",
+                path = MarkdownInlineCode(&display_path)
+            ),
             ToolPermissionContext::new(SaveLearningTool::NAME, vec![display_path.clone()])
                 .once_only(),
             cx,

@@ -11,6 +11,7 @@ use gpui::{
     AnyElement, ClipboardItem, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Hsla,
     Task, WeakEntity, px,
 };
+use i18n::t;
 use project::Project;
 use std::sync::Arc;
 use ui::{Tooltip, prelude::*};
@@ -207,7 +208,7 @@ pub(crate) fn build_trace(spans: Rows, logs: Rows) -> Trace {
         all.push(Span {
             id,
             parent: spans.text(row, "parent.id"),
-            name: name.unwrap_or_else(|| "(sem nome)".to_string()),
+            name: name.unwrap_or_else(|| t!("elastic.trace.unnamed").to_string()),
             service: spans.text(row, "service.name").unwrap_or_default(),
             event,
             kind: spans.text(row, "span.type"),
@@ -256,7 +257,7 @@ pub(crate) fn build_trace(spans: Rows, logs: Rows) -> Trace {
                     .or_else(|| logs.text(row, "error.log.message"))
                     .or_else(|| logs.text(row, "error.grouping_name"))
                     .or_else(|| logs.text(row, results::MESSAGE))
-                    .unwrap_or_else(|| "erro".to_string()),
+                    .unwrap_or_else(|| t!("elastic.trace.error_fallback").to_string()),
                 culprit: logs.text(row, "error.culprit"),
                 timestamp,
             });
@@ -347,14 +348,9 @@ impl TraceView {
             let result = load_trace(&session, &trace_id).await;
             this.update(cx, |this, cx| {
                 this.state = match result {
-                    Ok(trace) if trace.spans.is_empty() => State::Failed(
-                        format!(
-                            "Nenhum span com trace.id {} em traces-apm*. O APM pode ter \
-                             descartado a amostra, ou o trace é de outro cluster.",
-                            this.trace_id
-                        )
-                        .into(),
-                    ),
+                    Ok(trace) if trace.spans.is_empty() => {
+                        State::Failed(t!("elastic.trace.no_spans", trace_id = this.trace_id))
+                    }
                     Ok(trace) => {
                         // The failed external call is what people open a trace for.
                         let selected = trace
@@ -405,14 +401,12 @@ impl TraceView {
                     let total = number(&rows, 0, "total")?;
                     let failed = number(&rows, 0, "failed").unwrap_or(0);
                     let p95 = number(&rows, 0, "p95").unwrap_or(0);
-                    Some(
-                        format!(
-                            "{} vezes nos últimos 30 min · {failed} em erro · p95 {}",
-                            results::format_count(total),
-                            results::format_micros(p95)
-                        )
-                        .into(),
-                    )
+                    Some(t!(
+                        "elastic.trace.similar",
+                        count = results::format_count(total),
+                        failed = failed,
+                        p95 = results::format_micros(p95)
+                    ))
                 });
                 cx.notify();
             })
@@ -484,7 +478,7 @@ impl TraceView {
                     )
                     .child(div().flex_1())
                     .child(
-                        Button::new("elastic-trace-logs", "Logs deste trace")
+                        Button::new("elastic-trace-logs", t!("elastic.trace.logs_button"))
                             .style(ButtonStyle::Outlined)
                             .label_size(LabelSize::Small)
                             .start_icon(Icon::new(IconName::Filter).size(IconSize::Small))
@@ -498,7 +492,7 @@ impl TraceView {
                             })),
                     )
                     .child(
-                        Button::new("elastic-trace-agent", "Perguntar ao Agent")
+                        Button::new("elastic-trace-agent", t!("elastic.common.ask_agent"))
                             .style(ButtonStyle::Tinted(ui::TintColor::Accent))
                             .label_size(LabelSize::Small)
                             .start_icon(Icon::new(IconName::Sparkle).size(IconSize::Small))
@@ -507,7 +501,7 @@ impl TraceView {
                             ),
                     )
                     .child(
-                        Button::new("elastic-trace-kibana", "Abrir no Kibana")
+                        Button::new("elastic-trace-kibana", t!("elastic.common.open_in_kibana"))
                             .style(ButtonStyle::Outlined)
                             .label_size(LabelSize::Small)
                             .start_icon(Icon::new(IconName::ArrowUpRight).size(IconSize::Small))
@@ -546,19 +540,31 @@ impl TraceView {
                         )
                     })
                     .child(
-                        Label::new(format!(
-                            "{} · {} · {} spans em {services} {} · {} erro(s) do APM · {} log(s)",
-                            results::format_micros(trace.duration_us()),
-                            root.map(|root| root.service.clone()).unwrap_or_default(),
-                            trace.spans.len(),
+                        Label::new({
+                            let duration = results::format_micros(trace.duration_us());
+                            let service = root.map(|root| root.service.clone()).unwrap_or_default();
                             if services == 1 {
-                                "serviço"
+                                t!(
+                                    "elastic.trace.summary.one",
+                                    duration = duration,
+                                    service = service,
+                                    spans = trace.spans.len(),
+                                    services = services,
+                                    errors = trace.errors.len(),
+                                    logs = trace.logs.len(),
+                                )
                             } else {
-                                "serviços"
-                            },
-                            trace.errors.len(),
-                            trace.logs.len(),
-                        ))
+                                t!(
+                                    "elastic.trace.summary.other",
+                                    duration = duration,
+                                    service = service,
+                                    spans = trace.spans.len(),
+                                    services = services,
+                                    errors = trace.errors.len(),
+                                    logs = trace.logs.len(),
+                                )
+                            }
+                        })
                         .size(LabelSize::Small)
                         .color(if failed {
                             Color::Error
@@ -572,7 +578,7 @@ impl TraceView {
                     .id("elastic-trace-id")
                     .gap_1()
                     .cursor_pointer()
-                    .tooltip(Tooltip::text("Copiar o trace.id"))
+                    .tooltip(Tooltip::text(t!("elastic.trace.copy_id")))
                     .on_click({
                         let trace_id = self.trace_id.clone();
                         move |_, _, cx| {
@@ -606,8 +612,8 @@ impl TraceView {
                     .gap_2()
                     .border_b_1()
                     .border_color(cx.theme().colors().border_variant)
-                    .child(section_label("SPAN").w(px(NAME_WIDTH)))
-                    .child(section_label("SERVIÇO").w(px(SERVICE_WIDTH)))
+                    .child(section_label(t!("elastic.trace.column_span")).w(px(NAME_WIDTH)))
+                    .child(section_label(t!("elastic.trace.column_service")).w(px(SERVICE_WIDTH)))
                     .child(
                         h_flex()
                             .flex_1()
@@ -619,7 +625,9 @@ impl TraceView {
                                     .color(Color::Disabled)
                             })),
                     )
-                    .child(section_label("DURAÇÃO").w(px(DURATION_WIDTH))),
+                    .child(
+                        section_label(t!("elastic.trace.column_duration")).w(px(DURATION_WIDTH)),
+                    ),
             )
             .children(trace.spans.iter().enumerate().map(|(index, span)| {
                 let offset = (span.start_us.saturating_sub(start)) as f32 / total;
@@ -741,11 +749,14 @@ impl TraceView {
                     .buffer_font(cx),
             )
             .child(
-                Label::new(format!(
-                    "{} · {} · {:.0}% do trace",
-                    span.service,
-                    results::format_micros(span.duration_us),
-                    span.duration_us as f32 / trace.duration_us() as f32 * 100.
+                Label::new(t!(
+                    "elastic.trace.span_share",
+                    service = span.service,
+                    duration = results::format_micros(span.duration_us),
+                    percent = format!(
+                        "{:.0}",
+                        span.duration_us as f32 / trace.duration_us() as f32 * 100.
+                    )
                 ))
                 .size(LabelSize::Small)
                 .color(Color::Muted),
@@ -778,7 +789,7 @@ impl TraceView {
                 }),
             ))
             .when(!errors.is_empty(), |this| {
-                this.child(section_label("ERRO DO APM"))
+                this.child(section_label(t!("elastic.trace.apm_error")))
                     .children(errors.into_iter().map(|error| {
                         v_flex()
                             .child(
@@ -798,20 +809,25 @@ impl TraceView {
                                     h_flex()
                                         .id("elastic-error-culprit")
                                         .child(
-                                            Label::new(format!("    em {culprit}"))
-                                                .size(LabelSize::Small)
-                                                .buffer_font(cx)
-                                                .color(if link.is_some() {
+                                            Label::new(t!(
+                                                "elastic.trace.culprit",
+                                                culprit = culprit
+                                            ))
+                                            .size(LabelSize::Small)
+                                            .buffer_font(cx)
+                                            .color(
+                                                if link.is_some() {
                                                     Color::Accent
                                                 } else {
                                                     Color::Muted
-                                                }),
+                                                },
+                                            ),
                                         )
                                         .when_some(link, move |this, link| {
                                             this.cursor_pointer()
-                                                .tooltip(Tooltip::text(format!(
-                                                    "Abrir {}",
-                                                    link.path
+                                                .tooltip(Tooltip::text(t!(
+                                                    "elastic.trace.open_path",
+                                                    path = link.path
                                                 )))
                                                 .on_click(move |_, window, cx| {
                                                     results::open_stack_link(
@@ -829,9 +845,9 @@ impl TraceView {
             })
             .when(!logs.is_empty(), |this| {
                 this.child(section_label(if logs.len() == 1 {
-                    "LOG NESTE SPAN".to_string()
+                    t!("elastic.trace.span_log_one")
                 } else {
-                    format!("LOGS NESTE SPAN · {}", logs.len())
+                    t!("elastic.trace.span_logs", count = logs.len())
                 }))
                 .children(logs.into_iter().take(20).map(|log| {
                     h_flex()
@@ -857,12 +873,12 @@ impl TraceView {
                         )
                 }))
             })
-            .child(section_label("PARECIDOS · ÚLTIMOS 30 MIN"))
+            .child(section_label(t!("elastic.trace.similar_header")))
             .child(
                 Label::new(
                     self.similar
                         .clone()
-                        .unwrap_or_else(|| "Contando no traces-apm*…".into()),
+                        .unwrap_or_else(|| t!("elastic.trace.counting")),
                 )
                 .size(LabelSize::Small)
                 .color(Color::Muted),
@@ -904,7 +920,7 @@ impl Render for TraceView {
             State::Loading => div()
                 .p_4()
                 .child(
-                    Label::new("Lendo o trace em traces-apm* e os logs com o mesmo trace.id…")
+                    Label::new(t!("elastic.trace.loading"))
                         .size(LabelSize::Small)
                         .color(Color::Muted),
                 )
@@ -918,7 +934,7 @@ impl Render for TraceView {
                         .color(Color::Error),
                 )
                 .child(
-                    Button::new("elastic-trace-retry", "Tentar de novo")
+                    Button::new("elastic-trace-retry", t!("elastic.common.retry"))
                         .style(ButtonStyle::Outlined)
                         .label_size(LabelSize::Small)
                         .on_click(cx.listener(|this, _, _, cx| this.load(cx))),

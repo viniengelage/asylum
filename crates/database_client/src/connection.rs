@@ -8,6 +8,7 @@ use crate::tunnel::{self, SshTunnel};
 use anyhow::Context as _;
 use db::kvp::KeyValueStore;
 use fs::Fs;
+use i18n::t;
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Path, PathBuf};
@@ -152,7 +153,12 @@ impl SavedConnection {
         let tunnel = reqwest_client::runtime()
             .spawn(async move { tunnel::open(&ssh, &host, port).await })
             .await
-            .map_err(|error| anyhow::anyhow!("o túnel SSH parou: {error}"))??;
+            .map_err(|error| {
+                anyhow::anyhow!(
+                    "{}",
+                    t!("database_client.errors.ssh_tunnel_stopped", error = error)
+                )
+            })??;
         Ok(self.target_through(password.as_deref(), Some(Arc::new(tunnel))))
     }
 }
@@ -223,8 +229,13 @@ pub async fn load_project(fs: &dyn Fs, root: &Path) -> anyhow::Result<Vec<SavedC
         return Ok(Vec::new());
     }
     let text = fs.load(&path).await?;
-    let file: ConnectionsFile =
-        serde_json::from_str(&text).with_context(|| format!("{} ilegível", path.display()))?;
+    let file: ConnectionsFile = serde_json::from_str(&text).with_context(|| {
+        t!(
+            "database_client.errors.unreadable_file",
+            path = path.display()
+        )
+        .to_string()
+    })?;
     Ok(file.connections)
 }
 

@@ -2,9 +2,10 @@ use crate::{DeviceInstanceKind, DevicePlatform, Sidebar};
 use android_sdk::{AndroidSdkManager, AndroidSdkState, EmulatorKey, KEYCODE_HOME};
 use anyhow::{Context as _, Result, anyhow};
 use gpui::{
-    AnyWindowHandle, App, AppContext as _, AsyncApp, Entity, Global, SimulatorInput,
+    AnyWindowHandle, App, AppContext as _, AsyncApp, Entity, Global, SharedString, SimulatorInput,
     SimulatorPointerPhase, WeakEntity,
 };
+use i18n::t;
 use project::Project;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -701,7 +702,7 @@ async fn ios_type(target: &DeviceTarget, udid: &str, text: &str, cx: &mut AsyncA
 
 fn device_input_tool<I>(
     name: &'static str,
-    title: &'static str,
+    title: SharedString,
     description: &'static str,
     access: ToolAccess,
     run: impl AsyncFn(DeviceTarget, I, &mut AsyncApp) -> Result<ToolkitOutput>
@@ -1085,7 +1086,7 @@ pub fn register_toolkit(cx: &mut App) {
     let tools = vec![
         ToolkitTool::new(
             "device_list",
-            "Listou os devices",
+            t!("sidebar.device_toolkit.tool_list"),
             "Lists the iOS simulators and Android emulators the Devices dock can show, with their \
              ids and which one is on screen. Use this instead of running simctl or emulator in a \
              terminal: devices started there don't appear in the app.",
@@ -1096,7 +1097,7 @@ pub fn register_toolkit(cx: &mut App) {
         ),
         ToolkitTool::new(
             "device_open",
-            "Abriu um device",
+            t!("sidebar.device_toolkit.tool_open"),
             "Opens an iOS simulator or Android emulator in the Devices dock, boots it, waits until \
              its screen is up and returns a screenshot. Name it by an id or name from device_list, \
              or \"ios\" / \"android\". Only one Android emulator runs at a time: opening another \
@@ -1108,7 +1109,7 @@ pub fn register_toolkit(cx: &mut App) {
         ),
         ToolkitTool::new(
             "device_close",
-            "Desligou um device",
+            t!("sidebar.device_toolkit.tool_close"),
             "Shuts down an iOS simulator or the Android emulator, named like in device_open.",
             ToolAccess::Act,
             |project: Entity<Project>, input: OpenInput, cx: &mut App| {
@@ -1117,7 +1118,7 @@ pub fn register_toolkit(cx: &mut App) {
         ),
         device_input_tool(
             "device_screenshot",
-            "Viu a tela do device",
+            t!("sidebar.device_toolkit.tool_screenshot"),
             "Captures the screen of the iOS simulator or Android emulator open in the Devices dock. \
              Coordinates for device_tap and device_swipe are in the pixels of this image. Take a new \
              screenshot after acting to see the result.",
@@ -1137,7 +1138,7 @@ pub fn register_toolkit(cx: &mut App) {
         ),
         device_input_tool(
             "device_tap",
-            "Tocou na tela do device",
+            t!("sidebar.device_toolkit.tool_tap"),
             "Taps the device screen at a point given in the pixels of the latest device_screenshot.",
             ToolAccess::Act,
             async |target, input: TapInput, cx| {
@@ -1164,7 +1165,7 @@ pub fn register_toolkit(cx: &mut App) {
         ),
         device_input_tool(
             "device_swipe",
-            "Arrastou na tela do device",
+            t!("sidebar.device_toolkit.tool_swipe"),
             "Drags a finger across the device screen, e.g. to scroll a list or dismiss a sheet. \
              Points are in the pixels of the latest device_screenshot.",
             ToolAccess::Act,
@@ -1206,7 +1207,7 @@ pub fn register_toolkit(cx: &mut App) {
         ),
         device_input_tool(
             "device_type",
-            "Digitou no device",
+            t!("sidebar.device_toolkit.tool_type"),
             "Types text into the focused field on the device. Tap the field first.",
             ToolAccess::Act,
             async |target, input: TypeInput, cx| {
@@ -1227,7 +1228,7 @@ pub fn register_toolkit(cx: &mut App) {
         ),
         device_input_tool(
             "device_key",
-            "Apertou uma tecla no device",
+            t!("sidebar.device_toolkit.tool_key"),
             "Presses a key on the device: enter, backspace, tab, escape, up, down, left, right, \
              and on Android also back and home.",
             ToolAccess::Act,
@@ -1285,7 +1286,7 @@ pub fn register_toolkit(cx: &mut App) {
         ),
         device_input_tool(
             "device_open_url",
-            "Abriu um link no device",
+            t!("sidebar.device_toolkit.tool_open_url"),
             "Opens a URL or deep link on the device, e.g. an Expo dev server URL or an app scheme.",
             ToolAccess::Act,
             async |target, input: OpenUrlInput, cx| {
@@ -1316,7 +1317,7 @@ pub fn register_toolkit(cx: &mut App) {
         ),
         device_input_tool(
             "device_logs",
-            "Leu os logs do device",
+            t!("sidebar.device_toolkit.tool_logs"),
             "Reads recent log lines from the device (logcat on Android, the unified log on iOS), \
              optionally filtered by a text such as the app name.",
             ToolAccess::Read,
@@ -1373,9 +1374,8 @@ pub fn register_toolkit(cx: &mut App) {
     task_agents::register_toolkit(
         Toolkit {
             id: task_agents::toolkit_ids::DEVICES.into(),
-            name: "Dispositivos".into(),
-            description: "Abre e controla o simulador iOS e o emulador Android do dock de Devices"
-                .into(),
+            name: t!("sidebar.device_toolkit.name"),
+            description: t!("sidebar.device_toolkit.description"),
             icon: "smartphone".into(),
             mention: None,
             tools,

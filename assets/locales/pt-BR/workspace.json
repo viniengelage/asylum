@@ -1,0 +1,14 @@
+{
+  "dock.close_tab": "Fechar aba",
+  "dock.toggle_bottom": "Alternar dock inferior",
+  "dock.toggle_devices": "Alternar dock de dispositivos",
+  "dock.toggle_left": "Alternar dock esquerdo",
+  "dock.toggle_right": "Alternar dock direito",
+  "foreign_paths.cancel": "Cancelar",
+  "foreign_paths.detail": "Lá ela abre com as contas, a IA e os MCPs daquele perfil.",
+  "foreign_paths.open_here": "Abrir aqui",
+  "foreign_paths.open_there": "Abrir em {profile}",
+  "foreign_paths.title": "Esta pasta pertence ao perfil {profile}",
+  "pane.fallback_title": "Painel",
+  "toolkit.title": "Toolkit"
+}

@@ -4,6 +4,7 @@
 //! user.
 
 use crate::{Criterion, Flow, OnFail, StepKind, Verifier};
+use i18n::t;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::time::SystemTime;
@@ -109,6 +110,10 @@ pub struct RunEvent {
     pub message: String,
     pub step: Option<usize>,
     pub at: SystemTime,
+    /// The summary of a step's criteria check, which the run panel expands into the results.
+    /// A flag rather than the title, which is translated.
+    #[serde(default)]
+    pub criteria: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -201,8 +206,8 @@ impl FlowRun {
         if self.state == RunState::Running {
             self.log(
                 RunEventKind::You,
-                "Você retomou",
-                "a esteira continua do passo em que parou.",
+                t!("flows.run.resumed_title"),
+                t!("flows.run.resumed_message"),
                 None,
             );
         }
@@ -225,8 +230,12 @@ impl FlowRun {
             backs: BTreeMap::new(),
             retries: BTreeMap::new(),
         };
-        let message = format!("rodou “{}” com: {}", run.flow.name, run.input);
-        run.log(RunEventKind::You, "Você", message, None);
+        let message = t!(
+            "flows.run.started_message",
+            flow = run.flow.name,
+            input = run.input
+        );
+        run.log(RunEventKind::You, t!("flows.run.you"), message, None);
         run.enter_cursor();
         run
     }
@@ -245,21 +254,22 @@ impl FlowRun {
     fn log(
         &mut self,
         kind: RunEventKind,
-        title: impl Into<String>,
-        message: impl Into<String>,
+        title: impl ToString,
+        message: impl ToString,
         step: Option<usize>,
     ) {
         self.events.push(RunEvent {
             kind,
-            title: title.into(),
-            message: message.into(),
+            title: title.to_string(),
+            message: message.to_string(),
             step,
             at: SystemTime::now(),
+            criteria: false,
         });
     }
 
     fn step_title(&self, step: usize, label: &str) -> String {
-        format!("Passo {} · {label}", step + 1)
+        t!("flows.run.step_title", number = step + 1, label = label).to_string()
     }
 
     /// Starts gates as soon as the run reaches them; agents and commands wait for the runner.
@@ -268,8 +278,8 @@ impl FlowRun {
             self.state = RunState::Succeeded;
             self.log(
                 RunEventKind::Finished,
-                "Esteira concluída",
-                "tudo entregue; revisão e merge ficam com você.",
+                t!("flows.run.finished_title"),
+                t!("flows.run.finished_message"),
                 None,
             );
             return;
@@ -282,13 +292,13 @@ impl FlowRun {
         }
         if let StepKind::Gate(gate) = &self.flow.steps[step].kind {
             let note = if gate.note.is_empty() {
-                "o que o passo anterior entregou".to_string()
+                t!("flows.run.gate_default_note").to_string()
             } else {
                 gate.note.clone()
             };
             self.steps[step].state = StepState::WaitingForYou;
             self.state = RunState::WaitingForYou(Waiting::Gate { step });
-            let title = self.step_title(step, "Você aprova");
+            let title = self.step_title(step, &t!("flows.step.gate"));
             self.log(RunEventKind::Gate, title, note, Some(step));
         } else {
             self.state = RunState::Running;
@@ -321,27 +331,39 @@ impl FlowRun {
             .filter(|target| *target > step)
             .unwrap_or(step + 1);
         self.steps[step].state = StepState::Passed;
-        self.steps[step].note = Some(if holds { "sim" } else { "não" }.to_string());
+        self.steps[step].note = Some(
+            if holds {
+                t!("flows.run.branch_yes")
+            } else {
+                t!("flows.run.branch_no")
+            }
+            .to_string(),
+        );
         for skipped in step + 1..target {
             self.steps[skipped].state = StepState::Skipped;
         }
         let destination = if target < self.flow.steps.len() {
-            format!("segue para o passo {}", target + 1)
+            t!("flows.run.branch_to_step", number = target + 1)
         } else {
-            "segue para o fim".to_string()
+            t!("flows.run.branch_to_end")
         };
-        let title = self.step_title(step, "Se / senão");
-        self.log(
-            RunEventKind::Verified,
-            title,
-            format!(
-                "{} {} “{}”: {destination}",
-                branch.output,
-                if holds { "contém" } else { "não contém" },
-                branch.contains
-            ),
-            Some(step),
-        );
+        let title = self.step_title(step, &t!("flows.step.branch"));
+        let message = if holds {
+            t!(
+                "flows.run.branch_contains",
+                output = branch.output,
+                text = branch.contains,
+                destination = destination
+            )
+        } else {
+            t!(
+                "flows.run.branch_not_contains",
+                output = branch.output,
+                text = branch.contains,
+                destination = destination
+            )
+        };
+        self.log(RunEventKind::Verified, title, message, Some(step));
         self.cursor = target;
         self.enter_cursor();
     }
@@ -360,19 +382,7 @@ impl FlowRun {
             match result {
                 Ok(submission) => {
                     let title = self.step_title(step, &branch);
-                    let delivered = if submission.outputs.is_empty() {
-                        submission.summary.clone()
-                    } else {
-                        format!(
-                            "entregou {}",
-                            submission
-                                .outputs
-                                .keys()
-                                .cloned()
-                                .collect::<Vec<_>>()
-                                .join(" + ")
-                        )
-                    };
+                    let delivered = delivered_message(&submission);
                     self.log(RunEventKind::Delivered, title, delivered, Some(step));
                     if !submission.summary.is_empty() {
                         if !merged.summary.is_empty() {
@@ -441,19 +451,7 @@ impl FlowRun {
             return Vec::new();
         };
         let criteria = agent_step.criteria.clone();
-        let delivered = if submission.outputs.is_empty() {
-            submission.summary.clone()
-        } else {
-            format!(
-                "entregou {}",
-                submission
-                    .outputs
-                    .keys()
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .join(" + ")
-            )
-        };
+        let delivered = delivered_message(&submission);
         let title = self.step_title(step, label);
         self.log(RunEventKind::Delivered, title, delivered, Some(step));
         let run = &mut self.steps[step];
@@ -473,7 +471,7 @@ impl FlowRun {
                             CriterionOutcome::Failed
                         },
                         evidence: if note.is_empty() {
-                            "autoavaliação no submit".to_string()
+                            t!("flows.run.evidence_self_check").to_string()
                         } else {
                             note.clone()
                         },
@@ -481,20 +479,20 @@ impl FlowRun {
                     None => CriterionResult {
                         index,
                         outcome: CriterionOutcome::Failed,
-                        evidence: "o agente não avaliou este critério no submit".to_string(),
+                        evidence: t!("flows.run.evidence_self_check_missing").to_string(),
                     },
                 },
                 Verifier::You => CriterionResult {
                     index,
                     outcome: CriterionOutcome::WithYou,
-                    evidence: "com você".to_string(),
+                    evidence: t!("flows.run.evidence_with_you").to_string(),
                 },
                 verifier @ (Verifier::Agent(_) | Verifier::Command(_)) => {
                     external.push((index, verifier.clone()));
                     CriterionResult {
                         index,
                         outcome: CriterionOutcome::WithYou,
-                        evidence: "verificando".to_string(),
+                        evidence: t!("flows.run.evidence_verifying").to_string(),
                     }
                 }
             })
@@ -554,10 +552,17 @@ impl FlowRun {
             };
             self.log(
                 kind,
-                format!("Critérios · {label}"),
-                format!("{passed} de {} conferidos", results.len()),
+                t!("flows.run.criteria_title", label = label),
+                t!(
+                    "flows.run.criteria_checked",
+                    passed = passed,
+                    total = results.len()
+                ),
                 Some(step),
             );
+            if let Some(event) = self.events.last_mut() {
+                event.criteria = true;
+            }
         }
         if !failed_required.is_empty() {
             self.fail_step(step, label, failed_required.join("; "));
@@ -593,7 +598,7 @@ impl FlowRun {
         };
         match on_fail {
             OnFail::Continue => {
-                self.pass_step(step, Some("seguiu mesmo assim".to_string()));
+                self.pass_step(step, Some(t!("flows.run.note_continued").to_string()));
             }
             OnFail::Retry { max } => {
                 let taken = self.retries.entry(step).or_default();
@@ -605,11 +610,17 @@ impl FlowRun {
                 let count = *taken;
                 self.steps[step].state = StepState::Failed;
                 self.steps[step].feedback = Some(reason.clone());
-                self.steps[step].note = Some(format!("refazendo {count} de {max}"));
+                self.steps[step].note =
+                    Some(t!("flows.run.note_retrying", count = count, max = max).to_string());
                 self.log(
                     RunEventKind::Back,
-                    format!("Refazendo {label}"),
-                    format!("{count} de {max} · motivo: {reason}"),
+                    t!("flows.run.retrying_title", label = label),
+                    t!(
+                        "flows.run.retrying_message",
+                        count = count,
+                        max = max,
+                        reason = reason
+                    ),
                     Some(step),
                 );
                 self.cursor = step;
@@ -628,7 +639,8 @@ impl FlowRun {
                 *taken += 1;
                 let count = *taken;
                 self.steps[step].state = StepState::Failed;
-                self.steps[step].note = Some(format!("volta {count} de {max}"));
+                self.steps[step].note =
+                    Some(t!("flows.run.note_back", count = count, max = max).to_string());
                 for later in target_index..step {
                     self.steps[later].state = StepState::Queued;
                 }
@@ -636,7 +648,12 @@ impl FlowRun {
                 self.log(
                     RunEventKind::Back,
                     format!("{label} → {}", self.target_label(target_index)),
-                    format!("volta {count} de {max} · motivo: {reason}"),
+                    t!(
+                        "flows.run.back_message",
+                        count = count,
+                        max = max,
+                        reason = reason
+                    ),
                     Some(step),
                 );
                 self.cursor = target_index;
@@ -649,21 +666,25 @@ impl FlowRun {
     fn target_label(&self, step: usize) -> String {
         match &self.flow.steps[step].kind {
             StepKind::Agent(agent_step) => format!("/{}", agent_step.agent),
-            StepKind::Gate(_) => "Você aprova".to_string(),
+            StepKind::Gate(_) => t!("flows.step.gate").to_string(),
             StepKind::Run(run) => run.command.clone(),
             StepKind::GitHub(github) => github.action.label().to_string(),
-            StepKind::Branch(_) => "Se / senão".to_string(),
-            StepKind::Parallel(_) => "Em paralelo".to_string(),
+            StepKind::Branch(_) => t!("flows.step.branch").to_string(),
+            StepKind::Parallel(_) => t!("flows.step.parallel").to_string(),
         }
     }
 
     fn exhaust(&mut self, step: usize, label: &str, reason: String) {
         self.steps[step].state = StepState::WaitingForYou;
-        self.steps[step].note = Some("reprovado".to_string());
+        self.steps[step].note = Some(t!("flows.run.note_failed").to_string());
         self.log(
             RunEventKind::Failed,
-            "Esperando você",
-            format!("{label}: “{reason}” reprovou. Decida como seguir."),
+            t!("flows.run.waiting_title"),
+            t!(
+                "flows.run.exhausted_message",
+                label = label,
+                reason = reason
+            ),
             Some(step),
         );
         self.state = RunState::WaitingForYou(Waiting::Exhausted { step, reason });
@@ -715,8 +736,13 @@ impl FlowRun {
                 StepKind::Gate(gate) => gate.note.clone(),
                 _ => String::new(),
             };
-            self.log(RunEventKind::You, "Você aprovou", message, Some(step));
-            self.pass_step(step, Some("aprovado".to_string()));
+            self.log(
+                RunEventKind::You,
+                t!("flows.run.approved_title"),
+                message,
+                Some(step),
+            );
+            self.pass_step(step, Some(t!("flows.run.note_approved").to_string()));
             return;
         }
         let target = match &self.flow.steps[step].kind {
@@ -732,7 +758,7 @@ impl FlowRun {
                 .find(|index| matches!(self.flow.steps[*index].kind, StepKind::Agent(_)))
         });
         let Some(target) = target else {
-            self.cancel("não há passo antes do portão para ajustar.");
+            self.cancel(&t!("flows.run.cancel_no_step_to_adjust"));
             return;
         };
         for later in target..=step {
@@ -747,8 +773,12 @@ impl FlowRun {
         let label = self.target_label(target);
         self.log(
             RunEventKind::Back,
-            format!("Ajuste → {label}"),
-            if note.is_empty() { "sem texto" } else { note },
+            t!("flows.run.adjust_title", label = label),
+            if note.is_empty() {
+                t!("flows.run.adjust_no_text")
+            } else {
+                note.to_string().into()
+            },
             Some(step),
         );
         self.cursor = target;
@@ -779,17 +809,17 @@ impl FlowRun {
                     CriterionOutcome::Failed
                 };
                 result.evidence = if accept {
-                    "você aceitou".to_string()
+                    t!("flows.run.evidence_accepted").to_string()
                 } else {
-                    "você recusou".to_string()
+                    t!("flows.run.evidence_refused").to_string()
                 };
             }
         }
         if accept {
             self.log(
                 RunEventKind::You,
-                "Você aceitou",
-                label.to_string(),
+                t!("flows.run.accepted_title"),
+                label,
                 Some(step),
             );
             self.state = RunState::Running;
@@ -803,7 +833,7 @@ impl FlowRun {
             .collect();
         self.log(
             RunEventKind::Back,
-            format!("Você pediu: refazer {label}"),
+            t!("flows.run.redo_requested_title", label = label),
             texts.join("; "),
             Some(step),
         );
@@ -835,14 +865,14 @@ impl FlowRun {
             self.steps[step].feedback = Some(reason);
             self.log(
                 RunEventKind::You,
-                "Você mandou refazer",
-                String::new(),
+                t!("flows.run.redo_ordered_title"),
+                "",
                 Some(step),
             );
             self.cursor = step;
             self.state = RunState::Running;
         } else {
-            self.cancel("você encerrou a esteira depois da reprovação.");
+            self.cancel(&t!("flows.run.cancel_after_failure"));
         }
     }
 
@@ -851,7 +881,26 @@ impl FlowRun {
             return;
         }
         self.state = RunState::Cancelled;
-        self.log(RunEventKind::Stopped, "Parado", reason.to_string(), None);
+        self.log(
+            RunEventKind::Stopped,
+            t!("flows.run.stopped_title"),
+            reason,
+            None,
+        );
+    }
+}
+
+fn delivered_message(submission: &Submission) -> String {
+    if submission.outputs.is_empty() {
+        submission.summary.clone()
+    } else {
+        let outputs = submission
+            .outputs
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(" + ");
+        t!("flows.run.delivered", outputs = outputs).to_string()
     }
 }
 

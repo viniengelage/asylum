@@ -7,6 +7,7 @@ use crate::schema::Validation;
 use anyhow::{Context as _, Result, anyhow};
 use collections::HashMap;
 use gpui::{App, AppContext as _, AsyncApp, Entity, Global, Task};
+use i18n::t;
 use project::Project;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -331,13 +332,13 @@ pub fn register_toolkit(cx: &mut App) {
         Toolkit {
             id: task_agents::toolkit_ids::API.into(),
             name: "API".into(),
-            description: "Operações do OpenAPI do projeto, pelo painel API".into(),
+            description: t!("api_client.toolkit.description"),
             icon: "arrow_right_left".into(),
             mention: None,
             tools: vec![
                 ToolkitTool::new(
                     "api_operations",
-                    "Listou as operações da API",
+                    t!("api_client.toolkit.operations_title"),
                     "Lists the operations of the project's OpenAPI/Swagger collections (method, \
                      path, summary, parameters), with the active environment and login state.",
                     ToolAccess::Read,
@@ -345,7 +346,7 @@ pub fn register_toolkit(cx: &mut App) {
                 ),
                 ToolkitTool::new(
                     "api_send",
-                    "Chamou a API",
+                    t!("api_client.toolkit.send_title"),
                     "Sends a request for one operation of the project's API collection, using its \
                      environment, headers and login (renewing the token and retrying once on 401). \
                      Returns the status, the schema check and the body.",

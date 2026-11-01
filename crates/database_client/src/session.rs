@@ -1,6 +1,7 @@
 use crate::tls::{RustlsConnect, SslMode};
 use anyhow::{Context as _, anyhow};
 use futures::{StreamExt as _, pin_mut};
+use i18n::t;
 use std::fmt;
 use std::future::Future;
 use std::str::FromStr as _;
@@ -26,13 +27,13 @@ impl ConnectTarget {
     pub fn parse(input: &str) -> anyhow::Result<Self> {
         let (rest, ssl_mode) = take_ssl_mode(input.trim());
         let ssl_mode = match ssl_mode {
-            Some(value) => {
-                SslMode::parse(&value).with_context(|| format!("sslmode desconhecido: {value}"))?
-            }
+            Some(value) => SslMode::parse(&value).with_context(|| {
+                t!("database_client.errors.unknown_ssl_mode", value = value).to_string()
+            })?,
             None => SslMode::default(),
         };
-        let mut config =
-            tokio_postgres::Config::from_str(&rest).context("conexão do Postgres inválida")?;
+        let mut config = tokio_postgres::Config::from_str(&rest)
+            .with_context(|| t!("database_client.errors.invalid_connection").to_string())?;
         config.ssl_mode(ssl_mode.negotiation());
         if config.get_connect_timeout().is_none() {
             config.connect_timeout(DEFAULT_CONNECT_TIMEOUT);
@@ -161,7 +162,15 @@ async fn on_runtime<T: Send + 'static>(
     reqwest_client::runtime()
         .spawn(future)
         .await
-        .map_err(|error| anyhow!("a tarefa do Postgres parou: {error}"))?
+        .map_err(|error| {
+            anyhow!(
+                "{}",
+                t!(
+                    "database_client.errors.postgres_task_stopped",
+                    error = error
+                )
+            )
+        })?
 }
 
 /// One connection to the server. Statements sent through the same session share its

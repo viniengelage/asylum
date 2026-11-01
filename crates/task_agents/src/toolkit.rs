@@ -2,6 +2,7 @@ use anyhow::Result;
 use base64::Engine as _;
 use collections::{HashMap, HashSet};
 use gpui::{App, Entity, Global, SharedString, Task, Window};
+use i18n::t;
 use project::Project;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -100,7 +101,11 @@ pub fn disabled_toolkit_names(
 
 /// What to tell someone who reaches for a toolkit that is off, e.g. through its shortcut.
 pub fn toolkit_disabled_message(name: &str) -> String {
-    format!("{name} está desligado neste perfil. Ligue em Gerenciar perfis → Toolkit do agente.")
+    t!("task_agents.toolkit.disabled", name = name).to_string()
+}
+
+fn missing_dock_error(dock: &str) -> anyhow::Error {
+    anyhow::anyhow!(t!("task_agents.toolkit.missing_dock", dock = dock).to_string())
 }
 
 fn toolkit_disabled_error(toolkit_id: &str, cx: &App) -> anyhow::Error {
@@ -378,9 +383,9 @@ pub fn describe_sql_editor(project: &Entity<Project>, abs_path: &Path, cx: &App)
     if !toolkit_enabled(toolkit_ids::DATABASE, project, cx) {
         return Err(toolkit_disabled_error(toolkit_ids::DATABASE, cx));
     }
-    let source = cx
-        .try_global::<SqlEditorSource>()
-        .ok_or_else(|| anyhow::anyhow!("This build has no database client."))?;
+    let source = cx.try_global::<SqlEditorSource>().ok_or_else(|| {
+        anyhow::anyhow!(t!("task_agents.toolkit.missing_database_client").to_string())
+    })?;
     (source.describe)(project, abs_path, cx)
 }
 
@@ -393,7 +398,9 @@ pub fn open_query_in_database(
     let open_query = cx
         .try_global::<SqlEditorSource>()
         .map(|source| source.open_query.clone())
-        .ok_or_else(|| anyhow::anyhow!("This build has no database client."))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!(t!("task_agents.toolkit.missing_database_client").to_string())
+        })?;
     open_query(project, sql, window, cx)
 }
 
@@ -406,7 +413,9 @@ pub fn focus_sql_editor(
     let focus = cx
         .try_global::<SqlEditorSource>()
         .map(|source| source.focus.clone())
-        .ok_or_else(|| anyhow::anyhow!("This build has no database client."))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!(t!("task_agents.toolkit.missing_database_client").to_string())
+        })?;
     focus(project, abs_path, window, cx)
 }
 
@@ -475,7 +484,7 @@ pub fn describe_log_mention(
             let describe = source.describe.clone();
             describe(project, id, cx)
         }
-        None => Task::ready(Err(anyhow::anyhow!("This build has no Elastic dock."))),
+        None => Task::ready(Err(missing_dock_error("Elastic"))),
     }
 }
 
@@ -489,13 +498,13 @@ pub fn open_log_mention(
         let open = cx
             .try_global::<ContainerSource>()
             .map(|source| source.open.clone())
-            .ok_or_else(|| anyhow::anyhow!("This build has no Docker dock."))?;
+            .ok_or_else(|| missing_dock_error("Docker"))?;
         return open(project, id, window, cx);
     }
     let open = cx
         .try_global::<LogSource>()
         .map(|source| source.open.clone())
-        .ok_or_else(|| anyhow::anyhow!("This build has no Elastic dock."))?;
+        .ok_or_else(|| missing_dock_error("Elastic"))?;
     open(project, id, window, cx)
 }
 
@@ -509,7 +518,7 @@ pub fn open_log_query(
     let open_query = cx
         .try_global::<LogSource>()
         .map(|source| source.open_query.clone())
-        .ok_or_else(|| anyhow::anyhow!("This build has no Elastic dock."))?;
+        .ok_or_else(|| missing_dock_error("Elastic"))?;
     open_query(project, query, window_minutes, window, cx)
 }
 
@@ -522,7 +531,7 @@ pub fn follow_logs(
     let follow = cx
         .try_global::<LogSource>()
         .map(|source| source.follow.clone())
-        .ok_or_else(|| anyhow::anyhow!("This build has no Elastic dock."))?;
+        .ok_or_else(|| missing_dock_error("Elastic"))?;
     follow(project, source, window, cx)
 }
 
@@ -581,7 +590,7 @@ fn describe_container_mention(
             let describe = source.describe.clone();
             describe(project, id, cx)
         }
-        None => Task::ready(Err(anyhow::anyhow!("This build has no Docker dock."))),
+        None => Task::ready(Err(missing_dock_error("Docker"))),
     }
 }
 
@@ -811,7 +820,7 @@ pub fn describe_pull_request(
             let describe = source.describe.clone();
             describe(project, reference, cx)
         }
-        None => Task::ready(Err(anyhow::anyhow!("This build has no Repo dock."))),
+        None => Task::ready(Err(missing_dock_error("Repo"))),
     }
 }
 
@@ -936,7 +945,9 @@ pub fn describe_project_item(
             let describe = source.describe.clone();
             describe(project, project_id, item_id, cx)
         }
-        None => Task::ready(Err(anyhow::anyhow!("This build has no Tarefas dock."))),
+        None => Task::ready(Err(missing_dock_error(&t!(
+            "task_agents.toolkit.tasks_dock"
+        )))),
     }
 }
 
@@ -1029,7 +1040,9 @@ pub fn run_github_step(
             let run = runner.run.clone();
             run(project, request, cx)
         }
-        None => Task::ready(Err(anyhow::anyhow!("Este build não tem o dock Tarefas."))),
+        None => Task::ready(Err(missing_dock_error(&t!(
+            "task_agents.toolkit.tasks_dock"
+        )))),
     }
 }
 

@@ -172,7 +172,7 @@ fn suggestions(cache: &FieldCache, query: &str, before_cursor: &str) -> Vec<Sugg
     result.extend(FUNCTIONS.iter().map(|function| Suggestion {
         text: (*function).to_string(),
         label: (*function).to_string(),
-        detail: Some("função".to_string()),
+        detail: Some(i18n::t!("elastic.completion.function").to_string()),
     }));
     result
 }

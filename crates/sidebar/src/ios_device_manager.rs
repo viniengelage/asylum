@@ -3,6 +3,7 @@ use gpui::{
     Anchor, AnyElement, ClickEvent, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable,
     FontWeight, ScrollHandle, Subscription, WeakEntity, px,
 };
+use i18n::t;
 use ios_simulator::{
     Appearance, IosSimulatorManager, LANGUAGES, PrepareRequest, ProductFamily, RuntimeOption,
     SimDevice, SimDeviceType, SimLanguage, SimulatorSettings, compare_versions, display_version,
@@ -19,7 +20,7 @@ use ui_input::{ErasedEditorEvent, InputField};
 use util::ResultExt as _;
 use workspace::{ModalView, Workspace, notifications::NotifyTaskExt as _};
 
-/// How many runtimes step D lists before "Mostrar versões mais antigas".
+/// How many runtimes step D lists before "Show older versions".
 const RECENT_RUNTIME_COUNT: usize = 5;
 const MODEL_COLUMNS: usize = 4;
 
@@ -72,7 +73,7 @@ enum WizardStep {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum WizardPurpose {
     Create,
-    /// "Baixar runtime…" in the runtimes tab: step D alone.
+    /// "Download runtime…" in the runtimes tab: step D alone.
     DownloadRuntime,
 }
 
@@ -116,9 +117,16 @@ impl IosDeviceManagerModal {
             manager.refresh(cx);
             manager.refresh_catalog(cx);
         });
-        let name_input = cx.new(|cx| InputField::new(window, cx, "iPhone 17 Pro").label("Nome"));
+        let name_input = cx.new(|cx| {
+            InputField::new(window, cx, "iPhone 17 Pro").label(t!("sidebar.ios_manager.name_label"))
+        });
         let search_input = cx.new(|cx| {
-            InputField::new(window, cx, "Buscar modelo").start_icon(IconName::MagnifyingGlass)
+            InputField::new(
+                window,
+                cx,
+                &t!("sidebar.ios_manager.search_model_placeholder"),
+            )
+            .start_icon(IconName::MagnifyingGlass)
         });
         let mut subscriptions = vec![cx.observe(&manager, |this, _, cx| {
             this.fill_wizard_defaults(cx);
@@ -503,29 +511,44 @@ impl IosDeviceManagerModal {
                 IconButton::new("ios-manager-close", IconName::Close)
                     .icon_size(IconSize::Small)
                     .icon_color(Color::Muted)
-                    .aria_label("Fechar")
+                    .aria_label(t!("sidebar.ios_manager.close"))
                     .on_click(cx.listener(|this, _, _, cx| this.dismiss(cx))),
             )
     }
 
     fn render_manage(&mut self, tab: ManagerTab, cx: &mut Context<Self>) -> AnyElement {
         let manager = self.manager.read(cx);
+        let simulator_count = manager.devices().len();
+        let runtime_count = manager.runtimes().len();
         let mut subtitle = format!(
             "{} · {}",
-            plural(manager.devices().len(), "simulador", "simuladores"),
-            plural(
-                manager.runtimes().len(),
-                "runtime instalado",
-                "runtimes instalados"
-            )
+            if simulator_count == 1 {
+                t!("sidebar.ios_manager.simulators.one")
+            } else {
+                t!(
+                    "sidebar.ios_manager.simulators.other",
+                    count = simulator_count
+                )
+            },
+            if runtime_count == 1 {
+                t!("sidebar.ios_manager.installed_runtimes.one")
+            } else {
+                t!(
+                    "sidebar.ios_manager.installed_runtimes.other",
+                    count = runtime_count
+                )
+            }
         );
         if let Some(version) = manager.xcode().and_then(|xcode| xcode.version()) {
             subtitle.push_str(&format!(" · Xcode {version}"));
         }
         let tabs = segmented_control(cx).w(px(220.)).children(
             [
-                (ManagerTab::Simulators, "Simuladores"),
-                (ManagerTab::Runtimes, "Runtimes"),
+                (
+                    ManagerTab::Simulators,
+                    t!("sidebar.ios_manager.tab_simulators"),
+                ),
+                (ManagerTab::Runtimes, t!("sidebar.ios_manager.tab_runtimes")),
             ]
             .into_iter()
             .map(|(option, label)| {
@@ -549,7 +572,7 @@ impl IosDeviceManagerModal {
             .pr(px(20.))
             .pb(px(14.))
             .pl_6()
-            .child(self.render_header("Simuladores iOS".into(), Some(subtitle.into()), cx))
+            .child(self.render_header(t!("sidebar.ios_manager.title"), Some(subtitle.into()), cx))
             .child(tabs);
         let body = match tab {
             ManagerTab::Simulators => self.render_simulators_tab(cx),
@@ -568,12 +591,21 @@ impl IosDeviceManagerModal {
         let busy = manager.is_busy();
         let devices_dir = manager.devices_dir();
         let footer_text = format!(
-            "{} · {} em uso{}",
-            tildify(devices_dir.parent().unwrap_or(&devices_dir)),
-            format_bytes(manager.devices_disk_bytes()),
+            "{}{}",
+            t!(
+                "sidebar.ios_manager.disk_in_use",
+                path = tildify(devices_dir.parent().unwrap_or(&devices_dir)),
+                size = format_bytes(manager.devices_disk_bytes())
+            ),
             manager
                 .available_bytes()
-                .map(|available| format!(" · {} livres", format_bytes(available)))
+                .map(|available| format!(
+                    " · {}",
+                    t!(
+                        "sidebar.ios_manager.free_space",
+                        size = format_bytes(available)
+                    )
+                ))
                 .unwrap_or_default()
         );
         let families: HashMap<String, ProductFamily> = manager
@@ -598,9 +630,9 @@ impl IosDeviceManagerModal {
                         .py_8()
                         .items_center()
                         .gap_1()
-                        .child(Label::new("Nenhum simulador ainda"))
+                        .child(Label::new(t!("sidebar.ios_manager.empty_title")))
                         .child(
-                            Label::new("Crie um para rodar apps iOS no dock.")
+                            Label::new(t!("sidebar.ios_manager.empty_description"))
                                 .size(LabelSize::Small)
                                 .color(Color::Muted),
                         ),
@@ -632,15 +664,26 @@ impl IosDeviceManagerModal {
                     ),
             )
             .child(
-                secondary_button("ios-open-folder", None, "Abrir pasta", true, cx)
-                    .on_click(move |_, _, cx| cx.open_with_system(&open_dir)),
+                secondary_button(
+                    "ios-open-folder",
+                    None,
+                    t!("sidebar.ios_manager.open_folder"),
+                    true,
+                    cx,
+                )
+                .on_click(move |_, _, cx| cx.open_with_system(&open_dir)),
             )
             .child(
-                primary_button("ios-new-simulator", None, "Novo simulador", None, cx).on_click(
-                    cx.listener(|this, _, window, cx| {
-                        this.start_wizard(WizardPurpose::Create, None, window, cx)
-                    }),
-                ),
+                primary_button(
+                    "ios-new-simulator",
+                    None,
+                    t!("sidebar.ios_manager.new_simulator"),
+                    None,
+                    cx,
+                )
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.start_wizard(WizardPurpose::Create, None, window, cx)
+                })),
             );
         v_flex()
             .w_full()
@@ -666,7 +709,7 @@ impl IosDeviceManagerModal {
         let version = device
             .runtime_version()
             .map(|version| format!("iOS {}", display_version(&version)))
-            .unwrap_or_else(|| "iOS desconhecido".to_string());
+            .unwrap_or_else(|| t!("sidebar.ios_manager.unknown_ios").to_string());
         let mut meta = version;
         if let Some(family) = family {
             meta.push_str(" · ");
@@ -674,23 +717,31 @@ impl IosDeviceManagerModal {
         }
         meta.push_str(" · ");
         if runtime_missing {
-            meta.push_str("runtime removido do Mac");
+            meta.push_str(&t!("sidebar.ios_manager.runtime_removed"));
         } else {
             meta.push_str(&format_bytes(device.disk_bytes));
         }
 
         let udid = device.udid.clone();
         let (action_icon, action_color, action_label) = if is_running {
-            (IconName::Stop, Color::Error, "Parar")
+            (IconName::Stop, Color::Error, t!("sidebar.ios_manager.stop"))
         } else if runtime_missing {
-            (IconName::Download, Color::Default, "Baixar o runtime")
+            (
+                IconName::Download,
+                Color::Default,
+                t!("sidebar.ios_manager.download_missing_runtime"),
+            )
         } else {
-            (IconName::PlayFilled, Color::Success, "Iniciar")
+            (
+                IconName::PlayFilled,
+                Color::Success,
+                t!("sidebar.ios_manager.start"),
+            )
         };
         let action = IconButton::new(("ios-device-action", index), action_icon)
             .icon_size(IconSize::Small)
             .icon_color(action_color)
-            .aria_label(action_label)
+            .aria_label(action_label.clone())
             .tooltip(Tooltip::text(action_label))
             .disabled(busy && !is_running)
             .on_click(cx.listener({
@@ -722,14 +773,14 @@ impl IosDeviceManagerModal {
                 IconButton::new(("ios-device-more", index), IconName::Ellipsis)
                     .icon_size(IconSize::Small)
                     .icon_color(Color::Muted)
-                    .aria_label(format!("Ações de {name}")),
+                    .aria_label(t!("sidebar.ios_manager.device_actions", name = name)),
             )
             .menu(move |window, cx| {
                 let this = this.clone();
                 let udid = udid.clone();
                 Some(ContextMenu::build(window, cx, move |menu, _, _| {
                     let off_disk_disabled = is_running || busy;
-                    let item = |label: &'static str,
+                    let item = |label: SharedString,
                                 icon: IconName,
                                 disabled: bool,
                                 action: fn(
@@ -769,7 +820,7 @@ impl IosDeviceManagerModal {
                         }
                     };
                     menu.item(item(
-                        "Iniciar",
+                        t!("sidebar.ios_manager.start"),
                         IconName::PlayFilled,
                         is_running || runtime_missing,
                         |this, udid, _, cx| {
@@ -779,7 +830,7 @@ impl IosDeviceManagerModal {
                         },
                     ))
                     .item(item(
-                        "Copiar UDID",
+                        t!("sidebar.ios_manager.copy_udid"),
                         IconName::Copy,
                         false,
                         |_, udid, _, cx| {
@@ -787,13 +838,13 @@ impl IosDeviceManagerModal {
                         },
                     ))
                     .item(item(
-                        "Editar…",
+                        t!("sidebar.ios_manager.edit"),
                         IconName::Pencil,
                         busy || runtime_missing,
                         |this, udid, window, cx| this.start_edit(udid, window, cx),
                     ))
                     .item(item(
-                        "Duplicar",
+                        t!("sidebar.ios_manager.duplicate"),
                         IconName::Copy,
                         off_disk_disabled || runtime_missing,
                         |this, udid, window, cx| {
@@ -804,7 +855,7 @@ impl IosDeviceManagerModal {
                         },
                     ))
                     .item(item(
-                        "Apagar conteúdo e ajustes…",
+                        t!("sidebar.ios_manager.erase_ellipsis"),
                         IconName::Eraser,
                         off_disk_disabled || runtime_missing,
                         |this, udid, window, cx| {
@@ -814,7 +865,7 @@ impl IosDeviceManagerModal {
                         },
                     ))
                     .item(item(
-                        "Mostrar no Finder",
+                        t!("sidebar.ios_manager.reveal_in_finder"),
                         IconName::Folder,
                         false,
                         |this, udid, _, cx| {
@@ -839,7 +890,10 @@ impl IosDeviceManagerModal {
                                         .size(IconSize::XSmall)
                                         .color(Color::Error),
                                 )
-                                .child(Label::new("Excluir…").color(Color::Error))
+                                .child(
+                                    Label::new(t!("sidebar.ios_manager.delete_ellipsis"))
+                                        .color(Color::Error),
+                                )
                                 .into_any_element()
                         },
                         move |window, cx| {
@@ -862,7 +916,7 @@ impl IosDeviceManagerModal {
             .when(menu_open, |this| this.bg(colors.ghost_element_hover))
             .hover(|this| this.bg(colors.ghost_element_hover))
             .when(is_running, |this| {
-                this.tooltip(Tooltip::text("Pare o simulador primeiro"))
+                this.tooltip(Tooltip::text(t!("sidebar.ios_manager.stop_first")))
             })
             .child(
                 div()
@@ -947,8 +1001,11 @@ impl IosDeviceManagerModal {
             }
             None => {
                 let task = gpui::Task::ready(Err(anyhow::anyhow!(
-                    "A Apple não oferece mais o iOS {}; exclua o simulador ou crie outro.",
-                    display_version(version)
+                    "{}",
+                    t!(
+                        "sidebar.ios_manager.runtime_no_longer_offered",
+                        version = display_version(version)
+                    )
                 )));
                 self.notify_err(task, window, cx);
             }
@@ -974,7 +1031,7 @@ impl IosDeviceManagerModal {
         runtimes.sort_by(|left, right| compare_versions(&right.0, &left.0));
         let requested = manager.requested_runtime();
         let xcode = manager.xcode().cloned().unwrap_or_default();
-        let section = |title: &'static str| {
+        let section = |title: SharedString| {
             Label::new(title)
                 .size(LabelSize::XSmall)
                 .weight(FontWeight::SEMIBOLD)
@@ -995,9 +1052,9 @@ impl IosDeviceManagerModal {
             .map(|(index, (version, build, used_by, disk_bytes))| {
                 let unused = used_by.is_empty();
                 let usage = match used_by.as_slice() {
-                    [] => "nenhum simulador usa".to_string(),
-                    [name] => format!("usado por {name}"),
-                    names => format!("usado por {} simuladores", names.len()),
+                    [] => t!("sidebar.ios_manager.usage_none"),
+                    [name] => t!("sidebar.ios_manager.usage_one", name = name),
+                    names => t!("sidebar.ios_manager.usage_many", count = names.len()),
                 };
                 let build_to_delete = build.clone();
                 h_flex()
@@ -1045,12 +1102,12 @@ impl IosDeviceManagerModal {
                             } else {
                                 Color::Placeholder
                             })
-                            .aria_label("Remover runtime")
+                            .aria_label(t!("sidebar.ios_manager.remove_runtime"))
                             .disabled(!unused || busy)
                             .tooltip(Tooltip::text(if unused {
-                                "Remover runtime"
+                                t!("sidebar.ios_manager.remove_runtime")
                             } else {
-                                "Algum simulador usa este runtime"
+                                t!("sidebar.ios_manager.runtime_in_use")
                             }))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 let build = build_to_delete.clone();
@@ -1091,46 +1148,52 @@ impl IosDeviceManagerModal {
         };
         let mut xcode_rows = Vec::new();
         if let Some((runtime, installed)) = requested {
-            let end =
-                if installed {
-                    Label::new("instalado")
+            let end = if installed {
+                Label::new(t!("sidebar.ios_manager.installed_status"))
+                    .size(LabelSize::Small)
+                    .color(Color::Placeholder)
+                    .into_any_element()
+            } else {
+                let (version, build) = (runtime.version.clone(), runtime.build.clone());
+                h_flex()
+                    .gap_3()
+                    .child(
+                        Label::new(t!(
+                            "sidebar.ios_manager.not_installed",
+                            size = format_bytes(runtime.download_bytes)
+                        ))
                         .size(LabelSize::Small)
-                        .color(Color::Placeholder)
-                        .into_any_element()
-                } else {
-                    let (version, build) = (runtime.version.clone(), runtime.build.clone());
-                    h_flex()
-                        .gap_3()
-                        .child(
-                            Label::new(format!(
-                                "não instalado · {}",
-                                format_bytes(runtime.download_bytes)
-                            ))
-                            .size(LabelSize::Small)
-                            .color(Color::Accent),
+                        .color(Color::Accent),
+                    )
+                    .child(
+                        secondary_button(
+                            "ios-download-requested",
+                            None,
+                            t!("sidebar.ios_manager.download"),
+                            !busy,
+                            cx,
                         )
-                        .child(
-                            secondary_button("ios-download-requested", None, "Baixar", !busy, cx)
-                                .when(!busy, |this| {
-                                    this.on_click(cx.listener(move |this, _, _, cx| {
-                                        let request = PrepareRequest::DownloadRuntime {
-                                            version: version.clone(),
-                                            build: build.clone(),
-                                        };
-                                        this.manager
-                                            .update(cx, |manager, cx| manager.prepare(request, cx));
-                                        this.dismiss(cx);
-                                    }))
-                                }),
-                        )
-                        .into_any_element()
-                };
+                        .when(!busy, |this| {
+                            this.on_click(cx.listener(move |this, _, _, cx| {
+                                let request = PrepareRequest::DownloadRuntime {
+                                    version: version.clone(),
+                                    build: build.clone(),
+                                };
+                                this.manager
+                                    .update(cx, |manager, cx| manager.prepare(request, cx));
+                                this.dismiss(cx);
+                            }))
+                        }),
+                    )
+                    .into_any_element()
+            };
             xcode_rows.push(xcode_row(
                 xcode_rows.len(),
-                format!(
-                    "iOS {} · pedido pelo Xcode",
-                    display_version(&runtime.version)
-                ),
+                t!(
+                    "sidebar.ios_manager.requested_runtime_row",
+                    version = display_version(&runtime.version)
+                )
+                .to_string(),
                 runtime.build,
                 end,
             ));
@@ -1140,7 +1203,7 @@ impl IosDeviceManagerModal {
                 xcode_rows.len(),
                 "Xcode".to_string(),
                 format!("{version} · {build}"),
-                Label::new("atualiza pela App Store")
+                Label::new(t!("sidebar.ios_manager.updates_via_app_store"))
                     .size(LabelSize::Small)
                     .color(Color::Placeholder)
                     .into_any_element(),
@@ -1175,13 +1238,15 @@ impl IosDeviceManagerModal {
             .child(
                 v_flex()
                     .gap_1p5()
-                    .child(section("RUNTIMES INSTALADOS"))
+                    .child(section(t!(
+                        "sidebar.ios_manager.section_installed_runtimes"
+                    )))
                     .child(
                         table()
                             .when(runtimes.is_empty(), |this| {
                                 this.child(
                                     div().p_3().child(
-                                        Label::new("Nenhum runtime instalado")
+                                        Label::new(t!("sidebar.ios_manager.no_runtimes"))
                                             .size(LabelSize::Small)
                                             .color(Color::Muted),
                                     ),
@@ -1193,39 +1258,42 @@ impl IosDeviceManagerModal {
             .child(
                 v_flex()
                     .gap_1p5()
-                    .child(section("XCODE"))
+                    .child(section("XCODE".into()))
                     .child(table().children(xcode_rows)),
             );
 
-        let footer =
-            modal_footer(cx)
-                .child(
-                    h_flex()
-                        .flex_1()
-                        .min_w_0()
-                        .gap_2()
-                        .child(
-                            Icon::new(IconName::Info)
-                                .size(IconSize::XSmall)
-                                .color(Color::Placeholder),
-                        )
-                        .child(
-                            Label::new(
-                                "Runtimes só são removidos quando nenhum simulador depende deles.",
-                            )
+        let footer = modal_footer(cx)
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap_2()
+                    .child(
+                        Icon::new(IconName::Info)
+                            .size(IconSize::XSmall)
+                            .color(Color::Placeholder),
+                    )
+                    .child(
+                        Label::new(t!("sidebar.ios_manager.runtimes_footer"))
                             .size(LabelSize::XSmall)
                             .color(Color::Placeholder)
                             .truncate(),
-                        ),
+                    ),
+            )
+            .child(
+                secondary_button(
+                    "ios-download-runtime",
+                    None,
+                    t!("sidebar.ios_manager.download_runtime_ellipsis"),
+                    !busy,
+                    cx,
                 )
-                .child(
-                    secondary_button("ios-download-runtime", None, "Baixar runtime…", !busy, cx)
-                        .when(!busy, |this| {
-                            this.on_click(cx.listener(|this, _, window, cx| {
-                                this.start_wizard(WizardPurpose::DownloadRuntime, None, window, cx)
-                            }))
-                        }),
-                );
+                .when(!busy, |this| {
+                    this.on_click(cx.listener(|this, _, window, cx| {
+                        this.start_wizard(WizardPurpose::DownloadRuntime, None, window, cx)
+                    }))
+                }),
+            );
         v_flex()
             .w_full()
             .child(body)
@@ -1273,10 +1341,11 @@ impl IosDeviceManagerModal {
             subtitle.push_str(family);
         }
         if !erase && runtime_alone {
-            subtitle.push_str(" · último simulador desse runtime");
+            subtitle.push_str(" · ");
+            subtitle.push_str(&t!("sidebar.ios_manager.last_simulator_of_runtime"));
         }
         let error = Color::Error.color(cx);
-        let consequence = |icon: IconName, text: String, detail: String| {
+        let consequence = |icon: IconName, text: SharedString, detail: SharedString| {
             h_flex()
                 .w_full()
                 .gap_2p5()
@@ -1300,13 +1369,16 @@ impl IosDeviceManagerModal {
         let freed = device.disk_bytes + if remove_runtime { runtime_bytes } else { 0 };
         let (title, action_label) = if erase {
             (
-                format!("Apagar conteúdo e ajustes de {}?", device.name),
-                "Apagar conteúdo e ajustes".to_string(),
+                t!("sidebar.ios_manager.erase_title", name = device.name),
+                t!("sidebar.ios_manager.erase_action"),
             )
         } else {
             (
-                format!("Excluir {}?", device.name),
-                format!("Excluir e liberar {}", format_bytes(freed)),
+                t!("sidebar.ios_manager.delete_title", name = device.name),
+                t!(
+                    "sidebar.ios_manager.delete_action",
+                    size = format_bytes(freed)
+                ),
             )
         };
         let colors = cx.theme().colors().clone();
@@ -1363,23 +1435,24 @@ impl IosDeviceManagerModal {
                         } else {
                             IconName::Trash
                         },
-                        "Apaga apps, dados e ajustes do simulador".to_string(),
+                        t!("sidebar.ios_manager.consequence_erases"),
                         if erase {
-                            "o simulador volta ao estado de fábrica".to_string()
+                            t!("sidebar.ios_manager.consequence_factory_state")
                         } else {
-                            format!(
-                                "libera {} em {devices_dir}",
-                                format_bytes(device.disk_bytes)
+                            t!(
+                                "sidebar.ios_manager.consequence_frees",
+                                size = format_bytes(device.disk_bytes),
+                                path = devices_dir
                             )
                         },
                     ))
                     .child(consequence(
                         IconName::Warning,
-                        "Não dá para desfazer".to_string(),
+                        t!("sidebar.ios_manager.consequence_irreversible"),
                         if erase {
-                            "o modelo e a versão do iOS continuam".to_string()
+                            t!("sidebar.ios_manager.consequence_keeps_model")
                         } else {
-                            "um simulador novo começa do zero".to_string()
+                            t!("sidebar.ios_manager.consequence_starts_fresh")
                         },
                     )),
             )
@@ -1409,13 +1482,16 @@ impl IosDeviceManagerModal {
                             v_flex()
                                 .gap_0p5()
                                 .child(
-                                    Label::new(format!("Remover também o runtime iOS {version}"))
-                                        .size(LabelSize::Small),
+                                    Label::new(t!(
+                                        "sidebar.ios_manager.also_remove_runtime",
+                                        version = version
+                                    ))
+                                    .size(LabelSize::Small),
                                 )
                                 .child(
-                                    Label::new(format!(
-                                        "Nenhum outro simulador usa · libera mais {}",
-                                        format_bytes(runtime_bytes)
+                                    Label::new(t!(
+                                        "sidebar.ios_manager.also_remove_runtime_detail",
+                                        size = format_bytes(runtime_bytes)
                                     ))
                                     .size(LabelSize::XSmall)
                                     .color(Color::Muted),
@@ -1426,18 +1502,23 @@ impl IosDeviceManagerModal {
         let footer = modal_footer(cx)
             .child(
                 div().flex_1().child(
-                    Label::new("esc para cancelar")
+                    Label::new(t!("sidebar.ios_manager.esc_to_cancel"))
                         .size(LabelSize::XSmall)
                         .color(Color::Placeholder),
                 ),
             )
             .child(
-                secondary_button("ios-confirm-cancel", None, "Cancelar", true, cx).on_click(
-                    cx.listener(|this, _, _, cx| {
-                        this.mode = Mode::Manage(ManagerTab::Simulators);
-                        cx.notify();
-                    }),
-                ),
+                secondary_button(
+                    "ios-confirm-cancel",
+                    None,
+                    t!("sidebar.ios_manager.cancel"),
+                    true,
+                    cx,
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.mode = Mode::Manage(ManagerTab::Simulators);
+                    cx.notify();
+                })),
             )
             .child(
                 destructive_button("ios-confirm-run", action_label, true, cx)
@@ -1455,8 +1536,8 @@ impl IosDeviceManagerModal {
             return div().into_any_element();
         };
         let title: SharedString = match wizard.purpose {
-            WizardPurpose::Create => "Novo simulador iOS".into(),
-            WizardPurpose::DownloadRuntime => "Baixar runtime".into(),
+            WizardPurpose::Create => t!("sidebar.ios_manager.wizard_title_create"),
+            WizardPurpose::DownloadRuntime => t!("sidebar.ios_manager.wizard_title_download"),
         };
         let colors = cx.theme().colors().clone();
         let header = v_flex()
@@ -1492,9 +1573,12 @@ impl IosDeviceManagerModal {
     ) -> impl IntoElement + use<> {
         let colors = cx.theme().colors().clone();
         let steps = [
-            (WizardStep::Model, "Modelo"),
-            (WizardStep::Runtime, "iOS"),
-            (WizardStep::Settings, "Ajustes"),
+            (WizardStep::Model, t!("sidebar.ios_manager.step_model")),
+            (WizardStep::Runtime, SharedString::new_static("iOS")),
+            (
+                WizardStep::Settings,
+                t!("sidebar.ios_manager.step_settings"),
+            ),
         ];
         let mut row = h_flex().w_full().gap_2p5();
         for (index, (step, label)) in steps.into_iter().enumerate() {
@@ -1661,12 +1745,12 @@ impl IosDeviceManagerModal {
                     .child(div().w(px(200.)).child(self.search_input.clone())),
             )
             .when(loading && models.is_empty(), |this| {
-                this.child(loading_row("Carregando modelos…"))
+                this.child(loading_row(t!("sidebar.ios_manager.loading_models")))
             })
             .when(!loading && models.is_empty(), |this| {
                 this.child(
                     div().py_6().child(
-                        Label::new("Nenhum modelo encontrado")
+                        Label::new(t!("sidebar.ios_manager.no_models"))
                             .size(LabelSize::Small)
                             .color(Color::Muted),
                     ),
@@ -1739,27 +1823,30 @@ impl IosDeviceManagerModal {
         );
         let show_prerelease = wizard.show_prerelease;
         let channel = segmented_control(cx).w(px(180.)).children(
-            [(false, "Lançadas"), (true, "Betas")]
-                .into_iter()
-                .enumerate()
-                .map(|(index, (prerelease, label))| {
-                    segment_option(
-                        ("ios-runtime-channel", index),
-                        label,
-                        prerelease == show_prerelease,
-                        true,
-                        cx,
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.update_wizard(cx, |wizard| {
-                            if wizard.show_prerelease != prerelease {
-                                wizard.show_prerelease = prerelease;
-                                wizard.runtime = None;
-                            }
-                        });
-                        this.fill_wizard_defaults(cx);
-                    }))
-                }),
+            [
+                (false, t!("sidebar.ios_manager.channel_released")),
+                (true, t!("sidebar.ios_manager.channel_betas")),
+            ]
+            .into_iter()
+            .enumerate()
+            .map(|(index, (prerelease, label))| {
+                segment_option(
+                    ("ios-runtime-channel", index),
+                    label,
+                    prerelease == show_prerelease,
+                    true,
+                    cx,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.update_wizard(cx, |wizard| {
+                        if wizard.show_prerelease != prerelease {
+                            wizard.show_prerelease = prerelease;
+                            wizard.runtime = None;
+                        }
+                    });
+                    this.fill_wizard_defaults(cx);
+                }))
+            }),
         );
         let selected = wizard.runtime.as_ref().map(|(_, build)| build.clone());
         let shown = recent.len();
@@ -1804,14 +1891,14 @@ impl IosDeviceManagerModal {
                     ),
             )
             .when(loading && shown == 0, |this| {
-                this.child(loading_row("Carregando versões do iOS…"))
+                this.child(loading_row(t!("sidebar.ios_manager.loading_versions")))
             })
             .when(!loading && shown == 0, |this| {
                 this.child(
                     Label::new(if show_prerelease {
-                        "Nenhuma beta disponível agora"
+                        t!("sidebar.ios_manager.no_betas")
                     } else {
-                        "Nenhuma versão do iOS disponível"
+                        t!("sidebar.ios_manager.no_versions")
                     })
                     .size(LabelSize::Small)
                     .color(Color::Muted),
@@ -1827,9 +1914,12 @@ impl IosDeviceManagerModal {
                             this.update_wizard(cx, |wizard| wizard.show_older_runtimes = true)
                         }))
                         .child(
-                            Label::new(format!("Mostrar versões mais antigas ({range})"))
-                                .size(LabelSize::Small)
-                                .color(Color::Accent),
+                            Label::new(t!(
+                                "sidebar.ios_manager.show_older_versions",
+                                range = range
+                            ))
+                            .size(LabelSize::Small)
+                            .color(Color::Accent),
                         ),
                 )
             })
@@ -1873,8 +1963,11 @@ impl IosDeviceManagerModal {
             .child(option_row(
                 &colors,
                 0,
-                "Hardware do modelo",
-                format!("CPU, memória e tela vêm do {model_name}; o Simulator não deixa ajustar."),
+                t!("sidebar.ios_manager.model_hardware"),
+                t!(
+                    "sidebar.ios_manager.model_hardware_detail",
+                    model = model_name
+                ),
                 true,
                 true,
                 cx,
@@ -1883,8 +1976,8 @@ impl IosDeviceManagerModal {
                 option_row(
                     &colors,
                     1,
-                    "Iniciar ao terminar",
-                    "Abre no dock assim que o simulador estiver criado.".to_string(),
+                    t!("sidebar.ios_manager.boot_when_ready"),
+                    t!("sidebar.ios_manager.boot_when_ready_detail"),
                     boot,
                     false,
                     cx,
@@ -1902,7 +1995,13 @@ impl IosDeviceManagerModal {
         let warning = Color::Warning.color(cx);
         let runtime_label = option
             .as_ref()
-            .map(|option| format!("Runtime iOS {} ({})", option.version, option.build))
+            .map(|option| {
+                t!(
+                    "sidebar.ios_manager.runtime_label",
+                    version = option.version,
+                    build = option.build
+                )
+            })
             .unwrap_or_default();
         let summary = if short_on_space {
             Some(
@@ -1923,16 +2022,16 @@ impl IosDeviceManagerModal {
                                     .color(Color::Warning),
                             )
                             .child(
-                                Label::new("Espaço insuficiente no disco")
+                                Label::new(t!("sidebar.ios_manager.low_disk_title"))
                                     .size(LabelSize::Small)
                                     .weight(FontWeight::SEMIBOLD),
                             ),
                     )
                     .child(
-                        Label::new(format!(
-                            "O runtime precisa de {} e há {} livres. Libere espaço ou escolha uma versão já instalada.",
-                            download_bytes.map(format_bytes).unwrap_or_default(),
-                            available.map(format_bytes).unwrap_or_default()
+                        Label::new(t!(
+                            "sidebar.ios_manager.low_disk_detail",
+                            needed = download_bytes.map(format_bytes).unwrap_or_default(),
+                            available = available.map(format_bytes).unwrap_or_default()
                         ))
                         .size(LabelSize::XSmall)
                         .color(Color::Muted),
@@ -1943,9 +2042,15 @@ impl IosDeviceManagerModal {
             if let Some(bytes) = download_bytes {
                 details.push(format_bytes(bytes));
             }
-            details.push("cada simulador ocupa de 0,5 a 3 GB depois de usado".to_string());
+            details.push(t!("sidebar.ios_manager.simulator_size_hint").to_string());
             if let Some(available) = available {
-                details.push(format!("{} livres", format_bytes(available)));
+                details.push(
+                    t!(
+                        "sidebar.ios_manager.free_space",
+                        size = format_bytes(available)
+                    )
+                    .to_string(),
+                );
             }
             Some(
                 v_flex()
@@ -1965,7 +2070,7 @@ impl IosDeviceManagerModal {
                                     .color(Color::Accent),
                             )
                             .child(
-                                Label::new("Antes de criar, vamos baixar")
+                                Label::new(t!("sidebar.ios_manager.download_before_create"))
                                     .size(LabelSize::Small)
                                     .weight(FontWeight::SEMIBOLD),
                             ),
@@ -2005,7 +2110,7 @@ impl IosDeviceManagerModal {
                         v_flex()
                             .flex_1()
                             .gap_1()
-                            .child(field_label("Idioma e região"))
+                            .child(field_label(t!("sidebar.ios_manager.language_region")))
                             .child(language_menu),
                     ),
             )
@@ -2018,7 +2123,7 @@ impl IosDeviceManagerModal {
                         v_flex()
                             .flex_1()
                             .gap_1()
-                            .child(field_label("Aparência"))
+                            .child(field_label(t!("sidebar.ios_manager.appearance")))
                             .child(appearance_track),
                     )
                     .child(div().flex_1()),
@@ -2094,25 +2199,24 @@ impl IosDeviceManagerModal {
             .unwrap_or_default()
             .to_string();
         let hint: SharedString = match wizard.step {
-            WizardStep::Model => {
-                "Modelos vêm do simctl; CPU, RAM e tela são fixos por modelo.".into()
-            }
+            WizardStep::Model => t!("sidebar.ios_manager.hint_models"),
             WizardStep::Runtime if needs_download => match manager.available_bytes() {
-                Some(available) => format!(
-                    "O runtime será baixado ao {} · {} livres",
-                    if wizard.purpose == WizardPurpose::Create {
-                        "criar"
-                    } else {
-                        "confirmar"
-                    },
-                    format_bytes(available)
-                )
-                .into(),
-                None => "O runtime será baixado ao criar".into(),
+                Some(available) if wizard.purpose == WizardPurpose::Create => t!(
+                    "sidebar.ios_manager.hint_download_on_create_free",
+                    size = format_bytes(available)
+                ),
+                Some(available) => t!(
+                    "sidebar.ios_manager.hint_download_on_confirm_free",
+                    size = format_bytes(available)
+                ),
+                None => t!("sidebar.ios_manager.hint_download_on_create"),
             },
             WizardStep::Runtime => SharedString::default(),
             WizardStep::Settings if needs_download => {
-                format!("O download é feito pelo xcodebuild do Xcode {xcode_version}.").into()
+                t!(
+                    "sidebar.ios_manager.hint_xcodebuild",
+                    version = xcode_version
+                )
             }
             WizardStep::Settings => SharedString::default(),
         };
@@ -2122,14 +2226,20 @@ impl IosDeviceManagerModal {
             _ => None,
         };
         let back_label = match (wizard.step, wizard.purpose) {
-            (WizardStep::Model, _) | (_, WizardPurpose::DownloadRuntime) => "Cancelar",
-            _ => "Voltar",
+            (WizardStep::Model, _) | (_, WizardPurpose::DownloadRuntime) => {
+                t!("sidebar.ios_manager.cancel")
+            }
+            _ => t!("sidebar.ios_manager.back"),
         };
         let primary_label = match (wizard.step, wizard.purpose) {
-            (WizardStep::Runtime, WizardPurpose::DownloadRuntime) => "Baixar",
-            (WizardStep::Settings, _) if needs_download => "Baixar e criar",
-            (WizardStep::Settings, _) => "Criar",
-            _ => "Próximo",
+            (WizardStep::Runtime, WizardPurpose::DownloadRuntime) => {
+                t!("sidebar.ios_manager.download")
+            }
+            (WizardStep::Settings, _) if needs_download => {
+                t!("sidebar.ios_manager.download_and_create")
+            }
+            (WizardStep::Settings, _) => t!("sidebar.ios_manager.create"),
+            _ => t!("sidebar.ios_manager.next"),
         };
         let primary = if can_advance {
             primary_button("ios-wizard-next", None, primary_label, None, cx)
@@ -2195,7 +2305,11 @@ impl IosDeviceManagerModal {
             .pl_6()
             .border_b_1()
             .border_color(colors.border)
-            .child(self.render_header(format!("Editar {}", device.name).into(), None, cx));
+            .child(self.render_header(
+                t!("sidebar.ios_manager.edit_title", name = device.name),
+                None,
+                cx,
+            ));
         let language_menu = self.render_language_menu(
             form.language,
             |this, option, cx| this.update_edit(cx, |form| form.language = option),
@@ -2214,7 +2328,10 @@ impl IosDeviceManagerModal {
             .border_1()
             .border_color(colors.border_variant)
             .opacity(0.6)
-            .child(Label::new(format!("iOS {version} · fixa")).color(Color::Muted));
+            .child(
+                Label::new(t!("sidebar.ios_manager.version_fixed", version = version))
+                    .color(Color::Muted),
+            );
         let device_type = device.device_type_identifier;
         let info = v_flex()
             .w_full()
@@ -2233,7 +2350,7 @@ impl IosDeviceManagerModal {
                             .color(Color::Muted),
                     )
                     .child(
-                        Label::new("A versão do iOS não muda depois de criado")
+                        Label::new(t!("sidebar.ios_manager.version_fixed_title"))
                             .size(LabelSize::Small)
                             .weight(FontWeight::SEMIBOLD),
                     ),
@@ -2250,9 +2367,9 @@ impl IosDeviceManagerModal {
                 .buffer_font(cx),
             )
             .child(
-                Label::new(format!(
-                    "O simctl não troca o runtime de um simulador. Para testar em outra versão, \
-                     crie um simulador novo com o mesmo modelo — Duplicar mantém o iOS {version}."
+                Label::new(t!(
+                    "sidebar.ios_manager.version_fixed_detail",
+                    version = version
                 ))
                 .size(LabelSize::XSmall)
                 .color(Color::Muted),
@@ -2262,7 +2379,7 @@ impl IosDeviceManagerModal {
                     secondary_button(
                         "ios-edit-other-version",
                         None,
-                        "Criar com outra versão…",
+                        t!("sidebar.ios_manager.create_other_version"),
                         true,
                         cx,
                     )
@@ -2292,7 +2409,7 @@ impl IosDeviceManagerModal {
                         v_flex()
                             .flex_1()
                             .gap_1()
-                            .child(field_label("Idioma e região"))
+                            .child(field_label(t!("sidebar.ios_manager.language_region")))
                             .child(language_menu),
                     ),
             )
@@ -2305,14 +2422,14 @@ impl IosDeviceManagerModal {
                         v_flex()
                             .flex_1()
                             .gap_1()
-                            .child(field_label("Aparência"))
+                            .child(field_label(t!("sidebar.ios_manager.appearance")))
                             .child(appearance_track),
                     )
                     .child(
                         v_flex()
                             .flex_1()
                             .gap_1()
-                            .child(field_label("Versão do iOS"))
+                            .child(field_label(t!("sidebar.ios_manager.ios_version")))
                             .child(version_field),
                     ),
             )
@@ -2326,9 +2443,10 @@ impl IosDeviceManagerModal {
                     .child(option_row(
                         &colors,
                         0,
-                        "Hardware do modelo",
-                        format!(
-                            "CPU, memória e tela vêm do {model_name}; o Simulator não deixa ajustar."
+                        t!("sidebar.ios_manager.model_hardware"),
+                        t!(
+                            "sidebar.ios_manager.model_hardware_detail",
+                            model = model_name
                         ),
                         true,
                         true,
@@ -2338,12 +2456,24 @@ impl IosDeviceManagerModal {
             .child(info);
         let can_save = !self.name_input.read(cx).text(cx).trim().is_empty();
         let save = if can_save {
-            primary_button("ios-edit-save", None, "Salvar", None, cx)
-                .on_click(cx.listener(|this, _, window, cx| this.save_edit(window, cx)))
+            primary_button(
+                "ios-edit-save",
+                None,
+                t!("sidebar.ios_manager.save"),
+                None,
+                cx,
+            )
+            .on_click(cx.listener(|this, _, window, cx| this.save_edit(window, cx)))
         } else {
-            primary_button("ios-edit-save", None, "Salvar", None, cx)
-                .opacity(0.5)
-                .cursor_default()
+            primary_button(
+                "ios-edit-save",
+                None,
+                t!("sidebar.ios_manager.save"),
+                None,
+                cx,
+            )
+            .opacity(0.5)
+            .cursor_default()
         };
         let footer = modal_footer(cx)
             .child(
@@ -2357,16 +2487,21 @@ impl IosDeviceManagerModal {
                             .color(Color::Placeholder),
                     )
                     .child(
-                        Label::new(
-                            "O idioma vale a partir da próxima inicialização; nada é apagado.",
-                        )
-                        .size(LabelSize::XSmall)
-                        .color(Color::Placeholder)
-                        .truncate(),
+                        Label::new(t!("sidebar.ios_manager.edit_footer"))
+                            .size(LabelSize::XSmall)
+                            .color(Color::Placeholder)
+                            .truncate(),
                     ),
             )
             .child(
-                secondary_button("ios-edit-cancel", None, "Cancelar", true, cx).on_click(
+                secondary_button(
+                    "ios-edit-cancel",
+                    None,
+                    t!("sidebar.ios_manager.cancel"),
+                    true,
+                    cx,
+                )
+                .on_click(
                     cx.listener(|this, _, window, cx| this.cancel(&menu::Cancel, window, cx)),
                 ),
             )
@@ -2467,7 +2602,7 @@ fn appearance_control(
     )
 }
 
-fn field_label(label: &'static str) -> Label {
+fn field_label(label: SharedString) -> Label {
     Label::new(label).size(LabelSize::Small)
 }
 
@@ -2601,7 +2736,7 @@ fn runtime_row(
                                     .rounded_sm()
                                     .bg(colors.border_focused.opacity(0.22))
                                     .child(
-                                        Label::new("pedido pelo Xcode")
+                                        Label::new(t!("sidebar.ios_manager.requested_by_xcode"))
                                             .size(LabelSize::XSmall)
                                             .color(Color::Accent),
                                     ),
@@ -2623,7 +2758,7 @@ fn runtime_row(
                         .color(Color::Muted),
                 )
                 .child(
-                    Label::new("Indisponível")
+                    Label::new(t!("sidebar.ios_manager.unavailable"))
                         .size(LabelSize::Small)
                         .color(Color::Muted),
                 )
@@ -2634,7 +2769,7 @@ fn runtime_row(
                         .color(Color::Success),
                 )
                 .child(
-                    Label::new("Instalado")
+                    Label::new(t!("sidebar.ios_manager.installed"))
                         .size(LabelSize::Small)
                         .color(Color::Success),
                 )
@@ -2645,8 +2780,11 @@ fn runtime_row(
                     Color::Muted
                 };
                 let label = match option.download_bytes.filter(|bytes| *bytes > 0) {
-                    Some(bytes) => format!("Baixar · {}", format_bytes(bytes)),
-                    None => "Baixar".to_string(),
+                    Some(bytes) => t!(
+                        "sidebar.ios_manager.download_with_size",
+                        size = format_bytes(bytes)
+                    ),
+                    None => t!("sidebar.ios_manager.download"),
                 };
                 this.child(
                     Icon::new(IconName::Download)
@@ -2661,8 +2799,8 @@ fn runtime_row(
 fn option_row(
     colors: &theme::ThemeColors,
     index: usize,
-    label: &'static str,
-    description: String,
+    label: SharedString,
+    description: SharedString,
     on: bool,
     locked: bool,
     cx: &App,
@@ -2697,7 +2835,7 @@ fn option_row(
                                             .color(Color::Placeholder),
                                     )
                                     .child(
-                                        Label::new("fixo")
+                                        Label::new(t!("sidebar.ios_manager.locked"))
                                             .size(LabelSize::XSmall)
                                             .color(Color::Placeholder),
                                     ),
@@ -2713,7 +2851,7 @@ fn option_row(
         .child(toggle_switch(("ios-option", index), on, !locked, cx))
 }
 
-fn loading_row(label: &'static str) -> impl IntoElement {
+fn loading_row(label: SharedString) -> impl IntoElement {
     h_flex()
         .py_6()
         .gap_2()
@@ -2725,14 +2863,6 @@ fn loading_row(label: &'static str) -> impl IntoElement {
                 .with_rotate_animation(2),
         )
         .child(Label::new(label).size(LabelSize::Small).color(Color::Muted))
-}
-
-fn plural(count: usize, singular: &str, plural: &str) -> String {
-    if count == 1 {
-        format!("1 {singular}")
-    } else {
-        format!("{count} {plural}")
-    }
 }
 
 /// `~/Library/Developer/CoreSimulator` instead of the full home path.

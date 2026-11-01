@@ -10,6 +10,7 @@ use crate::{
 };
 use anyhow::Result;
 use http_client::HttpClient;
+use i18n::t;
 use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -386,7 +387,9 @@ impl Client {
                 bitbucket::get_merge_task(&self.http_client, credentials, repository, task_url)
                     .await
             }
-            Credentials::GitHub(_) => anyhow::bail!("o GitHub não acompanha merges por task"),
+            Credentials::GitHub(_) => {
+                anyhow::bail!("{}", t!("repo_hosting.error.github_no_merge_task"))
+            }
         }
     }
 
@@ -397,7 +400,9 @@ impl Client {
         strategy: MergeStrategy,
     ) -> Result<()> {
         match &self.credentials {
-            Credentials::Bitbucket(_) => anyhow::bail!("o Bitbucket não tem auto-merge"),
+            Credentials::Bitbucket(_) => {
+                anyhow::bail!("{}", t!("repo_hosting.error.bitbucket_no_auto_merge"))
+            }
             Credentials::GitHub(credentials) => {
                 github::enable_auto_merge(
                     &self.http_client,
@@ -448,7 +453,9 @@ impl Client {
 
     pub async fn rerun_job(&self, repository: &RemoteRepository, job_id: u64) -> Result<()> {
         match &self.credentials {
-            Credentials::Bitbucket(_) => anyhow::bail!("só jobs do GitHub Actions re-rodam daqui"),
+            Credentials::Bitbucket(_) => {
+                anyhow::bail!("{}", t!("repo_hosting.error.rerun_github_only"))
+            }
             Credentials::GitHub(credentials) => {
                 github::rerun_job(&self.http_client, credentials, repository, job_id).await
             }
@@ -457,7 +464,9 @@ impl Client {
 
     pub async fn get_job_log(&self, repository: &RemoteRepository, job_id: u64) -> Result<String> {
         match &self.credentials {
-            Credentials::Bitbucket(_) => anyhow::bail!("só jobs do GitHub Actions têm log aqui"),
+            Credentials::Bitbucket(_) => {
+                anyhow::bail!("{}", t!("repo_hosting.error.job_log_github_only"))
+            }
             Credentials::GitHub(credentials) => {
                 github::get_job_log(&self.http_client, credentials, repository, job_id).await
             }
