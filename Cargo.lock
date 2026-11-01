@@ -13084,6 +13084,7 @@ dependencies = [
  "const_format",
  "dirs",
  "ignore",
+ "tempfile",
  "util",
 ]
 

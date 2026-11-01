@@ -20,6 +20,9 @@ pub const APP_NAME: &str = "Asylum";
 const LEGACY_APP_NAME: &str = "Zed";
 const LEGACY_APP_NAME_LOWERCASE: &str = "zed";
 
+/// Written into each of Asylum's directories once its legacy contents have been copied.
+const LEGACY_MIGRATION_MARKER: &str = ".migrated-from-zed";
+
 /// Lowercased form of [`APP_NAME`], for use in XDG-style paths on
 /// Linux/FreeBSD and the macOS `~/.config` fallback.
 pub const APP_NAME_LOWERCASE: &str = {
@@ -233,10 +236,7 @@ pub fn migrate_legacy_directories() -> Vec<String> {
 
     let mut failures = Vec::new();
     for (legacy, current) in pairs {
-        if current.exists() || !legacy.is_dir() {
-            continue;
-        }
-        if let Err(error) = copy_directory_atomically(&legacy, &current) {
+        if let Err(error) = migrate_legacy_directory(&legacy, &current) {
             failures.push(format!(
                 "failed to copy {} to {}: {error}",
                 legacy.display(),
@@ -245,6 +245,33 @@ pub fn migrate_legacy_directories() -> Vec<String> {
         }
     }
     failures
+}
+
+fn migrate_legacy_directory(legacy: &Path, current: &Path) -> std::io::Result<()> {
+    if !legacy.is_dir() || current.join(LEGACY_MIGRATION_MARKER).exists() {
+        return Ok(());
+    }
+    if current.exists() {
+        // Something created the directory before the first migration (older builds wrote a
+        // single prompts folder there), so skipping it would leave settings and keymaps behind.
+        copy_missing_entries(legacy, current)?;
+    } else {
+        copy_directory_atomically(legacy, current)?;
+    }
+    std::fs::write(current.join(LEGACY_MIGRATION_MARKER), "")
+}
+
+/// Copies the entries of `source` that `destination` lacks, never replacing an existing one.
+fn copy_missing_entries(source: &Path, destination: &Path) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(source)? {
+        let entry = entry?;
+        let destination_path = destination.join(entry.file_name());
+        if destination_path.symlink_metadata().is_ok() {
+            continue;
+        }
+        copy_entry(&entry.path(), &destination_path, entry.file_type()?)?;
+    }
+    Ok(())
 }
 
 /// Copies into a sibling staging directory first and renames it at the end, so an interrupted
@@ -268,18 +295,28 @@ fn copy_directory_recursively(source: &Path, destination: &Path) -> std::io::Res
     std::fs::create_dir_all(destination)?;
     for entry in std::fs::read_dir(source)? {
         let entry = entry?;
-        let source_path = entry.path();
-        let destination_path = destination.join(entry.file_name());
-        let file_type = entry.file_type()?;
-        if file_type.is_dir() {
-            copy_directory_recursively(&source_path, &destination_path)?;
-        } else if file_type.is_symlink() {
-            copy_symlink(&source_path, &destination_path)?;
-        } else if file_type.is_file() {
-            // On APFS this clones the file instead of duplicating its bytes, which keeps copying
-            // large directories such as the Android SDK cheap.
-            std::fs::copy(&source_path, &destination_path)?;
-        }
+        copy_entry(
+            &entry.path(),
+            &destination.join(entry.file_name()),
+            entry.file_type()?,
+        )?;
+    }
+    Ok(())
+}
+
+fn copy_entry(
+    source: &Path,
+    destination: &Path,
+    file_type: std::fs::FileType,
+) -> std::io::Result<()> {
+    if file_type.is_dir() {
+        copy_directory_recursively(source, destination)?;
+    } else if file_type.is_symlink() {
+        copy_symlink(source, destination)?;
+    } else if file_type.is_file() {
+        // On APFS this clones the file instead of duplicating its bytes, which keeps copying
+        // large directories such as the Android SDK cheap.
+        std::fs::copy(source, destination)?;
     }
     Ok(())
 }
@@ -874,6 +911,56 @@ pub fn global_gitignore_path() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_legacy_migration_fills_a_directory_created_before_it() -> std::io::Result<()> {
+        let root = tempfile::tempdir()?;
+        let legacy = root.path().join("zed");
+        let current = root.path().join("asylum");
+        std::fs::create_dir_all(legacy.join("themes"))?;
+        std::fs::write(legacy.join("settings.json"), "legacy settings")?;
+        std::fs::write(legacy.join("themes/dark.json"), "theme")?;
+        std::fs::create_dir_all(current.join("prompts"))?;
+        std::fs::write(current.join("keymap.json"), "current keymap")?;
+        std::fs::write(legacy.join("keymap.json"), "legacy keymap")?;
+
+        migrate_legacy_directory(&legacy, &current)?;
+        assert_eq!(
+            std::fs::read_to_string(current.join("settings.json"))?,
+            "legacy settings"
+        );
+        assert_eq!(
+            std::fs::read_to_string(current.join("themes/dark.json"))?,
+            "theme"
+        );
+        assert_eq!(
+            std::fs::read_to_string(current.join("keymap.json"))?,
+            "current keymap"
+        );
+
+        // Once marked, files the user removes afterwards are not brought back.
+        std::fs::remove_file(current.join("settings.json"))?;
+        migrate_legacy_directory(&legacy, &current)?;
+        assert!(!current.join("settings.json").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn test_legacy_migration_copies_into_a_new_directory() -> std::io::Result<()> {
+        let root = tempfile::tempdir()?;
+        let legacy = root.path().join("zed");
+        let current = root.path().join("asylum");
+        std::fs::create_dir_all(&legacy)?;
+        std::fs::write(legacy.join("settings.json"), "legacy settings")?;
+
+        migrate_legacy_directory(&legacy, &current)?;
+        assert_eq!(
+            std::fs::read_to_string(current.join("settings.json"))?,
+            "legacy settings"
+        );
+        assert!(current.join(LEGACY_MIGRATION_MARKER).exists());
+        Ok(())
+    }
 
     #[test]
     fn test_profile_ids() {
