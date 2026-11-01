@@ -4,7 +4,8 @@
 //! The Dock keeps apps by bundle, and every profile runs from the same `Asylum.app`, so
 //! without them all profiles share one icon. A launcher is a bundle of its own (identifier,
 //! name, icon and an `AsylumProfile` key) whose executables, frameworks and resources are
-//! symlinks into the real app, started by a script that `exec`s the `zed` symlink. AppKit
+//! symlinks into the real app, started by a script that `exec`s the symlink to the app's
+//! executable. AppKit
 //! takes the main bundle from the executable's path, which is the symlink inside the launcher,
 //! so the process belongs to the launcher; the code signature is the real executable's, since
 //! the symlink resolves to it. Running the real executable's path would make the process
@@ -24,7 +25,9 @@ const LAUNCH_SCRIPT_NAME: &str = "launch";
 // Launch Services resolves a symlinked `CFBundleExecutable` before running it, which would
 // start the real app instead. A script inside the launcher keeps the path: `exec` through the
 // sibling symlink leaves the process's executable path, and so its main bundle, in the launcher.
-const LAUNCH_SCRIPT: &str = "#!/bin/sh\nexec \"$(dirname \"$0\")/zed\" \"$@\"\n";
+fn launch_script(executable: &str) -> String {
+    format!("#!/bin/sh\nexec \"$(dirname \"$0\")/{executable}\" \"$@\"\n")
+}
 const LSREGISTER: &str = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
 
 /// What a profile's launcher is made from.
@@ -197,20 +200,38 @@ fn write_launcher(
     std::fs::create_dir_all(contents.join("MacOS"))?;
     std::fs::create_dir_all(&resources)?;
 
+    let executable = app_info
+        .as_dictionary()
+        .and_then(|info| info.get("CFBundleExecutable"))
+        .and_then(|executable| executable.as_string())
+        .context("the app's Info.plist has no CFBundleExecutable")?;
+
     let mut changed = false;
     // The executables have to be files inside the launcher's `Contents/MacOS` (symlinks to the
     // real ones), not a symlink of the whole directory: AppKit finds the bundle from the
     // executable's path.
+    let mut app_executables = Vec::new();
     for entry in std::fs::read_dir(app_contents.join("MacOS"))? {
         let entry = entry?;
         changed |= link(
             &contents.join("MacOS").join(entry.file_name()),
             &entry.path(),
         )?;
+        app_executables.push(entry.file_name());
     }
-    let launch_script = contents.join("MacOS").join(LAUNCH_SCRIPT_NAME);
-    changed |= write_if_changed(&launch_script, LAUNCH_SCRIPT.as_bytes())?;
-    std::fs::set_permissions(&launch_script, std::fs::Permissions::from_mode(0o755))?;
+    // Links to executables the app no longer has (the main one was renamed from `zed` to
+    // `asylum`) would otherwise be left dangling.
+    for entry in std::fs::read_dir(contents.join("MacOS"))? {
+        let entry = entry?;
+        let name = entry.file_name();
+        if name != LAUNCH_SCRIPT_NAME && !app_executables.contains(&name) {
+            std::fs::remove_file(entry.path())?;
+            changed = true;
+        }
+    }
+    let launch_script_path = contents.join("MacOS").join(LAUNCH_SCRIPT_NAME);
+    changed |= write_if_changed(&launch_script_path, launch_script(executable).as_bytes())?;
+    std::fs::set_permissions(&launch_script_path, std::fs::Permissions::from_mode(0o755))?;
     changed |= link(
         &contents.join("Frameworks"),
         &app_contents.join("Frameworks"),
@@ -370,6 +391,40 @@ mod tests {
     }
 
     #[test]
+    fn test_sync_follows_a_renamed_app_executable() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let app = fake_app(root.path())?;
+        let launchers_dir = root.path().join("Applications");
+        let profiles = [LauncherProfile {
+            id: "work".into(),
+            name: "Trabalho".into(),
+            icon: b"work icon",
+        }];
+        futures::executor::block_on(sync_launchers_in(&launchers_dir, &app, &profiles))?;
+
+        let app_contents = app.join("Contents");
+        std::fs::rename(
+            app_contents.join("MacOS").join("zed"),
+            app_contents.join("MacOS").join("asylum"),
+        )?;
+        let mut info = plist::Value::from_file(app_contents.join("Info.plist"))?
+            .into_dictionary()
+            .context("Info.plist is not a dictionary")?;
+        info.insert("CFBundleExecutable".into(), "asylum".into());
+        plist::Value::Dictionary(info).to_file_xml(app_contents.join("Info.plist"))?;
+        futures::executor::block_on(sync_launchers_in(&launchers_dir, &app, &profiles))?;
+
+        let launcher_executables = launchers_dir.join("Fake Trabalho.app/Contents/MacOS");
+        assert_eq!(
+            std::fs::read_to_string(launcher_executables.join("launch"))?,
+            launch_script("asylum")
+        );
+        assert!(launcher_executables.join("asylum").exists());
+        assert!(launcher_executables.join("zed").symlink_metadata().is_err());
+        Ok(())
+    }
+
+    #[test]
     fn test_sync_creates_renames_and_removes_launchers() -> Result<()> {
         let root = tempfile::tempdir()?;
         let app = fake_app(root.path())?;
@@ -416,10 +471,13 @@ mod tests {
         );
         assert_eq!(string("CFBundleName"), Some("Fake Trabalho"));
         assert_eq!(string("CFBundleExecutable"), Some("launch"));
-        let launch_script = contents.join("MacOS").join("launch");
-        assert_eq!(std::fs::read_to_string(&launch_script)?, LAUNCH_SCRIPT);
+        let launch_script_path = contents.join("MacOS").join("launch");
         assert_eq!(
-            std::fs::metadata(&launch_script)?.permissions().mode() & 0o777,
+            std::fs::read_to_string(&launch_script_path)?,
+            launch_script("zed")
+        );
+        assert_eq!(
+            std::fs::metadata(&launch_script_path)?.permissions().mode() & 0o777,
             0o755
         );
         assert_eq!(string("CFBundleIconFile"), Some("profile"));
