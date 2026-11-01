@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Akiyama Kohane <i@kept.to>"
+   ],
+   "description": "Immersed in peace and a muted colorscheme",
+   "download_count": 0,
+   "id": "eclat",
+   "name": "Eclat",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:14:24Z",
+   "repository": "https://github.com/utakotoba/eclat-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

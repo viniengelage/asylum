@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "mikemcbride <mike@mcbrides.us>"
+   ],
+   "description": "Electron highlighter is a dark syntax theme based off of the iconic One Dark theme with a more vibrant color palette.",
+   "download_count": 0,
+   "id": "electron-highlighter-theme",
+   "name": "Electron Highlighter",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:14:45Z",
+   "repository": "https://github.com/electron-highlighter/zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

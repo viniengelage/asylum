@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "samurmaykrr"
+   ],
+   "description": "A cyberpunk-inspired theme with scarlet red accents, based on the Cyberpunk Scarlet Protocol iTerm2 color scheme. Includes dark and light variants.",
+   "download_count": 0,
+   "id": "cyberpunk-scarlet",
+   "name": "Cyberpunk Scarlet",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:12:48Z",
+   "repository": "https://github.com/samurmaykrr/cyberpunk-scarlet-zed",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

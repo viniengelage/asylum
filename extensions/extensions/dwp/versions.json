@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Sachin Jangir <sachinjangir0181@gmail.com>"
+   ],
+   "description": "A minimal theme designed with perfection (dwp)",
+   "download_count": 0,
+   "id": "dwp",
+   "name": "dwp",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:14:21Z",
+   "repository": "https://github.com/shenlong21/zed-dwp-theme",
+   "schema_version": 1,
+   "version": "0.0.4",
+   "wasm_api_version": null
+  }
+ ]
+}

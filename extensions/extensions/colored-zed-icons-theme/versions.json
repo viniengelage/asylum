@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "TheRedXD",
+    "Zed Industries <support@zed.dev>"
+   ],
+   "description": "Default Zed icons, but colored!",
+   "download_count": 0,
+   "id": "colored-zed-icons-theme",
+   "name": "Colored Zed Icons Theme",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-11-01T11:10:31Z",
+   "repository": "https://github.com/TheRedXD/zed-icons-colored-theme",
+   "schema_version": 1,
+   "version": "0.3.1",
+   "wasm_api_version": null
+  }
+ ]
+}

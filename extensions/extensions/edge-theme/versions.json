@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Alison Oliveira <arobsn@proton.me>"
+   ],
+   "description": "Clean & Elegant Color Scheme inspired by Atom One and Material.",
+   "download_count": 0,
+   "id": "edge-theme",
+   "name": "Edge Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:14:26Z",
+   "repository": "https://github.com/arobsn/edge-zed",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

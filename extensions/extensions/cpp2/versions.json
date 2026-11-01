@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Jost Triller <tsoj.tsoj@gmx.de>"
+   ],
+   "description": "Cpp2 support for Zed Editor",
+   "download_count": 0,
+   "id": "cpp2",
+   "name": "Cpp2",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-01T11:11:29Z",
+   "repository": "https://github.com/tsoj/zed-cpp2",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

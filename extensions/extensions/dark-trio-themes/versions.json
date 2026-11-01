@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "2u841r"
+   ],
+   "description": "3 dark themes: Bytes Newsletter, Svelte 5, Pinky Promise",
+   "download_count": 0,
+   "id": "dark-trio-themes",
+   "name": "Dark Trio",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:13:05Z",
+   "repository": "https://github.com/2u841r/dark-trio",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

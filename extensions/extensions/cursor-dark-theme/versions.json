@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "LooSheng",
+    "Cursor Editor Team"
+   ],
+   "description": "Themes transplanted from cursor editor",
+   "download_count": 0,
+   "id": "cursor-dark-theme",
+   "name": "Cursor Dark Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:12:28Z",
+   "repository": "https://github.com/loosheng/zed-cursor-dark",
+   "schema_version": 2,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "FeedMyCat54 <kangelou@proton.me>"
+   ],
+   "description": "Write Elixir faster with code snippets.",
+   "download_count": 0,
+   "id": "elixir-snippets",
+   "name": "Elixir Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-01T11:14:48Z",
+   "repository": "https://github.com/FeedMyCat54/elixir-zed-snippets.git",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

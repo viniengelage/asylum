@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ryan Brue <ryanbrue.dev@gmail.com>"
+   ],
+   "description": "A faint pastel theme for Zed",
+   "download_count": 0,
+   "id": "faded-prism-theme",
+   "name": "Faded Prism Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:15:38Z",
+   "repository": "https://github.com/ryanabx/faded-prism-zed",
+   "schema_version": 1,
+   "version": "1.4.1",
+   "wasm_api_version": null
+  }
+ ]
+}

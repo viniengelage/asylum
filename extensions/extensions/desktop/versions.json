@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "mikaeladev"
+   ],
+   "description": "Syntax highlighting for .desktop and .directory files",
+   "download_count": 0,
+   "id": "desktop",
+   "name": "Desktop Entry",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-01T11:13:36Z",
+   "repository": "https://github.com/mikaeladev/zed-desktop-entry",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

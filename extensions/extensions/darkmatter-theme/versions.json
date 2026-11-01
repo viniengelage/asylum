@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Steve Simkins <stevedsimkins@gmail.com>"
+   ],
+   "description": "Darkmatter theme based on Base16 Black Metal Bathory",
+   "download_count": 0,
+   "id": "darkmatter-theme",
+   "name": "Darkmatter Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:13:06Z",
+   "repository": "https://github.com/stevedylandev/darkmatter-zed",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

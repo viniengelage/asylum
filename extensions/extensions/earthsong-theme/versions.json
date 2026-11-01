@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Hampus Sj\u00f6berg <hampus.sjoberg@protonmail.com>"
+   ],
+   "description": "A Zed port of Dayle Rees' Earthsong theme.",
+   "download_count": 0,
+   "id": "earthsong-theme",
+   "name": "Earthsong",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:14:23Z",
+   "repository": "https://github.com/hsjoberg/zedsong",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

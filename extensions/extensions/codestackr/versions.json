@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Pjort Kat"
+   ],
+   "description": "A port of the popular codeSTACKr VS Code theme for Zed Editor",
+   "download_count": 0,
+   "id": "codestackr",
+   "name": "codeSTACKr theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:10:12Z",
+   "repository": "https://github.com/Pjort/codestackr-zed",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

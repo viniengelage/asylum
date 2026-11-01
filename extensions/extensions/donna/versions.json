@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "NikolasSkyl"
+   ],
+   "description": "Donna language support for Zed",
+   "download_count": 0,
+   "id": "donna",
+   "name": "Donna",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-01T11:14:02Z",
+   "repository": "https://github.com/NikolasSkyl/donna-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

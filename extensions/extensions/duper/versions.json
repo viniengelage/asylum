@@ -1,0 +1,23 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Eric Rodrigues Pires <eric@eric.dev.br>"
+   ],
+   "description": "Duper support for Zed.",
+   "download_count": 0,
+   "id": "duper",
+   "name": "Duper",
+   "provides": [
+    "languages",
+    "grammars",
+    "language-servers"
+   ],
+   "published_at": "2026-11-01T11:14:20Z",
+   "repository": "https://github.com/EpicEric/duper",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": "0.1.0"
+  }
+ ]
+}

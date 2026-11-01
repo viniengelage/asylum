@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Anders H\u00f6ckersten <anders@hockersten.se>"
+   ],
+   "description": "Adds emoji completions when typing ':', '::' or '(' followed by an emoji name.",
+   "download_count": 0,
+   "id": "emoji-completions",
+   "name": "Emoji completions",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-11-01T11:15:29Z",
+   "repository": "https://github.com/ahockersten/emoji-completions-zed",
+   "schema_version": 1,
+   "version": "1.4.0",
+   "wasm_api_version": "0.7.0"
+  }
+ ]
+}

@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Daniel Zarifpour <z@rifpour.xyz>"
+   ],
+   "description": "\ud83d\udd10 Environment support. \u2730 and report issues \u27a9",
+   "download_count": 0,
+   "id": "env",
+   "name": "env",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-01T11:15:29Z",
+   "repository": "https://github.com/zarifpour/zed-env",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

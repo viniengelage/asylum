@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "malleroid"
+   ],
+   "description": "A synthwave-inspired dark theme with deep purple backgrounds and cyan-green accents.",
+   "download_count": 0,
+   "id": "emerald-synth-theme",
+   "name": "Emerald Synth",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:15:10Z",
+   "repository": "https://github.com/malleroid/emerald-synth-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

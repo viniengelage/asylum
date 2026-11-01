@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Jordan Marescaux <jordan.marescaux@epitech.eu>"
+   ],
+   "description": "insert your epitech header easily",
+   "download_count": 0,
+   "id": "epitech-header-snippets",
+   "name": "EPITECH Header",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-01T11:15:30Z",
+   "repository": "https://github.com/JordanMar1/epitech-header-snippets.git",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

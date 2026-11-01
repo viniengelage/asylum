@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Amirali Beigi"
+   ],
+   "description": "Dark themes for the night owls \u2014 Mars (warm), Neptune (cool) and Pluto (true black).",
+   "download_count": 0,
+   "id": "dark-matter-code-theme",
+   "name": "Dark Matter Code",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:13:04Z",
+   "repository": "https://github.com/amiralibg/Dark-Matter-Code",
+   "schema_version": 1,
+   "version": "0.0.8",
+   "wasm_api_version": null
+  }
+ ]
+}

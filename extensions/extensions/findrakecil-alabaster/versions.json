@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Liffindra Angga Zaaldian <lzaaldian@gmail.com>"
+   ],
+   "description": "Light and Dark theme ported from https://github.com/tonsky/sublime-scheme-alabaster",
+   "download_count": 0,
+   "id": "findrakecil-alabaster",
+   "name": "Alabaster",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:16:29Z",
+   "repository": "https://github.com/findrakecil/alabaster-zed-theme",
+   "schema_version": 1,
+   "version": "1.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

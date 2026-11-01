@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "blaqat <blaqat.ag@gmail.com>"
+   ],
+   "description": "Ember Colorscheme port for Zed",
+   "download_count": 0,
+   "id": "ember-theme",
+   "name": "Ember Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:15:10Z",
+   "repository": "https://github.com/biaqat/ember-theme-zed",
+   "schema_version": 1,
+   "version": "0.9.1",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Flynt Theme <flynttheme@gmail.com>"
+   ],
+   "description": "Warm tones. Zero visual noise.",
+   "download_count": 0,
+   "id": "flynt-theme",
+   "name": "Flynt",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:16:41Z",
+   "repository": "https://github.com/flynt-theme/flynt-zed",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Do\u011fukan \u00dcrker <dogukanurker@icloud.com>"
+   ],
+   "description": "A minimalist flat theme with pure black and white backgrounds, vibrant syntax colors, and consistent medium font weights. Features both dark and light variants.",
+   "download_count": 0,
+   "id": "dogi",
+   "name": "Dogi",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:14:00Z",
+   "repository": "https://github.com/DogukanUrker/DogiZed",
+   "schema_version": 1,
+   "version": "1.0.4",
+   "wasm_api_version": null
+  }
+ ]
+}

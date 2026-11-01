@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "David C Cavalcante <davcavalcante@proton.me>",
+    "Takk\u2122 Innovate Studio <say@takk.ag>"
+   ],
+   "description": "\ud83d\udcfa The original Cyberpunk 2077 theme transforms your coding environment with the exact vibrant colors used by CD Projekt Red's designers.",
+   "download_count": 0,
+   "id": "cyberpunk-2077",
+   "name": "Cyberpunk 2077 Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:12:48Z",
+   "repository": "https://github.com/takk8is/cyberpunk-2077-theme-for-zed",
+   "schema_version": 2,
+   "version": "2.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

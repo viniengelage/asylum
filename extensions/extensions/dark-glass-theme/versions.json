@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Magnus Pladsen <magnus_pladsen@hotmail.com>"
+   ],
+   "description": "A collection of translucent, blurred dark themes with 16 unique color tints",
+   "download_count": 0,
+   "id": "dark-glass-theme",
+   "name": "Transparent Prism Collection",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:13:03Z",
+   "repository": "https://github.com/magnuspladsen/dark-glass-theme",
+   "schema_version": 1,
+   "version": "0.3.0",
+   "wasm_api_version": null
+  }
+ ]
+}

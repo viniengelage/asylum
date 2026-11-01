@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ed Heltzel <ed@rainyday.media>"
+   ],
+   "description": "A community-driven theme inspired by Lovecraftian horror, ported from eldritch.nvim. Includes Eldritch (Cthulhu/default), Eldritch Midnight (formerly Deeper), Eldritch Abyss (formerly Dark), and Eldritch Dusk (light).",
+   "download_count": 0,
+   "id": "eldritch-theme",
+   "name": "Eldritch",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:14:45Z",
+   "repository": "https://github.com/edheltzel/eldritch-zed",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

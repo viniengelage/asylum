@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Andrew Gielow <awgielow@gmail.com>",
+    "Evan Simpson <evan@evan.news>"
+   ],
+   "description": "A darker theme for Zed based on the Darcula theme from Jetbrains IDEs",
+   "download_count": 0,
+   "id": "darcula-dark",
+   "name": "Darcula Dark Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:13:02Z",
+   "repository": "https://github.com/Not-a-cowfr/Darcula-Dark",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

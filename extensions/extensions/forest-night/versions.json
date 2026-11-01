@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Evgenii Gorodilov <jarith@fastmail.de>"
+   ],
+   "description": "Forest Night is a green based color scheme; it's designed to be warm and soft in order to protect developers' eyes",
+   "download_count": 0,
+   "id": "forest-night",
+   "name": "Forest Night Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:16:43Z",
+   "repository": "https://github.com/jarith/forest-night-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

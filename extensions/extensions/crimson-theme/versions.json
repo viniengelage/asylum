@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Kaem Viotto <kaemviotto@icloud.com>"
+   ],
+   "description": "A theme inspired by the t3.chat redesign colour scheme.",
+   "download_count": 0,
+   "id": "crimson-theme",
+   "name": "Crimson Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:11:31Z",
+   "repository": "https://github.com/kaem-e/zed-crimson-theme",
+   "schema_version": 1,
+   "version": "0.0.5",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "earomc"
+   ],
+   "description": "A very dark theme with vibrant, saturated syntax colors, creating a high contrast between code and backround.",
+   "download_count": 0,
+   "id": "earo-theme",
+   "name": "Earo Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:14:22Z",
+   "repository": "https://github.com/earomc/earo-theme-zed",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

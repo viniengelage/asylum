@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "blaqat <blaqat.ag@gmail.com>"
+   ],
+   "description": "Port of the Cyan Light Theme from the JetBrains Marketplace",
+   "download_count": 0,
+   "id": "cyan-light-theme",
+   "name": "Cyan Light Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:12:47Z",
+   "repository": "https://github.com/biaqat/cyan-light-theme-zed",
+   "schema_version": 1,
+   "version": "0.7.2",
+   "wasm_api_version": null
+  }
+ ]
+}

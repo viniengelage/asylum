@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "lsdanii <luisdanieldlcg@gmail.com>"
+   ],
+   "description": "A collection of Flutter snippets to improve your development speed.",
+   "download_count": 0,
+   "id": "flutter-snippets",
+   "name": "Flutter Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-01T11:16:41Z",
+   "repository": "https://github.com/luisdanieldlcg/flutter-snippets",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

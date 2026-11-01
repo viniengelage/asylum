@@ -1,0 +1,23 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Nando Vieira <me@fnando.com>"
+   ],
+   "description": "Syntax highlighting for Demo Tape terminal recording scripts",
+   "download_count": 0,
+   "id": "demotape",
+   "name": "Demo Tape",
+   "provides": [
+    "languages",
+    "grammars",
+    "snippets"
+   ],
+   "published_at": "2026-11-01T11:13:12Z",
+   "repository": "https://github.com/fnando/zed-demotape",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

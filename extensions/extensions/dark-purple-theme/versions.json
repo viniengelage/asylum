@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Dominik Berger <dominik.berger@protonmail.com>"
+   ],
+   "description": "Ported from the Jetbrains Dark Purple Theme",
+   "download_count": 0,
+   "id": "dark-purple-theme",
+   "name": "Dark Purple Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:13:05Z",
+   "repository": "https://github.com/brgr/dark-purple-theme-for-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

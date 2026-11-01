@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Leo Douglas"
+   ],
+   "description": "Eiwa language support.",
+   "download_count": 0,
+   "id": "eiwa",
+   "name": "Eiwa",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-01T11:14:44Z",
+   "repository": "https://github.com/eiwa-lang/zed-extension",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

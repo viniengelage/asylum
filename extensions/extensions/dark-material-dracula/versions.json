@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Wlad Paiva"
+   ],
+   "description": "A dark theme combining Material and Dracula colors.",
+   "download_count": 0,
+   "id": "dark-material-dracula",
+   "name": "Dark Material Dracula",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:13:04Z",
+   "repository": "https://github.com/wladpaiva/zed-dark-material-dracula",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

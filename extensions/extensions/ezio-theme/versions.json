@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Derek Santolo"
+   ],
+   "description": "The Ezio theme for Zed.",
+   "download_count": 0,
+   "id": "ezio-theme",
+   "name": "Ezio Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:15:37Z",
+   "repository": "https://github.com/dsantolo/ezio-zed",
+   "schema_version": 1,
+   "version": "0.0.8",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "enderahmetyurt <enderyurt@gmail.com>"
+   ],
+   "description": "Essential ERB snippets for faster development",
+   "download_count": 0,
+   "id": "erb-snippets",
+   "name": "ERB Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-01T11:15:30Z",
+   "repository": "https://github.com/enderahmetyurt/zed-erb-snippets",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

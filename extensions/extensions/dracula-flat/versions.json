@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "WangWindow <1598593280@qq.com>"
+   ],
+   "description": "Dracula theme (flat version) for Zed",
+   "download_count": 0,
+   "id": "dracula-flat",
+   "name": "Dracula Flat",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:14:05Z",
+   "repository": "https://github.com/WangWindows/dracula-theme-zed",
+   "schema_version": 1,
+   "version": "1.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Hari Bantwal <hpai.bantwal@gmail.com>"
+   ],
+   "description": "Zed Extension for cypher",
+   "download_count": 0,
+   "id": "cypher",
+   "name": "Cypher",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-01T11:12:50Z",
+   "repository": "https://github.com/pupli/cypher",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

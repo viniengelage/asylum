@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "fwcd"
+   ],
+   "description": "Curry language support for Zed",
+   "download_count": 0,
+   "id": "curry",
+   "name": "Curry",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-01T11:12:27Z",
+   "repository": "https://github.com/fwcd/zed-curry",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

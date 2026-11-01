@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Eduardo <eduardo@lecdt.com>"
+   ],
+   "description": "EduSites theme for Zed \u2014 dark and light variants based on the EduSites visual identity.",
+   "download_count": 0,
+   "id": "edusites-theme",
+   "name": "EduSites",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:14:28Z",
+   "repository": "https://github.com/eduardolecdt/edusites-theme-zed",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

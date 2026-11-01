@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Your Name <your.email@example.com>"
+   ],
+   "description": "A darker magical theme for Zed Code Editor",
+   "download_count": 0,
+   "id": "dev-magic",
+   "name": "Dev Magic",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:13:36Z",
+   "repository": "https://github.com/yourusername/dev-magic",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

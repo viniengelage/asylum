@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "RajaSunrise <indra020204@gmail.com>"
+   ],
+   "description": "A comprehensive collection of production-ready FastAPI snippets for the Zed code editor. Boost your development speed with templates for endpoints, security, database models, FastAPI Cloud, and more.",
+   "download_count": 0,
+   "id": "fastapi-snippets",
+   "name": "Fastapi Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-01T11:16:02Z",
+   "repository": "https://github.com/NarmadaWeb/fastapi-snippets-zed",
+   "schema_version": 1,
+   "version": "0.3.0",
+   "wasm_api_version": null
+  }
+ ]
+}

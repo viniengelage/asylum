@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Oneptica <dev@oneptica.com>"
+   ],
+   "description": "Neon Genesis Evangelion inspired dark theme. Unit 01 purple, LCL orange, and NERV aesthetics.",
+   "download_count": 0,
+   "id": "eva-theme",
+   "name": "Evangelion",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:15:32Z",
+   "repository": "https://github.com/Oneptica/Zed-Theme-Evangelion",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

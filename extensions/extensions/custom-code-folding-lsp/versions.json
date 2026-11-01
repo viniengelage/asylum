@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ali Ramadhan <ali.hh.ramadhan@gmail.com>",
+    "Tomas Chor <tomas.chor@atdepthmrv.com>"
+   ],
+   "description": "Configurable code folding with custom comment markers",
+   "download_count": 0,
+   "id": "custom-code-folding-lsp",
+   "name": "Custom Code Folding",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-11-01T11:12:44Z",
+   "repository": "https://github.com/tomchor/zed-custom-code-folding",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": "0.7.0"
+  }
+ ]
+}

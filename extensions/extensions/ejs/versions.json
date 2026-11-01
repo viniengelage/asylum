@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Dang Huynh"
+   ],
+   "description": "EJS template support for Zed",
+   "download_count": 0,
+   "id": "ejs",
+   "name": "EJS",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-01T11:14:44Z",
+   "repository": "https://github.com/dangh/zed-ejs",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "BastenIT"
+   ],
+   "description": "Packagist links, installed versions, and update hints for composer.json files.",
+   "download_count": 0,
+   "id": "composer-lsp",
+   "name": "Composer LSP",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-11-01T11:10:59Z",
+   "repository": "https://github.com/BastenIT/zed-composer-support",
+   "schema_version": 1,
+   "version": "0.2.6",
+   "wasm_api_version": "0.7.0"
+  }
+ ]
+}

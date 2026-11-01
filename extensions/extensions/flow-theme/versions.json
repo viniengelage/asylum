@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ric's Dev <ricdev.io@gmail.com>"
+   ],
+   "description": "Flow Theme for Zed",
+   "download_count": 0,
+   "id": "flow-theme",
+   "name": "Flow Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:16:39Z",
+   "repository": "https://github.com/Rics-Dev/zed-flow-theme",
+   "schema_version": 1,
+   "version": "1.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

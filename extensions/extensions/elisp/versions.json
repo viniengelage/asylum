@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Joseph Lyons <JosephTLyons@gmail.com>"
+   ],
+   "description": "Elisp language support for Zed",
+   "download_count": 0,
+   "id": "elisp",
+   "name": "Elisp",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-01T11:14:46Z",
+   "repository": "https://github.com/JosephTLyons/zed-elisp",
+   "schema_version": 1,
+   "version": "0.0.5",
+   "wasm_api_version": null
+  }
+ ]
+}

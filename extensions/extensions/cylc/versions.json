@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Elliot Fontaine <elliot.fontaine@gmail.com>"
+   ],
+   "description": "Cylc configuration files support.",
+   "download_count": 0,
+   "id": "cylc",
+   "name": "Cylc",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-01T11:12:49Z",
+   "repository": "https://github.com/elliotfontaine/zed-cylc",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

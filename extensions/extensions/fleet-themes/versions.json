@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Lihuen Molina <lihue.molina@gmail.com>"
+   ],
+   "description": "\ud83d\udea2 Transform Zed with Fleet's sleek, modern aesthetic for a sublime coding experience.",
+   "download_count": 0,
+   "id": "fleet-themes",
+   "name": "Fleet Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:16:36Z",
+   "repository": "https://github.com/skarline/zed-fleet-themes",
+   "schema_version": 1,
+   "version": "1.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

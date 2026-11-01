@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Donnie Adams <donnie@thedadams.com>"
+   ],
+   "description": "Comment language extension for highlighting special comments",
+   "download_count": 0,
+   "id": "comment",
+   "name": "Comments Highlighter",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-01T11:10:38Z",
+   "repository": "https://github.com/thedadams/zed-comment",
+   "schema_version": 1,
+   "version": "0.6.8",
+   "wasm_api_version": null
+  }
+ ]
+}

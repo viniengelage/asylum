@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Kyle Huggins <kyle@huggins.io>"
+   ],
+   "description": "Cooklang support.",
+   "download_count": 0,
+   "id": "cooklang",
+   "name": "Cooklang",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-01T11:11:01Z",
+   "repository": "https://github.com/hugginsio/zed-cooklang",
+   "schema_version": 1,
+   "version": "1.3.3",
+   "wasm_api_version": null
+  }
+ ]
+}

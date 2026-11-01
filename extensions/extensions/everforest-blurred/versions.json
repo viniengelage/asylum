@@ -1,0 +1,23 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Sainnhe",
+    "Thomas Alban",
+    "Daniel Illescas Rromero"
+   ],
+   "description": "Everforest Dark Medium with blurred backgrounds and high contrast.",
+   "download_count": 0,
+   "id": "everforest-blurred",
+   "name": "Everforest Blurred",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:15:33Z",
+   "repository": "https://github.com/illescasDaniel/everforest-blurred-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

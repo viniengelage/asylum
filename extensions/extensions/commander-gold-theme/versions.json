@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ilya Ashchepkov"
+   ],
+   "description": "A Zed theme inspired by Norton Commander, Midnight Commander, and Borland editors: deep blue surfaces with gold text.",
+   "download_count": 0,
+   "id": "commander-gold-theme",
+   "name": "Commander Gold Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:10:32Z",
+   "repository": "https://github.com/koctep/z-commander-gold-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

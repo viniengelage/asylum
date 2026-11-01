@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Esteban H. Acevedo A."
+   ],
+   "description": "\ud83d\udc8e It's a beautiful theme for Zed Editor",
+   "download_count": 0,
+   "id": "esmerald-theme",
+   "name": "Esmerald",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:15:32Z",
+   "repository": "https://github.com/esthorace/esmerald-zed.git",
+   "schema_version": 1,
+   "version": "0.1.2",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Artem Zakharchenko"
+   ],
+   "description": "A port of the Evil Rabbit theme.",
+   "download_count": 0,
+   "id": "evil-rabbit-theme",
+   "name": "Evil Rabbit Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:15:34Z",
+   "repository": "https://github.com/kettanaito/zed-theme-evil-rabbit",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

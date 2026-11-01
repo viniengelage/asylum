@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "mizdra <pp.mizdra@gmail.com>"
+   ],
+   "description": "The Zed extension for CSS Modules Kit",
+   "download_count": 0,
+   "id": "css-modules-kit",
+   "name": "CSS Modules Kit",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-11-01T11:12:02Z",
+   "repository": "https://github.com/mizdra/css-modules-kit",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": "0.7.0"
+  }
+ ]
+}

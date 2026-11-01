@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Yefimov Valentyn <valentine.efimov@gmail.com>"
+   ],
+   "description": "A JetBrains-inspired dark theme for Zed with balanced contrast and refined syntax colors.",
+   "download_count": 0,
+   "id": "efa-dark-theme",
+   "name": "Efa Dark Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:14:28Z",
+   "repository": "https://github.com/valyefimov/zed-theme-efa-dark",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

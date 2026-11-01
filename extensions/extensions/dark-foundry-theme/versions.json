@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Giossue"
+   ],
+   "description": "A curated dark theme collection with aurora, graphite and sakura-inspired palettes.",
+   "download_count": 0,
+   "id": "dark-foundry-theme",
+   "name": "Dark Foundry Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:13:03Z",
+   "repository": "https://github.com/giossue/dark-foundry-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

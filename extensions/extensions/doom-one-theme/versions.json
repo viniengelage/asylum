@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "bashln",
+    "Leo"
+   ],
+   "description": "A faithful and vibrant port of the Doom One theme from Doom Emacs to Zed.",
+   "download_count": 0,
+   "id": "doom-one-theme",
+   "name": "Doom One",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:14:02Z",
+   "repository": "https://github.com/bashln/zed-doom",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

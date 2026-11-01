@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ngonidzashe Mangudya <ngmangudya@gmail.com>"
+   ],
+   "description": "This theme is perfect for those who want a sleek and professional look for their editor.",
+   "download_count": 0,
+   "id": "emerald-night",
+   "name": "Emerald Night",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:15:10Z",
+   "repository": "https://github.com/iamngoni/emerald-night-theme",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

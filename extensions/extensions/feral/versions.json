@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Elec <feral@mail.electrux.me>"
+   ],
+   "description": "Language support for the Feral programming language",
+   "download_count": 0,
+   "id": "feral",
+   "name": "Feral",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-01T11:16:23Z",
+   "repository": "https://github.com/Feral-Lang/Zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

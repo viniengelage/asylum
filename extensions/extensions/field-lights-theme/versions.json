@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Adam Sharif <adamsharifc@gmail.com>"
+   ],
+   "description": "Field Lights is a dark Visual Studio Theme inspired by the great Ayu (Mirage) theme but adding some personal taste customizations. Original implementation by Sebasti\u00e1n Veggiani.",
+   "download_count": 0,
+   "id": "field-lights-theme",
+   "name": "Field Lights",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:16:27Z",
+   "repository": "https://github.com/adamsharifc/zed-field-lights",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Shelton Louis <louisshelton0@gmail.com>"
+   ],
+   "description": "EBNF language support.",
+   "download_count": 0,
+   "id": "ebnf",
+   "name": "EBNF",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-01T11:14:24Z",
+   "repository": "https://github.com/louiss0/zed-ebnf",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

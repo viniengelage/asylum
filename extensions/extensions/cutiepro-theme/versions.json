@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "wuemeli <heelo@wuemeli.com>"
+   ],
+   "description": "A dark pastel theme emphasizing warm colors and extraordinarily cute, girly vibes",
+   "download_count": 0,
+   "id": "cutiepro-theme",
+   "name": "Cutiepro Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:12:47Z",
+   "repository": "https://codeberg.org/wuemeli/cutiepro-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

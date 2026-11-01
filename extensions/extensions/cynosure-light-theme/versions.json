@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Storm Maxwell"
+   ],
+   "description": "Cyberpunk 2077, Phantom Liberty inspired theme",
+   "download_count": 0,
+   "id": "cynosure-light-theme",
+   "name": "Cynosure Light Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:12:49Z",
+   "repository": "https://github.com/SM2507/cynosure-light-theme.git",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

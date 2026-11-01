@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Finorion <mooo@duck.com>"
+   ],
+   "description": "\u2604\ufe0f Calm, medium contrast, dark and flat theme for Zed editor",
+   "download_count": 0,
+   "id": "fineorite-theme",
+   "name": "Fineorite",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:16:30Z",
+   "repository": "https://github.com/Finorion/zed-fineorite",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

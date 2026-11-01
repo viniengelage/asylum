@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "ozacod"
+   ],
+   "description": "Doxygen documentation comment support for C, C++, and other languages.",
+   "download_count": 0,
+   "id": "doxygen",
+   "name": "Doxygen",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-01T11:14:04Z",
+   "repository": "https://github.com/ozacod/zed-doxygen",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

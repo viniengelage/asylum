@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Roter-S"
+   ],
+   "description": "A dark theme with deep blue-gray tones",
+   "download_count": 0,
+   "id": "deep-slate-theme",
+   "name": "Deep Slate",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:13:10Z",
+   "repository": "https://github.com/Roter-S/deep-slate-vscode",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

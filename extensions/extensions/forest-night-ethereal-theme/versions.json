@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "bashln",
+    "Forrest Knight"
+   ],
+   "description": "A deep blue-slate aesthetic for Zed with muted forest green, teal, purple and amber accents.",
+   "download_count": 0,
+   "id": "forest-night-ethereal-theme",
+   "name": "Forest Night Ethereal",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:16:44Z",
+   "repository": "https://github.com/bashln/zed-forest-night-ethereal-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

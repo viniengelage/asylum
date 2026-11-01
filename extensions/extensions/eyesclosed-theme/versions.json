@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ethan Lee"
+   ],
+   "description": "A low-chroma dark theme, read by brightness rather than hue",
+   "download_count": 0,
+   "id": "eyesclosed-theme",
+   "name": "eyesclosed",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:15:36Z",
+   "repository": "https://github.com/thdxg/eyesclosed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

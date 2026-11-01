@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Kenneth Joshua Becaro <joshuabecaro@gmail.com>"
+   ],
+   "description": "C# snippets for Zed IDE.",
+   "download_count": 0,
+   "id": "csharp-snippets",
+   "name": "C# Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-01T11:11:43Z",
+   "repository": "https://github.com/kenBinary/csharp-zed-snippets",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

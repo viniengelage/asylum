@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Arturo Negrete <contact@arturonegrete.com>"
+   ],
+   "description": "A soft theme featuring warm beige and browns.",
+   "download_count": 0,
+   "id": "dream",
+   "name": "Dream",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:14:06Z",
+   "repository": "https://github.com/arturonegrete-dev/Dream-zed",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

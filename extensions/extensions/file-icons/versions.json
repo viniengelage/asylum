@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Anton Palgunov <toxblh@gmail.com>"
+   ],
+   "description": "2000+ file and folder icons for Zed, ported from the popular file-icons/vscode theme.",
+   "download_count": 0,
+   "id": "file-icons",
+   "name": "File Icons",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-11-01T11:16:29Z",
+   "repository": "https://github.com/toxblh/zed-file-icons",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

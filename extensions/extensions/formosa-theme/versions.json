@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Takeshi Yu <hey@ywh.sh>"
+   ],
+   "description": "A theme inspired by Porsche 911 Carrera T Formosa Taiwan Limited Edition. Colors extracted from Ipanema Blue, Night Green, Truffle Brown, and Cream White.",
+   "download_count": 0,
+   "id": "formosa-theme",
+   "name": "Formosa Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:16:44Z",
+   "repository": "https://github.com/takeshiyu/formosa-zed-theme",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

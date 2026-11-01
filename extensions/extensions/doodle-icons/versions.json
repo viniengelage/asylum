@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Alris <alrisdhanwani@protonmail.com>"
+   ],
+   "description": "Goofy hand-drawn icon theme inspired by dd-icons in VS Code",
+   "download_count": 0,
+   "id": "doodle-icons",
+   "name": "Doodle Icons",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-11-01T11:14:02Z",
+   "repository": "https://github.com/MrCheesie/doodle-icons",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

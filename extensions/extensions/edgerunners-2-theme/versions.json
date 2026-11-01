@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "NickTriez"
+   ],
+   "description": "Based on Cyberpunk Edgerunners 2",
+   "download_count": 0,
+   "id": "edgerunners-2-theme",
+   "name": "Edgerunners 2",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:14:26Z",
+   "repository": "https://github.com/Nicktriez/edgerunners-2-zed-editor-themes",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

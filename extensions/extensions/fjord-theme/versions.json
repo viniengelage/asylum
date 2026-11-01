@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Josh Huntley"
+   ],
+   "description": "Dusk-blue base with soft leaf-green accents, cyan selections, and crisp blue/cyan separation.",
+   "download_count": 0,
+   "id": "fjord-theme",
+   "name": "Fjord",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:16:34Z",
+   "repository": "https://github.com/fjord-themes/fjord-zed",
+   "schema_version": 1,
+   "version": "0.1.5",
+   "wasm_api_version": null
+  }
+ ]
+}

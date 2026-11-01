@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "rbprsp <relonychan@proton.me>"
+   ],
+   "description": "Syntax highlighting for the Drogon CSP template language",
+   "download_count": 0,
+   "id": "drogon-csp",
+   "name": "Drogon CSP",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-01T11:14:06Z",
+   "repository": "https://github.com/rbprsp/zed-drogon-csp",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

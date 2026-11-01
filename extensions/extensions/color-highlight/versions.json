@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Jason Lee <huacnlee@gmail.com>"
+   ],
+   "description": "Highlight colors in your editor based on color-lsp.",
+   "download_count": 0,
+   "id": "color-highlight",
+   "name": "Color Highlight",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-11-01T11:10:30Z",
+   "repository": "https://github.com/huacnlee/color-lsp/tree/main/zed-color-highlight",
+   "schema_version": 1,
+   "version": "0.2.2",
+   "wasm_api_version": "0.7.0"
+  }
+ ]
+}

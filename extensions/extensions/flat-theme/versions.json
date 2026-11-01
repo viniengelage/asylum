@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "blaqat <blaqat.ag@gmail.com>"
+   ],
+   "description": "Minimal, easy on the eyes theme inspired by flatwhite syntax from Atom",
+   "download_count": 0,
+   "id": "flat-theme",
+   "name": "Flat Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:16:35Z",
+   "repository": "https://github.com/biaqat/flat-theme-zed",
+   "schema_version": 1,
+   "version": "0.5.1",
+   "wasm_api_version": null
+  }
+ ]
+}

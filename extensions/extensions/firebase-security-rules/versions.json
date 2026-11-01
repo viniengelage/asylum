@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Guilherme Caldas <gcaldas@chemis.tech>"
+   ],
+   "description": "Firebase Security Rules language support.",
+   "download_count": 0,
+   "id": "firebase-security-rules",
+   "name": "Firebase Security Rules",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-01T11:16:31Z",
+   "repository": "https://github.com/ChemisTechlabs/zed-firebase-security-rules",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

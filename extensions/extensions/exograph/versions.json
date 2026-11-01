@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Affan Shahid <affan.shahid.94@gmail.com>"
+   ],
+   "description": "Exograph syntax highlighting.",
+   "download_count": 0,
+   "id": "exograph",
+   "name": "Exograph",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-01T11:15:35Z",
+   "repository": "https://github.com/exograph/zed-extension",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

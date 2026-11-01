@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "malucart"
+   ],
+   "description": "A very dark, colorful theme for focus and readability",
+   "download_count": 0,
+   "id": "dark-castle-theme",
+   "name": "Dark Castle Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:13:03Z",
+   "repository": "https://github.com/malucard/dark-castle-theme-zed",
+   "schema_version": 1,
+   "version": "0.0.4",
+   "wasm_api_version": null
+  }
+ ]
+}

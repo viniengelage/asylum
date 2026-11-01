@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "iamanuclearwarhead"
+   ],
+   "description": "Muted plum background with pastel pink accents. A dark and light theme.",
+   "download_count": 0,
+   "id": "dusty-plum-theme",
+   "name": "Dusty Plum",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:14:21Z",
+   "repository": "https://github.com/iamanuclearwarhead/zed-dusty-plum",
+   "schema_version": 1,
+   "version": "0.1.2",
+   "wasm_api_version": null
+  }
+ ]
+}

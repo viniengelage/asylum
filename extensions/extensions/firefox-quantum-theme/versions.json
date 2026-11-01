@@ -1,0 +1,23 @@
+{
+ "data": [
+  {
+   "authors": [
+    "beastdestroyer <https://github.com/beastdestroyer>",
+    "chpxu https://github.com/chpxu",
+    "devinaxo <https://github.com/devinaxo>"
+   ],
+   "description": "A Zed port of the Firefox Quantum themes for Visual Studio Code, based on Firefox DevTools colors",
+   "download_count": 0,
+   "id": "firefox-quantum-theme",
+   "name": "Firefox Quantum Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:16:31Z",
+   "repository": "https://github.com/devinaxo/zed-firefox-quantum-themes",
+   "schema_version": 1,
+   "version": "1.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

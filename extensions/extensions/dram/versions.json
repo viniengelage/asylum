@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "ClamJohnston"
+   ],
+   "description": "Dram is a lush green and blue color scheme for Zed utilizing the color palette from the science fantasy roguelike epic Caves of Qud. It is evocative of the venerable Solarized Dark by Ethan Schoonover.",
+   "download_count": 0,
+   "id": "dram",
+   "name": "Dram",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:14:06Z",
+   "repository": "https://github.com/clamjohnston/dram",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

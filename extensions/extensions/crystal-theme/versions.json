@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Vova K <v1mkss.m@gmail.com> | CrystalNetwork Studio"
+   ],
+   "description": "A sleek and modern theme for Zed inspired by crystal formations, featuring vibrant colors and smooth gradients for enhanced coding aesthetics and readability",
+   "download_count": 0,
+   "id": "crystal-theme",
+   "name": "CrystalTheme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:11:42Z",
+   "repository": "https://gitlab.com/crystalnetwork-studio/themes/zed-editor",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Thomas Simmer"
+   ],
+   "description": "Inspired by Cyberpunk 2077 (Arasaka, Biotechnica, Softsys, NCPD, Kang Tao, Militech, Delamain, Pink neon, Mox), on One Dark and One Dark Pro greys",
+   "download_count": 0,
+   "id": "cyberpunk-2077-theme",
+   "name": "Cyberpunk 2077",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:12:48Z",
+   "repository": "https://github.com/thomassimmer/cyberpunk-2077-zed-extension",
+   "schema_version": 1,
+   "version": "0.0.4",
+   "wasm_api_version": null
+  }
+ ]
+}

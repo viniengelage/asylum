@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Panxiaoan \ud83c\udf43"
+   ],
+   "description": "\ud83e\udd85 A gentle, eye-friendly themes to protect your eyesight for Zed. \u4e00\u4e2a\u6e29\u548c\u7684\uff0c\u5bf9\u773c\u775b\u53cb\u597d\uff0c\u4fdd\u62a4\u89c6\u529b\u7684 Zed \u62a4\u773c\u4e3b\u9898\u3002",
+   "download_count": 0,
+   "id": "falcon-theme",
+   "name": "Falcon Relaxing-Eyes Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:15:41Z",
+   "repository": "https://github.com/panxiaoan/falcon-zed-themes",
+   "schema_version": 1,
+   "version": "1.0.10",
+   "wasm_api_version": null
+  }
+ ]
+}

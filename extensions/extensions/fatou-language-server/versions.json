@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Johan Larsson <johan@jolars.co>"
+   ],
+   "description": "Language server, formatter, and linter for Julia",
+   "download_count": 0,
+   "id": "fatou-language-server",
+   "name": "Fatou",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-11-01T11:16:21Z",
+   "repository": "https://github.com/jolars/fatou",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": "0.6.0"
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Vatsal Sanjay <vatsalsanjay@gmail.com>"
+   ],
+   "description": "CoMPhy Lab editor themes: Crisp Velvet (jewel-toned syntax on plum-tinted dark) and Gruvbox Plum, matching the lab VS Code, Neovim and Obsidian themes",
+   "download_count": 0,
+   "id": "comphy-crisp-themes",
+   "name": "CoMPhy Crisp Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:10:39Z",
+   "repository": "https://github.com/comphy-lab/comphy-zed-themes",
+   "schema_version": 1,
+   "version": "1.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

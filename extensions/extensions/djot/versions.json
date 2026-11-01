@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Noah Zoschke <noah@housecat.com>"
+   ],
+   "description": "Djot markup language support",
+   "download_count": 0,
+   "id": "djot",
+   "name": "Djot",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-01T11:13:58Z",
+   "repository": "https://github.com/nzoschke/zed-djot",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

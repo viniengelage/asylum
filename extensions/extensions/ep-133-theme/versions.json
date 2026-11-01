@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Evgenii Sergeev"
+   ],
+   "description": "Inspired by Teenage Engineering",
+   "download_count": 0,
+   "id": "ep-133-theme",
+   "name": "EP-133",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:15:30Z",
+   "repository": "https://github.com/evgenii-sergeev/zed-ep-133",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

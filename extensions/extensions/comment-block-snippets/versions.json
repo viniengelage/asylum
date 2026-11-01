@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Rami Shalhoub <rami2002.work@gmail.com>"
+   ],
+   "description": "snippets to add comment blocks",
+   "download_count": 0,
+   "id": "comment-block-snippets",
+   "name": "Comment Blocks",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-01T11:10:38Z",
+   "repository": "https://github.com/rami-shalhoub/comment-blocks-zed",
+   "schema_version": 1,
+   "version": "1.0.4",
+   "wasm_api_version": null
+  }
+ ]
+}

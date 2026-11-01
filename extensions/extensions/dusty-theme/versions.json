@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Clay Loveless <clay@loveless.net>"
+   ],
+   "description": "Like an old friend. Muted navy theme with bright accents.",
+   "download_count": 0,
+   "id": "dusty-theme",
+   "name": "Dusty",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:14:21Z",
+   "repository": "https://github.com/claylo/dusty-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

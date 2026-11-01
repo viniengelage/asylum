@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Aatricks"
+   ],
+   "description": "Flat dark theme for Zed - Clean, minimalist design with consistent colors",
+   "download_count": 0,
+   "id": "flat-themes",
+   "name": "Flat Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:16:35Z",
+   "repository": "https://github.com/Aatricks/zed-flat-theme",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

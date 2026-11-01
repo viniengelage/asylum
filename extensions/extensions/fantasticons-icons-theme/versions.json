@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Caio Landgraf <eu.caiolandgraf@gmail.com>"
+   ],
+   "description": "A fastastic icon theme for Zed",
+   "download_count": 0,
+   "id": "fantasticons-icons-theme",
+   "name": "FantastIcons",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-11-01T11:16:01Z",
+   "repository": "https://github.com/caiolandgraf/fantasticons-zed",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

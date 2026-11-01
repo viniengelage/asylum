@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "kargency@gmail.com"
+   ],
+   "description": "Easy to read, no gray-on-white fonts, red highlights.",
+   "download_count": 0,
+   "id": "easy-opaque-theme",
+   "name": "Easy Opaque",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:14:23Z",
+   "repository": "https://github.com/KarmanyaIyer/zed-easy-opaque-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

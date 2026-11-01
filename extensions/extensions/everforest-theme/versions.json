@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Sainnhe <https://github.com/sainnhe>",
+    "Thomas Alban <https://github.com/ThomasAlban>"
+   ],
+   "description": "Everforest is a green based color scheme; it's designed to be warm and soft in order to protect developers' eyes.",
+   "download_count": 0,
+   "id": "everforest-theme",
+   "name": "Everforest Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:15:33Z",
+   "repository": "https://github.com/ThomasAlban/everforest-zed",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Okan KARAMAN <karamanokan@msn.com>"
+   ],
+   "description": "A dark theme inspired by IntelliJ IDEA's Darcula theme",
+   "download_count": 0,
+   "id": "darcula-dark-okkano",
+   "name": "Darcula Dark Theme - Okkano Version",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:13:02Z",
+   "repository": "https://github.com/okkan/zed-darcula-dark-okkano",
+   "schema_version": 1,
+   "version": "0.1.4",
+   "wasm_api_version": null
+  }
+ ]
+}

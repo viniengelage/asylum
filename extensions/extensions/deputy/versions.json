@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Filip Tibell <filip.tibell@gmail.com>",
+    "teapo <4teapo@gmail.com>"
+   ],
+   "description": "Autocomplete, hover info, and more for your dependencies",
+   "download_count": 0,
+   "id": "deputy",
+   "name": "Deputy",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-11-01T11:13:34Z",
+   "repository": "https://github.com/filiptibell/deputy",
+   "schema_version": 1,
+   "version": "1.0.1",
+   "wasm_api_version": "0.6.0"
+  }
+ ]
+}

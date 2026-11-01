@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Sergej Suskov <sergej.suskov@gmail.com>"
+   ],
+   "description": "FHIR Shorthand (FSH) language support for Zed: syntax highlighting, bracket matching, and code outline for .fsh files.",
+   "download_count": 0,
+   "id": "fhir-shorthand",
+   "name": "FHIR Shorthand",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-01T11:16:26Z",
+   "repository": "https://github.com/spilikin/zed-fhir-shorthand",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

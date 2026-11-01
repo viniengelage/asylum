@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "zangetsu"
+   ],
+   "description": "A theme for Zed inspired by Discord's new theme.",
+   "download_count": 0,
+   "id": "dark-discord",
+   "name": "Discord Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:13:03Z",
+   "repository": "https://github.com/zangetsu02/zed-discord-theme.git",
+   "schema_version": 1,
+   "version": "2.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

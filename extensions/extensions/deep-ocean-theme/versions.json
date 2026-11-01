@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "axatbhardwaj"
+   ],
+   "description": "A deep ocean dark theme for Zed",
+   "download_count": 0,
+   "id": "deep-ocean-theme",
+   "name": "Deep Ocean",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:13:09Z",
+   "repository": "https://github.com/axatbhardwaj/deep-ocean-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

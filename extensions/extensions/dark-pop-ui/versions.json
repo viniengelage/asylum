@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Kunal Arora <kunal_arora@live.com>"
+   ],
+   "description": "Midnight hues with a neon twist \u2014 a dark theme that keeps your code stylish and your eyes happy.",
+   "download_count": 0,
+   "id": "dark-pop-ui",
+   "name": "\ud83c\udf0c Dark Pop UI \ud83c\udfa8",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:13:05Z",
+   "repository": "https://github.com/kunal-arora/zed-theme-dark-pop-ui",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "ACodingDay <yinshuaibi@gmail.com>"
+   ],
+   "description": "Erlang QoL: module and comment templates as snippets, ported from the erlang-code-generation VSCode extension",
+   "download_count": 0,
+   "id": "erlang-qol-snippets",
+   "name": "Erlang QoL Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-01T11:15:32Z",
+   "repository": "https://github.com/ACodingDay/erlang-qol-snippets",
+   "schema_version": 1,
+   "version": "0.1.2",
+   "wasm_api_version": null
+  }
+ ]
+}

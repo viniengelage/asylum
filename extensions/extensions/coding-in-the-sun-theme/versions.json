@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "tgrecojs"
+   ],
+   "description": "A high-contrast light theme for Zed, ported from Coding in the Sun for VS Code",
+   "download_count": 0,
+   "id": "coding-in-the-sun-theme",
+   "name": "Coding in the Sun",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:10:12Z",
+   "repository": "https://github.com/tgrecojs/coding-in-the-sun",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

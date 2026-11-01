@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Hasit Mistry <hasitnm@gmail.com>"
+   ],
+   "description": "Fish language support for Zed",
+   "download_count": 0,
+   "id": "fish",
+   "name": "Fish",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-01T11:16:34Z",
+   "repository": "https://github.com/hasit/zed-fish",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

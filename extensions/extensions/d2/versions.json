@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Gabriel Silva <gabe@gabe.id>"
+   ],
+   "description": "D2 support.",
+   "download_count": 0,
+   "id": "d2",
+   "name": "D2",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-01T11:12:56Z",
+   "repository": "https://github.com/gabeidx/zed-d2",
+   "schema_version": 1,
+   "version": "0.2.1",
+   "wasm_api_version": null
+  }
+ ]
+}

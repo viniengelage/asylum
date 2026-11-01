@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ayush Shukla <ayush@shuklaayu.sh>"
+   ],
+   "description": "Database Markup Language (DBML) support.",
+   "download_count": 0,
+   "id": "dbml",
+   "name": "DBML",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-01T11:13:08Z",
+   "repository": "https://github.com/shuklaayush/zed-dbml",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

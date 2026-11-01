@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "FedaykinDev"
+   ],
+   "description": "Dark Dune-inspired themes for Zed - industrial monochrome and warm desert palettes",
+   "download_count": 0,
+   "id": "fedaykin-themes",
+   "name": "Fedaykin Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-01T11:16:22Z",
+   "repository": "https://github.com/btriapitsyn/zed-fedaykin-themes",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}
