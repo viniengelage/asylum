@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "DCCXXV"
+   ],
+   "description": "Elegant dark themes using the Gato OS palette",
+   "download_count": 0,
+   "id": "gato-theme",
+   "name": "Gato Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:10:43Z",
+   "repository": "https://github.com/DCCXXV/gato-zed",
+   "schema_version": 1,
+   "version": "0.3.0",
+   "wasm_api_version": null
+  }
+ ]
+}

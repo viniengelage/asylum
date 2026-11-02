@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "PR454D <pr454d@protonmail.com>"
+   ],
+   "description": "Dark and light themes inspired by Frieren Beyond Journey's End",
+   "download_count": 0,
+   "id": "frieren-theme",
+   "name": "Frieren Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:10:13Z",
+   "repository": "https://github.com/PR454D/frieren-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

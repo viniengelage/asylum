@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "MaxGB23"
+   ],
+   "description": "A modern, vibrant, and expressive dark color theme for Zed. Crafted for React, TypeScript, and web development, with semantic syntax highlighting, vivid colors, and low eye strain.",
+   "download_count": 0,
+   "id": "funky-theme",
+   "name": "Funky Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:10:31Z",
+   "repository": "https://github.com/maxgb23/funky-theme",
+   "schema_version": 1,
+   "version": "0.2.1",
+   "wasm_api_version": null
+  }
+ ]
+}

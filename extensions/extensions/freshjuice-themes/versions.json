@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Alex Zappa @ FreshJuice.dev"
+   ],
+   "description": "FreshJuice theme collection for Zed \u2014 fruit-named dark themes",
+   "download_count": 0,
+   "id": "freshjuice-themes",
+   "name": "FreshJuice Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:10:12Z",
+   "repository": "https://github.com/freshjuice-dev/zed-themes",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

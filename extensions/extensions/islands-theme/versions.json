@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Matt McKenna"
+   ],
+   "description": "A theme inspired by JetBrains' Islands design system, with light and dark variants.",
+   "download_count": 0,
+   "id": "islands-theme",
+   "name": "Islands Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:15:54Z",
+   "repository": "https://github.com/himattm/zed-islands-theme",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

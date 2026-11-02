@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Pyae Sone Aung <pyaesoneaungrgn@gmail.com>",
+    "Clay Tercek"
+   ],
+   "description": "GitHub themes for Zed",
+   "download_count": 0,
+   "id": "github-theme",
+   "name": "Github Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:11:59Z",
+   "repository": "https://github.com/PyaeSoneAungRgn/github-zed-theme",
+   "schema_version": 1,
+   "version": "0.1.9",
+   "wasm_api_version": null
+  }
+ ]
+}

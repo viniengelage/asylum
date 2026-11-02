@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Pavel Lozinsky <pavel@lozinsky.dev>"
+   ],
+   "description": "Zed version of the popular Gatito Theme for VSCode.",
+   "download_count": 0,
+   "id": "gatito-theme",
+   "name": "Gatito Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:10:42Z",
+   "repository": "https://github.com/lozinsky/zed-gatito-theme",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

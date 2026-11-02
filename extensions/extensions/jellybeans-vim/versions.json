@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Raj Kashyap <rajkash06@gmail.com>"
+   ],
+   "description": "Zed port of nanotech's jellybeans.vim theme \ud83e\uded8",
+   "download_count": 0,
+   "id": "jellybeans-vim",
+   "name": "Jellybeans Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:20:53Z",
+   "repository": "https://github.com/rajerthat1/jellybeans.zed",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,23 @@
+{
+ "data": [
+  {
+   "authors": [
+    "River M",
+    "Jonathan Harty",
+    "Material Extensions contributors"
+   ],
+   "description": "Gruvbox Material icons for Zed.",
+   "download_count": 0,
+   "id": "gruvbox-material-icons",
+   "name": "Gruvbox Material Icon Theme",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-11-02T12:13:09Z",
+   "repository": "https://github.com/rivermatsumoto/gruvbox-material-icon-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

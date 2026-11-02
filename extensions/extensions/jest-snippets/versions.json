@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Tomas dev@tmsbkn.ca"
+   ],
+   "description": "Jest test snippets for Zed",
+   "download_count": 0,
+   "id": "jest-snippets",
+   "name": "Jest Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-02T12:20:55Z",
+   "repository": "https://github.com/tmsbkn/Jest-Snippets",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

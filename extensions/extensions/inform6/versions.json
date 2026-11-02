@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Sam Win-Mason <sam@albedogames.com>"
+   ],
+   "description": "Zed language support for the Inform 6 programming language.",
+   "download_count": 0,
+   "id": "inform6",
+   "name": "Inform 6",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:15:22Z",
+   "repository": "https://github.com/Or4c/zed-inform6",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "seekode <nicolas@seekode.dev>"
+   ],
+   "description": "Essential HTML snippets for faster development",
+   "download_count": 0,
+   "id": "html-snippets",
+   "name": "HTML Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-02T12:14:53Z",
+   "repository": "https://github.com/seekode/zed-html-snippets",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

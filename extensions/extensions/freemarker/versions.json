@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "debba <andrea@debbaweb.it>"
+   ],
+   "description": "Full-featured Freemarker Template Language support for Zed editor with tree-sitter-based syntax highlighting",
+   "download_count": 0,
+   "id": "freemarker",
+   "name": "Freemarker",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:10:10Z",
+   "repository": "https://github.com/debba/zed-freemarker",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

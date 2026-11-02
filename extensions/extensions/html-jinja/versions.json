@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Jaagup Averin"
+   ],
+   "description": "Highlighting for HTML-Jinja templates.",
+   "download_count": 0,
+   "id": "html-jinja",
+   "name": "HTML-Jinja Template Support",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:14:53Z",
+   "repository": "https://github.com/JaagupAverin/html-jinja",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

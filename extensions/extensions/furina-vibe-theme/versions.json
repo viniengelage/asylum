@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Hilrein (github.com/hilrein)"
+   ],
+   "description": "A dark blue theme inspired by Furina",
+   "download_count": 0,
+   "id": "furina-vibe-theme",
+   "name": "Furina Vibe Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:10:31Z",
+   "repository": "https://github.com/Hilrein/zed-Furina-vibe-theme",
+   "schema_version": 1,
+   "version": "0.1.2",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Snehasish Dawn <snehasishdawn29@gmail.com>"
+   ],
+   "description": "A colorful dark theme for Zed editor inspired by Jellybeans color scheme.",
+   "download_count": 0,
+   "id": "jellybeans-theme",
+   "name": "Jellybeans Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:20:52Z",
+   "repository": "https://github.com/sdawn29/jellybeans-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

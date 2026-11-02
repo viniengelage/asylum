@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Arthur Brussee <arthur.brussee@gmail.com>"
+   ],
+   "description": "A soothing dark theme. An editor full off soot, made into a high class place.",
+   "download_count": 0,
+   "id": "haku-dark-theme",
+   "name": "Haku Dark",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:36Z",
+   "repository": "https://github.com/ArthurBrussee/haku_dark",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,23 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Mikayla Maki <mikayla@zed.dev>"
+   ],
+   "description": "GLSL support.",
+   "download_count": 0,
+   "id": "glsl",
+   "name": "GLSL",
+   "provides": [
+    "languages",
+    "grammars",
+    "language-servers"
+   ],
+   "published_at": "2026-11-02T12:12:33Z",
+   "repository": "https://github.com/zed-industries/zed",
+   "schema_version": 1,
+   "version": "0.2.5",
+   "wasm_api_version": "0.1.0"
+  }
+ ]
+}

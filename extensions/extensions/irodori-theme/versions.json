@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Graham Rounds <gtrounds@gmail.com>"
+   ],
+   "description": "Statistically-averaged dark themes generated from Zed community color choices, with WCAG AA and AAA contrast variants.",
+   "download_count": 0,
+   "id": "irodori-theme",
+   "name": "Irodori",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:15:53Z",
+   "repository": "https://github.com/agrahamlincoln/irodori",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

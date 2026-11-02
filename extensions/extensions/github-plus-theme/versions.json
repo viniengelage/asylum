@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Nicola Peduzzi <thenikso@gmail.com>"
+   ],
+   "description": "\ud83d\udc19 Inspired by GitHub colors. Light and dark variants for a clear and coherent look.",
+   "download_count": 0,
+   "id": "github-plus-theme",
+   "name": "Github Plus Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:11:59Z",
+   "repository": "https://github.com/thenikso/github-plus-theme-zed",
+   "schema_version": 1,
+   "version": "1.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

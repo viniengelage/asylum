@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Soheil Fouladvandi <filip@janevski.dev>"
+   ],
+   "description": "A sleek, focused dark theme for Zed",
+   "download_count": 0,
+   "id": "gafelson",
+   "name": "gafelson Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:10:34Z",
+   "repository": "https://github.com/gafelson/zed-theme",
+   "schema_version": 1,
+   "version": "1.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

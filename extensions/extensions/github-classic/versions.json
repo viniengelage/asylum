@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Nguyen Dang Vinh <meocoder@gmail.com>"
+   ],
+   "description": "The classic GitHub Light and GitHub Dark themes for Zed",
+   "download_count": 0,
+   "id": "github-classic",
+   "name": "Github Classic",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:11:55Z",
+   "repository": "https://github.com/meocoder31099/Github-Classic-Theme-Zed",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Etienne Bacher"
+   ],
+   "description": "Jarl extension for Zed",
+   "download_count": 0,
+   "id": "jarl",
+   "name": "Jarl",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-11-02T12:16:51Z",
+   "repository": "https://github.com/etiennebacher/jarl",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": "0.2.0"
+  }
+ ]
+}

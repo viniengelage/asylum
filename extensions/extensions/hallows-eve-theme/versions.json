@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Fred Marques"
+   ],
+   "description": "Halloween-inspired dark and light themes with pumpkin orange, witchy violet, and ghostly green.",
+   "download_count": 0,
+   "id": "hallows-eve-theme",
+   "name": "Hallow's Eve",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:39Z",
+   "repository": "https://github.com/fredmarques/hallows-eve-theme",
+   "schema_version": 1,
+   "version": "0.2.1",
+   "wasm_api_version": null
+  }
+ ]
+}

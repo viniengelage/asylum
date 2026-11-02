@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Slipstream Max"
+   ],
+   "description": "Blurred JetBrains Dark theme for Zed",
+   "download_count": 0,
+   "id": "jetbrains-dark-blur-theme",
+   "name": "JetBrains Dark Blur",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:20:56Z",
+   "repository": "https://github.com/Slipstream-Max/jetbrains-dark-blur-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

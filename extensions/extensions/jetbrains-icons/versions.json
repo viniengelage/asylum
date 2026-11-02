@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Zeeshan Ahmad <ziishaned@gmail.com>"
+   ],
+   "description": "JetBrains Icons for Zed",
+   "download_count": 0,
+   "id": "jetbrains-icons",
+   "name": "JetBrains Icons",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-11-02T12:20:57Z",
+   "repository": "https://github.com/ziishaned/zed-jetbrains-icons",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Daniel Hillmann <daniel@hillmann.dev>"
+   ],
+   "description": "Zed port of the vscode V theme extension",
+   "download_count": 0,
+   "id": "hilleer-v-theme",
+   "name": "V Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:14:07Z",
+   "repository": "https://github.com/hilleer/zed-v-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

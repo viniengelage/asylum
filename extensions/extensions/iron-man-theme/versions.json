@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "bkataru"
+   ],
+   "description": "Theme for Zed. Arc-reactor gold, repulsor blue, and crimson red.",
+   "download_count": 0,
+   "id": "iron-man-theme",
+   "name": "Iron Man",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:15:53Z",
+   "repository": "https://github.com/bkataru/iron-man-zed",
+   "schema_version": 1,
+   "version": "2.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "gxanshu"
+   ],
+   "description": "A dark, minimalist theme inspired by Framer's code editor. Ported from the VS Code Framer Dark theme by Adam Seckel.",
+   "download_count": 0,
+   "id": "framer-dark-theme",
+   "name": "Framer Dark Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:10:08Z",
+   "repository": "https://github.com/gxanshu/zed-framer-dark",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

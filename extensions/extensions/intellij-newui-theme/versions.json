@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Kenny Pitt <kenny@pittcrew.org>"
+   ],
+   "description": "A Zed theme based on the JetBrains IntelliJ \"New UI\" colors (default Dark theme only).",
+   "download_count": 0,
+   "id": "intellij-newui-theme",
+   "name": "JetBrains New UI Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:15:30Z",
+   "repository": "https://github.com/kpitt/zed-theme-intellij-newui",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

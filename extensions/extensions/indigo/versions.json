@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "p3rception <dim.pergel@gmail.com>"
+   ],
+   "description": "Dark. Clean. Indigo.",
+   "download_count": 0,
+   "id": "indigo",
+   "name": "Indigo Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:15:20Z",
+   "repository": "https://github.com/p3rception/Indigo-zed",
+   "schema_version": 0,
+   "version": "0.1.2",
+   "wasm_api_version": null
+  }
+ ]
+}

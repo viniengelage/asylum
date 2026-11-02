@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "BinaryMoura <leomourait@fastmail.com>"
+   ],
+   "description": "A serene Zed IDE theme inspired by the quiet beauty of Mount Fuji and traditional Japanese countryside. Includes: FujiHaze Dark, FujiHaze Countryside (light), and FujiHaze Morning Mist (light).",
+   "download_count": 0,
+   "id": "fujihaze-theme",
+   "name": "FujiHaze Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:10:24Z",
+   "repository": "https://github.com/BinaryMoura/FujiHaze-Theme",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

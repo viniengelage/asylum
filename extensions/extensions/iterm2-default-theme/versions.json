@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Etan Heyman"
+   ],
+   "description": "The classic iTerm2 default dark color scheme for Zed \u2014 pure black background, familiar CGA ANSI colors, and a clean editor experience that feels like home for Mac terminal users.",
+   "download_count": 0,
+   "id": "iterm2-default-theme",
+   "name": "iTerm2 Default Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:15:57Z",
+   "repository": "https://github.com/EtanHey/zed-iterm-default-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

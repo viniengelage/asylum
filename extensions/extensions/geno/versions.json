@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "John Lyon-Smith <john@escapegallery.net>"
+   ],
+   "description": "Geno schema language support.",
+   "download_count": 0,
+   "id": "geno",
+   "name": "Geno",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:11:25Z",
+   "repository": "https://github.com/jlyonsmtih/zed-geno",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

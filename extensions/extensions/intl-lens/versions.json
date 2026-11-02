@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Trong Nguyen"
+   ],
+   "description": "Internationalization (i18n) support for Zed - inline translations, hover info, and diagnostics",
+   "download_count": 0,
+   "id": "intl-lens",
+   "name": "Intl Lens",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-11-02T12:15:50Z",
+   "repository": "https://github.com/nguyenphutrong/intl-lens",
+   "schema_version": 1,
+   "version": "0.1.5",
+   "wasm_api_version": "0.7.0"
+  }
+ ]
+}

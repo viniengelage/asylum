@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Alessandro Bruno <alessandro.brunoh@gmail.com>"
+   ],
+   "description": "Syntax highlighting support for Jhipster Domain Language",
+   "download_count": 0,
+   "id": "jdl",
+   "name": "Jhipster Domain Language Support",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:20:50Z",
+   "repository": "https://github.com/alessandrobrunoh/zed-grammar-jdl",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

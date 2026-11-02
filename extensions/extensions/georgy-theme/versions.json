@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Georgy"
+   ],
+   "description": "A dark theme family for Zed including Georgy Dark, Georgy Black, Georgy Black High, and Georgy Black Dim.",
+   "download_count": 0,
+   "id": "georgy-theme",
+   "name": "Georgy Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:11:28Z",
+   "repository": "https://github.com/GeorgyDesign/georgy-themes-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

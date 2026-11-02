@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "chandruscm"
+   ],
+   "description": "A light theme for Zed that replicates the default light theme that comes standard with IntelliJ IDEA / Android Studio.",
+   "download_count": 0,
+   "id": "intellij-light-theme",
+   "name": "IntelliJ Light Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:15:29Z",
+   "repository": "https://github.com/chandruscm/intellij-light-theme-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

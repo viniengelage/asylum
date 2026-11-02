@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Igor Dreher <igor.dreher@gmail.com>"
+   ],
+   "description": "HLSL Support",
+   "download_count": 0,
+   "id": "hlsl",
+   "name": "HLSL",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:14:15Z",
+   "repository": "https://github.com/igordreher/zed-hlsl",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

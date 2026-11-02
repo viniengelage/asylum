@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "ANKDDEV"
+   ],
+   "description": "JetBrains New UI icons theme for Zed",
+   "download_count": 0,
+   "id": "jetbrains-new-ui-icons",
+   "name": "JetBrains New UI Icon Theme",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-11-02T12:20:58Z",
+   "repository": "https://github.com/ankddev/zed-jetbrains-newui-icons",
+   "schema_version": 1,
+   "version": "2.2.1",
+   "wasm_api_version": null
+  }
+ ]
+}

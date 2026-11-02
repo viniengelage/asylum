@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Danielle Maywood <danielle@themaywoods.com>"
+   ],
+   "description": "Theme inspired by gleam.run",
+   "download_count": 0,
+   "id": "gleam-theme",
+   "name": "Gleam Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:12:08Z",
+   "repository": "https://github.com/DanielleMaywood/gleam-theme-zed",
+   "schema_version": 1,
+   "version": "0.2.1",
+   "wasm_api_version": null
+  }
+ ]
+}

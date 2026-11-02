@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Blue Amber"
+   ],
+   "description": "HubL syntax highlighting for HubSpot templates",
+   "download_count": 0,
+   "id": "hubl",
+   "name": "HubL",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:14:57Z",
+   "repository": "https://github.com/blueambr/zed-hubl",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

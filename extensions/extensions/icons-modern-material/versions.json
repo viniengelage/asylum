@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "JosMiguelMM <miguelmendezm0802@gmail.com>"
+   ],
+   "description": "A collection of icons for Zed",
+   "download_count": 0,
+   "id": "icons-modern-material",
+   "name": "Icons modern material",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-11-02T12:15:12Z",
+   "repository": "https://github.com/JosMiguelMM/icons-modern-material",
+   "schema_version": 1,
+   "version": "1.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

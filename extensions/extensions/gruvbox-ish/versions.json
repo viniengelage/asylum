@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Tristan F. <leodog896@gmail.ocm>"
+   ],
+   "description": "Gruvbox ish theme from VSCode ported to zed.",
+   "download_count": 0,
+   "id": "gruvbox-ish",
+   "name": "Gruvbox ish",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:07Z",
+   "repository": "https://github.com/LeoDog896/zed-gruvbox-ish",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

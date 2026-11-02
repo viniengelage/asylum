@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Pavel Vlasikhin <pavel@vlasikhin.com>"
+   ],
+   "description": "Syntax highlighting for /etc/hosts files",
+   "download_count": 0,
+   "id": "hosts",
+   "name": "Hosts",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:14:23Z",
+   "repository": "https://github.com/vlasikhin/zed-hosts",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "ssaunderss <austinsaunders@me.com>"
+   ],
+   "description": "Theme to help you celebrate Grimace's Birthday.",
+   "download_count": 0,
+   "id": "grimaces-birthday",
+   "name": "Grimace's Birthday",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:12:57Z",
+   "repository": "https://github.com/ssaunderss/grimaces-birthday",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

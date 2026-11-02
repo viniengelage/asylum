@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Pengfan Chang <developer@jpfchang.org>"
+   ],
+   "description": "An orange-dominant dark theme inspired by ionized gas glow.",
+   "download_count": 0,
+   "id": "gas-plasma-theme",
+   "name": "Gas Plasma Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:10:40Z",
+   "repository": "https://github.com/JohnThre/GasPlasma-theme",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Pengfan Chang <developer@jpfchang.org>"
+   ],
+   "description": "Orange-dominant file icons inspired by the Gas Plasma palette.",
+   "download_count": 0,
+   "id": "gas-plasma-icons",
+   "name": "Gas Plasma Icons",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-11-02T12:10:38Z",
+   "repository": "https://github.com/JohnThre/GasPlasma-theme",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

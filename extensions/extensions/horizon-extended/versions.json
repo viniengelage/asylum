@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "lancewilhelm <lance.wilhelm@gmail.com>"
+   ],
+   "description": "Brining over the mildly popular Horizon Extended theme from VSCode and Neovim",
+   "download_count": 0,
+   "id": "horizon-extended",
+   "name": "Horizon Extended",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:14:21Z",
+   "repository": "https://github.com/lancewilhelm/horizon-extended.zed.git",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

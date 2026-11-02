@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Daksh Sharma <www.dakshsharma.tech>"
+   ],
+   "description": "GitHub Actions workflow snippets for Zed.",
+   "download_count": 0,
+   "id": "github-actions-snippets",
+   "name": "GitHub Actions Snippet",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-02T12:11:54Z",
+   "repository": "https://github.com/frypan05/github-actions-snippet",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Hleb Bury <b4bury@gmail.com>"
+   ],
+   "description": "Liquid glass \u2014 a transparent, frosted theme (dark + light) for Zed",
+   "download_count": 0,
+   "id": "glass-theme",
+   "name": "Glass",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:12:05Z",
+   "repository": "https://github.com/b4bury/zed-glass",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

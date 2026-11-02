@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Jms Dnns <jdennis@gmail.com>"
+   ],
+   "description": "Turn off the lights and I'll glow",
+   "download_count": 0,
+   "id": "iceicebergy",
+   "name": "Ice Ice Bergy Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:15:11Z",
+   "repository": "https://github.com/jmsdnns/iceicebergy-zed-theme",
+   "schema_version": 1,
+   "version": "0.3.14",
+   "wasm_api_version": null
+  }
+ ]
+}

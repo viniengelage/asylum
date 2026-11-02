@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Eduardo Juliao <ejuliao9@gmail.com>"
+   ],
+   "description": "Gleam snippets for Zed IDE. A collection of Gleam snippets to improve your development speed.",
+   "download_count": 0,
+   "id": "gleam-snippets",
+   "name": "Gleam Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-02T12:12:08Z",
+   "repository": "https://github.com/BlueBlizzardd/gleam-zed-snippets",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Bronya0 <tangssst@163.com>"
+   ],
+   "description": "Darcula theme from Jetbrains IDE, Like IDEA/Goland/Pycharm\uff0cMy favorite theme, and you?",
+   "download_count": 0,
+   "id": "jetbrains-darcula-theme-by-bronya0",
+   "name": "Jetbrains Darcula theme by bronya0",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:20:55Z",
+   "repository": "https://github.com/Bronya0/Jetbrains-Darcula-Zed-Theme",
+   "schema_version": 1,
+   "version": "0.1.4",
+   "wasm_api_version": null
+  }
+ ]
+}

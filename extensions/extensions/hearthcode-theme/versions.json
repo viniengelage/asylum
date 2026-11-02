@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "HearthCode"
+   ],
+   "description": "Warm Ember or structured Moss in calibrated Dark and Light themes for Zed, with one consistent semantic color system.",
+   "download_count": 0,
+   "id": "hearthcode-theme",
+   "name": "HearthCode Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:55Z",
+   "repository": "https://github.com/hearth-code/hearthcode-zed",
+   "schema_version": 1,
+   "version": "3.7.7",
+   "wasm_api_version": null
+  }
+ ]
+}

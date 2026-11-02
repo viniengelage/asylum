@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "cringoleg"
+   ],
+   "description": "A port of the JetBrains High Contrast accessibility theme for Zed",
+   "download_count": 0,
+   "id": "jb-high-contrast-theme",
+   "name": "JetBrains High Contrast",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:20:49Z",
+   "repository": "https://github.com/cringoleg/jetbrains-high-contrast-zed",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

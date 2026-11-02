@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Vijay Kiran <mail@vijaykiran.com>"
+   ],
+   "description": "Zed extension for Janet programming language.",
+   "download_count": 0,
+   "id": "janet",
+   "name": "Janet",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:16:02Z",
+   "repository": "https://github.com/vijaykiran/janet-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

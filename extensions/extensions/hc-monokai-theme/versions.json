@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "p404"
+   ],
+   "description": "High contrast Monokai theme with black editor background, charcoal UI surfaces, and vibrant syntax highlighting",
+   "download_count": 0,
+   "id": "hc-monokai-theme",
+   "name": "HC Monokai",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:53Z",
+   "repository": "https://github.com/p404/zed-hc-monokai",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

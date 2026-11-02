@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Yann Defretin <yann@defret.in>"
+   ],
+   "description": "A dark blue theme.",
+   "download_count": 0,
+   "id": "hivacruz-theme",
+   "name": "Hivacruz Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:14:08Z",
+   "repository": "https://github.com/kinoute/zed-hivacruz-theme",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

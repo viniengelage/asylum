@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "guba <gubacoolest@gmail.com>"
+   ],
+   "description": "A port of Google Gemini color scheme",
+   "download_count": 0,
+   "id": "jemini-theme",
+   "name": "Jemini",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:20:53Z",
+   "repository": "https://github.com/iamguba/zed-jemini-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

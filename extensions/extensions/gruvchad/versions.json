@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "ewan <ewan@s3n.xyz>"
+   ],
+   "description": "Gruvchad theme from NvChad.",
+   "download_count": 0,
+   "id": "gruvchad",
+   "name": "Gruvchad",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:11Z",
+   "repository": "https://github.com/hey-ewan/zed-gruvchad",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

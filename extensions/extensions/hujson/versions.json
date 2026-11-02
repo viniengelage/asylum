@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Gareth Evans <hi@gvns.ca>"
+   ],
+   "description": "HuJSON (JWCC) support: JSON with comments and trailing commas",
+   "download_count": 0,
+   "id": "hujson",
+   "name": "HuJSON",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:15:00Z",
+   "repository": "https://github.com/ggfevans/zed-hujson",
+   "schema_version": 1,
+   "version": "1.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,23 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Alan Hamlett <alan@wakatime.com>",
+    "bestgopher <84328409@qq.com>",
+    "alice <alice@hackclub.cc>"
+   ],
+   "description": "Wakatime extension fork to improve hackatime support.",
+   "download_count": 0,
+   "id": "hackatime",
+   "name": "hackatime",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-11-02T12:13:32Z",
+   "repository": "https://github.com/espcaa/zed-hackatime",
+   "schema_version": 1,
+   "version": "0.4.0",
+   "wasm_api_version": "0.7.0"
+  }
+ ]
+}

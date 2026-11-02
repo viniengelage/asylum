@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "mantou132 <709922234@qq.com>"
+   ],
+   "description": "GritQL language support",
+   "download_count": 0,
+   "id": "grit",
+   "name": "GritQL",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:12:59Z",
+   "repository": "https://github.com/mantou132/zed-grit",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

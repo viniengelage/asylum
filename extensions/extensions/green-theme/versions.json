@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "ningfangbin <nfb0408@163.com>"
+   ],
+   "description": "The theme is mainly in green color.",
+   "download_count": 0,
+   "id": "green-theme",
+   "name": "green-theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:12:47Z",
+   "repository": "https://github.com/ningfangbin/zed_code_green.git",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

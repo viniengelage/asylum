@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "maikel"
+   ],
+   "description": "A deep-sea inspired theme set for Zed with four variants, Hadal Shallows, Deep, Twilight, and Midnight, 105 syntax captures, and full terminal support.",
+   "download_count": 0,
+   "id": "hadal-theme",
+   "name": "Hadal Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:35Z",
+   "repository": "https://github.com/maikel-479/hadal",
+   "schema_version": 1,
+   "version": "0.3.0",
+   "wasm_api_version": null
+  }
+ ]
+}

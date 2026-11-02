@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Mahmud Ridwan <m@hjr265.me>"
+   ],
+   "description": "Provides snippets of .gitignore templates from https://github.com/github/gitignore.",
+   "download_count": 0,
+   "id": "gitignore-templates",
+   "name": "Gitignore Templates",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-02T12:12:02Z",
+   "repository": "https://github.com/hjr265/zed-gitignore-templates",
+   "schema_version": 1,
+   "version": "2026.9.1",
+   "wasm_api_version": null
+  }
+ ]
+}

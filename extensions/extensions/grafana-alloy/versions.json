@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "lenstr"
+   ],
+   "description": "Grafana Alloy support.",
+   "download_count": 0,
+   "id": "grafana-alloy",
+   "name": "Grafana Alloy",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:12:41Z",
+   "repository": "https://github.com/lenstr/zed-grafana-alloy",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

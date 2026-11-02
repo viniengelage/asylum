@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Yorick Peterse <yorick@yorickpeterse.com>"
+   ],
+   "description": "Inko support.",
+   "download_count": 0,
+   "id": "inko",
+   "name": "Inko",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:15:27Z",
+   "repository": "https://github.com/inko-lang/zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

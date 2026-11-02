@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "thochra"
+   ],
+   "description": "HAProxy configuration syntax support for Zed",
+   "download_count": 0,
+   "id": "haproxy",
+   "name": "HAProxy",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:13:43Z",
+   "repository": "https://github.com/thochra/zed-haproxy-extension",
+   "schema_version": 1,
+   "version": "1.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

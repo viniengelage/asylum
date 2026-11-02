@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Brian J. Gamble"
+   ],
+   "description": "A dark theme inspired by Gentle Dark UI for the Atom editor",
+   "download_count": 0,
+   "id": "gentle-dark",
+   "name": "Gentle Dark Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:11:26Z",
+   "repository": "https://github.com/gentlelionstudios/gentle-dark-zed",
+   "schema_version": 1,
+   "version": "1.2.2",
+   "wasm_api_version": null
+  }
+ ]
+}

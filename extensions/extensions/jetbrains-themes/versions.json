@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Artem Evsevev <artem@artevs.dev>"
+   ],
+   "description": "Light, Dark, Islands Light and Islands Dark JetBrains themes",
+   "download_count": 0,
+   "id": "jetbrains-themes",
+   "name": "JetBrains Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:21:00Z",
+   "repository": "https://github.com/artemevsevev/zed-theme-jetbrains",
+   "schema_version": 1,
+   "version": "1.4.0",
+   "wasm_api_version": null
+  }
+ ]
+}

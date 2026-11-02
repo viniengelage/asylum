@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Reese Armstrong <me@reeseric.ci>"
+   ],
+   "description": "FSM language support for Zed",
+   "download_count": 0,
+   "id": "fsm",
+   "name": "FSM",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:10:22Z",
+   "repository": "https://codeberg.org/reesericci/zed-extension-fsm",
+   "schema_version": 1,
+   "version": "0.3.0",
+   "wasm_api_version": null
+  }
+ ]
+}

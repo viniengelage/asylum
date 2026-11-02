@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Nishant Dahiya <nishant.dahiya2000@gmail.com>"
+   ],
+   "description": "Monochrome theme based on Github light mode syntax highlighting ",
+   "download_count": 0,
+   "id": "github-monochrome-theme",
+   "name": "GitHub Light Monochrome Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:11:57Z",
+   "repository": "https://github.com/Nishantdd/github-monochrome-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

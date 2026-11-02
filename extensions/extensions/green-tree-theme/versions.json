@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "yuukiLike"
+   ],
+   "description": "A high contrast theme collection for Zed. Three dark variants target WCAG AAA 7:1 for primary text, with AA 4.5:1 for comments. Search and selections prioritize appearance. Warm-white Day Vivid favors brighter colors.",
+   "download_count": 0,
+   "id": "green-tree-theme",
+   "name": "GreenTree",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:12:50Z",
+   "repository": "https://github.com/yuukiLike/zed-skin",
+   "schema_version": 1,
+   "version": "0.11.2",
+   "wasm_api_version": null
+  }
+ ]
+}

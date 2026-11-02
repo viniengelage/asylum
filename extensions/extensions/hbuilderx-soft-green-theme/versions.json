@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "qinains"
+   ],
+   "description": "A soft green light and dark theme inspired by HBuilderX.",
+   "download_count": 0,
+   "id": "hbuilderx-soft-green-theme",
+   "name": "HBuilderX Soft Green",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:53Z",
+   "repository": "https://github.com/qinains/hbuilderx-soft-green",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

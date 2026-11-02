@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Gustavo Dias <gustavodiasa2121@gmail.com>"
+   ],
+   "description": "A calm, pastel dark theme inspired by Galarian Slowpoke.",
+   "download_count": 0,
+   "id": "g-slowpoke-theme",
+   "name": "Galarian Slowpoke Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:10:32Z",
+   "repository": "https://github.com/charmingruby/g-slowpoke-zed-theme",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

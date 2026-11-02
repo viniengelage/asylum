@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "justKevv <kevinbramastaa@gmail.com>"
+   ],
+   "description": "Dark, moody Mount Fuji winter palette \u2014 desaturated blue/green-gray with warm gray text",
+   "download_count": 0,
+   "id": "fuji-winter-theme",
+   "name": "Fuji Winter",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:10:24Z",
+   "repository": "https://github.com/justKevv/zed-fuji-winter-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

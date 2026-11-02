@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "isunjn <isunjn@gmail.com>"
+   ],
+   "description": "\ud83c\udf48 Organic green and orange flavored editor theme",
+   "download_count": 0,
+   "id": "hami-melon-theme",
+   "name": "Hami Melon Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:39Z",
+   "repository": "https://github.com/isunjn/hami-melon-zed",
+   "schema_version": 1,
+   "version": "0.5.0",
+   "wasm_api_version": null
+  }
+ ]
+}

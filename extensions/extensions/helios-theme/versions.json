@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "<chris@puska.org>"
+   ],
+   "description": "Helios theme for Zed",
+   "download_count": 0,
+   "id": "helios-theme",
+   "name": "Helios",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:56Z",
+   "repository": "https://github.com/heliosgraphics/helios-theme",
+   "schema_version": 1,
+   "version": "0.0.8",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Damir Karashev"
+   ],
+   "description": "Transparent theme for Zed",
+   "download_count": 0,
+   "id": "icu-theme",
+   "name": "ICU",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:15:13Z",
+   "repository": "https://github.com/dbkarashev/zed-icu",
+   "schema_version": 1,
+   "version": "0.1.2",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Mahmud Ridwan <m@hjr265.me>"
+   ],
+   "description": "Go template support, includes text/template (gotmpl) and html/template (gohtml).",
+   "download_count": 0,
+   "id": "gotmpl",
+   "name": "Gotmpl",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:12:40Z",
+   "repository": "https://github.com/hjr265/zed-gotmpl",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

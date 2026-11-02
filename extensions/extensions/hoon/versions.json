@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "TisaneFruitRouge"
+   ],
+   "description": "Hoon language support (syntax highlighting, brackets, comments).",
+   "download_count": 0,
+   "id": "hoon",
+   "name": "Hoon",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:14:20Z",
+   "repository": "https://github.com/TisaneFruitRouge/hoon-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

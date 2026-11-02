@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Isabel Kaspriskie <mail@isabelgk.com>"
+   ],
+   "description": "Genexpr support",
+   "download_count": 0,
+   "id": "genexpr",
+   "name": "Genexpr",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:11:24Z",
+   "repository": "https://github.com/isabelgk/genexpr-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

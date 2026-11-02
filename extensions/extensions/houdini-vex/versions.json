@@ -1,0 +1,23 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Igor Elovikov <igor.elovikov@gmail.com>"
+   ],
+   "description": "Houdini VEX Language support",
+   "download_count": 0,
+   "id": "houdini-vex",
+   "name": "Houdini VEX",
+   "provides": [
+    "languages",
+    "grammars",
+    "snippets"
+   ],
+   "published_at": "2026-11-02T12:14:25Z",
+   "repository": "https://github.com/igor-elovikov/hou-vex-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

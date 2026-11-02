@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Gabriel Aderaldo <gabriel_aderaldo@edu.unifor.br>"
+   ],
+   "description": "It\u00e1 Semantic \u2014 semantic color theme for the It\u00e1 language (Dark & Light, WCAG AA)",
+   "download_count": 0,
+   "id": "ita-theme",
+   "name": "It\u00e1 Semantic",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:15:56Z",
+   "repository": "https://github.com/ita-lang/ita-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

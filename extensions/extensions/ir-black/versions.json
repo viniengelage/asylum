@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Samet Aylak <sametaylak29@gmail.com>"
+   ],
+   "description": "IR Black theme",
+   "download_count": 0,
+   "id": "ir-black",
+   "name": "IR Black",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:15:52Z",
+   "repository": "https://github.com/sametaylak/ir-black-zed-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

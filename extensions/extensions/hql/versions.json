@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Diego Reis <el-yawd@proton.me>"
+   ],
+   "description": "HQL syntax highlighter",
+   "download_count": 0,
+   "id": "hql",
+   "name": "HQL",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:14:29Z",
+   "repository": "https://github.com/el-yawd/hql-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

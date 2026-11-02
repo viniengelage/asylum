@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Yaroslav Bolyukin <iam@lach.pw>"
+   ],
+   "description": "Immigrant schema definition language support",
+   "download_count": 0,
+   "id": "immigrant",
+   "name": "Immigrant",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:15:16Z",
+   "repository": "https://github.com/deltarocks/zed-immigrant",
+   "schema_version": 1,
+   "version": "0.1.2",
+   "wasm_api_version": null
+  }
+ ]
+}

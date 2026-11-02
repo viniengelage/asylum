@@ -1,0 +1,23 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Else"
+   ],
+   "description": "Ghostty configuration file support",
+   "download_count": 0,
+   "id": "ghostty",
+   "name": "Ghostty",
+   "provides": [
+    "languages",
+    "grammars",
+    "language-servers"
+   ],
+   "published_at": "2026-11-02T12:11:49Z",
+   "repository": "https://github.com/Else00/ghostty-zed-extension",
+   "schema_version": 1,
+   "version": "0.3.2",
+   "wasm_api_version": "0.7.0"
+  }
+ ]
+}

@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Kartik Vashistha <kartikv.work@gmail.com>"
+   ],
+   "description": "Syntax highlighting for Go Checksum files.",
+   "download_count": 0,
+   "id": "gosum",
+   "name": "Go Sum Highlighting",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:12:38Z",
+   "repository": "https://github.com/kartikvashistha/zed-gosum",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

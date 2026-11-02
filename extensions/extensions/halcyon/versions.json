@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Hichem Fantar <fantar.hichem@gmail.com>"
+   ],
+   "description": "\ud83c\udf0a A minimal, dark blue theme for Zed",
+   "download_count": 0,
+   "id": "halcyon",
+   "name": "Halcyon Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:37Z",
+   "repository": "https://github.com/hichemfantar/halcyon-zed",
+   "schema_version": 1,
+   "version": "0.2.3",
+   "wasm_api_version": null
+  }
+ ]
+}

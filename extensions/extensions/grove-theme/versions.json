@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Hima Aramona"
+   ],
+   "description": "A nature-inspired, Gruvbox-based color theme for Zed with earthy greens, warm ambers, and muted tones. Includes Dark and Light variants in Normal, Hard, and Soft contrast levels.",
+   "download_count": 0,
+   "id": "grove-theme",
+   "name": "Grove",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:03Z",
+   "repository": "https://github.com/HimaAramona/grove-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

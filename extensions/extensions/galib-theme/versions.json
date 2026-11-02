@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Galib"
+   ],
+   "description": "This a soft dark theme for coding",
+   "download_count": 0,
+   "id": "galib-theme",
+   "name": "Galib Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:10:36Z",
+   "repository": "https://github.com/galib-savar/Galib-Theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

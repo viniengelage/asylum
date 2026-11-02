@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Guilherme Robert Silveira Santos"
+   ],
+   "description": "Temas escuros HackTheBox (port das cores do tema VS Code) e HackTheBlue (variante azul).",
+   "download_count": 0,
+   "id": "hackthebox-theme",
+   "name": "HackTheBox",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:34Z",
+   "repository": "https://github.com/b00tk1ll/hackthebox-zed-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

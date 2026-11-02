@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Niraj"
+   ],
+   "description": "Huff language support for Zed - a low-level EVM assembly language",
+   "download_count": 0,
+   "id": "huff",
+   "name": "Huff",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:14:58Z",
+   "repository": "https://github.com/Niraj-Kamdar/zed-huff",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

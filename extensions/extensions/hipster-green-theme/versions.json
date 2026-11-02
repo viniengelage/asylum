@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ayush Bhat <tfeayush@gmail.com>"
+   ],
+   "description": "An exact port of Tabby/iTerm2's Hipster Green color scheme - a vibrant terminal-inspired theme with classic green-on-black aesthetic and modern syntax highlighting",
+   "download_count": 0,
+   "id": "hipster-green-theme",
+   "name": "Hipster Green Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:14:08Z",
+   "repository": "https://github.com/1ay1/hipster-green-zed-theme",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

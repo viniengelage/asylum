@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Gerson Dantas"
+   ],
+   "description": "A comfort-focused theme collection for Zed inspired by Dracula.",
+   "download_count": 0,
+   "id": "haven-theme",
+   "name": "Haven",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:49Z",
+   "repository": "https://github.com/GersonDantas/Haven-Theme",
+   "schema_version": 1,
+   "version": "0.6.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "hakimi"
+   ],
+   "description": "A deuteranopia-safe theme extension built entirely using accessible colors",
+   "download_count": 0,
+   "id": "hakimi-deuteranopia-theme",
+   "name": "Hakimi Deuteranopia Safe",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:35Z",
+   "repository": "https://github.com/zogwosh/hakimi-theme",
+   "schema_version": 1,
+   "version": "2.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,23 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Isaac Clayton <slightknack@gmail.com>"
+   ],
+   "description": "HTML support.",
+   "download_count": 0,
+   "id": "html",
+   "name": "HTML",
+   "provides": [
+    "languages",
+    "grammars",
+    "language-servers"
+   ],
+   "published_at": "2026-11-02T12:14:51Z",
+   "repository": "https://github.com/zed-industries/zed",
+   "schema_version": 1,
+   "version": "0.3.2",
+   "wasm_api_version": "0.7.0"
+  }
+ ]
+}

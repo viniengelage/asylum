@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ryan Furrer"
+   ],
+   "description": "A warm color theme that keeps the interface calm and lights the code with a single ember.",
+   "download_count": 0,
+   "id": "hearth-theme",
+   "name": "Hearth",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:55Z",
+   "repository": "https://github.com/ryanfurrer/hearth-theme",
+   "schema_version": 1,
+   "version": "0.3.0",
+   "wasm_api_version": null
+  }
+ ]
+}

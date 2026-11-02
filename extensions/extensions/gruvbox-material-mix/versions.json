@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "hyperdevstuff <harshch.work@proton.me>"
+   ],
+   "description": "Gruvbox Material Port for Zed with more weights and styles.",
+   "download_count": 0,
+   "id": "gruvbox-material-mix",
+   "name": "Gruvbox Material Mix",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:10Z",
+   "repository": "https://github.com/hyperdevstuff/zed-gruvbox-material",
+   "schema_version": 1,
+   "version": "1.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

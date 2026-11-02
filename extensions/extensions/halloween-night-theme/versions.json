@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "RuslanRystsov"
+   ],
+   "description": "\ud83c\udf77 A sinister cocktail brewed with the finest vampire blood, a splash of spiced pumpkin juice, crushed spider legs for texture, a dash of clown hair for an eerie twist, and topped with a sprinkle of grave soil for that final touch of dread. Sip... if you dare. Bon app\u00e9tit!",
+   "download_count": 0,
+   "id": "halloween-night-theme",
+   "name": "Halloween Night",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:38Z",
+   "repository": "https://github.com/BlueRexPY/HalloweenNightZed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

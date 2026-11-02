@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Rakshit <rakshit087@gmail.com>"
+   ],
+   "description": "\ud83d\udc53 High contrast variants of your favorite dark themes for Zed",
+   "download_count": 0,
+   "id": "high-contrast-themes",
+   "name": "High Contrast Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:14:06Z",
+   "repository": "https://github.com/rakshit087/high-contrast-zed/",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "RiverMatsumoto"
+   ],
+   "description": "Gruvbox Material port from f4z3r's gruvbox-material.nvim palette. Their work can be found at https://github.com/f4z3r/gruvbox-material.nvim/tree/master",
+   "download_count": 0,
+   "id": "gruvbox-material-neovim",
+   "name": "Gruvbox Material Neovim",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:11Z",
+   "repository": "https://github.com/RiverMatsumoto/gruvbox-material-nvim-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

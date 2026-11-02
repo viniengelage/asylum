@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Maksym Karnaukh <krnhmx@gmail.com>"
+   ],
+   "description": "Zed port of GitLab's Web IDE / VS Code theme \u2014 Dark, Dark Midnight, and Light variants.",
+   "download_count": 0,
+   "id": "gitlab-web-ide-theme",
+   "name": "Gitlab Web IDE Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:12:04Z",
+   "repository": "https://github.com/karnauhmax/zed-gitlab-web-ide-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

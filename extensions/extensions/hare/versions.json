@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "xdBronch <51252236+xdBronch@users.noreply.github.com>"
+   ],
+   "description": "Hare support for Zed",
+   "download_count": 0,
+   "id": "hare",
+   "name": "Hare",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:13:45Z",
+   "repository": "https://github.com/xdBronch/hare-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

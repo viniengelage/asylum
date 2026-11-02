@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Steeven Lopez <stee-ven_94@outlook.com>"
+   ],
+   "description": "Collection of Freezed snippets for Flutter/Dart development on the Zed editor.",
+   "download_count": 0,
+   "id": "freezed-dart-flutter-snippets",
+   "name": "Freezed Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-02T12:10:10Z",
+   "repository": "https://github.com/OppositeDragon/freezed-snippets",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

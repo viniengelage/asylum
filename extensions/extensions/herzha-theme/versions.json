@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Madhanmaaz <madhanmaaz@gmail.com>"
+   ],
+   "description": "Herzha theme for zed.",
+   "download_count": 0,
+   "id": "herzha-theme",
+   "name": "Herzha Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:58Z",
+   "repository": "https://github.com/madhanmaaz/herzha-theme.git",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

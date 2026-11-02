@@ -5178,6 +5178,2605 @@
    "schema_version": 1,
    "version": "1.0.0",
    "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Matthew Goodman"
+   ],
+   "description": "Dark carbon theme with warm earthy syntax colors",
+   "download_count": 0,
+   "id": "fozzy",
+   "name": "Fozzy",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:10:08Z",
+   "repository": "https://github.com/juxta-tad/fozzy-zed",
+   "schema_version": 1,
+   "version": "0.1.8",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "gxanshu"
+   ],
+   "description": "A dark, minimalist theme inspired by Framer's code editor. Ported from the VS Code Framer Dark theme by Adam Seckel.",
+   "download_count": 0,
+   "id": "framer-dark-theme",
+   "name": "Framer Dark Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:10:08Z",
+   "repository": "https://github.com/gxanshu/zed-framer-dark",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "debba <andrea@debbaweb.it>"
+   ],
+   "description": "Full-featured Freemarker Template Language support for Zed editor with tree-sitter-based syntax highlighting",
+   "download_count": 0,
+   "id": "freemarker",
+   "name": "Freemarker",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:10:10Z",
+   "repository": "https://github.com/debba/zed-freemarker",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Steeven Lopez <stee-ven_94@outlook.com>"
+   ],
+   "description": "Collection of Freezed snippets for Flutter/Dart development on the Zed editor.",
+   "download_count": 0,
+   "id": "freezed-dart-flutter-snippets",
+   "name": "Freezed Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-02T12:10:10Z",
+   "repository": "https://github.com/OppositeDragon/freezed-snippets",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Alex Zappa @ FreshJuice.dev"
+   ],
+   "description": "FreshJuice theme collection for Zed \u2014 fruit-named dark themes",
+   "download_count": 0,
+   "id": "freshjuice-themes",
+   "name": "FreshJuice Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:10:12Z",
+   "repository": "https://github.com/freshjuice-dev/zed-themes",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "PR454D <pr454d@protonmail.com>"
+   ],
+   "description": "Dark and light themes inspired by Frieren Beyond Journey's End",
+   "download_count": 0,
+   "id": "frieren-theme",
+   "name": "Frieren Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:10:13Z",
+   "repository": "https://github.com/PR454D/frieren-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Reese Armstrong <me@reeseric.ci>"
+   ],
+   "description": "FSM language support for Zed",
+   "download_count": 0,
+   "id": "fsm",
+   "name": "FSM",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:10:22Z",
+   "repository": "https://codeberg.org/reesericci/zed-extension-fsm",
+   "schema_version": 1,
+   "version": "0.3.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "justKevv <kevinbramastaa@gmail.com>"
+   ],
+   "description": "Dark, moody Mount Fuji winter palette \u2014 desaturated blue/green-gray with warm gray text",
+   "download_count": 0,
+   "id": "fuji-winter-theme",
+   "name": "Fuji Winter",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:10:24Z",
+   "repository": "https://github.com/justKevv/zed-fuji-winter-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "BinaryMoura <leomourait@fastmail.com>"
+   ],
+   "description": "A serene Zed IDE theme inspired by the quiet beauty of Mount Fuji and traditional Japanese countryside. Includes: FujiHaze Dark, FujiHaze Countryside (light), and FujiHaze Morning Mist (light).",
+   "download_count": 0,
+   "id": "fujihaze-theme",
+   "name": "FujiHaze Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:10:24Z",
+   "repository": "https://github.com/BinaryMoura/FujiHaze-Theme",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "omdxp"
+   ],
+   "description": "The Fun website color themes, dark and light.",
+   "download_count": 0,
+   "id": "fun-web-theme",
+   "name": "Fun Web Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:10:29Z",
+   "repository": "https://github.com/omdxp/fun",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "MaxGB23"
+   ],
+   "description": "A modern, vibrant, and expressive dark color theme for Zed. Crafted for React, TypeScript, and web development, with semantic syntax highlighting, vivid colors, and low eye strain.",
+   "download_count": 0,
+   "id": "funky-theme",
+   "name": "Funky Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:10:31Z",
+   "repository": "https://github.com/maxgb23/funky-theme",
+   "schema_version": 1,
+   "version": "0.2.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Hilrein (github.com/hilrein)"
+   ],
+   "description": "A dark blue theme inspired by Furina",
+   "download_count": 0,
+   "id": "furina-vibe-theme",
+   "name": "Furina Vibe Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:10:31Z",
+   "repository": "https://github.com/Hilrein/zed-Furina-vibe-theme",
+   "schema_version": 1,
+   "version": "0.1.2",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Gustavo Dias <gustavodiasa2121@gmail.com>"
+   ],
+   "description": "A calm, pastel dark theme inspired by Galarian Slowpoke.",
+   "download_count": 0,
+   "id": "g-slowpoke-theme",
+   "name": "Galarian Slowpoke Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:10:32Z",
+   "repository": "https://github.com/charmingruby/g-slowpoke-zed-theme",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Soheil Fouladvandi <filip@janevski.dev>"
+   ],
+   "description": "A sleek, focused dark theme for Zed",
+   "download_count": 0,
+   "id": "gafelson",
+   "name": "gafelson Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:10:34Z",
+   "repository": "https://github.com/gafelson/zed-theme",
+   "schema_version": 1,
+   "version": "1.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Morteza Jamshidi"
+   ],
+   "description": "Gafelson and Lavender blend for Zed",
+   "download_count": 0,
+   "id": "gafelson-lavender-theme",
+   "name": "Gafelson Lavender",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:10:35Z",
+   "repository": "https://github.com/devmor-j/gafelson-lavender-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Galib"
+   ],
+   "description": "This a soft dark theme for coding",
+   "download_count": 0,
+   "id": "galib-theme",
+   "name": "Galib Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:10:36Z",
+   "repository": "https://github.com/galib-savar/Galib-Theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Pengfan Chang <developer@jpfchang.org>"
+   ],
+   "description": "Orange-dominant file icons inspired by the Gas Plasma palette.",
+   "download_count": 0,
+   "id": "gas-plasma-icons",
+   "name": "Gas Plasma Icons",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-11-02T12:10:38Z",
+   "repository": "https://github.com/JohnThre/GasPlasma-theme",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Pengfan Chang <developer@jpfchang.org>"
+   ],
+   "description": "An orange-dominant dark theme inspired by ionized gas glow.",
+   "download_count": 0,
+   "id": "gas-plasma-theme",
+   "name": "Gas Plasma Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:10:40Z",
+   "repository": "https://github.com/JohnThre/GasPlasma-theme",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Pavel Lozinsky <pavel@lozinsky.dev>"
+   ],
+   "description": "Zed version of the popular Gatito Theme for VSCode.",
+   "download_count": 0,
+   "id": "gatito-theme",
+   "name": "Gatito Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:10:42Z",
+   "repository": "https://github.com/lozinsky/zed-gatito-theme",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "DCCXXV"
+   ],
+   "description": "Elegant dark themes using the Gato OS palette",
+   "download_count": 0,
+   "id": "gato-theme",
+   "name": "Gato Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:10:43Z",
+   "repository": "https://github.com/DCCXXV/gato-zed",
+   "schema_version": 1,
+   "version": "0.3.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "mantou132 <709922234@qq.com>"
+   ],
+   "description": "Language Support for Gem",
+   "download_count": 0,
+   "id": "gem",
+   "name": "Gem",
+   "provides": [
+    "language-servers",
+    "context-servers",
+    "snippets"
+   ],
+   "published_at": "2026-11-02T12:11:22Z",
+   "repository": "https://github.com/mantou132/gem",
+   "schema_version": 1,
+   "version": "0.0.5",
+   "wasm_api_version": "0.7.0"
+  },
+  {
+   "authors": [
+    "Isabel Kaspriskie <mail@isabelgk.com>"
+   ],
+   "description": "Genexpr support",
+   "download_count": 0,
+   "id": "genexpr",
+   "name": "Genexpr",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:11:24Z",
+   "repository": "https://github.com/isabelgk/genexpr-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "John Lyon-Smith <john@escapegallery.net>"
+   ],
+   "description": "Geno schema language support.",
+   "download_count": 0,
+   "id": "geno",
+   "name": "Geno",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:11:25Z",
+   "repository": "https://github.com/jlyonsmtih/zed-geno",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Brian J. Gamble"
+   ],
+   "description": "A dark theme inspired by Gentle Dark UI for the Atom editor",
+   "download_count": 0,
+   "id": "gentle-dark",
+   "name": "Gentle Dark Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:11:26Z",
+   "repository": "https://github.com/gentlelionstudios/gentle-dark-zed",
+   "schema_version": 1,
+   "version": "1.2.2",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Almela"
+   ],
+   "description": "\ud83d\udc8e A gem-toned theme for Zed. Color only where it carries meaning \u2014 dark and light, cut from the same stone.",
+   "download_count": 0,
+   "id": "geode-theme",
+   "name": "Geode",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:11:27Z",
+   "repository": "https://github.com/almeladev/geode-zed",
+   "schema_version": 1,
+   "version": "2.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Georgy"
+   ],
+   "description": "A dark theme family for Zed including Georgy Dark, Georgy Black, Georgy Black High, and Georgy Black Dim.",
+   "download_count": 0,
+   "id": "georgy-theme",
+   "name": "Georgy Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:11:28Z",
+   "repository": "https://github.com/GeorgyDesign/georgy-themes-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Ozzy (ddoemonn) <https://github.com/ddoemonn>"
+   ],
+   "description": "A cyberpunk-inspired theme based on Ghost in the Shell, featuring neon greens, deep cyans, and dark backgrounds",
+   "download_count": 0,
+   "id": "ghost-in-the-shell-theme",
+   "name": "Ghost in the Shell Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:11:29Z",
+   "repository": "https://github.com/ddoemonn/ghost-in-the-shell-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Else"
+   ],
+   "description": "Ghostty configuration file support",
+   "download_count": 0,
+   "id": "ghostty",
+   "name": "Ghostty",
+   "provides": [
+    "languages",
+    "grammars",
+    "language-servers"
+   ],
+   "published_at": "2026-11-02T12:11:49Z",
+   "repository": "https://github.com/Else00/ghostty-zed-extension",
+   "schema_version": 1,
+   "version": "0.3.2",
+   "wasm_api_version": "0.7.0"
+  },
+  {
+   "authors": [
+    "Davide Luzi"
+   ],
+   "description": "A dark theme inspired by Ghostty terminal emulator dark theme, with pleasant fresh colors and a good contrast. Not too dark nor faded. Ideal for PHP.",
+   "download_count": 0,
+   "id": "ghostty-dark-theme",
+   "name": "Ghostty Dark Inspired Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:11:50Z",
+   "repository": "https://github.com/davideluzi/ghostty-dark-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Giossue"
+   ],
+   "description": "A glassy dark theme family with mono, azure and crimson variants.",
+   "download_count": 0,
+   "id": "giossue-glass-theme",
+   "name": "Glass Theme Collection",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:11:50Z",
+   "repository": "https://github.com/giossue/glass-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "d1y <chenhonzhou@gmail.com>",
+    "Peter Tripp <petertripp@gmail.com>"
+   ],
+   "description": "Provides Git Syntax Highlighting",
+   "download_count": 0,
+   "id": "git-firefly",
+   "name": "Git Firefly",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:11:52Z",
+   "repository": "https://github.com/d1y/git_firefly",
+   "schema_version": 1,
+   "version": "0.1.9",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Daksh Sharma <www.dakshsharma.tech>"
+   ],
+   "description": "GitHub Actions workflow snippets for Zed.",
+   "download_count": 0,
+   "id": "github-actions-snippets",
+   "name": "GitHub Actions Snippet",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-02T12:11:54Z",
+   "repository": "https://github.com/frypan05/github-actions-snippet",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Nguyen Dang Vinh <meocoder@gmail.com>"
+   ],
+   "description": "The classic GitHub Light and GitHub Dark themes for Zed",
+   "download_count": 0,
+   "id": "github-classic",
+   "name": "Github Classic",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:11:55Z",
+   "repository": "https://github.com/meocoder31099/Github-Classic-Theme-Zed",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "ssaunderss <austinsaunders@me.com>"
+   ],
+   "description": "IDE theme from Github Copilot's Website, it's dark and high contrast",
+   "download_count": 0,
+   "id": "github-copilot-theme",
+   "name": "GitHub Copilot Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:11:56Z",
+   "repository": "https://github.com/ssaunderss/zed-gh-copilot-theme",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "MordFustang21"
+   ],
+   "description": "A modified port of the GitHub VSCode theme",
+   "download_count": 0,
+   "id": "github-dark-default",
+   "name": "GitHub Dark Default",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:11:56Z",
+   "repository": "https://github.com/mordfustang21/zed-github-dark",
+   "schema_version": 1,
+   "version": "1.0.10",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Nishant Dahiya <nishant.dahiya2000@gmail.com>"
+   ],
+   "description": "Monochrome theme based on Github light mode syntax highlighting ",
+   "download_count": 0,
+   "id": "github-monochrome-theme",
+   "name": "GitHub Light Monochrome Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:11:57Z",
+   "repository": "https://github.com/Nishantdd/github-monochrome-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Nicola Peduzzi <thenikso@gmail.com>"
+   ],
+   "description": "\ud83d\udc19 Inspired by GitHub colors. Light and dark variants for a clear and coherent look.",
+   "download_count": 0,
+   "id": "github-plus-theme",
+   "name": "Github Plus Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:11:59Z",
+   "repository": "https://github.com/thenikso/github-plus-theme-zed",
+   "schema_version": 1,
+   "version": "1.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Pyae Sone Aung <pyaesoneaungrgn@gmail.com>",
+    "Clay Tercek"
+   ],
+   "description": "GitHub themes for Zed",
+   "download_count": 0,
+   "id": "github-theme",
+   "name": "Github Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:11:59Z",
+   "repository": "https://github.com/PyaeSoneAungRgn/github-zed-theme",
+   "schema_version": 1,
+   "version": "0.1.9",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Mahmud Ridwan <m@hjr265.me>"
+   ],
+   "description": "Provides snippets of .gitignore templates from https://github.com/github/gitignore.",
+   "download_count": 0,
+   "id": "gitignore-templates",
+   "name": "Gitignore Templates",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-02T12:12:02Z",
+   "repository": "https://github.com/hjr265/zed-gitignore-templates",
+   "schema_version": 1,
+   "version": "2026.9.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Maksym Karnaukh <krnhmx@gmail.com>"
+   ],
+   "description": "Zed port of GitLab's Web IDE / VS Code theme \u2014 Dark, Dark Midnight, and Light variants.",
+   "download_count": 0,
+   "id": "gitlab-web-ide-theme",
+   "name": "Gitlab Web IDE Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:12:04Z",
+   "repository": "https://github.com/karnauhmax/zed-gitlab-web-ide-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Hleb Bury <b4bury@gmail.com>"
+   ],
+   "description": "Liquid glass \u2014 a transparent, frosted theme (dark + light) for Zed",
+   "download_count": 0,
+   "id": "glass-theme",
+   "name": "Glass",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:12:05Z",
+   "repository": "https://github.com/b4bury/zed-glass",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Nicole Muzzin"
+   ],
+   "description": "Glassy themes for Zed",
+   "download_count": 0,
+   "id": "glazier",
+   "name": "Glazier",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:12:06Z",
+   "repository": "https://github.com/airgap/glazier",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Eduardo Juliao <ejuliao9@gmail.com>"
+   ],
+   "description": "Gleam snippets for Zed IDE. A collection of Gleam snippets to improve your development speed.",
+   "download_count": 0,
+   "id": "gleam-snippets",
+   "name": "Gleam Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-02T12:12:08Z",
+   "repository": "https://github.com/BlueBlizzardd/gleam-zed-snippets",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Danielle Maywood <danielle@themaywoods.com>"
+   ],
+   "description": "Theme inspired by gleam.run",
+   "download_count": 0,
+   "id": "gleam-theme",
+   "name": "Gleam Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:12:08Z",
+   "repository": "https://github.com/DanielleMaywood/gleam-theme-zed",
+   "schema_version": 1,
+   "version": "0.2.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Mikayla Maki <mikayla@zed.dev>"
+   ],
+   "description": "GLSL support.",
+   "download_count": 0,
+   "id": "glsl",
+   "name": "GLSL",
+   "provides": [
+    "languages",
+    "grammars",
+    "language-servers"
+   ],
+   "published_at": "2026-11-02T12:12:33Z",
+   "repository": "https://github.com/zed-industries/zed",
+   "schema_version": 1,
+   "version": "0.2.5",
+   "wasm_api_version": "0.1.0"
+  },
+  {
+   "authors": [
+    "Ayberk Gezer <ayberkgezer@outlook.com>"
+   ],
+   "description": "Go snippets for Zed IDE. A collection of go snippets to improve your development speed.",
+   "download_count": 0,
+   "id": "go-snippets",
+   "name": "Go Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-02T12:12:34Z",
+   "repository": "https://github.com/ayberkgezer/go-zed-snippets",
+   "schema_version": 1,
+   "version": "0.1.5",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Enzo Suares <mail@enzosuares.dev>"
+   ],
+   "description": "A theme inspired by the Godot editor and GDScript highlighting",
+   "download_count": 0,
+   "id": "godot-theme",
+   "name": "Godot Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:12:35Z",
+   "repository": "https://github.com/D4r3NPo/zed-theme-godot",
+   "schema_version": 1,
+   "version": "1.3.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Kartik Vashistha <kartikv.work@gmail.com>"
+   ],
+   "description": "Syntax highlighting for Go Checksum files.",
+   "download_count": 0,
+   "id": "gosum",
+   "name": "Go Sum Highlighting",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:12:38Z",
+   "repository": "https://github.com/kartikvashistha/zed-gosum",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Mahmud Ridwan <m@hjr265.me>"
+   ],
+   "description": "Go template support, includes text/template (gotmpl) and html/template (gohtml).",
+   "download_count": 0,
+   "id": "gotmpl",
+   "name": "Gotmpl",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:12:40Z",
+   "repository": "https://github.com/hjr265/zed-gotmpl",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "lenstr"
+   ],
+   "description": "Grafana Alloy support.",
+   "download_count": 0,
+   "id": "grafana-alloy",
+   "name": "Grafana Alloy",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:12:41Z",
+   "repository": "https://github.com/lenstr/zed-grafana-alloy",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Jade Fisher"
+   ],
+   "description": "Gruvbox, but make it purple",
+   "download_count": 0,
+   "id": "grapebox-theme",
+   "name": "Grapebox",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:12:42Z",
+   "repository": "https://github.com/fisherrjd/Grapebox",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "AdinAck <adinackerman@gmail.com>"
+   ],
+   "description": "A practical dark theme for Zed.",
+   "download_count": 0,
+   "id": "graphene",
+   "name": "Graphene Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:12:43Z",
+   "repository": "https://github.com/adinack/graphene",
+   "schema_version": 1,
+   "version": "0.2.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Anubis"
+   ],
+   "description": "A charcoal theme with blue keywords, purple control flow, olive types, and warm gold functions.",
+   "download_count": 0,
+   "id": "graphite-theme",
+   "name": "Graphite",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:12:44Z",
+   "repository": "https://github.com/lazyanubis/zed-graphite",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "ningfangbin <nfb0408@163.com>"
+   ],
+   "description": "The theme is mainly in green color.",
+   "download_count": 0,
+   "id": "green-theme",
+   "name": "green-theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:12:47Z",
+   "repository": "https://github.com/ningfangbin/zed_code_green.git",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "yuukiLike"
+   ],
+   "description": "A high contrast theme collection for Zed. Three dark variants target WCAG AAA 7:1 for primary text, with AA 4.5:1 for comments. Search and selections prioritize appearance. Warm-white Day Vivid favors brighter colors.",
+   "download_count": 0,
+   "id": "green-tree-theme",
+   "name": "GreenTree",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:12:50Z",
+   "repository": "https://github.com/yuukiLike/zed-skin",
+   "schema_version": 1,
+   "version": "0.11.2",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Marco Garcia <mvrcoag@gmail.com>"
+   ],
+   "description": "Light. Minimal. Grey.",
+   "download_count": 0,
+   "id": "grey-theme",
+   "name": "Grey Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:12:53Z",
+   "repository": "https://github.com/mvrcoag/zed-grey-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "ssaunderss <austinsaunders@me.com>"
+   ],
+   "description": "Theme to help you celebrate Grimace's Birthday.",
+   "download_count": 0,
+   "id": "grimaces-birthday",
+   "name": "Grimace's Birthday",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:12:57Z",
+   "repository": "https://github.com/ssaunderss/grimaces-birthday",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "mantou132 <709922234@qq.com>"
+   ],
+   "description": "GritQL language support",
+   "download_count": 0,
+   "id": "grit",
+   "name": "GritQL",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:12:59Z",
+   "repository": "https://github.com/mantou132/zed-grit",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Ash <ashley@juice49.com>"
+   ],
+   "description": "GROQ support.",
+   "download_count": 0,
+   "id": "groq",
+   "name": "GROQ",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:13:02Z",
+   "repository": "https://github.com/juice49/zed-groq",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Hima Aramona"
+   ],
+   "description": "A nature-inspired, Gruvbox-based color theme for Zed with earthy greens, warm ambers, and muted tones. Includes Dark and Light variants in Normal, Hard, and Soft contrast levels.",
+   "download_count": 0,
+   "id": "grove-theme",
+   "name": "Grove",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:03Z",
+   "repository": "https://github.com/HimaAramona/grove-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Thomas Jensen <thomas.jensen_@outlook.com>"
+   ],
+   "description": "A port of the Gruber Darker theme for emacs",
+   "download_count": 0,
+   "id": "gruber-darker",
+   "name": "Gruber Darker",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:03Z",
+   "repository": "https://github.com/th0jensen/gruber-darker.zed",
+   "schema_version": 1,
+   "version": "0.0.8",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "blaqat <blaqat.ag@gmail.com>"
+   ],
+   "description": "15 flavors of a theme for recreational programmers.",
+   "download_count": 0,
+   "id": "gruber-flavors",
+   "name": "Gruber Flavors",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:05Z",
+   "repository": "https://github.com/biaqat/gruber-theme-zed",
+   "schema_version": 1,
+   "version": "0.8.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "gbo-dev"
+   ],
+   "description": "A port of the popular Gruvbox Baby theme with warm, earthy colors",
+   "download_count": 0,
+   "id": "gruvbox-baby",
+   "name": "Gruvbox Baby",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:05Z",
+   "repository": "https://github.com/gbo-dev/gruvbox-baby-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Vatsal Sanjay <vatsalsanjay@gmail.com>"
+   ],
+   "description": "Custom Gruvbox themes for Zed Editor with crisp high contrast variants",
+   "download_count": 0,
+   "id": "gruvbox-crisp-themes",
+   "name": "Gruvbox Crisp Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:07Z",
+   "repository": "https://github.com/VatsalSy/zed-gruvbox_custom_themes",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Tristan F. <leodog896@gmail.ocm>"
+   ],
+   "description": "Gruvbox ish theme from VSCode ported to zed.",
+   "download_count": 0,
+   "id": "gruvbox-ish",
+   "name": "Gruvbox ish",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:07Z",
+   "repository": "https://github.com/LeoDog896/zed-gruvbox-ish",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "tokiory <tokiory.work@gmail.com>"
+   ],
+   "description": "Gruvbox Material theme for Zed editor",
+   "download_count": 0,
+   "id": "gruvbox-material",
+   "name": "Gruvbox Material",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:08Z",
+   "repository": "https://github.com/tokiory/zed-gruvbox-material",
+   "schema_version": 1,
+   "version": "1.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "River M",
+    "Jonathan Harty",
+    "Material Extensions contributors"
+   ],
+   "description": "Gruvbox Material icons for Zed.",
+   "download_count": 0,
+   "id": "gruvbox-material-icons",
+   "name": "Gruvbox Material Icon Theme",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-11-02T12:13:09Z",
+   "repository": "https://github.com/rivermatsumoto/gruvbox-material-icon-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "hyperdevstuff <harshch.work@proton.me>"
+   ],
+   "description": "Gruvbox Material Port for Zed with more weights and styles.",
+   "download_count": 0,
+   "id": "gruvbox-material-mix",
+   "name": "Gruvbox Material Mix",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:10Z",
+   "repository": "https://github.com/hyperdevstuff/zed-gruvbox-material",
+   "schema_version": 1,
+   "version": "1.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "RiverMatsumoto"
+   ],
+   "description": "Gruvbox Material port from f4z3r's gruvbox-material.nvim palette. Their work can be found at https://github.com/f4z3r/gruvbox-material.nvim/tree/master",
+   "download_count": 0,
+   "id": "gruvbox-material-neovim",
+   "name": "Gruvbox Material Neovim",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:11Z",
+   "repository": "https://github.com/RiverMatsumoto/gruvbox-material-nvim-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "ewan <ewan@s3n.xyz>"
+   ],
+   "description": "Gruvchad theme from NvChad.",
+   "download_count": 0,
+   "id": "gruvchad",
+   "name": "Gruvchad",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:11Z",
+   "repository": "https://github.com/hey-ewan/zed-gruvchad",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Alan Hamlett <alan@wakatime.com>",
+    "bestgopher <84328409@qq.com>",
+    "alice <alice@hackclub.cc>"
+   ],
+   "description": "Wakatime extension fork to improve hackatime support.",
+   "download_count": 0,
+   "id": "hackatime",
+   "name": "hackatime",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-11-02T12:13:32Z",
+   "repository": "https://github.com/espcaa/zed-hackatime",
+   "schema_version": 1,
+   "version": "0.4.0",
+   "wasm_api_version": "0.7.0"
+  },
+  {
+   "authors": [
+    "Guilherme Robert Silveira Santos"
+   ],
+   "description": "Temas escuros HackTheBox (port das cores do tema VS Code) e HackTheBlue (variante azul).",
+   "download_count": 0,
+   "id": "hackthebox-theme",
+   "name": "HackTheBox",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:34Z",
+   "repository": "https://github.com/b00tk1ll/hackthebox-zed-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "maikel"
+   ],
+   "description": "A deep-sea inspired theme set for Zed with four variants, Hadal Shallows, Deep, Twilight, and Midnight, 105 syntax captures, and full terminal support.",
+   "download_count": 0,
+   "id": "hadal-theme",
+   "name": "Hadal Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:35Z",
+   "repository": "https://github.com/maikel-479/hadal",
+   "schema_version": 1,
+   "version": "0.3.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "hakimi"
+   ],
+   "description": "A deuteranopia-safe theme extension built entirely using accessible colors",
+   "download_count": 0,
+   "id": "hakimi-deuteranopia-theme",
+   "name": "Hakimi Deuteranopia Safe",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:35Z",
+   "repository": "https://github.com/zogwosh/hakimi-theme",
+   "schema_version": 1,
+   "version": "2.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Arthur Brussee <arthur.brussee@gmail.com>"
+   ],
+   "description": "A soothing dark theme. An editor full off soot, made into a high class place.",
+   "download_count": 0,
+   "id": "haku-dark-theme",
+   "name": "Haku Dark",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:36Z",
+   "repository": "https://github.com/ArthurBrussee/haku_dark",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Hichem Fantar <fantar.hichem@gmail.com>"
+   ],
+   "description": "\ud83c\udf0a A minimal, dark blue theme for Zed",
+   "download_count": 0,
+   "id": "halcyon",
+   "name": "Halcyon Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:37Z",
+   "repository": "https://github.com/hichemfantar/halcyon-zed",
+   "schema_version": 1,
+   "version": "0.2.3",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "RuslanRystsov"
+   ],
+   "description": "\ud83c\udf77 A sinister cocktail brewed with the finest vampire blood, a splash of spiced pumpkin juice, crushed spider legs for texture, a dash of clown hair for an eerie twist, and topped with a sprinkle of grave soil for that final touch of dread. Sip... if you dare. Bon app\u00e9tit!",
+   "download_count": 0,
+   "id": "halloween-night-theme",
+   "name": "Halloween Night",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:38Z",
+   "repository": "https://github.com/BlueRexPY/HalloweenNightZed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Fred Marques"
+   ],
+   "description": "Halloween-inspired dark and light themes with pumpkin orange, witchy violet, and ghostly green.",
+   "download_count": 0,
+   "id": "hallows-eve-theme",
+   "name": "Hallow's Eve",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:39Z",
+   "repository": "https://github.com/fredmarques/hallows-eve-theme",
+   "schema_version": 1,
+   "version": "0.2.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "isunjn <isunjn@gmail.com>"
+   ],
+   "description": "\ud83c\udf48 Organic green and orange flavored editor theme",
+   "download_count": 0,
+   "id": "hami-melon-theme",
+   "name": "Hami Melon Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:39Z",
+   "repository": "https://github.com/isunjn/hami-melon-zed",
+   "schema_version": 1,
+   "version": "0.5.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "David Cornu <me@davidcornu.com>"
+   ],
+   "description": "Haml template support",
+   "download_count": 0,
+   "id": "haml",
+   "name": "Haml",
+   "provides": [
+    "languages",
+    "grammars",
+    "snippets"
+   ],
+   "published_at": "2026-11-02T12:13:41Z",
+   "repository": "https://github.com/davidcornu/zed-haml",
+   "schema_version": 1,
+   "version": "0.4.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "thochra"
+   ],
+   "description": "HAProxy configuration syntax support for Zed",
+   "download_count": 0,
+   "id": "haproxy",
+   "name": "HAProxy",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:13:43Z",
+   "repository": "https://github.com/thochra/zed-haproxy-extension",
+   "schema_version": 1,
+   "version": "1.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "xdBronch <51252236+xdBronch@users.noreply.github.com>"
+   ],
+   "description": "Hare support for Zed",
+   "download_count": 0,
+   "id": "hare",
+   "name": "Hare",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:13:45Z",
+   "repository": "https://github.com/xdBronch/hare-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Gerson Dantas"
+   ],
+   "description": "A comfort-focused theme collection for Zed inspired by Dracula.",
+   "download_count": 0,
+   "id": "haven-theme",
+   "name": "Haven",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:49Z",
+   "repository": "https://github.com/GersonDantas/Haven-Theme",
+   "schema_version": 1,
+   "version": "0.6.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "evansam <evan.yuanzh@gmail.com>"
+   ],
+   "description": "A light theme inspired by HBuilderX with green accents",
+   "download_count": 0,
+   "id": "hbuilderx-push-light",
+   "name": "HBuilderX Push Light",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:52Z",
+   "repository": "https://github.com/yuanzhhh/hbuilderx-theme-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "qinains"
+   ],
+   "description": "A soft green light and dark theme inspired by HBuilderX.",
+   "download_count": 0,
+   "id": "hbuilderx-soft-green-theme",
+   "name": "HBuilderX Soft Green",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:53Z",
+   "repository": "https://github.com/qinains/hbuilderx-soft-green",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "p404"
+   ],
+   "description": "High contrast Monokai theme with black editor background, charcoal UI surfaces, and vibrant syntax highlighting",
+   "download_count": 0,
+   "id": "hc-monokai-theme",
+   "name": "HC Monokai",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:53Z",
+   "repository": "https://github.com/p404/zed-hc-monokai",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Ryan Furrer"
+   ],
+   "description": "A warm color theme that keeps the interface calm and lights the code with a single ember.",
+   "download_count": 0,
+   "id": "hearth-theme",
+   "name": "Hearth",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:55Z",
+   "repository": "https://github.com/ryanfurrer/hearth-theme",
+   "schema_version": 1,
+   "version": "0.3.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "HearthCode"
+   ],
+   "description": "Warm Ember or structured Moss in calibrated Dark and Light themes for Zed, with one consistent semantic color system.",
+   "download_count": 0,
+   "id": "hearthcode-theme",
+   "name": "HearthCode Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:55Z",
+   "repository": "https://github.com/hearth-code/hearthcode-zed",
+   "schema_version": 1,
+   "version": "3.7.7",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "<chris@puska.org>"
+   ],
+   "description": "Helios theme for Zed",
+   "download_count": 0,
+   "id": "helios-theme",
+   "name": "Helios",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:56Z",
+   "repository": "https://github.com/heliosgraphics/helios-theme",
+   "schema_version": 1,
+   "version": "0.0.8",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Madhanmaaz <madhanmaaz@gmail.com>"
+   ],
+   "description": "Herzha theme for zed.",
+   "download_count": 0,
+   "id": "herzha-theme",
+   "name": "Herzha Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:13:58Z",
+   "repository": "https://github.com/madhanmaaz/herzha-theme.git",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Alexander Stepanov <stepanov@insysbio.com>"
+   ],
+   "description": "Heta syntax highlighting for Zed.",
+   "download_count": 0,
+   "id": "heta",
+   "name": "Heta",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:14:00Z",
+   "repository": "https://github.com/hetalang/zed-heta",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Hex <lihex.go@gmail.com>"
+   ],
+   "description": "Theme with syntax highlighting for Ayu, Latte and Solarized",
+   "download_count": 0,
+   "id": "hex-light-theme",
+   "name": "Hex Light Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:14:01Z",
+   "repository": "https://github.com/coghost/light-zed-theme",
+   "schema_version": 1,
+   "version": "0.0.4",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Sergii Gulenok <graywolfs@gmail.com>"
+   ],
+   "description": "Syntax highlighting for Hexaly Modeler models (.hxm)",
+   "download_count": 0,
+   "id": "hexaly",
+   "name": "Hexaly",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:14:03Z",
+   "repository": "https://github.com/ashenwolf/zed-hexaly",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Aboobacker MK <aboobackervyd@gmail.com>"
+   ],
+   "description": "HFST language support for Zed: TWOL (Two-Level Morphology) and LEXC (Lexicon Compiler)",
+   "download_count": 0,
+   "id": "hfst",
+   "name": "HFST",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:14:05Z",
+   "repository": "https://github.com/tachyons/zed-hfst",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Rakshit <rakshit087@gmail.com>"
+   ],
+   "description": "\ud83d\udc53 High contrast variants of your favorite dark themes for Zed",
+   "download_count": 0,
+   "id": "high-contrast-themes",
+   "name": "High Contrast Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:14:06Z",
+   "repository": "https://github.com/rakshit087/high-contrast-zed/",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Daniel Hillmann <daniel@hillmann.dev>"
+   ],
+   "description": "Zed port of the vscode V theme extension",
+   "download_count": 0,
+   "id": "hilleer-v-theme",
+   "name": "V Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:14:07Z",
+   "repository": "https://github.com/hilleer/zed-v-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Ayush Bhat <tfeayush@gmail.com>"
+   ],
+   "description": "An exact port of Tabby/iTerm2's Hipster Green color scheme - a vibrant terminal-inspired theme with classic green-on-black aesthetic and modern syntax highlighting",
+   "download_count": 0,
+   "id": "hipster-green-theme",
+   "name": "Hipster Green Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:14:08Z",
+   "repository": "https://github.com/1ay1/hipster-green-zed-theme",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Yann Defretin <yann@defret.in>"
+   ],
+   "description": "A dark blue theme.",
+   "download_count": 0,
+   "id": "hivacruz-theme",
+   "name": "Hivacruz Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:14:08Z",
+   "repository": "https://github.com/kinoute/zed-hivacruz-theme",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Igor Dreher <igor.dreher@gmail.com>"
+   ],
+   "description": "HLSL Support",
+   "download_count": 0,
+   "id": "hlsl",
+   "name": "HLSL",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:14:15Z",
+   "repository": "https://github.com/igordreher/zed-hlsl",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Jens Kouros <jens.kouros@posteo.de>"
+   ],
+   "description": "HOCON (Human-Optimized Config Object Notation) language support",
+   "download_count": 0,
+   "id": "hocon",
+   "name": "HOCON",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:14:17Z",
+   "repository": "https://github.com/tomatitito/hocon-zed-extension",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "TisaneFruitRouge"
+   ],
+   "description": "Hoon language support (syntax highlighting, brackets, comments).",
+   "download_count": 0,
+   "id": "hoon",
+   "name": "Hoon",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:14:20Z",
+   "repository": "https://github.com/TisaneFruitRouge/hoon-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "lancewilhelm <lance.wilhelm@gmail.com>"
+   ],
+   "description": "Brining over the mildly popular Horizon Extended theme from VSCode and Neovim",
+   "download_count": 0,
+   "id": "horizon-extended",
+   "name": "Horizon Extended",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:14:21Z",
+   "repository": "https://github.com/lancewilhelm/horizon-extended.zed.git",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Flori Ava Star Weber <hello@ava.pet>",
+    "Jonathan Olaleye <jolaleye@gmail.com>"
+   ],
+   "description": "A beautifully warm dual theme for Zed",
+   "download_count": 0,
+   "id": "horizon-theme",
+   "name": "Horizon Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:14:22Z",
+   "repository": "https://codeberg.org/ava/horizon-zed",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Pavel Vlasikhin <pavel@vlasikhin.com>"
+   ],
+   "description": "Syntax highlighting for /etc/hosts files",
+   "download_count": 0,
+   "id": "hosts",
+   "name": "Hosts",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:14:23Z",
+   "repository": "https://github.com/vlasikhin/zed-hosts",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "CoasterFan5"
+   ],
+   "description": "Hot Dog Stand theme for Zed",
+   "download_count": 0,
+   "id": "hot-dog-stand",
+   "name": "Hot Dog Stand",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:14:23Z",
+   "repository": "https://github.com/coasterfan5/hotdog-stand-zed",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Igor Elovikov <igor.elovikov@gmail.com>"
+   ],
+   "description": "Houdini VEX Language support",
+   "download_count": 0,
+   "id": "houdini-vex",
+   "name": "Houdini VEX",
+   "provides": [
+    "languages",
+    "grammars",
+    "snippets"
+   ],
+   "published_at": "2026-11-02T12:14:25Z",
+   "repository": "https://github.com/igor-elovikov/hou-vex-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Diego Reis <el-yawd@proton.me>"
+   ],
+   "description": "HQL syntax highlighter",
+   "download_count": 0,
+   "id": "hql",
+   "name": "HQL",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:14:29Z",
+   "repository": "https://github.com/el-yawd/hql-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Isaac Clayton <slightknack@gmail.com>"
+   ],
+   "description": "HTML support.",
+   "download_count": 0,
+   "id": "html",
+   "name": "HTML",
+   "provides": [
+    "languages",
+    "grammars",
+    "language-servers"
+   ],
+   "published_at": "2026-11-02T12:14:51Z",
+   "repository": "https://github.com/zed-industries/zed",
+   "schema_version": 1,
+   "version": "0.3.2",
+   "wasm_api_version": "0.7.0"
+  },
+  {
+   "authors": [
+    "Jaagup Averin"
+   ],
+   "description": "Highlighting for HTML-Jinja templates.",
+   "download_count": 0,
+   "id": "html-jinja",
+   "name": "HTML-Jinja Template Support",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:14:53Z",
+   "repository": "https://github.com/JaagupAverin/html-jinja",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "seekode <nicolas@seekode.dev>"
+   ],
+   "description": "Essential HTML snippets for faster development",
+   "download_count": 0,
+   "id": "html-snippets",
+   "name": "HTML Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-02T12:14:53Z",
+   "repository": "https://github.com/seekode/zed-html-snippets",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "agrippa <afsalahamed07@gmail.com>"
+   ],
+   "description": "A dark theme based on habamax, ported from hubbamax.nvim.",
+   "download_count": 0,
+   "id": "hubbamax-theme",
+   "name": "Hubbamax",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:14:56Z",
+   "repository": "https://github.com/agrippa1027/zed-hubbamax",
+   "schema_version": 1,
+   "version": "0.3.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Blue Amber"
+   ],
+   "description": "HubL syntax highlighting for HubSpot templates",
+   "download_count": 0,
+   "id": "hubl",
+   "name": "HubL",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:14:57Z",
+   "repository": "https://github.com/blueambr/zed-hubl",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Niraj"
+   ],
+   "description": "Huff language support for Zed - a low-level EVM assembly language",
+   "download_count": 0,
+   "id": "huff",
+   "name": "Huff",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:14:58Z",
+   "repository": "https://github.com/Niraj-Kamdar/zed-huff",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Gareth Evans <hi@gvns.ca>"
+   ],
+   "description": "HuJSON (JWCC) support: JSON with comments and trailing commas",
+   "download_count": 0,
+   "id": "hujson",
+   "name": "HuJSON",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:15:00Z",
+   "repository": "https://github.com/ggfevans/zed-hujson",
+   "schema_version": 1,
+   "version": "1.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "David C Cavalcante <davcavalcante@proton.me>",
+    "Takk\u2122 Innovate Studio <say@takk.ag>"
+   ],
+   "description": "\ud83d\udcfa A theme faithfully based on the IBM 5151 green phosphor screen, recreating the authentic monochrome terminal experience",
+   "download_count": 0,
+   "id": "ibm-5151",
+   "name": "IBM 5151 Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:15:09Z",
+   "repository": "https://github.com/takk8is/ibm-5151-theme-for-zed",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Douglas Muratore <douglas.muratore@gmail.com>"
+   ],
+   "description": "Iceberg is well-designed, bluish color scheme for Vim/Neovim and now, Zed.",
+   "download_count": 0,
+   "id": "iceberg",
+   "name": "Iceberg Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:15:10Z",
+   "repository": "https://github.com/efdos/iceberg-zed-theme",
+   "schema_version": 1,
+   "version": "0.2.10",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Jms Dnns <jdennis@gmail.com>"
+   ],
+   "description": "Turn off the lights and I'll glow",
+   "download_count": 0,
+   "id": "iceicebergy",
+   "name": "Ice Ice Bergy Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:15:11Z",
+   "repository": "https://github.com/jmsdnns/iceicebergy-zed-theme",
+   "schema_version": 1,
+   "version": "0.3.14",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "JosMiguelMM <miguelmendezm0802@gmail.com>"
+   ],
+   "description": "A collection of icons for Zed",
+   "download_count": 0,
+   "id": "icons-modern-material",
+   "name": "Icons modern material",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-11-02T12:15:12Z",
+   "repository": "https://github.com/JosMiguelMM/icons-modern-material",
+   "schema_version": 1,
+   "version": "1.2.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Damir Karashev"
+   ],
+   "description": "Transparent theme for Zed",
+   "download_count": 0,
+   "id": "icu-theme",
+   "name": "ICU",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:15:13Z",
+   "repository": "https://github.com/dbkarashev/zed-icu",
+   "schema_version": 1,
+   "version": "0.1.2",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "kr-aman-sharma <iak.sharma0004@gmail.com>"
+   ],
+   "description": "This theme is brought to you with inspiration from Google's Project IDX online editor",
+   "download_count": 0,
+   "id": "idx-theme",
+   "name": "IDX Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:15:15Z",
+   "repository": "https://github.com/kr-aman-sharma/idx-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Yaroslav Bolyukin <iam@lach.pw>"
+   ],
+   "description": "Immigrant schema definition language support",
+   "download_count": 0,
+   "id": "immigrant",
+   "name": "Immigrant",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:15:16Z",
+   "repository": "https://github.com/deltarocks/zed-immigrant",
+   "schema_version": 1,
+   "version": "0.1.2",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "ChocolateNao <andrey12q112@gmail.com>"
+   ],
+   "description": "\ud83d\udd56 A color theme for non-night owls",
+   "download_count": 0,
+   "id": "inbedby7pm-theme",
+   "name": "In Bed By 7pm",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:15:19Z",
+   "repository": "https://github.com/ChocolateNao/inbedby7pm-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "p3rception <dim.pergel@gmail.com>"
+   ],
+   "description": "Dark. Clean. Indigo.",
+   "download_count": 0,
+   "id": "indigo",
+   "name": "Indigo Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:15:20Z",
+   "repository": "https://github.com/p3rception/Indigo-zed",
+   "schema_version": 0,
+   "version": "0.1.2",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Sam Win-Mason <sam@albedogames.com>"
+   ],
+   "description": "Zed language support for the Inform 6 programming language.",
+   "download_count": 0,
+   "id": "inform6",
+   "name": "Inform 6",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:15:22Z",
+   "repository": "https://github.com/Or4c/zed-inform6",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Yorick Peterse <yorick@yorickpeterse.com>"
+   ],
+   "description": "Inko support.",
+   "download_count": 0,
+   "id": "inko",
+   "name": "Inko",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:15:27Z",
+   "repository": "https://github.com/inko-lang/zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "chandruscm"
+   ],
+   "description": "A light theme for Zed that replicates the default light theme that comes standard with IntelliJ IDEA / Android Studio.",
+   "download_count": 0,
+   "id": "intellij-light-theme",
+   "name": "IntelliJ Light Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:15:29Z",
+   "repository": "https://github.com/chandruscm/intellij-light-theme-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Kenny Pitt <kenny@pittcrew.org>"
+   ],
+   "description": "A Zed theme based on the JetBrains IntelliJ \"New UI\" colors (default Dark theme only).",
+   "download_count": 0,
+   "id": "intellij-newui-theme",
+   "name": "JetBrains New UI Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:15:30Z",
+   "repository": "https://github.com/kpitt/zed-theme-intellij-newui",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Trong Nguyen"
+   ],
+   "description": "Internationalization (i18n) support for Zed - inline translations, hover info, and diagnostics",
+   "download_count": 0,
+   "id": "intl-lens",
+   "name": "Intl Lens",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-11-02T12:15:50Z",
+   "repository": "https://github.com/nguyenphutrong/intl-lens",
+   "schema_version": 1,
+   "version": "0.1.5",
+   "wasm_api_version": "0.7.0"
+  },
+  {
+   "authors": [
+    "Inuzdev"
+   ],
+   "description": "A coffee theme by InuzDev - v1.1.3",
+   "download_count": 0,
+   "id": "inuzdev-coffee-theme",
+   "name": "InuzDev Coffee theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:15:51Z",
+   "repository": "https://github.com/InuzDev/InuzDev-coffee",
+   "schema_version": 1,
+   "version": "1.1.3",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Samet Aylak <sametaylak29@gmail.com>"
+   ],
+   "description": "IR Black theme",
+   "download_count": 0,
+   "id": "ir-black",
+   "name": "IR Black",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:15:52Z",
+   "repository": "https://github.com/sametaylak/ir-black-zed-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Graham Rounds <gtrounds@gmail.com>"
+   ],
+   "description": "Statistically-averaged dark themes generated from Zed community color choices, with WCAG AA and AAA contrast variants.",
+   "download_count": 0,
+   "id": "irodori-theme",
+   "name": "Irodori",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:15:53Z",
+   "repository": "https://github.com/agrahamlincoln/irodori",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "bkataru"
+   ],
+   "description": "Theme for Zed. Arc-reactor gold, repulsor blue, and crimson red.",
+   "download_count": 0,
+   "id": "iron-man-theme",
+   "name": "Iron Man",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:15:53Z",
+   "repository": "https://github.com/bkataru/iron-man-zed",
+   "schema_version": 1,
+   "version": "2.0.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Matt McKenna"
+   ],
+   "description": "A theme inspired by JetBrains' Islands design system, with light and dark variants.",
+   "download_count": 0,
+   "id": "islands-theme",
+   "name": "Islands Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:15:54Z",
+   "repository": "https://github.com/himattm/zed-islands-theme",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Gabriel Aderaldo <gabriel_aderaldo@edu.unifor.br>"
+   ],
+   "description": "It\u00e1 Semantic \u2014 semantic color theme for the It\u00e1 language (Dark & Light, WCAG AA)",
+   "download_count": 0,
+   "id": "ita-theme",
+   "name": "It\u00e1 Semantic",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:15:56Z",
+   "repository": "https://github.com/ita-lang/ita-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Etan Heyman"
+   ],
+   "description": "The classic iTerm2 default dark color scheme for Zed \u2014 pure black background, familiar CGA ANSI colors, and a clean editor experience that feels like home for Mac terminal users.",
+   "download_count": 0,
+   "id": "iterm2-default-theme",
+   "name": "iTerm2 Default Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:15:57Z",
+   "repository": "https://github.com/EtanHey/zed-iterm-default-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Vijay Kiran <mail@vijaykiran.com>"
+   ],
+   "description": "Zed extension for Janet programming language.",
+   "download_count": 0,
+   "id": "janet",
+   "name": "Janet",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:16:02Z",
+   "repository": "https://github.com/vijaykiran/janet-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Etienne Bacher"
+   ],
+   "description": "Jarl extension for Zed",
+   "download_count": 0,
+   "id": "jarl",
+   "name": "Jarl",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-11-02T12:16:51Z",
+   "repository": "https://github.com/etiennebacher/jarl",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": "0.2.0"
+  },
+  {
+   "authors": [
+    "seekode <nicolas@seekode.dev>"
+   ],
+   "description": "Essential JavaScript snippets for faster development",
+   "download_count": 0,
+   "id": "javascript-snippets",
+   "name": "JavaScript Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-02T12:20:49Z",
+   "repository": "https://github.com/seekode/zed-js-snippets",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "cringoleg"
+   ],
+   "description": "A port of the JetBrains High Contrast accessibility theme for Zed",
+   "download_count": 0,
+   "id": "jb-high-contrast-theme",
+   "name": "JetBrains High Contrast",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:20:49Z",
+   "repository": "https://github.com/cringoleg/jetbrains-high-contrast-zed",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Alessandro Bruno <alessandro.brunoh@gmail.com>"
+   ],
+   "description": "Syntax highlighting support for Jhipster Domain Language",
+   "download_count": 0,
+   "id": "jdl",
+   "name": "Jhipster Domain Language Support",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-02T12:20:50Z",
+   "repository": "https://github.com/alessandrobrunoh/zed-grammar-jdl",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Snehasish Dawn <snehasishdawn29@gmail.com>"
+   ],
+   "description": "A colorful dark theme for Zed editor inspired by Jellybeans color scheme.",
+   "download_count": 0,
+   "id": "jellybeans-theme",
+   "name": "Jellybeans Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:20:52Z",
+   "repository": "https://github.com/sdawn29/jellybeans-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Raj Kashyap <rajkash06@gmail.com>"
+   ],
+   "description": "Zed port of nanotech's jellybeans.vim theme \ud83e\uded8",
+   "download_count": 0,
+   "id": "jellybeans-vim",
+   "name": "Jellybeans Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:20:53Z",
+   "repository": "https://github.com/rajerthat1/jellybeans.zed",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "guba <gubacoolest@gmail.com>"
+   ],
+   "description": "A port of Google Gemini color scheme",
+   "download_count": 0,
+   "id": "jemini-theme",
+   "name": "Jemini",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:20:53Z",
+   "repository": "https://github.com/iamguba/zed-jemini-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Tomas dev@tmsbkn.ca"
+   ],
+   "description": "Jest test snippets for Zed",
+   "download_count": 0,
+   "id": "jest-snippets",
+   "name": "Jest Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-02T12:20:55Z",
+   "repository": "https://github.com/tmsbkn/Jest-Snippets",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Bronya0 <tangssst@163.com>"
+   ],
+   "description": "Darcula theme from Jetbrains IDE, Like IDEA/Goland/Pycharm\uff0cMy favorite theme, and you?",
+   "download_count": 0,
+   "id": "jetbrains-darcula-theme-by-bronya0",
+   "name": "Jetbrains Darcula theme by bronya0",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:20:55Z",
+   "repository": "https://github.com/Bronya0/Jetbrains-Darcula-Zed-Theme",
+   "schema_version": 1,
+   "version": "0.1.4",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Slipstream Max"
+   ],
+   "description": "Blurred JetBrains Dark theme for Zed",
+   "download_count": 0,
+   "id": "jetbrains-dark-blur-theme",
+   "name": "JetBrains Dark Blur",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:20:56Z",
+   "repository": "https://github.com/Slipstream-Max/jetbrains-dark-blur-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Zeeshan Ahmad <ziishaned@gmail.com>"
+   ],
+   "description": "JetBrains Icons for Zed",
+   "download_count": 0,
+   "id": "jetbrains-icons",
+   "name": "JetBrains Icons",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-11-02T12:20:57Z",
+   "repository": "https://github.com/ziishaned/zed-jetbrains-icons",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "ANKDDEV"
+   ],
+   "description": "JetBrains New UI icons theme for Zed",
+   "download_count": 0,
+   "id": "jetbrains-new-ui-icons",
+   "name": "JetBrains New UI Icon Theme",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-11-02T12:20:58Z",
+   "repository": "https://github.com/ankddev/zed-jetbrains-newui-icons",
+   "schema_version": 1,
+   "version": "2.2.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "RajaSunrise <indra020204@gmail.com>"
+   ],
+   "description": "Light and Dark JetBrains Rider themes",
+   "download_count": 0,
+   "id": "jetbrains-rider",
+   "name": "JetBrains Rider",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:20:59Z",
+   "repository": "https://github.com/NarmadaWeb/jetbrains-rider-zed",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Artem Evsevev <artem@artevs.dev>"
+   ],
+   "description": "Light, Dark, Islands Light and Islands Dark JetBrains themes",
+   "download_count": 0,
+   "id": "jetbrains-themes",
+   "name": "JetBrains Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:21:00Z",
+   "repository": "https://github.com/artemevsevev/zed-theme-jetbrains",
+   "schema_version": 1,
+   "version": "1.4.0",
+   "wasm_api_version": null
   }
  ]
 }

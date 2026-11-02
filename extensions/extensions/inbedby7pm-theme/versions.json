@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "ChocolateNao <andrey12q112@gmail.com>"
+   ],
+   "description": "\ud83d\udd56 A color theme for non-night owls",
+   "download_count": 0,
+   "id": "inbedby7pm-theme",
+   "name": "In Bed By 7pm",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-02T12:15:19Z",
+   "repository": "https://github.com/ChocolateNao/inbedby7pm-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}
