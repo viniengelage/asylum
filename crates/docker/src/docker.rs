@@ -54,6 +54,9 @@ actions!(
         ToggleStop,
         /// Removes the selected container, after confirming.
         Remove,
+        /// Removes stopped containers, dangling images, unused networks and the build cache,
+        /// after confirming.
+        Prune,
         /// Pauses or resumes following the logs.
         ToggleFollow,
     ]

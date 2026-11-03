@@ -3,7 +3,9 @@
 //! window shows the dock.
 
 use crate::{
-    client::{Container, ContainerState, Docker, DockerError, Image, Network, Stats, Volume},
+    client::{
+        Container, ContainerState, Docker, DockerError, Image, Network, PruneReport, Stats, Volume,
+    },
     discovery::{self, SocketCandidate},
 };
 use collections::{HashMap, HashSet};
@@ -133,6 +135,7 @@ pub struct DockerStore {
     volumes: Vec<Volume>,
     volume_sizes: HashMap<String, i64>,
     networks: Vec<Network>,
+    pruning: bool,
     connect_task: Task<()>,
     events_task: Task<()>,
     stats_task: Task<()>,
@@ -180,6 +183,7 @@ impl DockerStore {
             volumes: Vec::new(),
             volume_sizes: HashMap::default(),
             networks: Vec::new(),
+            pruning: false,
             connect_task: Task::ready(()),
             events_task: Task::ready(()),
             stats_task: Task::ready(()),
@@ -266,6 +270,10 @@ impl DockerStore {
 
     pub fn networks(&self) -> &[Network] {
         &self.networks
+    }
+
+    pub fn is_pruning(&self) -> bool {
+        self.pruning
     }
 
     /// The compose project whose directory is `project_root` first, everything else under
@@ -593,6 +601,31 @@ impl DockerStore {
             result.map_err(|error| anyhow::anyhow!("{error}"))
         })
     }
+
+    /// `docker system prune`. Errors come back in the interface language for the caller's toast.
+    pub fn prune(&mut self, cx: &mut Context<Self>) -> Task<anyhow::Result<PruneReport>> {
+        let Some(docker) = self.docker().cloned() else {
+            return Task::ready(Err(anyhow::anyhow!(
+                "{}",
+                t!("docker.connection.not_connected")
+            )));
+        };
+        if self.pruning {
+            return Task::ready(Err(anyhow::anyhow!("{}", t!("docker.prune.in_progress"))));
+        }
+        self.pruning = true;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = docker.prune().await;
+            this.update(cx, |this, cx| {
+                this.pruning = false;
+                this.refresh(cx);
+                this.refresh_resources(cx);
+                cx.notify();
+            })?;
+            result.map_err(|error| anyhow::anyhow!("{error}"))
+        })
+    }
 }
 
 /// Stats cost the daemon a sample per container every interval, so they only run while some
@@ -689,6 +722,7 @@ mod tests {
             volumes: Vec::new(),
             volume_sizes: HashMap::default(),
             networks: Vec::new(),
+            pruning: false,
             connect_task: Task::ready(()),
             events_task: Task::ready(()),
             stats_task: Task::ready(()),

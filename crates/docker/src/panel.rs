@@ -1,5 +1,5 @@
 use crate::{
-    FocusFilter, Inspect, NewContainer, OpenLogs, OpenTerminal, Refresh, Remove, Restart,
+    FocusFilter, Inspect, NewContainer, OpenLogs, OpenTerminal, Prune, Refresh, Remove, Restart,
     ToggleFocus, TogglePause, ToggleStop,
     client::{Container, ContainerState, health_label},
     discovery, format_bytes, format_percent, logs_view, new_container,
@@ -256,6 +256,45 @@ impl DockerPanel {
         .detach_and_log_err(cx);
     }
 
+    fn confirm_prune(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.store.read(cx).is_pruning() {
+            return;
+        }
+        let confirm = t!("docker.prune.confirm");
+        let cancel = t!("docker.remove.cancel");
+        let answer = window.prompt(
+            PromptLevel::Warning,
+            &t!("docker.prune.title"),
+            Some(&t!("docker.prune.detail")),
+            &[confirm.as_ref(), cancel.as_ref()],
+            cx,
+        );
+        cx.spawn(async move |this, cx| {
+            if answer.await.ok() != Some(0) {
+                return anyhow::Ok(());
+            }
+            let task = this.update(cx, |this, cx| {
+                this.store.update(cx, |store, cx| store.prune(cx))
+            })?;
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                let message = match result {
+                    Ok(report) => t!(
+                        "docker.prune.done",
+                        containers = report.containers,
+                        images = report.images,
+                        networks = report.networks,
+                        space = format_bytes(report.space_reclaimed)
+                    )
+                    .to_string(),
+                    Err(error) => t!("docker.prune.failed", error = error).to_string(),
+                };
+                this.toast("prune", message, cx);
+            })
+        })
+        .detach_and_log_err(cx);
+    }
+
     fn run_on_group(&mut self, group: &Group, action: ContainerAction, cx: &mut Context<Self>) {
         let containers: Vec<Container> = group
             .containers
@@ -335,6 +374,8 @@ impl DockerPanel {
 
     fn render_engine(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let store = self.store.read(cx);
+        let is_ready = matches!(store.connection(), Connection::Ready { .. });
+        let is_pruning = store.is_pruning();
         let (runtime, chip): (SharedString, AnyElement) = match store.connection() {
             Connection::Ready {
                 runtime,
@@ -386,6 +427,33 @@ impl DockerPanel {
             .child(text(runtime, 12.5).weight(FontWeight::MEDIUM))
             .child(chip)
             .child(div().flex_1())
+            .when(is_ready, |this| {
+                this.child(if is_pruning {
+                    h_flex()
+                        .id("docker-prune")
+                        .size(px(28.))
+                        .flex_none()
+                        .justify_center()
+                        .child(
+                            Icon::new(IconName::LoadCircle)
+                                .size(IconSize::Medium)
+                                .color(Color::Muted)
+                                .with_rotate_animation(2),
+                        )
+                        .tooltip(Tooltip::text(t!("docker.prune.in_progress")))
+                } else {
+                    icon_button(
+                        "docker-prune",
+                        IconName::Eraser,
+                        28.,
+                        IconSize::Medium,
+                        false,
+                        cx,
+                    )
+                    .tooltip(Tooltip::text(t!("docker.prune.tooltip")))
+                    .on_click(cx.listener(|this, _, window, cx| this.confirm_prune(window, cx)))
+                })
+            })
             .child(
                 icon_button(
                     "docker-refresh",
@@ -1842,6 +1910,7 @@ impl Render for DockerPanel {
                     })
                     .log_err();
             }))
+            .on_action(cx.listener(|this, _: &Prune, window, cx| this.confirm_prune(window, cx)))
             .on_action(cx.listener(|this, _: &Refresh, _, cx| {
                 this.store.update(cx, |store, cx| store.reconnect(cx));
             }))

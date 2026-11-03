@@ -20,6 +20,9 @@ pub const COMPOSE_WORKING_DIR_LABEL: &str = "com.docker.compose.project.working_
 pub const COMPOSE_CONFIG_FILES_LABEL: &str = "com.docker.compose.project.config_files";
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+/// The daemon answers a prune only after deleting everything, and the build cache alone can take
+/// minutes.
+const PRUNE_TIMEOUT: Duration = Duration::from_secs(600);
 
 #[derive(Debug, Clone)]
 pub enum DockerError {
@@ -166,6 +169,42 @@ impl Docker {
 
     pub async fn networks(&self) -> Result<Vec<Network>, DockerError> {
         self.get_json("/networks").await
+    }
+
+    /// What `docker system prune` removes: stopped containers, dangling images, unused networks
+    /// and the build cache. Volumes stay, since they hold data.
+    pub async fn prune(&self) -> Result<PruneReport, DockerError> {
+        let containers: PruneResponse = self.post_prune("/containers/prune").await?;
+        let images: PruneResponse = self.post_prune("/images/prune").await?;
+        let networks: PruneResponse = self.post_prune("/networks/prune").await?;
+        // Podman and older engines have no build cache endpoint.
+        let build_cache = match self.post_prune("/build/prune").await {
+            Ok(response) => response,
+            Err(DockerError::NotFound(_)) => PruneResponse::default(),
+            Err(error) => return Err(error),
+        };
+        Ok(PruneReport {
+            containers: containers.containers_deleted.as_ref().map_or(0, Vec::len),
+            images: images
+                .images_deleted
+                .iter()
+                .flatten()
+                .filter(|image| image.deleted.is_some())
+                .count(),
+            networks: networks.networks_deleted.as_ref().map_or(0, Vec::len),
+            space_reclaimed: [containers, images, build_cache]
+                .iter()
+                .map(|response| response.space_reclaimed.unwrap_or_default())
+                .sum(),
+        })
+    }
+
+    async fn post_prune(&self, path: &str) -> Result<PruneResponse, DockerError> {
+        decode(
+            &self
+                .send_with_timeout("POST", path, None, PRUNE_TIMEOUT)
+                .await?,
+        )
     }
 
     pub async fn create(
@@ -362,6 +401,17 @@ impl Docker {
         path: &str,
         body: Option<Vec<u8>>,
     ) -> Result<Bytes, DockerError> {
+        self.send_with_timeout(method, path, body, REQUEST_TIMEOUT)
+            .await
+    }
+
+    async fn send_with_timeout(
+        &self,
+        method: &'static str,
+        path: &str,
+        body: Option<Vec<u8>>,
+        timeout: Duration,
+    ) -> Result<Bytes, DockerError> {
         let socket = self.socket.clone();
         let path = path.to_string();
         on_runtime(async move {
@@ -376,7 +426,7 @@ impl Docker {
                     .to_bytes();
                 check_status(status, bytes)
             };
-            tokio_timeout(REQUEST_TIMEOUT, request)
+            tokio_timeout(timeout, request)
                 .await
                 .unwrap_or_else(|| Err(unavailable(&socket, t!("docker.error.timed_out"))))
         })
@@ -1092,6 +1142,30 @@ pub struct Volume {
     pub driver: String,
     #[serde(default)]
     pub mountpoint: String,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PruneReport {
+    pub containers: usize,
+    pub images: usize,
+    pub networks: usize,
+    pub space_reclaimed: u64,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct PruneResponse {
+    containers_deleted: Option<Vec<String>>,
+    images_deleted: Option<Vec<ImageDeleteEntry>>,
+    networks_deleted: Option<Vec<String>>,
+    space_reclaimed: Option<u64>,
+}
+
+/// The daemon lists an untagged reference and a deleted layer as separate entries.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct ImageDeleteEntry {
+    deleted: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
