@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Gustavo <gus@gus.sh>"
+   ],
+   "description": "A Comfy & Soft Dark theme with neon Violet, Pink and Vaporwave syntax colors.",
+   "download_count": 0,
+   "id": "neon-comfy-soft-themes",
+   "name": "Neon Comfy & Soft Themes (opaque/blured/transparent)",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:55:25Z",
+   "repository": "https://github.com/guustavocl/zed-neon-comfy-soft-themes",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

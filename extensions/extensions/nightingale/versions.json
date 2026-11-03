@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "xeind"
+   ],
+   "description": "Night theme with comfortable warm contrast",
+   "download_count": 0,
+   "id": "nightingale",
+   "name": "Nightingale",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:55:46Z",
+   "repository": "https://github.com/xeind/nightingale-zed",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

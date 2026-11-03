@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Caio Landgraf <eu.caiolandgraf@gmail.com>"
+   ],
+   "description": "Modified peppermint and orange flavored dark theme.",
+   "download_count": 0,
+   "id": "modern-vesper",
+   "name": "Moderns Vesper",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:54:43Z",
+   "repository": "https://github.com/caiolandgraf/modern-vesper-zed",
+   "schema_version": 1,
+   "version": "1.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

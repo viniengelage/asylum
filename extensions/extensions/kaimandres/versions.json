@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "martellev <vf.hann2723@gmail.com>"
+   ],
+   "description": "The official Zed port for Kaimandres.nvim.",
+   "download_count": 0,
+   "id": "kaimandres",
+   "name": "Kaimandres",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:49:33Z",
+   "repository": "https://github.com/MartelleV/kaimandres-zed",
+   "schema_version": 1,
+   "version": "1.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

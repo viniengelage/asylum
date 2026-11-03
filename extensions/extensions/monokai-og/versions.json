@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Siddha"
+   ],
+   "description": "A faithful recreation of the original Monokai theme",
+   "download_count": 0,
+   "id": "monokai-og",
+   "name": "Monokai Original",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:54:57Z",
+   "repository": "https://github.com/sidwachche/monokai-og-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

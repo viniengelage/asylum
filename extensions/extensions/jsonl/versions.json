@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ofer Affias <ofer.affias@gmail.com>"
+   ],
+   "description": "JSON Lines (JSONL) syntax highlighting support for Zed",
+   "download_count": 0,
+   "id": "jsonl",
+   "name": "JSONL",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-03T11:49:01Z",
+   "repository": "https://github.com/vim-zz/jsonl-syntax-zed",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

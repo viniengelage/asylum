@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Tristan Brewster"
+   ],
+   "description": "A peaceful light theme inspired by the dark theme, Kokedera.",
+   "download_count": 0,
+   "id": "kokedera-light-theme",
+   "name": "Kokedera Light",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:49:52Z",
+   "repository": "https://github.com/xplato/kokedera-light",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

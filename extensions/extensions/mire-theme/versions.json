@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "MONARCH"
+   ],
+   "description": "\ud83c\udfa8 A minimal Zed theme family with deep black and soft ivory variants, pairing quiet UI surfaces with refined orange, gold, teal, cream, and rose syntax accents.",
+   "download_count": 0,
+   "id": "mire-theme",
+   "name": "Mire theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:54:35Z",
+   "repository": "https://github.com/monarcode/mire-theme-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

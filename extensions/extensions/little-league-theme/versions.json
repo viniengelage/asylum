@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Matt Strom <https://github.com/ilikescience>"
+   ],
+   "description": "A quiet theme with harmonious colors",
+   "download_count": 0,
+   "id": "little-league-theme",
+   "name": "Little League",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:51:13Z",
+   "repository": "https://github.com/ilikescience/little-league",
+   "schema_version": 1,
+   "version": "1.5.1",
+   "wasm_api_version": null
+  }
+ ]
+}

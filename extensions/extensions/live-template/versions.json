@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Jekst <jekst@qq.com>"
+   ],
+   "description": "A collection of snippets.",
+   "download_count": 0,
+   "id": "live-template",
+   "name": "Live Template",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-03T11:51:16Z",
+   "repository": "https://github.com/jekst/zed-snippets",
+   "schema_version": 1,
+   "version": "0.0.4",
+   "wasm_api_version": null
+  }
+ ]
+}

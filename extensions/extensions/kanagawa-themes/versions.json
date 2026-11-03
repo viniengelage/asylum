@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ethan Gilmore <ethanmckgilmore@gmail.com>",
+    "Yair Chan <enyaoficial001@gmail.com"
+   ],
+   "description": "\ud83c\udf0a Zed port of rebelot's Kanagawa.nvim theme \ud83d\udc09",
+   "download_count": 0,
+   "id": "kanagawa-themes",
+   "name": "Kanagawa Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:49:36Z",
+   "repository": "https://github.com/ethangilmore/zed-kanagawa",
+   "schema_version": 1,
+   "version": "0.1.2",
+   "wasm_api_version": null
+  }
+ ]
+}

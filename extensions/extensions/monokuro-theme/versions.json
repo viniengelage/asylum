@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Namito Kawane <kawanenamito0426@gmail.com>"
+   ],
+   "description": "Monokuro is the romanization of the Japanese pronunciation of 'monochrome.' It's a simple black-and-white theme.",
+   "download_count": 0,
+   "id": "monokuro-theme",
+   "name": "Monokuro theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:55:01Z",
+   "repository": "https://github.com/KawaneNamito/zed-monokuro-theme.git",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

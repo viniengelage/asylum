@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Francisco Bach"
+   ],
+   "description": "Miramare theme for Zed.",
+   "download_count": 0,
+   "id": "miramare-theme",
+   "name": "Miramare",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:54:34Z",
+   "repository": "https://github.com/franbach/miramare-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

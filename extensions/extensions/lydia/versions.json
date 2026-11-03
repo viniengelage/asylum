@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "dnlytras <hi@dnlytras.com>"
+   ],
+   "description": "A dark color scheme built around cool blue-grays and vibrant accents.",
+   "download_count": 0,
+   "id": "lydia",
+   "name": "Lydia Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:52:00Z",
+   "repository": "https://github.com/dimitrisnl/lydia-zed-theme",
+   "schema_version": 1,
+   "version": "0.0.4",
+   "wasm_api_version": null
+  }
+ ]
+}

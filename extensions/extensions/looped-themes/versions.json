@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ratul Maharaj <ratul@looped.sh>"
+   ],
+   "description": "Looped Automation's themes for Zed",
+   "download_count": 0,
+   "id": "looped-themes",
+   "name": "Looped",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:51:45Z",
+   "repository": "https://github.com/loopedautomation/editor-themes",
+   "schema_version": 1,
+   "version": "1.0.4",
+   "wasm_api_version": null
+  }
+ ]
+}

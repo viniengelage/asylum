@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Markos Narinian <manarinian@gmail.com>",
+    "Karl Oskar Joosep Nurm"
+   ],
+   "description": "Koda theme ported from oskarnurm/koda.nvim by Karl Oskar Joosep Nurm",
+   "download_count": 0,
+   "id": "koda-theme",
+   "name": "Koda Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:49:49Z",
+   "repository": "https://github.com/markosnarinian/koda-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

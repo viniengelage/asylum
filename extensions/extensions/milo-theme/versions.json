@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "hazicy"
+   ],
+   "description": "A refined dark color theme for Zed.",
+   "download_count": 0,
+   "id": "milo-theme",
+   "name": "Milo",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:54:25Z",
+   "repository": "https://github.com/hazicy/milo-theme-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Yusef Karim <yusefkarim@riseup.net>"
+   ],
+   "description": "A mostly-monochrome theme with warm amber accents, in dark and light variants, adapted from Josias Beem's Monochromator.",
+   "download_count": 0,
+   "id": "monochrome-amber-theme",
+   "name": "Monochrome Amber",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:54:54Z",
+   "repository": "https://github.com/yusefkarim/zed-monochrome-amber",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

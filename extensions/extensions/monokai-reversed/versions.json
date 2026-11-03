@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "everdrone"
+   ],
+   "description": "Zed port of Bearded Monokai Reversed",
+   "download_count": 0,
+   "id": "monokai-reversed",
+   "name": "Monokai Reversed Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:54:59Z",
+   "repository": "https://github.com/everdrone/zed-monokai-reversed",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

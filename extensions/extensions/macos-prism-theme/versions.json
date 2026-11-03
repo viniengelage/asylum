@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Arda Hamamcioglu"
+   ],
+   "description": "A macOS-inspired Zed color theme with rich, colorful syntax highlighting for dark and light modes.",
+   "download_count": 0,
+   "id": "macos-prism-theme",
+   "name": "MacOS prism",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:52:02Z",
+   "repository": "https://github.com/ardahamamcioglu/macos-prism-theme.git",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

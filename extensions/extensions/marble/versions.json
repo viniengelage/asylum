@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "TeenCoder159 TeenCoder159@github.com"
+   ],
+   "description": "Marble theme, an amazing looking theme with blue, red green and orange, all while being pleasant to the eyes",
+   "download_count": 0,
+   "id": "marble",
+   "name": "Marble",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:52:37Z",
+   "repository": "https://github.com/TeenCoder159/marble-theme",
+   "schema_version": 1,
+   "version": "0.3.0",
+   "wasm_api_version": null
+  }
+ ]
+}

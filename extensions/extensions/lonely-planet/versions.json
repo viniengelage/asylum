@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "John Castrillon <https://github.com/jbonez87>"
+   ],
+   "description": "Theme for Zed inspired by the vscode-chester-atom theme.",
+   "download_count": 0,
+   "id": "lonely-planet",
+   "name": "Lonely Planet Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:51:44Z",
+   "repository": "https://github.com/jbonez87/lonely-planet-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

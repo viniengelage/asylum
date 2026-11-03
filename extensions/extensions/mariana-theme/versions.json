@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "blaqat <blaqat.ag@gmail.com>"
+   ],
+   "description": "Sublime 4's Mariana Theme for Zed",
+   "download_count": 0,
+   "id": "mariana-theme",
+   "name": "Mariana Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:52:38Z",
+   "repository": "https://github.com/biaqat/mariana-theme-zed",
+   "schema_version": 1,
+   "version": "0.9.1",
+   "wasm_api_version": null
+  }
+ ]
+}

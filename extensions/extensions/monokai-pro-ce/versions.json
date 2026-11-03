@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Erik Br\u00fcggemann <erik@eobyte.dev>"
+   ],
+   "description": "Monokai Pro Community Edition for Zed",
+   "download_count": 0,
+   "id": "monokai-pro-ce",
+   "name": "Monokai Pro (CE)",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:54:58Z",
+   "repository": "https://github.com/monokai-pro/zed",
+   "schema_version": 1,
+   "version": "1.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

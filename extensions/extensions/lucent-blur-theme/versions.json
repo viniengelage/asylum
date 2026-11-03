@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "callqh"
+   ],
+   "description": "Three focused palettes with Light, Blur, and Heavy translucent Zed surfaces",
+   "download_count": 0,
+   "id": "lucent-blur-theme",
+   "name": "Lucent Blur",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:51:53Z",
+   "repository": "https://github.com/callqh/lucent-blur",
+   "schema_version": 1,
+   "version": "0.4.0",
+   "wasm_api_version": null
+  }
+ ]
+}

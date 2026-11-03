@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Mrzz <runze.ma@outlook.com>"
+   ],
+   "description": "A light theme for Zed.",
+   "download_count": 0,
+   "id": "matt-white-theme",
+   "name": "Matt White Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:52:53Z",
+   "repository": "https://github.com/mrzzmrzz/matt-white-theme.git",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Hubert Mi\u015b <hubert.mis@gmail.com>"
+   ],
+   "description": "Kconfig support",
+   "download_count": 0,
+   "id": "kconfig",
+   "name": "Kconfig",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-03T11:49:42Z",
+   "repository": "https://github.com/hubertmis/zed-ext-kconfig",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

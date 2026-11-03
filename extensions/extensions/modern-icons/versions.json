@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ravindra Singh <ravindra@budgurjar.org>"
+   ],
+   "description": "VSCode icons theme for Zed",
+   "download_count": 0,
+   "id": "modern-icons",
+   "name": "Modern Icons Theme",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-11-03T11:54:42Z",
+   "repository": "https://github.com/badrat-in/zed-modern-icons",
+   "schema_version": 1,
+   "version": "0.7.2",
+   "wasm_api_version": null
+  }
+ ]
+}

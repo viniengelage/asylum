@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Umut Ertu\u011frul Da\u015fg\u0131n <ertugruldasgin@gmail.com>"
+   ],
+   "description": "Quick Lorem Ipsum snippets for any file. Just type 'lorem' and select the desired snippet from the suggestions.",
+   "download_count": 0,
+   "id": "lorem-snippets",
+   "name": "Lorem Ipsum Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-03T11:51:45Z",
+   "repository": "https://github.com/ertugruldasgin/lorem-snippets",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

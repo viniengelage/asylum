@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Sai Nimmagadda <https://github.com/funsaized>"
+   ],
+   "description": "Kanagawa for Zed \u2014 Wave, Wave Blur, Dragon, and Lotus. Colors of Hokusai's Great Wave.",
+   "download_count": 0,
+   "id": "kanagawa-wave-blur-theme",
+   "name": "Kanagawa",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:49:37Z",
+   "repository": "https://github.com/funsaized/kanagawa-zed-theme",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

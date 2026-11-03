@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Madi Zhanbyrtayev <m.zhanbyrtaev@gmail.com>"
+   ],
+   "description": "A dark and light theme for Zed based on ngrok's Mantle design system. Features the full Mantle color palette with syntax highlighting matched to Mantle's Prism.js code block tokens.",
+   "download_count": 0,
+   "id": "mantle-theme",
+   "name": "Mantle",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:52:33Z",
+   "repository": "https://github.com/madi-zh/mantle-theme",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

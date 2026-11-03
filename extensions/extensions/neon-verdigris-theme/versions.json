@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "slaps-keyboard"
+   ],
+   "description": "A minimal dark nearly monochrome theme with green highlights, based on erbridge\u2019s theme",
+   "download_count": 0,
+   "id": "neon-verdigris-theme",
+   "name": "Neon Verdigris",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:55:28Z",
+   "repository": "https://github.com/slaps-keyboard/zed-theme-neon-verdigris",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

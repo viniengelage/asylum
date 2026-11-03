@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Gabriel Silva <gabe@gabe.id>"
+   ],
+   "description": "Mermaid support.",
+   "download_count": 0,
+   "id": "mermaid",
+   "name": "Mermaid",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-03T11:53:53Z",
+   "repository": "https://github.com/gabeidx/zed-mermaid",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

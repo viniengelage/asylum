@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Travis Vanderstad <t.vanderstad@gmail.com>"
+   ],
+   "description": "\ud83d\udc8e Vibrant and purposeful theme family",
+   "download_count": 0,
+   "id": "mnemonic",
+   "name": "Mnemonic",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:54:40Z",
+   "repository": "https://github.com/tvanderstad/mnemonic-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

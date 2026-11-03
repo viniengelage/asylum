@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Owen Law <owenlaw222@gmail.com>"
+   ],
+   "description": "A clean dark theme",
+   "download_count": 0,
+   "id": "monolith",
+   "name": "Monolith",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:55:02Z",
+   "repository": "https://github.com/someone13574/zed-monolith-theme",
+   "schema_version": 1,
+   "version": "0.0.4",
+   "wasm_api_version": null
+  }
+ ]
+}

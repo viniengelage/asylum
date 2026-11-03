@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "lastdescent"
+   ],
+   "description": "Moss-temple color themes \u2014 nine variants across the day, the seasons, and the weather of one garden.",
+   "download_count": 0,
+   "id": "kokedera-theme",
+   "name": "Kokedera \u2014 Moss Temple Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:49:54Z",
+   "repository": "https://github.com/lastdescent/kokedera-theme-extension-zed",
+   "schema_version": 1,
+   "version": "2.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

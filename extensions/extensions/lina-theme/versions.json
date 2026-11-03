@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Danilo Campos <hello@danilocampos.cc>"
+   ],
+   "description": "Lina theme for Zed",
+   "download_count": 0,
+   "id": "lina-theme",
+   "name": "Lina",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:50:37Z",
+   "repository": "https://github.com/danilomcampos/lina-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

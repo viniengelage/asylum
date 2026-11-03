@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "John Mylchreest <jmylchreest@users.noreply.github.com>"
+   ],
+   "description": "Model Context Protocol Server for Kagi Search",
+   "download_count": 0,
+   "id": "kagimcp",
+   "name": "Kagi MCP Server",
+   "provides": [
+    "context-servers"
+   ],
+   "published_at": "2026-11-03T11:49:32Z",
+   "repository": "https://github.com/jmylchreest/kagimcp-zed",
+   "schema_version": 1,
+   "version": "0.0.31",
+   "wasm_api_version": "0.7.0"
+  }
+ ]
+}

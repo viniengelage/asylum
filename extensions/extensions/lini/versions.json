@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Abbas Monfared"
+   ],
+   "description": "Syntax highlighting for the Lini diagram language",
+   "download_count": 0,
+   "id": "lini",
+   "name": "Lini",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-03T11:50:41Z",
+   "repository": "https://github.com/monfa-red/lini",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

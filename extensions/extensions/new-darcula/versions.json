@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Evan Simpson <evan@evan.news>"
+   ],
+   "description": "\ud83d\udd2e Clean and minimal take on the JetBrains Darcula theme. INCLUDES dark, darker, and light variants.",
+   "download_count": 0,
+   "id": "new-darcula",
+   "name": "New Darcula Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:55:33Z",
+   "repository": "https://github.com/e-simpson/new-darcula-z",
+   "schema_version": 1,
+   "version": "1.0.9",
+   "wasm_api_version": null
+  }
+ ]
+}

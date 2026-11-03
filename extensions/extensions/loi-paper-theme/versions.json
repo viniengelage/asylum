@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Aliaksei <aliaksei.loi@fr.team>"
+   ],
+   "description": "A warm-paper Zed theme: cream surfaces in light mode, soft charcoal in dark mode, with restrained coral accents reserved for cursor, links, tags, and emphasis.",
+   "download_count": 0,
+   "id": "loi-paper-theme",
+   "name": "Loi Paper",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:51:43Z",
+   "repository": "https://github.com/aliaksei-loi/zed-loi-paper-theme",
+   "schema_version": 1,
+   "version": "0.3.1",
+   "wasm_api_version": null
+  }
+ ]
+}

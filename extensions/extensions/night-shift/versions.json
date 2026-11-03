@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Jean Tinland"
+   ],
+   "description": "A clean desatured zed theme",
+   "download_count": 0,
+   "id": "night-shift",
+   "name": "Night Shift Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:55:41Z",
+   "repository": "https://github.com/Jean-Tinland/zed-theme-night-shift",
+   "schema_version": 1,
+   "version": "1.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

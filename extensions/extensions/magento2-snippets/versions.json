@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "GrimLink <sean.grimlink@gmail.com>"
+   ],
+   "description": "Magento 2 and Hyv\u00e4 Snippets",
+   "download_count": 0,
+   "id": "magento2-snippets",
+   "name": "Magento 2 Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-03T11:52:04Z",
+   "repository": "https://github.com/mage-os-lab/zed-magento2-snippets",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

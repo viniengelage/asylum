@@ -1,0 +1,28 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Caius Durling <dev@caius.name>",
+    "d1y <chenhonzhou@gmail.com>",
+    "Marshall Bowers <elliott.codes@gmail.com>",
+    "Luke Naylor <luke@grahamnaylor.net>",
+    "Igor T\u00e1mara <igor.tamara@gmail.com>",
+    "Michael Alexander <michael.alexander@karlstorz.com>",
+    "Donnie Adams <donnie@thedadams.com>"
+   ],
+   "description": "Makefile syntax highlighting",
+   "download_count": 0,
+   "id": "make",
+   "name": "Make",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-03T11:52:28Z",
+   "repository": "https://github.com/caius/zed-make",
+   "schema_version": 1,
+   "version": "1.1.2",
+   "wasm_api_version": null
+  }
+ ]
+}

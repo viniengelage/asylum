@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Grant Miner <gx0r@proton.me>"
+   ],
+   "description": "A dark and elegant theme",
+   "download_count": 0,
+   "id": "leblackque",
+   "name": "Le Blackque Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:50:20Z",
+   "repository": "https://github.com/gx0r/leblackque",
+   "schema_version": 1,
+   "version": "1.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

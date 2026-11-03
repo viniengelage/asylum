@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Jackson Makinda <jacksonmakinda@outlook.com>"
+   ],
+   "description": "Premium light and dark themes for Zed with warm orange accents and excellent readability.",
+   "download_count": 0,
+   "id": "makinda-themes",
+   "name": "Makinda Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:52:28Z",
+   "repository": "https://github.com/makindajack/makinda-themes",
+   "schema_version": 1,
+   "version": "1.0.4",
+   "wasm_api_version": null
+  }
+ ]
+}

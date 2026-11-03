@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Andrew Zhuk <andrewzhuk@outlook.com>"
+   ],
+   "description": "A warm, vivid color scheme inspired by the colors of daybreak-theme",
+   "download_count": 0,
+   "id": "nightfall-theme",
+   "name": "Nightfall",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:55:43Z",
+   "repository": "https://github.com/andrewzhuk/nightfall-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

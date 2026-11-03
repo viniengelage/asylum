@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Vitaly Slobodin <vitaliy.slobodin@gmail.com>"
+   ],
+   "description": "A complete set of accessible themes for Zed editor. These themes provide high contrast and color-blind friendly color combinations, ensuring readability and comfort for all users. ",
+   "download_count": 0,
+   "id": "modus-themes",
+   "name": "Modus Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:54:46Z",
+   "repository": "https://github.com/vitallium/zed-modus-themes",
+   "schema_version": 1,
+   "version": "0.2.1",
+   "wasm_api_version": null
+  }
+ ]
+}

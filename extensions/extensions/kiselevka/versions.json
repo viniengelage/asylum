@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Konstantin Tereschenkov <kdubrovsky@gmail.com>"
+   ],
+   "description": "Cozy dark and light color themes for Zed",
+   "download_count": 0,
+   "id": "kiselevka",
+   "name": "Kiselevka",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:49:48Z",
+   "repository": "https://github.com/kdubrovsky/kiselevka",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

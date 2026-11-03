@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "sunaipa <sunaipa@duck.com>"
+   ],
+   "description": "A clean, eye friendly dark theme combining signature magenta accents with classic hacker green highlights.",
+   "download_count": 0,
+   "id": "magreen-theme",
+   "name": "Magreen",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:52:23Z",
+   "repository": "https://github.com/sunaipa5/magreen-zed",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

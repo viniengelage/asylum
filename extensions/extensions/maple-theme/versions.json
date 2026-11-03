@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "subframe7536 <1667077010@qq.com>"
+   ],
+   "description": "A colorful Zed theme, support light or dark mode, with medium brightness and low saturation.",
+   "download_count": 0,
+   "id": "maple-theme",
+   "name": "Maple Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:52:34Z",
+   "repository": "https://github.com/subframe7536/zed-theme-maple",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

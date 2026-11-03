@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Pedro Nhamirre"
+   ],
+   "description": "A calm dark theme with warm accents and low-contrast color separation for effortless code reading.",
+   "download_count": 0,
+   "id": "lumenhush-theme",
+   "name": "Lumenhush Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:51:56Z",
+   "repository": "https://github.com/pedronhamirre/lumenhush-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

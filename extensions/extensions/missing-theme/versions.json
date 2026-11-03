@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Deniz Ak\u015fim\u015fek <deniz@aksimsek.tr>"
+   ],
+   "description": "Theme derived from Missing.css Prism theme",
+   "download_count": 0,
+   "id": "missing-theme",
+   "name": "Missing Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:54:36Z",
+   "repository": "https://codeberg-org/dz4k/zed-missing",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Dar Zaccaro <darzaccaro@gmail.com>"
+   ],
+   "description": "A color theme for Zed inspired by Jonathan Blow's compiler livestreams.",
+   "download_count": 0,
+   "id": "naysayer-theme",
+   "name": "Naysayer",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:55:21Z",
+   "repository": "https://github.com/darzaccaro/naysayer-theme",
+   "schema_version": 1,
+   "version": "1.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

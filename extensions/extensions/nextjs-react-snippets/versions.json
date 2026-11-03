@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Konstantinos Psychogios"
+   ],
+   "description": "A collection of useful NEXTJS + React + JavaScript snippets to speed up your development.",
+   "download_count": 0,
+   "id": "nextjs-react-snippets",
+   "name": "NEXTJS React JavaScript Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-03T11:55:35Z",
+   "repository": "https://github.com/Konstantinos-Ps/zed-nextjs-react-snippets",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

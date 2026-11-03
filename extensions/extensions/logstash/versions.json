@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Agani Daniel Strong <adhueywilan@gmail.com>"
+   ],
+   "description": "Logstash pipeline config file syntax highlighting support",
+   "download_count": 0,
+   "id": "logstash",
+   "name": "Logstash",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-03T11:51:42Z",
+   "repository": "https://github.com/StrongTheDev/logstash-for-zed",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Dustin Turner <dustin@dustinbturner.com>"
+   ],
+   "description": "Clean, minimal, neutral color palette.",
+   "download_count": 0,
+   "id": "neutral-theme",
+   "name": "Neutral Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:55:32Z",
+   "repository": "https://github.com/dustinbturner/neutral-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "ClamJohnston"
+   ],
+   "description": "A dark color scheme with a focus on reds, browns, and icy whites.",
+   "download_count": 0,
+   "id": "martianized",
+   "name": "Martianized",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:52:47Z",
+   "repository": "https://github.com/clamjohnston/martianized",
+   "schema_version": 1,
+   "version": "1.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

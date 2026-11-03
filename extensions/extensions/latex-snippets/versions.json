@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Oneptica <dev@oneptica.com>"
+   ],
+   "description": "LaTeX snippets for common patterns. Install alongside a LaTeX language extension for full support.",
+   "download_count": 0,
+   "id": "latex-snippets",
+   "name": "LaTeX Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-03T11:50:16Z",
+   "repository": "https://github.com/Oneptica/Zed-LaTeX-Snippets",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

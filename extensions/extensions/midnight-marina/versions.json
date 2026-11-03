@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Muddyblack"
+   ],
+   "description": "Ocean inspired theme for Zed \ud83c\udf0a\u2693",
+   "download_count": 0,
+   "id": "midnight-marina",
+   "name": "Midnight Marina",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:54:23Z",
+   "repository": "https://github.com/Muddyblack/midnight-marina-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

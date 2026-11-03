@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Samuel Onoja <0@sami.cx>",
+    "Fabian Bergstr\u00f6m"
+   ],
+   "description": "Monosami | black and white monochrome theme for Zed Editor",
+   "download_count": 0,
+   "id": "monosami",
+   "name": "Monosami Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:55:03Z",
+   "repository": "https://github.com/borngraced/monosami",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

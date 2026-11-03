@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ivanopulo124 <ivanopulo1628@gmail.com>"
+   ],
+   "description": "Mint theme for zed IDE",
+   "download_count": 0,
+   "id": "mint-theme",
+   "name": "Mint theme for zed",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:54:33Z",
+   "repository": "https://github.com/Ivanopulo124/zed-theme-mint",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

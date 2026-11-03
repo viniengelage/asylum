@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Daniel Fry"
+   ],
+   "description": "A muted, elegant dark color theme with warm undertones and a soft lavender identity",
+   "download_count": 0,
+   "id": "lume-theme",
+   "name": "Lume Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:51:55Z",
+   "repository": "https://github.com/danfry1/lume-zed-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

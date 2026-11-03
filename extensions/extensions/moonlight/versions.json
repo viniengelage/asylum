@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Rick-VA <rick@rickva.dev>"
+   ],
+   "description": "Moonlight theme for Zed",
+   "download_count": 0,
+   "id": "moonlight",
+   "name": "Moonlight",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:55:07Z",
+   "repository": "https://github.com/Rick-VA/Moonlight",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

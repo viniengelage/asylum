@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Kim N\u00f8rgaard"
+   ],
+   "description": "A port of the default Neovim themes",
+   "download_count": 0,
+   "id": "neovim-default",
+   "name": "Neovim default themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:55:29Z",
+   "repository": "https://github.com/KimNorgaard/zed-neovim-default.git",
+   "schema_version": 1,
+   "version": "0.3.0",
+   "wasm_api_version": null
+  }
+ ]
+}

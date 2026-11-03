@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Nathan Whetsell <nathan.whetsell@gmail.com>"
+   ],
+   "description": "LilyPond syntax highlighting in Zed",
+   "download_count": 0,
+   "id": "lilypond",
+   "name": "LilyPond",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-03T11:50:36Z",
+   "repository": "https://github.com/nwhetsell/lilypond-zed-extension",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Rudrrayan Manna"
+   ],
+   "description": "Mako template language support.",
+   "download_count": 0,
+   "id": "mako",
+   "name": "Mako",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-03T11:52:30Z",
+   "repository": "https://github.com/ron0studios/mako-zed",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

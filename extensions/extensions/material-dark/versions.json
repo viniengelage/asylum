@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Xero <xeroday@duck.com>"
+   ],
+   "description": "Theme that imitates Google's Material Dark theme.",
+   "download_count": 0,
+   "id": "material-dark",
+   "name": "Material Dark Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:52:48Z",
+   "repository": "https://github.com/xerodark/zed-material-theme",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

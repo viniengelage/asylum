@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Mete Sirin <metesirin.dev@gmail.com>"
+   ],
+   "description": "Charcoal dark theme with navy blue elements.",
+   "download_count": 0,
+   "id": "midnight-theme",
+   "name": "Midnight",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:54:23Z",
+   "repository": "https://github.com/mete-sirin/midnight-theme",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

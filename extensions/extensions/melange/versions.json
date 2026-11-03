@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "adorabilis"
+   ],
+   "description": "A warm and cozy theme for Zed with dark and light variants",
+   "download_count": 0,
+   "id": "melange",
+   "name": "Melange Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:53:49Z",
+   "repository": "https://github.com/adorabilis/melange-zed",
+   "schema_version": 1,
+   "version": "0.0.14",
+   "wasm_api_version": null
+  }
+ ]
+}

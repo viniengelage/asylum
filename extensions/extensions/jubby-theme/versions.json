@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Zeke John"
+   ],
+   "description": "A dark theme inspired by Tokyo Night with purple-tinted backgrounds, pink keywords, teal strings, gold types, and purple brackets.",
+   "download_count": 0,
+   "id": "jubby-theme",
+   "name": "Jubby",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:49:06Z",
+   "repository": "https://github.com/zeke-john/jubby-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

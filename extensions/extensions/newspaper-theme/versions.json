@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Isaac Behrens"
+   ],
+   "description": "Flat, monochrome, letterpress/e-ink theme. Newsprint surfaces that never reach white, near-black ink text, square corners, no shadows.",
+   "download_count": 0,
+   "id": "newspaper-theme",
+   "name": "Newspaper",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:55:34Z",
+   "repository": "https://github.com/ibehren1/zed-newspaper-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

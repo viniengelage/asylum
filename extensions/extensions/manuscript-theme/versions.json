@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "JoyAndEnjoy <anytype@duck.com>"
+   ],
+   "description": "A warm, old-paper theme collection",
+   "download_count": 0,
+   "id": "manuscript-theme",
+   "name": "Manuscript Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:52:34Z",
+   "repository": "https://github.com/JoyAndEnjoy/zed-manuscript-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

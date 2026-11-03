@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Alex Thomson <alexjthomson1882@gmail.com>"
+   ],
+   "description": "A theme that's easy on your eyes and your monitor.",
+   "download_count": 0,
+   "id": "lumina-theme",
+   "name": "Lumina",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:51:58Z",
+   "repository": "https://github.com/alexjthomson/lumina-zed",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

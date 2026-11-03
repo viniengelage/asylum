@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Kasper Henningsen <kasperkh.kh@gmail.com>"
+   ],
+   "description": "Monokai Sharp theme",
+   "download_count": 0,
+   "id": "monokai-sharp",
+   "name": "Monokai Sharp",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:55:00Z",
+   "repository": "https://github.com/kasper9n/monokai-sharp",
+   "schema_version": 1,
+   "version": "1.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Hamza Mughal <hamza@prodesquare.com>"
+   ],
+   "description": "Colorscheme inspired by deep marine hues, designed by The ProDeSquare",
+   "download_count": 0,
+   "id": "marine-dark",
+   "name": "Marine Dark",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:52:38Z",
+   "repository": "https://github.com/MarineDark/marine-dark.zed",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ravindra Singh <ravindra@budgurjar.org>"
+   ],
+   "description": "A clean, dark and light Zed theme inspired by LazyVim and TokyoNight",
+   "download_count": 0,
+   "id": "lazyvim-theme",
+   "name": "LazyVim Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:50:18Z",
+   "repository": "https://github.com/BadRat-in/zed-lazyvim-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

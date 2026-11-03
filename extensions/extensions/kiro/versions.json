@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "David C Cavalcante <davcavalcante@proton.me>",
+    "Takk\u2122 Innovate Studio <say@takk.ag>"
+   ],
+   "description": "\ud83d\udcfa A theme that recreates the Kiro IDE experience within Zed, bringing familiar styling and interface elements from the popular AI-powered code editor",
+   "download_count": 0,
+   "id": "kiro",
+   "name": "Kiro Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:49:47Z",
+   "repository": "https://github.com/takk8is/kiro-theme-for-zed",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

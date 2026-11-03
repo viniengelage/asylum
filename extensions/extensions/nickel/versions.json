@@ -1,0 +1,23 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Artur Chakhvadze <norpadon@gmail.com>"
+   ],
+   "description": "Support for the Nickel configuration language.",
+   "download_count": 0,
+   "id": "nickel",
+   "name": "Nickel",
+   "provides": [
+    "languages",
+    "grammars",
+    "language-servers"
+   ],
+   "published_at": "2026-11-03T11:55:39Z",
+   "repository": "https://github.com/norpadon/zed-nickel-extension",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

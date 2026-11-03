@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Timothy Cole <tim@timcole.me>"
+   ],
+   "description": "A modest zed theme based on one dark but with brighter colours on a darker background",
+   "download_count": 0,
+   "id": "modest-dark",
+   "name": "Modest Dark",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:54:44Z",
+   "repository": "https://github.com/timcole/modest-dark",
+   "schema_version": 1,
+   "version": "0.1.9",
+   "wasm_api_version": null
+  }
+ ]
+}

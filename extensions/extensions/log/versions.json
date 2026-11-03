@@ -1,0 +1,24 @@
+{
+ "data": [
+  {
+   "authors": [
+    "nervenes",
+    "notpeter",
+    "d1y"
+   ],
+   "description": "Syntax highlighting for log files.",
+   "download_count": 0,
+   "id": "log",
+   "name": "LOG",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-03T11:51:29Z",
+   "repository": "https://github.com/nervenes/zed-log",
+   "schema_version": 1,
+   "version": "0.0.7",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ben Kunkle <ben@zed.dev>"
+   ],
+   "description": "Support for Leptos RSTML in Zed",
+   "download_count": 0,
+   "id": "leptos",
+   "name": "Leptos RSTML",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-03T11:50:26Z",
+   "repository": "https://github.com/zed-extensions/leptos",
+   "schema_version": 1,
+   "version": "0.1.2",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "kde-community",
+    "jovi-j"
+   ],
+   "description": "KDE's Breeze dark theme for Zed.",
+   "download_count": 0,
+   "id": "kde-breeze-dark-theme",
+   "name": "KDE Breeze Dark Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:49:43Z",
+   "repository": "https://github.com/jovi-j/kde-breeze-dark-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

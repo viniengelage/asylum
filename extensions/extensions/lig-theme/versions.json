@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "0froq"
+   ],
+   "description": "LiG editor themes: Light, Dark, Light Paper and Dark Paper",
+   "download_count": 0,
+   "id": "lig-theme",
+   "name": "LiG",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:50:31Z",
+   "repository": "https://github.com/0froq/zed-theme-LiG",
+   "schema_version": 1,
+   "version": "0.1.2",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Kris van der Ven"
+   ],
+   "description": "File and folder icons built from Lucide (lucide.dev)",
+   "download_count": 0,
+   "id": "lucide-icons",
+   "name": "Lucide Icons",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-11-03T11:51:54Z",
+   "repository": "https://github.com/kjvdven/lucide-zed-icons",
+   "schema_version": 1,
+   "version": "0.4.0",
+   "wasm_api_version": null
+  }
+ ]
+}

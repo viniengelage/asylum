@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "FuncFusion"
+   ],
+   "description": "Minecraft-inspired icon theme",
+   "download_count": 0,
+   "id": "mc-dp-icons-theme",
+   "name": "Datapack Icons",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-11-03T11:53:00Z",
+   "repository": "https://github.com/FuncFusion/mc-dp-icons-zed",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

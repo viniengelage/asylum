@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "SkyLissh <alisson.hdz.lopez@hotmail.com>"
+   ],
+   "description": "\ud83c\udf38 A minimal zen theme for Zed",
+   "download_count": 0,
+   "id": "lotus-theme",
+   "name": "Lotus Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:51:47Z",
+   "repository": "https://github.com/skylissh/lotus-theme-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

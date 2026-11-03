@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Zev Ross <zevross@gmail.com>"
+   ],
+   "description": "A theme for the Zed text editor based on the art desing of the 2026 video game Marathon by Bungie.",
+   "download_count": 0,
+   "id": "marathon-theme",
+   "name": "Marathon Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:52:35Z",
+   "repository": "https://github.com/Zev18/marathon-theme-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

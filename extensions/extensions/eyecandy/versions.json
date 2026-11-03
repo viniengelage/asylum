@@ -11,6 +11,23 @@
    "provides": [
     "themes"
    ],
+   "published_at": "2026-11-03T11:48:31Z",
+   "repository": "https://github.com/msh-01/eyecandy",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "MSH-01"
+   ],
+   "description": "This theme is beauty, taste and old money.",
+   "download_count": 0,
+   "id": "eyecandy",
+   "name": "Eyecandy Theme",
+   "provides": [
+    "themes"
+   ],
    "published_at": "2026-11-01T11:15:36Z",
    "repository": "https://github.com/msh-01/eyecandy",
    "schema_version": 1,

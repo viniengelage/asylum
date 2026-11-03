@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "mcdays94"
+   ],
+   "description": "OLED-friendly Zed theme inspired by vaporwave. Pure black background, marine teal primary, vibrant green-cyan accents, hot pink highlights. Zed port of opencode-vaporware-oled-theme.",
+   "download_count": 0,
+   "id": "mdias-oled-theme",
+   "name": "Mdias OLED",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:53:46Z",
+   "repository": "https://github.com/mcdays94/zed-vaporware-oled-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

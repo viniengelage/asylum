@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Llewellyn Adonteng Paintsil <llewellynpaintsil34@gmail.com>"
+   ],
+   "description": "A dark theme inspired by Andromeda and SynthWave '84.",
+   "download_count": 0,
+   "id": "legendary-dark-theme",
+   "name": "Legendary Dark",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:50:21Z",
+   "repository": "https://github.com/Llewellyn500/Legendary-Dark",
+   "schema_version": 1,
+   "version": "5.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

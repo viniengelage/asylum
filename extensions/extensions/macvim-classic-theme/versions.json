@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Juan V\u00e1squez"
+   ],
+   "description": "MacVim's classic colorscheme for Zed: faithful light, readable dark",
+   "download_count": 0,
+   "id": "macvim-classic-theme",
+   "name": "MacVim Classic",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:52:03Z",
+   "repository": "https://github.com/JuanVqz/macvim-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Jason Lee <huacnlee@gmail.com>"
+   ],
+   "description": "A macOS native style theme, let it same like native app in macOS.",
+   "download_count": 0,
+   "id": "macos-classic",
+   "name": "macOS Classic Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:52:02Z",
+   "repository": "https://github.com/huacnlee/zed-theme-macos-classic",
+   "schema_version": 1,
+   "version": "0.4.0",
+   "wasm_api_version": null
+  }
+ ]
+}

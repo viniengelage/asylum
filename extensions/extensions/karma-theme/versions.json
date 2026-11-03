@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Sreetam Das"
+   ],
+   "description": "A colorful theme",
+   "download_count": 0,
+   "id": "karma-theme",
+   "name": "Karma Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:49:40Z",
+   "repository": "https://github.com/sreetamdas/karma",
+   "schema_version": 1,
+   "version": "3.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "vinnom vinnom.2d@gmail.com"
+   ],
+   "description": "Syntax highlighting for Android logcat files.",
+   "download_count": 0,
+   "id": "logcat",
+   "name": "Logcat Highlighter",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-03T11:51:32Z",
+   "repository": "https://github.com/vinnom/logcat-highlighter",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

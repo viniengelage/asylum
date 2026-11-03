@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "fangorodev"
+   ],
+   "description": "A theme that tastes like its name",
+   "download_count": 0,
+   "id": "mangoes",
+   "name": "Mangoes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:52:32Z",
+   "repository": "https://github.com/fangorodev/zed-mangoes",
+   "schema_version": 1,
+   "version": "0.1.2",
+   "wasm_api_version": null
+  }
+ ]
+}

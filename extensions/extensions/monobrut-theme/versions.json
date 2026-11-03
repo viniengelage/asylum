@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Andreas Kull"
+   ],
+   "description": "A high-contrast brutalist theme collection for Zed.",
+   "download_count": 0,
+   "id": "monobrut-theme",
+   "name": "Monobrut",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:54:48Z",
+   "repository": "https://github.com/akullpp/monobrut-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

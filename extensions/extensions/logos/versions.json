@@ -1,0 +1,23 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Great Love (nobottomline)"
+   ],
+   "description": "Syntax highlighting for Theos Logos .x, .xm, .xi, and .xmi files.",
+   "download_count": 0,
+   "id": "logos",
+   "name": "Logos",
+   "provides": [
+    "languages",
+    "grammars",
+    "snippets"
+   ],
+   "published_at": "2026-11-03T11:51:41Z",
+   "repository": "https://github.com/nobottomline/logos-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

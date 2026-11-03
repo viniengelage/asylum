@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Chadderbox, Monokai Vibrant Amped"
+   ],
+   "description": "A version of Monokai Vibrant Amped, but for Zed!",
+   "download_count": 0,
+   "id": "monokai-vibrant-amped",
+   "name": "Monokai Vibrant Amped",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:55:01Z",
+   "repository": "https://github.com/MonokaiVibrantAmped/monokai-vibrant-amped-zed",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

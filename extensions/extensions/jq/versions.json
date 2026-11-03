@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Dang Huynh"
+   ],
+   "description": "jq language support for Zed",
+   "download_count": 0,
+   "id": "jq",
+   "name": "jq",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-03T11:48:55Z",
+   "repository": "https://github.com/dangh/zed-jq",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Vaqxai <vaqxai@gmail.com>"
+   ],
+   "description": "A red-orange-dark theme for your editor. Derived from Ayu Dark.",
+   "download_count": 0,
+   "id": "molten-theme",
+   "name": "Molten Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:54:47Z",
+   "repository": "https://github.com/vaqxai/zed-ash-theme",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

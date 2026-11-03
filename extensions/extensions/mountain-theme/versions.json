@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "xproklyatx"
+   ],
+   "description": "Port of Mountain theme for Zed Editor",
+   "download_count": 0,
+   "id": "mountain-theme",
+   "name": "Mountain",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:55:09Z",
+   "repository": "https://github.com/xproklyatx/mountain-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

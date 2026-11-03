@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Jake Callahan <jacob.callahan05@gmail.com>"
+   ],
+   "description": "A deep and vivid Monokai-inspired theme for the Zed editor",
+   "download_count": 0,
+   "id": "monokai-nebula",
+   "name": "Monokai Nebula",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:54:56Z",
+   "repository": "https://github.com/jacobcallahan/monokai-nebula-zed",
+   "schema_version": 1,
+   "version": "0.2.6",
+   "wasm_api_version": null
+  }
+ ]
+}

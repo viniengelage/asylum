@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Mauricio Coelho <mauscoelho@gmail.com>"
+   ],
+   "description": "Mau Zed theme",
+   "download_count": 0,
+   "id": "mau",
+   "name": "Mau Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:52:55Z",
+   "repository": "https://github.com/mauscoelho/zed-mau-themes",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

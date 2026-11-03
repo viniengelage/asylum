@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "blaqat <blaqat.ag@gmail.com>"
+   ],
+   "description": "A dark colorful theme for zed based off the colors used in the Discord UI",
+   "download_count": 0,
+   "id": "lusch-theme",
+   "name": "Lusch Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:51:59Z",
+   "repository": "https://github.com/biaqat/lusch-theme-zed",
+   "schema_version": 1,
+   "version": "0.6.1",
+   "wasm_api_version": null
+  }
+ ]
+}

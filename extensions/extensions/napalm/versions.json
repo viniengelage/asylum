@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Semen Loktionov <loktionov.kh@gmail.com>"
+   ],
+   "description": "A minimalistic dark theme, mix of GitHub Dark UI theme and VSCode Dark+ theme syntax highlighting.",
+   "download_count": 0,
+   "id": "napalm",
+   "name": "Napalm Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-03T11:55:18Z",
+   "repository": "https://github.com/napalmpapalam/napalm-theme-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}
