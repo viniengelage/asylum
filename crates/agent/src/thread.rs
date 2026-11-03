@@ -3,7 +3,8 @@ use crate::{
     CreateDirectoryTool, CreateThreadTool, DatabaseSchemaTool, DbLanguageModel, DbThread,
     DeletePathTool, DiagnosticsTool, EditFileTool, FetchTool, FindPathTool, FindReferencesTool,
     GetCodeActionsTool, GoToDefinitionTool, GrepTool, ListAgentsAndModelsTool, ListDirectoryTool,
-    MovePathTool, ProjectSnapshot, ReadFileTool, RenameTool, RepoMapTool, SandboxedTerminalTool,
+    LoadContextServerTool, LoadableContextServer, LoadedContextServers, MovePathTool,
+    ProjectSnapshot, ReadFileTool, RenameTool, RepoMapTool, SandboxedTerminalTool,
     SaveLearningTool, SpawnAgentTool, SubmitPlanTool, SubmitStepTool, SystemPromptTemplate,
     Template, Templates, TerminalTool, ToolPermissionDecision, UpdatePlanTool, WebSearchTool,
     WriteFileTool, decide_permission_from_settings,
@@ -1381,6 +1382,8 @@ pub struct Thread {
     /// Estimated tokens kept out of the model's context by compacting tool
     /// output (see `tools::terminal_output`).
     compacted_output_tokens: u64,
+    /// Servers from `on_demand_context_servers` the user approved loading in this thread.
+    loaded_context_servers: LoadedContextServers,
     pending_compaction_telemetry: Option<CompactionTelemetry>,
     #[allow(unused)]
     initial_project_snapshot: Shared<Task<Option<Arc<ProjectSnapshot>>>>,
@@ -1551,6 +1554,7 @@ impl Thread {
             cumulative_token_usage: TokenUsage::default(),
             current_request_token_usage: TokenUsage::default(),
             compacted_output_tokens: 0,
+            loaded_context_servers: LoadedContextServers::default(),
             pending_compaction_telemetry: None,
             initial_project_snapshot: {
                 let project_snapshot = Self::project_snapshot(project.clone(), cx);
@@ -1935,6 +1939,9 @@ impl Thread {
             cumulative_token_usage: db_thread.cumulative_token_usage,
             current_request_token_usage: TokenUsage::default(),
             compacted_output_tokens: db_thread.compacted_output_tokens,
+            loaded_context_servers: Arc::new(parking_lot::Mutex::new(
+                db_thread.loaded_context_servers.iter().cloned().collect(),
+            )),
             pending_compaction_telemetry: None,
             initial_project_snapshot: Task::ready(db_thread.initial_project_snapshot).shared(),
             context_server_registry,
@@ -2079,6 +2086,12 @@ impl Thread {
             sandbox_grants: self.sandbox_grants.borrow().to_db(),
             task_agent: self.task_agent.as_deref().cloned(),
             compacted_output_tokens: self.compacted_output_tokens,
+            loaded_context_servers: {
+                let mut servers: Vec<String> =
+                    self.loaded_context_servers.lock().iter().cloned().collect();
+                servers.sort();
+                servers
+            },
         };
 
         cx.background_spawn(async move {
@@ -4726,27 +4739,66 @@ impl Thread {
         let mut context_server_tools = Vec::new();
         let mut seen_tools = tools.keys().cloned().collect::<HashSet<_>>();
         let mut duplicate_tool_names = HashSet::default();
-        // A task agent can turn on whole MCP servers, e.g. a flow step that happens in Pencil.
+        // A task agent that lists MCP servers gets exactly those, whatever the profile enables:
+        // every server's tool schemas go out with each request, so the ones the agent doesn't
+        // need are paid for on every step.
         let task_agent_servers = self
             .effective_task_agent()
             .map(|agent| agent.context_servers.clone())
             .unwrap_or_default();
+        let on_demand_servers = &AgentSettings::get_global(cx).on_demand_context_servers;
+        let loaded_servers = self.loaded_context_servers.lock();
+        let mut loadable_servers = Vec::new();
         for (server_id, server_tools) in self.context_server_registry.read(cx).servers() {
             let server_enabled_by_agent = task_agent_servers
                 .iter()
                 .any(|id| id.as_str() == server_id.0.as_ref());
+            // On-demand servers stay reachable through `load_mcp_server` even for an agent that
+            // doesn't list them, since the user approves each load.
+            let on_demand = !server_enabled_by_agent
+                && on_demand_servers
+                    .iter()
+                    .any(|id| id.as_str() == server_id.0.as_ref());
+            let waiting_for_load = on_demand && !loaded_servers.contains(server_id.0.as_ref());
+            let mut withheld_tools = 0;
             for (tool_name, tool) in server_tools {
-                if server_enabled_by_agent
-                    || profile.is_context_server_tool_enabled(&server_id.0, &tool_name)
-                {
-                    let tool_name: SharedString =
-                        provider_compatible_tool_name(tool_name.as_ref()).into();
-                    if !seen_tools.insert(tool_name.clone()) {
-                        duplicate_tool_names.insert(tool_name.clone());
-                    }
-                    context_server_tools.push((server_id.clone(), tool_name, tool.clone()));
+                let enabled = if server_enabled_by_agent {
+                    true
+                } else if task_agent_servers.is_empty() || on_demand {
+                    profile.is_context_server_tool_enabled(&server_id.0, &tool_name)
+                } else {
+                    false
+                };
+                if !enabled {
+                    continue;
                 }
+                if waiting_for_load {
+                    withheld_tools += 1;
+                    continue;
+                }
+                let tool_name: SharedString =
+                    provider_compatible_tool_name(tool_name.as_ref()).into();
+                if !seen_tools.insert(tool_name.clone()) {
+                    duplicate_tool_names.insert(tool_name.clone());
+                }
+                context_server_tools.push((server_id.clone(), tool_name, tool.clone()));
             }
+            if withheld_tools > 0 {
+                loadable_servers.push(LoadableContextServer {
+                    id: server_id.0.to_string(),
+                    tool_count: withheld_tools,
+                });
+            }
+        }
+        drop(loaded_servers);
+        if !loadable_servers.is_empty() {
+            tools.insert(
+                LoadContextServerTool::NAME.into(),
+                Arc::new(LoadContextServerTool::new(
+                    loadable_servers,
+                    self.loaded_context_servers.clone(),
+                )),
+            );
         }
 
         // When there are duplicate tool names, disambiguate by prefixing them

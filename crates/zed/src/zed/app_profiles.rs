@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use settings::{Settings as _, SettingsStore};
 use ui::{
     ButtonLike, Divider, IconButton, IconName, IconSize, Indicator, Label, LabelSize, PopoverMenu,
-    PopoverMenuHandle, Switch, ToggleState, Tooltip, prelude::*,
+    PopoverMenuHandle, Switch, TintColor, ToggleState, Tooltip, prelude::*,
 };
 use util::ResultExt as _;
 use util::paths::{PathMatcher, PathStyle, PathWithPosition};
@@ -536,6 +536,9 @@ struct McpServerSummary {
     /// The command or URL of the server, empty for one an extension provides.
     detail: String,
     enabled: bool,
+    /// Listed in `agent.on_demand_context_servers`: the agent asks before loading its tools.
+    #[serde(default)]
+    on_demand: bool,
 }
 
 const CLICKUP_CREDENTIALS_URL: &str = "https://app.clickup.com/asylum";
@@ -588,6 +591,7 @@ fn toolkit_summaries(cx: &App) -> Vec<ToolkitSummary> {
 }
 
 fn mcp_server_summaries(cx: &App) -> Vec<McpServerSummary> {
+    let on_demand_servers = &AgentSettings::get_global(cx).on_demand_context_servers;
     let mut servers: Vec<McpServerSummary> = ProjectSettings::get_global(cx)
         .context_servers
         .iter()
@@ -595,6 +599,7 @@ fn mcp_server_summaries(cx: &App) -> Vec<McpServerSummary> {
             id: id.to_string(),
             detail: mcp_server_detail(settings),
             enabled: settings.enabled(),
+            on_demand: on_demand_servers.iter().any(|server| server == id.as_ref()),
         })
         .collect();
     servers.sort_by(|a, b| a.id.cmp(&b.id));
@@ -2225,6 +2230,22 @@ impl ManageProfilesModal {
         });
     }
 
+    fn toggle_mcp_on_demand(&self, server: String, on_demand: bool, cx: &mut Context<Self>) {
+        let fs = <dyn Fs>::global(cx);
+        settings::update_settings_file(fs, cx, move |settings, _| {
+            let servers = settings
+                .agent
+                .get_or_insert_default()
+                .on_demand_context_servers
+                .get_or_insert_default();
+            servers.retain(|id| id != &server);
+            if on_demand {
+                servers.push(server);
+                servers.sort();
+            }
+        });
+    }
+
     /// Whether the MCP server `id` of this window's project is running, as a short label.
     fn mcp_status(&self, id: &str, cx: &App) -> Option<(SharedString, bool)> {
         let workspace = self.workspace.upgrade()?;
@@ -2454,9 +2475,27 @@ impl ManageProfilesModal {
                         .filter(|_| server.enabled)
                         .map(|(label, ok)| Self::render_status(label, ok));
                     let toggled_server = server.id.clone();
+                    let on_demand_server = server.id.clone();
+                    let on_demand = server.on_demand;
                     h_flex()
                         .gap_2()
                         .children(status)
+                        .when(server.enabled, |this| {
+                            this.child(
+                                Button::new(("mcp-on-demand", index), t!("zed.mcp.on_demand"))
+                                    .label_size(LabelSize::XSmall)
+                                    .toggle_state(on_demand)
+                                    .selected_style(ButtonStyle::Tinted(TintColor::Accent))
+                                    .tooltip(Tooltip::text(t!("zed.mcp.on_demand_tooltip")))
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.toggle_mcp_on_demand(
+                                            on_demand_server.clone(),
+                                            !on_demand,
+                                            cx,
+                                        )
+                                    })),
+                            )
+                        })
                         .child(
                             Switch::new(
                                 ("mcp-toggle", index),
@@ -2479,10 +2518,12 @@ impl ManageProfilesModal {
                         .into_any_element()
                 } else {
                     Self::render_status(
-                        if server.enabled {
-                            t!("zed.profiles.on")
-                        } else {
+                        if !server.enabled {
                             t!("zed.profiles.off")
+                        } else if server.on_demand {
+                            t!("zed.mcp.on_demand")
+                        } else {
+                            t!("zed.profiles.on")
                         },
                         server.enabled,
                     )

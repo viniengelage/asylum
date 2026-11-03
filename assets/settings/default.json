@@ -1287,6 +1287,10 @@
     },
     // When enabled, agent edits will be displayed in single-file editors for review
     "single_file_review": false,
+    // MCP servers whose tools stay out of the agent's context until the agent
+    // asks to load them and you approve, e.g. ["openship"]. Use it for servers
+    // with many tools that are only needed now and then.
+    "on_demand_context_servers": [],
     // Settings for automatic agent context compaction, which summarizes earlier
     // messages to free up room in the model's context window once it grows too
     // large.

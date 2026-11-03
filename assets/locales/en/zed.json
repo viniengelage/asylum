@@ -71,6 +71,8 @@
   "mcp.add_there": "Add there",
   "mcp.empty": "No MCP servers configured.",
   "mcp.extension": "extension",
+  "mcp.on_demand": "On demand",
+  "mcp.on_demand_tooltip": "Keep this server's tools out of the agent's context until it asks to load them and you approve",
   "mcp.status_error": "error",
   "mcp.status_needs_login": "needs sign-in",
   "mcp.status_running": "running",

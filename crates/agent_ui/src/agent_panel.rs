@@ -11893,6 +11893,7 @@ mod tests {
             sandbox_grants: Default::default(),
             task_agent: None,
             compacted_output_tokens: 0,
+            loaded_context_servers: Vec::new(),
         };
 
         let thread_store = cx.update(|cx| ThreadStore::global(cx));

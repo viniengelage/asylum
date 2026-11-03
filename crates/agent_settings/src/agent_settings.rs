@@ -238,6 +238,7 @@ pub struct AgentSettings {
     pub single_file_review: bool,
     pub model_parameters: Vec<LanguageModelParameters>,
     pub auto_compact: AutoCompactSettings,
+    pub on_demand_context_servers: Vec<String>,
     pub enable_feedback: bool,
     pub expand_edit_card: bool,
     pub expand_terminal_card: bool,
@@ -832,6 +833,7 @@ impl Settings for AgentSettings {
                     threshold,
                 }
             },
+            on_demand_context_servers: agent.on_demand_context_servers.unwrap_or_default(),
             enable_feedback: agent.enable_feedback.unwrap(),
             expand_edit_card: agent.expand_edit_card.unwrap(),
             expand_terminal_card: agent.expand_terminal_card.unwrap(),

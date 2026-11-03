@@ -2746,6 +2746,7 @@ fn run_multi_workspace_sidebar_visual_tests(
                             sandbox_grants: Default::default(),
                             task_agent: None,
                             compacted_output_tokens: 0,
+                            loaded_context_servers: Vec::new(),
                         },
                         path_list,
                         cx,

@@ -2466,6 +2466,188 @@ async fn test_mcp_tool_result_displayed_when_server_disconnected(cx: &mut TestAp
     );
 }
 
+fn empty_mcp_tool(name: &str) -> context_server::types::Tool {
+    context_server::types::Tool {
+        name: name.into(),
+        title: None,
+        description: None,
+        input_schema: json!({"type": "object", "properties": {}}),
+        output_schema: None,
+        annotations: None,
+    }
+}
+
+async fn setup_on_demand_mcp_test(
+    cx: &mut TestAppContext,
+) -> (
+    ThreadTest,
+    Vec<
+        mpsc::UnboundedReceiver<(
+            context_server::types::CallToolParams,
+            oneshot::Sender<context_server::types::CallToolResponse>,
+        )>,
+    >,
+) {
+    let test = setup(cx, TestModel::Fake).await;
+    test.fs
+        .insert_file(
+            paths::settings_file(),
+            json!({
+                "agent": {
+                    "on_demand_context_servers": ["ondemand"],
+                    "profiles": {
+                        "test": {
+                            "name": "Test Profile",
+                            "enable_all_context_servers": true,
+                            "tools": {}
+                        },
+                    }
+                }
+            })
+            .to_string()
+            .into_bytes(),
+        )
+        .await;
+    cx.run_until_parked();
+    test.thread.update(cx, |thread, cx| {
+        thread.set_profile(AgentProfileId("test".into()), cx);
+    });
+    let calls = vec![
+        setup_context_server(
+            "aaa",
+            vec![empty_mcp_tool("aaa_tool")],
+            &test.context_server_store,
+            cx,
+        ),
+        setup_context_server(
+            "bbb",
+            vec![empty_mcp_tool("bbb_tool")],
+            &test.context_server_store,
+            cx,
+        ),
+        setup_context_server(
+            "ondemand",
+            vec![empty_mcp_tool("od_one"), empty_mcp_tool("od_two")],
+            &test.context_server_store,
+            cx,
+        ),
+    ];
+    cx.run_until_parked();
+    (test, calls)
+}
+
+#[gpui::test]
+async fn test_task_agent_context_servers_restrict_mcp_tools(cx: &mut TestAppContext) {
+    let (ThreadTest { fake, thread, .. }, _calls) = setup_on_demand_mcp_test(cx).await;
+
+    thread
+        .update(cx, |thread, cx| {
+            thread.send(ClientUserMessageId::new(), ["Go"], cx)
+        })
+        .unwrap();
+    cx.run_until_parked();
+    let completion = fake.pending_completions().pop().unwrap();
+    assert_eq!(
+        tool_names_for_completion(&completion),
+        vec!["aaa_tool", "bbb_tool", LoadContextServerTool::NAME]
+    );
+    let load_tool = completion
+        .tools
+        .iter()
+        .find(|tool| tool.name == LoadContextServerTool::NAME)
+        .unwrap();
+    assert!(load_tool.description.contains("`ondemand` (2 tools)"));
+    thread.update(cx, |thread, cx| thread.cancel(cx)).await;
+
+    let task_agent = task_agents::parse_task_agent(
+        std::path::Path::new("/test/.asylum/agents/dev.md"),
+        "---\nname: Dev\ncontext_servers:\n- aaa\n---\nTrabalhe.",
+        task_agents::TaskAgentSource::Personal,
+    )
+    .unwrap();
+    thread.update(cx, |thread, cx| thread.set_task_agent(Some(task_agent), cx));
+    thread
+        .update(cx, |thread, cx| {
+            thread.send(ClientUserMessageId::new(), ["Go"], cx)
+        })
+        .unwrap();
+    cx.run_until_parked();
+    let completion = fake.pending_completions().pop().unwrap();
+    assert_eq!(
+        tool_names_for_completion(&completion),
+        vec!["aaa_tool", LoadContextServerTool::NAME]
+    );
+}
+
+#[gpui::test]
+async fn test_on_demand_context_server_loads_after_approval(cx: &mut TestAppContext) {
+    let (
+        ThreadTest {
+            model,
+            fake,
+            thread,
+            ..
+        },
+        _calls,
+    ) = setup_on_demand_mcp_test(cx).await;
+
+    let mut events = thread
+        .update(cx, |thread, cx| {
+            thread.send(ClientUserMessageId::new(), ["Deploy"], cx)
+        })
+        .unwrap();
+    cx.run_until_parked();
+    let input = json!({"server": "ondemand", "reason": "Ver o deploy"});
+    fake.send_last_event(
+        &model,
+        LanguageModelCompletionEvent::ToolUse(LanguageModelToolUse {
+            id: "load_1".into(),
+            name: LoadContextServerTool::NAME.into(),
+            raw_input: input.to_string(),
+            input: language_model::LanguageModelToolUseInput::Json(input),
+            is_input_complete: true,
+            thought_signature: None,
+        }),
+    );
+    fake.end_last(&model);
+    let authorization = loop {
+        let event = events
+            .next()
+            .await
+            .expect("no tool call authorization event received")
+            .unwrap();
+        if let ThreadEvent::ToolCallAuthorization(authorization) = event {
+            break authorization;
+        }
+    };
+    // Every load is a fresh question: there's no "always allow" to skip it.
+    assert!(
+        authorization
+            .options
+            .first_option_of_kind(acp_v2::PermissionOptionKind::AllowAlways)
+            .is_none()
+    );
+    authorization
+        .response
+        .send(acp_thread::SelectedPermissionOutcome::new(
+            acp_v2::PermissionOptionId::new("allow"),
+            acp_v2::PermissionOptionKind::AllowOnce,
+        ))
+        .unwrap();
+    cx.run_until_parked();
+
+    let completion = fake.pending_completions().pop().unwrap();
+    assert_eq!(
+        tool_names_for_completion(&completion),
+        vec!["aaa_tool", "bbb_tool", "od_one", "od_two"]
+    );
+    let db_thread = thread.read_with(cx, |thread, cx| thread.to_db(cx)).await;
+    assert_eq!(
+        db_thread.loaded_context_servers,
+        vec!["ondemand".to_string()]
+    );
+}
+
 #[gpui::test]
 async fn test_mcp_tool_truncation(cx: &mut TestAppContext) {
     let ThreadTest {

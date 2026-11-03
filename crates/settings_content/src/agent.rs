@@ -349,6 +349,12 @@ pub struct AgentSettingsContent {
     /// earlier messages to free up room in the model's context window once the
     /// context grows too large.
     pub auto_compact: Option<AutoCompactSettingsContent>,
+    /// MCP servers whose tools are kept out of the agent's context until the
+    /// agent asks to load them and the user approves. Use it for servers with
+    /// many tools that are only needed now and then.
+    ///
+    /// Default: []
+    pub on_demand_context_servers: Option<Vec<String>>,
     /// Whether to show thumb buttons for feedback in the agent panel.
     ///
     /// Default: true

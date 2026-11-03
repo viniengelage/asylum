@@ -71,6 +71,8 @@
   "mcp.add_there": "Adicionar lá",
   "mcp.empty": "Nenhum servidor MCP configurado.",
   "mcp.extension": "extensão",
+  "mcp.on_demand": "Sob demanda",
+  "mcp.on_demand_tooltip": "Deixa as ferramentas deste servidor fora do contexto do agente até ele pedir para carregar e você aprovar",
   "mcp.status_error": "erro",
   "mcp.status_needs_login": "pede login",
   "mcp.status_running": "rodando",

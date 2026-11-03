@@ -90,6 +90,8 @@ pub struct DbThread {
     pub task_agent: Option<task_agents::TaskAgent>,
     #[serde(default)]
     pub compacted_output_tokens: u64,
+    #[serde(default)]
+    pub loaded_context_servers: Vec<String>,
 }
 
 /// Serialized form of the sandbox permissions the user granted "for the rest of
@@ -175,6 +177,7 @@ impl SharedThread {
             sandbox_grants: DbSandboxGrants::default(),
             task_agent: None,
             compacted_output_tokens: 0,
+            loaded_context_servers: Vec::new(),
         }
     }
 
@@ -363,6 +366,7 @@ impl DbThread {
             sandbox_grants: DbSandboxGrants::default(),
             task_agent: None,
             compacted_output_tokens: 0,
+            loaded_context_servers: Vec::new(),
         })
     }
 }
@@ -983,6 +987,7 @@ mod tests {
             sandbox_grants: DbSandboxGrants::default(),
             task_agent: None,
             compacted_output_tokens: 0,
+            loaded_context_servers: Vec::new(),
         }
     }
 
