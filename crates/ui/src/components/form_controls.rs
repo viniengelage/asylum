@@ -69,6 +69,68 @@ pub fn secondary_button(
         }))
 }
 
+/// The boards' round, bordered chip action, e.g. "+ Adicionar" next to a row of people.
+pub fn pill_button(
+    id: impl Into<gpui::ElementId>,
+    icon: Option<IconName>,
+    label: impl Into<SharedString>,
+    enabled: bool,
+    cx: &App,
+) -> Stateful<Div> {
+    let colors = cx.theme().colors();
+    h_flex()
+        .id(id)
+        .h(px(26.))
+        .pl_2()
+        .pr(px(10.))
+        .gap(px(5.))
+        .flex_none()
+        .rounded_full()
+        .border_1()
+        .border_color(colors.border_selected)
+        .when(enabled, |this| {
+            this.cursor_pointer()
+                .hover(|this| this.bg(colors.element_hover))
+        })
+        .when(!enabled, |this| this.opacity(0.5))
+        .children(icon.map(|icon| Icon::new(icon).size(IconSize::XSmall).color(Color::Muted)))
+        .child(Label::new(label).size(LabelSize::Small).color(Color::Muted))
+}
+
+/// The boards' accent picker (a branch, a target): tinted in the accent with a chevron, in the
+/// buffer font. Wrap it in [`PopoverTriggerArea`] to open the choices.
+pub fn picker_button(
+    id: impl Into<gpui::ElementId>,
+    label: impl Into<SharedString>,
+    cx: &App,
+) -> Stateful<Div> {
+    let colors = cx.theme().colors();
+    let accent = colors.border_focused;
+    h_flex()
+        .id(id)
+        .min_w_0()
+        .h(px(26.))
+        .pl_2()
+        .pr(px(6.))
+        .gap(px(6.))
+        .rounded(px(6.))
+        .border_1()
+        .border_color(accent)
+        .bg(accent.opacity(0.2))
+        .hover(move |this| this.bg(accent.opacity(0.3)))
+        .child(
+            Label::new(label)
+                .size(LabelSize::XSmall)
+                .buffer_font(cx)
+                .truncate(),
+        )
+        .child(
+            Icon::new(IconName::ChevronDown)
+                .size(IconSize::XSmall)
+                .color(Color::Muted),
+        )
+}
+
 /// Two or more choices side by side; the chosen one is filled and outlined in the accent, as in
 /// the boards.
 pub fn segment_option(

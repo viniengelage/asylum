@@ -28,9 +28,10 @@ use project::{
 use settings::SettingsStore;
 use std::{collections::HashSet, future::Future, time::Duration, time::Instant};
 use ui::{
-    Checkbox, CommonAnimationExt, ContextMenu, ContextMenuEntry, KeyBinding, PopoverMenu, Tab,
-    TabBar, TabPosition, TabStyle, Tooltip, prelude::*, primary_button, right_click_menu,
-    secondary_button, segment_option, segmented_control,
+    Checkbox, CommonAnimationExt, ContextMenu, ContextMenuEntry, KeyBinding, PopoverMenu,
+    PopoverTriggerArea, Tab, TabBar, TabPosition, TabStyle, Tooltip, checkbox_indicator,
+    picker_button, pill_button, prelude::*, primary_button, right_click_menu, secondary_button,
+    segment_option, segmented_control,
 };
 use ui_input::{ErasedEditorEvent, InputField};
 use util::ResultExt as _;
@@ -4162,12 +4163,11 @@ impl RepoPanel {
         }
         let selected_destination = form.destination.clone();
         let destination_picker = PopoverMenu::new("repo-create-destination")
-            .trigger(
-                Button::new("repo-create-destination-button", destination_label)
-                    .style(ButtonStyle::Outlined)
-                    .label_size(LabelSize::Small)
-                    .end_icon(Icon::new(IconName::ChevronDown).size(IconSize::XSmall)),
-            )
+            .trigger(PopoverTriggerArea::new(picker_button(
+                "repo-create-destination-button",
+                destination_label,
+                cx,
+            )))
             .menu(move |window, cx| {
                 let branches = branches.clone();
                 let panel = panel.clone();
@@ -4195,22 +4195,24 @@ impl RepoPanel {
             });
 
         let route = v_flex()
-            .gap(DynamicSpacing::Base08.px(cx))
-            .p(DynamicSpacing::Base10.px(cx))
-            .rounded_lg()
+            .gap(px(10.))
+            .p(px(10.))
+            .rounded(px(10.))
             .border_1()
-            .border_color(cx.theme().colors().border_variant)
+            .border_color(cx.theme().colors().border)
             .bg(cx.theme().colors().element_background)
             .child(
                 h_flex()
-                    .gap(DynamicSpacing::Base06.px(cx))
+                    .gap_2()
                     .child(
                         h_flex()
                             .min_w_0()
-                            .gap(DynamicSpacing::Base04.px(cx))
-                            .px(DynamicSpacing::Base06.px(cx))
-                            .py_0p5()
-                            .rounded_md()
+                            .h(px(26.))
+                            .gap(px(6.))
+                            .px_2()
+                            .rounded(px(6.))
+                            .border_1()
+                            .border_color(cx.theme().colors().border)
                             .bg(cx.theme().colors().editor_background)
                             .child(
                                 Icon::new(IconName::GitBranch)
@@ -4233,7 +4235,7 @@ impl RepoPanel {
             )
             .child(
                 h_flex()
-                    .gap(DynamicSpacing::Base06.px(cx))
+                    .gap_2()
                     .child(div().size(px(7.)).rounded_full().bg(dot.color(cx)))
                     .child(
                         div().flex_1().min_w_0().child(
@@ -4246,7 +4248,7 @@ impl RepoPanel {
                     .child(
                         Label::new(sync_note)
                             .size(LabelSize::XSmall)
-                            .color(Color::Disabled),
+                            .color(Color::Muted),
                     ),
             )
             .when(
@@ -4281,11 +4283,7 @@ impl RepoPanel {
                         .color(Color::Muted),
                 )
                 .when_some(hint, |this, hint| {
-                    this.child(
-                        Label::new(hint)
-                            .size(LabelSize::XSmall)
-                            .color(Color::Disabled),
-                    )
+                    this.child(Label::new(hint).size(LabelSize::XSmall).color(Color::Muted))
                 })
         };
 
@@ -4297,11 +4295,13 @@ impl RepoPanel {
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
-            .px(DynamicSpacing::Base12.px(cx))
-            .pb(DynamicSpacing::Base12.px(cx))
-            .gap(DynamicSpacing::Base12.px(cx))
+            .px_3()
+            .pt_1()
+            .pb_3()
+            .gap(px(14.))
             .child(
                 v_flex()
+                    .gap_1()
                     .child(
                         Label::new(t!(
                             "repo_hosting.create.in_repository",
@@ -4332,10 +4332,10 @@ impl RepoPanel {
                     ))
                     .child(
                         div()
-                            .p(DynamicSpacing::Base08.px(cx))
-                            .rounded_md()
+                            .p(px(10.))
+                            .rounded_lg()
                             .border_1()
-                            .border_color(cx.theme().colors().border)
+                            .border_color(cx.theme().colors().border_selected)
                             .bg(cx.theme().colors().editor_background)
                             .child(form.description_editor.clone()),
                     ),
@@ -4348,43 +4348,21 @@ impl RepoPanel {
             )
             .child(
                 v_flex()
-                    .gap(DynamicSpacing::Base06.px(cx))
-                    .child(
-                        Checkbox::new("repo-create-close-source", form.close_source_branch.into())
-                            .label(t!("repo_hosting.create.close_source_branch"))
-                            .on_click({
-                                let panel = cx.weak_entity();
-                                move |state, _, cx| {
-                                    let checked = state.selected();
-                                    panel
-                                        .update(cx, |panel, cx| {
-                                            if let Some(form) = &mut panel.creating {
-                                                form.close_source_branch = checked;
-                                                cx.notify();
-                                            }
-                                        })
-                                        .log_err();
-                                }
-                            }),
-                    )
-                    .child(
-                        Checkbox::new("repo-create-draft", form.draft.into())
-                            .label(t!("repo_hosting.create.draft"))
-                            .on_click({
-                                let panel = cx.weak_entity();
-                                move |state, _, cx| {
-                                    let checked = state.selected();
-                                    panel
-                                        .update(cx, |panel, cx| {
-                                            if let Some(form) = &mut panel.creating {
-                                                form.draft = checked;
-                                                cx.notify();
-                                            }
-                                        })
-                                        .log_err();
-                                }
-                            }),
-                    ),
+                    .gap_2()
+                    .child(Self::render_create_option(
+                        "repo-create-close-source",
+                        t!("repo_hosting.create.close_source_branch"),
+                        form.close_source_branch,
+                        |form| form.close_source_branch = !form.close_source_branch,
+                        cx,
+                    ))
+                    .child(Self::render_create_option(
+                        "repo-create-draft",
+                        t!("repo_hosting.create.draft"),
+                        form.draft,
+                        |form| form.draft = !form.draft,
+                        cx,
+                    )),
             )
             .child(commits);
 
@@ -4407,6 +4385,11 @@ impl RepoPanel {
                     this.close_create_form(window, cx)
                 }),
             )
+            .on_action(cx.listener(|this, _: &menu::SecondaryConfirm, window, cx| {
+                if this.creating.as_ref().is_some_and(|form| !form.submitting) {
+                    this.submit_create_form(window, cx)
+                }
+            }))
             .size_full()
             .child(
                 h_flex()
@@ -4431,10 +4414,8 @@ impl RepoPanel {
             .child(content)
             .child(
                 v_flex()
-                    .gap(DynamicSpacing::Base06.px(cx))
-                    .p(DynamicSpacing::Base08.px(cx))
-                    .border_t_1()
-                    .border_color(cx.theme().colors().border_variant)
+                    .gap_2()
+                    .p_2()
                     .when_some(form.error.clone(), |this, error| {
                         this.child(
                             Label::new(error)
@@ -4453,39 +4434,67 @@ impl RepoPanel {
                             ""
                         };
                         this.child(
-                            Label::new(t!(
-                                "repo_hosting.create.push_hint",
-                                command = format!("git push {flag}{remote_name} {local}")
-                            ))
-                            .size(LabelSize::XSmall)
-                            .buffer_font(cx)
-                            .color(Color::Muted)
-                            .truncate(),
+                            h_flex()
+                                .px_1()
+                                .gap(px(6.))
+                                .child(
+                                    Icon::new(IconName::ArrowUp)
+                                        .size(IconSize::XSmall)
+                                        .color(Color::Muted),
+                                )
+                                .child(
+                                    Label::new(t!(
+                                        "repo_hosting.create.push_hint",
+                                        command = format!("git push {flag}{remote_name} {local}")
+                                    ))
+                                    .size(LabelSize::XSmall)
+                                    .buffer_font(cx)
+                                    .color(Color::Muted)
+                                    .truncate(),
+                                ),
                         )
                     })
                     .child(
                         h_flex()
-                            .gap(DynamicSpacing::Base08.px(cx))
+                            .gap_2()
                             .child(
-                                Button::new("repo-create-cancel", t!("repo_hosting.common.cancel"))
-                                    .style(ButtonStyle::Outlined)
-                                    .label_size(LabelSize::Small)
-                                    .on_click(cx.listener(|this, _, window, cx| {
+                                secondary_button(
+                                    "repo-create-cancel",
+                                    None,
+                                    t!("repo_hosting.common.cancel"),
+                                    !form.submitting,
+                                    cx,
+                                )
+                                .bg(cx.theme().colors().element_background)
+                                .when(!form.submitting, |this| {
+                                    this.on_click(cx.listener(|this, _, window, cx| {
                                         this.close_create_form(window, cx)
-                                    })),
+                                    }))
+                                }),
                             )
                             .child(
-                                Button::new("repo-create-submit", submit_label)
-                                    .full_width()
-                                    .style(ButtonStyle::Filled)
-                                    .label_size(LabelSize::Small)
-                                    .start_icon(
-                                        Icon::new(IconName::PullRequest).size(IconSize::XSmall),
-                                    )
-                                    .disabled(form.submitting)
-                                    .on_click(cx.listener(|this, _, window, cx| {
+                                primary_button(
+                                    "repo-create-submit",
+                                    Some(IconName::PullRequest),
+                                    submit_label,
+                                    (!form.submitting).then(|| {
+                                        KeyBinding::for_action_in(
+                                            &menu::SecondaryConfirm,
+                                            &self.focus_handle,
+                                            cx,
+                                        )
+                                    }),
+                                    cx,
+                                )
+                                .flex_1()
+                                .min_w_0()
+                                .justify_center()
+                                .when(form.submitting, |this| this.opacity(0.5).cursor_default())
+                                .when(!form.submitting, |this| {
+                                    this.on_click(cx.listener(|this, _, window, cx| {
                                         this.submit_create_form(window, cx)
-                                    })),
+                                    }))
+                                }),
                             ),
                     ),
             )
@@ -4501,16 +4510,13 @@ impl RepoPanel {
             .map(|person| person.id.clone())
             .collect();
         let add = PopoverMenu::new("repo-create-reviewers")
-            .trigger(
-                Button::new(
-                    "repo-create-add-reviewer",
-                    t!("repo_hosting.create.add_reviewer"),
-                )
-                .style(ButtonStyle::Outlined)
-                .label_size(LabelSize::Small)
-                .start_icon(Icon::new(IconName::Plus).size(IconSize::XSmall))
-                .disabled(candidates.is_empty()),
-            )
+            .trigger(PopoverTriggerArea::new(pill_button(
+                "repo-create-add-reviewer",
+                Some(IconName::Plus),
+                t!("repo_hosting.create.add_reviewer"),
+                !candidates.is_empty(),
+                cx,
+            )))
             .menu(move |window, cx| {
                 let candidates = candidates.clone();
                 let selected = selected.clone();
@@ -4550,34 +4556,60 @@ impl RepoPanel {
                         "repo-create-reviewer-{}",
                         person.id
                     )))
-                    .gap(DynamicSpacing::Base04.px(cx))
-                    .pl(DynamicSpacing::Base02.px(cx))
-                    .pr(DynamicSpacing::Base04.px(cx))
-                    .py_0p5()
+                    .h(px(26.))
+                    .gap(px(6.))
+                    .pl_1()
+                    .pr(px(6.))
                     .rounded_full()
                     .border_1()
-                    .border_color(cx.theme().colors().border)
-                    .child(avatar(&person.display_name, Color::Info, cx))
+                    .border_color(cx.theme().colors().border_selected)
+                    .bg(cx.theme().colors().element_background)
+                    .child(avatar(&person.display_name, Color::Info, cx).size(px(18.)))
                     .child(Label::new(person.short_name().to_string()).size(LabelSize::Small))
                     .child(
-                        IconButton::new(
-                            SharedString::from(format!(
+                        div()
+                            .id(SharedString::from(format!(
                                 "repo-create-reviewer-remove-{}",
                                 person.id
-                            )),
-                            IconName::Close,
-                        )
-                        .icon_size(IconSize::XSmall)
-                        .icon_color(Color::Muted)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            if let Some(form) = &mut this.creating {
-                                toggle_person(&mut form.reviewers, &removed);
-                                cx.notify();
-                            }
-                        })),
+                            )))
+                            .cursor_pointer()
+                            .rounded_sm()
+                            .hover(|this| this.bg(cx.theme().colors().element_hover))
+                            .child(
+                                Icon::new(IconName::Close)
+                                    .size(IconSize::XSmall)
+                                    .color(Color::Muted),
+                            )
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if let Some(form) = &mut this.creating {
+                                    toggle_person(&mut form.reviewers, &removed);
+                                    cx.notify();
+                                }
+                            })),
                     )
             }))
             .child(add)
+    }
+
+    fn render_create_option(
+        id: &'static str,
+        label: SharedString,
+        checked: bool,
+        toggle: fn(&mut CreateForm),
+        cx: &Context<Self>,
+    ) -> impl IntoElement {
+        h_flex()
+            .id(id)
+            .gap_2()
+            .cursor_pointer()
+            .child(checkbox_indicator(checked, cx))
+            .child(Label::new(label).size(LabelSize::Small))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                if let Some(form) = &mut this.creating {
+                    toggle(form);
+                    cx.notify();
+                }
+            }))
     }
 
     fn render_create_commits(
@@ -4600,7 +4632,7 @@ impl RepoPanel {
             Some(
                 Label::new(t!("repo_hosting.create.commits_hint"))
                     .size(LabelSize::XSmall)
-                    .color(Color::Disabled)
+                    .color(Color::Muted)
                     .into_any_element(),
             ),
             cx,
@@ -6701,7 +6733,7 @@ fn state_pill(pull_request: &PullRequest, cx: &App) -> impl IntoElement {
     pill(label.to_string(), color, None, cx)
 }
 
-fn avatar(name: &str, color: Color, cx: &App) -> impl IntoElement {
+fn avatar(name: &str, color: Color, cx: &App) -> gpui::Div {
     h_flex()
         .flex_none()
         .size(DynamicSpacing::Base20.px(cx))

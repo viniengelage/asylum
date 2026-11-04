@@ -1074,6 +1074,13 @@
     "context": "RepoPanel",
     "bindings": {
       "ctrl-shift-.": "repo_hosting::MentionSelectedPullRequest",
+      "ctrl-enter": "menu::SecondaryConfirm",
+    },
+  },
+  {
+    "context": "RepoCreatePullRequest > Editor",
+    "bindings": {
+      "ctrl-enter": "menu::SecondaryConfirm",
     },
   },
   {
