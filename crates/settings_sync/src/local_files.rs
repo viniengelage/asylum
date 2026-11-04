@@ -17,6 +17,13 @@ const FOLDER_SEPARATOR: &str = "--";
 /// Larger files are skipped: everything synced is hand-written configuration.
 const MAX_FILE_SIZE: u64 = 1024 * 1024;
 
+/// What one gist holds: the files every profile shares, or the current profile's own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncScope {
+    Shared,
+    Profile,
+}
+
 enum Location {
     File {
         name: &'static str,
@@ -29,15 +36,44 @@ enum Location {
     },
 }
 
-fn locations() -> Vec<Location> {
+fn locations(scope: SyncScope) -> Vec<Location> {
+    match scope {
+        SyncScope::Shared => shared_locations(),
+        SyncScope::Profile => profile_locations(),
+    }
+}
+
+fn shared_locations() -> Vec<Location> {
+    let mut locations = Vec::new();
+    if let Some(shared_settings_file) = paths::shared_settings_file() {
+        locations.push(Location::File {
+            name: "settings.json",
+            path: shared_settings_file.clone(),
+        });
+    }
+    locations.extend([
+        Location::File {
+            name: "keymap.json",
+            path: paths::keymap_file().clone(),
+        },
+        Location::File {
+            name: "profiles.json",
+            path: paths::profiles_dir().join("profiles.json"),
+        },
+        Location::Folder {
+            prefix: "themes",
+            path: paths::themes_dir().clone(),
+            suffix: ".json",
+        },
+    ]);
+    locations
+}
+
+fn profile_locations() -> Vec<Location> {
     vec![
         Location::File {
             name: "settings.json",
             path: paths::settings_file().clone(),
-        },
-        Location::File {
-            name: "keymap.json",
-            path: paths::keymap_file().clone(),
         },
         Location::File {
             name: "tasks.json",
@@ -56,11 +92,6 @@ fn locations() -> Vec<Location> {
             path: paths::snippets_dir().clone(),
             suffix: ".json",
         },
-        Location::Folder {
-            prefix: "themes",
-            path: paths::themes_dir().clone(),
-            suffix: ".json",
-        },
         // The same folders as `task_agents::personal_agents_dir` and `flows::personal_flows_dir`,
         // which this crate doesn't depend on to stay out of the title bar's dependency graph.
         Location::Folder {
@@ -77,9 +108,9 @@ fn locations() -> Vec<Location> {
 }
 
 /// Reads every synced file that exists and isn't empty, keyed by its name in the gist.
-pub fn read_local_files() -> Result<BTreeMap<String, String>> {
+pub fn read_local_files(scope: SyncScope) -> Result<BTreeMap<String, String>> {
     let mut files = BTreeMap::new();
-    for location in locations() {
+    for location in locations(scope) {
         match location {
             Location::File { name, path } => {
                 if let Some(content) = read_text_file(&path)? {
@@ -148,8 +179,8 @@ fn read_text_file(path: &Path) -> Result<Option<String>> {
 }
 
 /// Where a file from the gist lives locally, or `None` for names Asylum doesn't sync.
-pub fn local_path(name: &str) -> Option<PathBuf> {
-    for location in locations() {
+pub fn local_path(scope: SyncScope, name: &str) -> Option<PathBuf> {
+    for location in locations(scope) {
         match location {
             Location::File {
                 name: file_name,
@@ -225,16 +256,23 @@ pub fn backups_dir() -> PathBuf {
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct SyncRecord {
     pub gist_id: Option<String>,
+    /// The GitHub account that owns the gist. Profiles can sign in with different accounts, so
+    /// the shared record is only reused by the account that wrote it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
     /// The hash of every file as of the last successful sync.
     pub base: Hashes,
 }
 
-fn record_path() -> PathBuf {
-    paths::data_dir().join("settings_sync").join("state.json")
+fn record_path(scope: SyncScope) -> PathBuf {
+    match scope {
+        SyncScope::Shared => paths::profiles_dir().join("settings_sync_shared.json"),
+        SyncScope::Profile => paths::data_dir().join("settings_sync").join("state.json"),
+    }
 }
 
-pub fn read_record() -> Result<SyncRecord> {
-    match std::fs::read_to_string(record_path()) {
+pub fn read_record(scope: SyncScope) -> Result<SyncRecord> {
+    match std::fs::read_to_string(record_path(scope)) {
         Ok(content) => serde_json::from_str(&content)
             .with_context(|| t!("settings_sync.error.read_state").to_string()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(SyncRecord::default()),
@@ -242,12 +280,43 @@ pub fn read_record() -> Result<SyncRecord> {
     }
 }
 
-pub fn write_record(record: &SyncRecord) -> Result<()> {
-    write_local_file(&record_path(), &serde_json::to_string_pretty(record)?)
+pub fn write_record(scope: SyncScope, record: &SyncRecord) -> Result<()> {
+    write_local_file(&record_path(scope), &serde_json::to_string_pretty(record)?)
 }
 
-pub fn delete_record() -> Result<()> {
-    delete_local_file(&record_path())
+/// Only the profile's record: the shared one belongs to every profile.
+pub fn delete_profile_record() -> Result<()> {
+    delete_local_file(&record_path(SyncScope::Profile))
+}
+
+/// Keeps the other profiles' processes from syncing the shared gist at the same time. Returns
+/// `None` while another process holds the lock; dropping the file releases it.
+pub fn try_lock_shared_sync() -> Result<Option<std::fs::File>> {
+    try_lock_file(&paths::profiles_dir().join("settings_sync_shared.lock"))
+}
+
+fn try_lock_file(lock_path: &Path) -> Result<Option<std::fs::File>> {
+    let lock_error = || {
+        t!(
+            "settings_sync.error.shared_lock",
+            path = lock_path.display()
+        )
+        .to_string()
+    };
+    if let Some(parent) = lock_path.parent() {
+        std::fs::create_dir_all(parent).with_context(lock_error)?;
+    }
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(lock_path)
+        .with_context(lock_error)?;
+    match file.try_lock() {
+        Ok(()) => Ok(Some(file)),
+        Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+        Err(std::fs::TryLockError::Error(error)) => Err(error).with_context(lock_error),
+    }
 }
 
 #[cfg(test)]
@@ -262,5 +331,44 @@ mod tests {
         assert!(!is_syncable_file_name(".hidden.json", ".json"));
         assert!(!is_syncable_file_name("a--b.json", ".json"));
         assert!(!is_syncable_file_name("../escape.json", ".json"));
+    }
+
+    #[test]
+    fn test_shared_files_are_not_synced_per_profile() {
+        for name in ["keymap.json", "profiles.json", "themes--dark.json"] {
+            assert_eq!(local_path(SyncScope::Profile, name), None, "{name}");
+            assert!(local_path(SyncScope::Shared, name).is_some(), "{name}");
+        }
+        for name in [
+            "tasks.json",
+            "debug.json",
+            "AGENTS.md",
+            "snippets--rust.json",
+            "agents--review.md",
+            "flows--release.flow.md",
+        ] {
+            assert!(local_path(SyncScope::Profile, name).is_some(), "{name}");
+            assert_eq!(local_path(SyncScope::Shared, name), None, "{name}");
+        }
+        assert_eq!(
+            local_path(SyncScope::Profile, "settings.json").as_ref(),
+            Some(paths::settings_file())
+        );
+        assert_eq!(
+            local_path(SyncScope::Shared, "settings.json").as_ref(),
+            paths::shared_settings_file()
+        );
+    }
+
+    #[test]
+    fn test_shared_lock_is_exclusive() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let lock_path = directory.path().join("nested").join("shared.lock");
+        let held = try_lock_file(&lock_path)?;
+        assert!(held.is_some());
+        assert!(try_lock_file(&lock_path)?.is_none());
+        drop(held);
+        assert!(try_lock_file(&lock_path)?.is_some());
+        Ok(())
     }
 }

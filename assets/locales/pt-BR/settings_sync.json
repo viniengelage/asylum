@@ -9,6 +9,7 @@
   "error.read_state": "lendo o estado da sincronização de configurações",
   "error.reading": "lendo {path}",
   "error.save_sign_in": "salvando o login do GitHub",
+  "error.shared_lock": "bloqueando a sincronização das configurações compartilhadas em {path}",
   "error.sign_in_failed": "o login no GitHub falhou: {reason}",
   "error.sign_in_refused": "o GitHub recusou iniciar o login ({status}): {response}",
   "error.sign_in_rejected": "O GitHub recusou o login salvo. Entre de novo.",

@@ -198,7 +198,7 @@ impl SkillCreatorPage {
 
         let name_editor = cx.new(|cx| {
             InputField::new(window, cx, "my-new-skill")
-                .label("Name")
+                .label(i18n::translate_text("settings_ui_text", "Name"))
                 .tab_index(NAME_FIELD_TAB_INDEX)
                 .tab_stop(true)
         });
@@ -207,7 +207,7 @@ impl SkillCreatorPage {
 
         let subcommand_name_editor = cx.new(|cx| {
             InputField::new(window, cx, "implement")
-                .label("Name")
+                .label(i18n::translate_text("settings_ui_text", "Name"))
                 .tab_index(NAME_FIELD_TAB_INDEX)
                 .tab_stop(true)
         });
@@ -216,18 +216,25 @@ impl SkillCreatorPage {
             InputField::new(
                 window,
                 cx,
-                "e.g., Fill the PR description following this template.",
+                &i18n::translate_text(
+                    "settings_ui_text",
+                    "e.g., Fill the PR description following this template.",
+                ),
             )
-            .label("Description")
+            .label(i18n::translate_text("settings_ui_text", "Description"))
             .tab_index(DESCRIPTION_FIELD_TAB_INDEX)
             .tab_stop(true)
         });
 
         let argument_hint_editor = cx.new(|cx| {
-            InputField::new(window, cx, "e.g., <story id>")
-                .label("Argument hint")
-                .tab_index(ARGUMENT_HINT_FIELD_TAB_INDEX)
-                .tab_stop(true)
+            InputField::new(
+                window,
+                cx,
+                &i18n::translate_text("settings_ui_text", "e.g., <story id>"),
+            )
+            .label(i18n::translate_text("settings_ui_text", "Argument hint"))
+            .tab_index(ARGUMENT_HINT_FIELD_TAB_INDEX)
+            .tab_stop(true)
         });
 
         let body_editor = cx.new(|cx| {
@@ -237,7 +244,11 @@ impl SkillCreatorPage {
                 buffer
             });
             let mut editor = Editor::for_buffer(buffer, None, window, cx);
-            editor.set_placeholder_text("Add skill content…", window, cx);
+            editor.set_placeholder_text(
+                &i18n::translate_text("settings_ui_text", "Add skill content…"),
+                window,
+                cx,
+            );
             editor.set_soft_wrap_mode(SoftWrap::EditorWidth, cx);
             editor.set_show_gutter(false, cx);
             editor.set_show_wrap_guides(false, cx);
@@ -471,9 +482,12 @@ impl SkillCreatorPage {
     fn recompute_name_error(&mut self, cx: &mut Context<Self>) {
         let error = self.validate_current_name(cx).err();
         self.name_error = error;
-        self.active_name_editor()
-            .clone()
-            .update(cx, |field, cx| field.set_error(error, cx));
+        self.active_name_editor().clone().update(cx, |field, cx| {
+            field.set_error(
+                error.map(|error| i18n::translate_text("settings_ui_text", error)),
+                cx,
+            )
+        });
     }
 
     fn recompute_description_error(&mut self, cx: &mut Context<Self>) {
@@ -481,8 +495,12 @@ impl SkillCreatorPage {
         self.description_length = description.chars().count();
         let error = self.validate_current_description(cx).err();
         self.description_error = error;
-        self.description_editor
-            .update(cx, |field, cx| field.set_error(error, cx));
+        self.description_editor.update(cx, |field, cx| {
+            field.set_error(
+                error.map(|error| i18n::translate_text("settings_ui_text", error)),
+                cx,
+            )
+        });
     }
 
     fn recompute_body_error(&mut self, cx: &App) {
@@ -805,21 +823,30 @@ impl SkillCreatorPage {
             .child(
                 h_flex()
                     .gap_1()
-                    .child(Label::new("Import from URL"))
-                    .child(Label::new("(optional)").color(Color::Muted)),
+                    .child(Label::new(i18n::translate_text(
+                        "settings_ui_text",
+                        "Import from URL",
+                    )))
+                    .child(
+                        Label::new(i18n::translate_text("settings_ui_text", "(optional)"))
+                            .color(Color::Muted),
+                    ),
             )
             .child(self.url_editor.clone())
             .child(match &self.url_import_status {
-                UrlImportStatus::Idle => Label::new(
+                UrlImportStatus::Idle => Label::new(i18n::translate_text(
+                    "settings_ui_text",
                     "Paste a GitHub .md URL to fetch it and fill out the form. \
                      For private files, Asylum retries using GITHUB_TOKEN, if set.",
-                )
+                ))
                 .size(LabelSize::Small)
                 .color(Color::Muted)
                 .into_any_element(),
-                UrlImportStatus::Fetching => {
-                    LoadingLabel::new("Fetching and parsing…").into_any_element()
-                }
+                UrlImportStatus::Fetching => LoadingLabel::new(i18n::translate_text(
+                    "settings_ui_text",
+                    "Fetching and parsing…",
+                ))
+                .into_any_element(),
                 UrlImportStatus::Error(error) => h_flex()
                     .gap_1()
                     .child(
@@ -846,7 +873,10 @@ impl SkillCreatorPage {
             .child(
                 v_flex()
                     .gap_2()
-                    .child(Label::new("Front-matter"))
+                    .child(Label::new(i18n::translate_text(
+                        "settings_ui_text",
+                        "Front-matter",
+                    )))
                     .child(self.active_name_editor().clone())
                     .child(self.description_editor.clone())
                     .when(is_subcommand, |this| {
@@ -863,13 +893,17 @@ impl SkillCreatorPage {
                     .flex_shrink_0()
                     .gap_2()
                     .child(Label::new(if is_subcommand {
-                        "Subcommand Content"
+                        i18n::translate_text("settings_ui_text", "Subcommand Content")
                     } else {
-                        "Skill Content"
+                        i18n::translate_text("settings_ui_text", "Skill Content")
                     }))
                     .child(self.render_body_field(window, cx))
                     .when_some(self.body_error, |this, error| {
-                        this.child(Label::new(error).size(LabelSize::Small).color(Color::Error))
+                        this.child(
+                            Label::new(i18n::translate_text("settings_ui_text", error))
+                                .size(LabelSize::Small)
+                                .color(Color::Error),
+                        )
                     }),
             )
     }
@@ -879,10 +913,9 @@ impl SkillCreatorPage {
 
         SwitchField::new(
             "disable-model-invocation",
-            Some("Disable model invocation"),
+            Some(i18n::translate_text("settings_ui_text", "Disable model invocation")),
             Some(
-                "Hide this skill from the model's catalog. It can still be invoked via slash command."
-                    .into(),
+                i18n::translate_text("settings_ui_text", "Hide this skill from the model's catalog. It can still be invoked via slash command."),
             ),
             toggle_state,
             cx.listener(|this, _state: &ToggleState, _window, cx| {
@@ -948,9 +981,9 @@ impl SkillCreatorPage {
     fn render_footer(&self, _window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
         let saving = self.saving;
         let main_action = match (saving, self.subcommand_target.is_some()) {
-            (true, _) => "Saving…",
-            (false, true) => "Save Subcommand",
-            (false, false) => "Save Skill",
+            (true, _) => i18n::translate_text("settings_ui_text", "Saving…"),
+            (false, true) => i18n::translate_text("settings_ui_text", "Save Subcommand"),
+            (false, false) => i18n::translate_text("settings_ui_text", "Save Skill"),
         };
 
         v_flex()

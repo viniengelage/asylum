@@ -87,7 +87,10 @@ pub(crate) fn render_edit_prediction_setup_page(
                 IconName::AiOpenAiCompat,
                 "OpenAI Compatible API",
                 ApiKeyDocs::Custom {
-                    message: "The API key sent as Authorization: Bearer {key}.".into(),
+                    message: i18n::translate_text(
+                        "settings_ui_text",
+                        "The API key sent as Authorization: Bearer {key}.",
+                    ),
                 },
                 open_ai_compatible_api_token(cx),
                 |cx| open_ai_compatible_api_url(cx),
@@ -128,7 +131,10 @@ fn render_provider_dropdown(window: &mut Window, cx: &mut App) -> AnyElement {
     let current_provider = AllLanguageSettings::get_global(cx)
         .edit_predictions
         .provider;
-    let current_provider_name = current_provider.display_name().unwrap_or("No provider set");
+    let current_provider_name = i18n::translate_text(
+        "settings_ui_text",
+        current_provider.display_name().unwrap_or("No provider set"),
+    );
 
     let menu = ContextMenu::build(window, cx, move |mut menu, _, cx| {
         let available_providers = get_available_providers(cx);
@@ -154,7 +160,10 @@ fn render_provider_dropdown(window: &mut Window, cx: &mut App) -> AnyElement {
         .id("provider-selector")
         .min_w_0()
         .gap_1p5()
-        .child(SettingsSectionHeader::new("Active Provider").no_padding(true))
+        .child(
+            SettingsSectionHeader::new(i18n::translate_text("settings_ui_text", "Active Provider"))
+                .no_padding(true),
+        )
         .child(
             h_flex()
                 .pt_2p5()
@@ -166,11 +175,17 @@ fn render_provider_dropdown(window: &mut Window, cx: &mut App) -> AnyElement {
                         .w_full()
                         .min_w_0()
                         .max_w_1_2()
-                        .child(Label::new("Provider"))
+                        .child(Label::new(i18n::translate_text(
+                            "settings_ui_text",
+                            "Provider",
+                        )))
                         .child(
-                            Label::new("Select which provider to use for edit predictions.")
-                                .size(LabelSize::Small)
-                                .color(Color::Muted),
+                            Label::new(i18n::translate_text(
+                                "settings_ui_text",
+                                "Select which provider to use for edit predictions.",
+                            ))
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
                         ),
                 )
                 .child(
@@ -244,7 +259,7 @@ fn render_api_key_provider(
 
     let base_container = v_flex().id(title).min_w_0().pt_8().gap_1p5();
 
-    let header = SettingsSectionHeader::new(title)
+    let header = SettingsSectionHeader::new(i18n::translate_text("settings_ui_text", title))
         .icon(icon)
         .no_padding(true);
 
@@ -260,7 +275,7 @@ fn render_api_key_provider(
             .flex_wrap()
             .gap_0p5()
             .child(
-                Label::new("Visit the")
+                Label::new(i18n::translate_text("settings_ui_text", "Visit the"))
                     .size(LabelSize::Small)
                     .color(Color::Muted),
             )
@@ -271,22 +286,25 @@ fn render_api_key_provider(
                     .label_color(Color::Muted),
             )
             .child(
-                Label::new("to generate an API key.")
-                    .size(LabelSize::Small)
-                    .color(Color::Muted),
+                Label::new(i18n::translate_text(
+                    "settings_ui_text",
+                    "to generate an API key.",
+                ))
+                .size(LabelSize::Small)
+                .color(Color::Muted),
             ),
     };
 
     let configured_card_label = if is_from_env_var {
-        "API Key Set in Environment Variable"
+        i18n::translate_text("settings_ui_text", "API Key Set in Environment Variable")
     } else {
-        "API Key Configured"
+        i18n::translate_text("settings_ui_text", "API Key Configured")
     };
 
     let container = if has_key {
         base_container.child(header).child(
             ConfiguredApiCard::new(format!("{title}-reset-key"), configured_card_label)
-                .button_label("Reset Key")
+                .button_label(i18n::translate_text("settings_ui_text", "Reset Key"))
                 .button_tab_index(0)
                 .disabled(is_from_env_var)
                 .when_some(env_var_name, |this, env_var_name| {
@@ -314,7 +332,10 @@ fn render_api_key_provider(
                         .min_w_0()
                         .max_w_1_2()
                         .gap_0p5()
-                        .child(Label::new("API Key"))
+                        .child(Label::new(i18n::translate_text(
+                            "settings_ui_text",
+                            "API Key",
+                        )))
                         .child(description)
                         .when_some(env_var_name, |this, env_var_name| {
                             this.child({

@@ -21,7 +21,7 @@ use language_model::LanguageModelRegistry;
 use project::context_server_store::ContextServerStatus;
 use project::project_settings::{ContextServerSettings, ProjectSettings};
 use serde::{Deserialize, Serialize};
-use settings::{Settings as _, SettingsStore};
+use settings::{Settings as _, SettingsFile, SettingsStore};
 use ui::{
     ButtonLike, Divider, IconButton, IconName, IconSize, Indicator, Label, LabelSize, PopoverMenu,
     PopoverMenuHandle, Switch, TintColor, ToggleState, Tooltip, prelude::*,
@@ -303,21 +303,45 @@ gpui::actions!(
     ]
 );
 
-fn open_manager(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
-    let store = ProfileStore::global(cx);
-    let weak_workspace = workspace.weak_handle();
-    workspace.toggle_modal(window, cx, move |window, cx| {
-        ManageProfilesModal::new(store, weak_workspace, window, cx)
-    });
+/// Profiles are managed on the Profiles page of the settings window.
+fn open_manager(_: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
+    window.dispatch_action(
+        Box::new(zed_actions::OpenSettingsPage {
+            page: "Profiles".to_string(),
+            target: None,
+        }),
+        cx,
+    );
 }
 
 /// Registers the profile actions and lets File > Open offer to open a folder in the profile
 /// it belongs to.
 pub fn init(cx: &mut App) {
-    cx.observe_new(|workspace: &mut Workspace, _, _| {
+    settings_ui::register_profiles_page(
+        std::rc::Rc::new(|original_window, window, cx| {
+            let store = ProfileStore::global(cx);
+            let workspace = original_window
+                .and_then(|handle| handle.read(cx).ok())
+                .map(|multi_workspace| multi_workspace.workspace().downgrade())
+                .unwrap_or_else(WeakEntity::new_invalid);
+            cx.new(|cx| ManageProfilesModal::new_embedded(store, workspace, window, cx))
+                .into()
+        }),
+        cx,
+    );
+    cx.observe_new(|workspace: &mut Workspace, window, cx| {
         workspace.register_action(|workspace, _: &ManageProfiles, window, cx| {
             open_manager(workspace, window, cx)
         });
+        if let Some(window) = window
+            && let Some(moved) = SettingsScopesNotice::pending()
+        {
+            cx.defer_in(window, move |workspace, window, cx| {
+                workspace.toggle_modal(window, cx, move |_, cx| {
+                    SettingsScopesNotice::new(moved, cx)
+                });
+            });
+        }
     })
     .detach();
 
@@ -332,6 +356,240 @@ pub fn init(cx: &mut App) {
             open_in_owner: Box::new(move |cx| forward_paths(owner.id, paths, cx)),
         })
     })));
+}
+
+/// Says once, in each profile, that the settings now have a scope, and which ones moved out of
+/// the shared file when they were split.
+struct SettingsScopesNotice {
+    moved: Vec<String>,
+    focus_handle: FocusHandle,
+}
+
+impl EventEmitter<DismissEvent> for SettingsScopesNotice {}
+impl ModalView for SettingsScopesNotice {}
+
+impl Focusable for SettingsScopesNotice {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
+#[derive(Deserialize)]
+struct SettingsScopesRecord {
+    #[serde(default)]
+    moved: Vec<String>,
+}
+
+impl SettingsScopesNotice {
+    fn shown_marker() -> PathBuf {
+        paths::data_dir().join("settings-scopes-notice-shown")
+    }
+
+    /// The settings the split moved, when this profile hasn't said so yet. Claims the notice, so
+    /// a second window doesn't show it again.
+    fn pending() -> Option<Vec<String>> {
+        static CLAIMED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if CLAIMED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            return None;
+        }
+        if Self::shown_marker().exists() {
+            return None;
+        }
+        let record = std::fs::read_to_string(settings::migration_record_file()).ok()?;
+        let record: SettingsScopesRecord = serde_json::from_str(&record).log_err()?;
+        if record.moved.is_empty() {
+            return None;
+        }
+        std::fs::write(Self::shown_marker(), b"").log_err();
+        Some(record.moved)
+    }
+
+    fn new(moved: Vec<String>, cx: &mut Context<Self>) -> Self {
+        Self {
+            moved,
+            focus_handle: cx.focus_handle(),
+        }
+    }
+
+    fn dismiss(&mut self, _: &menu::Cancel, _: &mut Window, cx: &mut Context<Self>) {
+        cx.emit(DismissEvent);
+    }
+
+    fn render_scope(
+        marker: AnyElement,
+        title: SharedString,
+        detail: SharedString,
+        path: SharedString,
+        cx: &App,
+    ) -> impl IntoElement {
+        h_flex()
+            .w_full()
+            .items_start()
+            .gap_3()
+            .p_3()
+            .rounded(px(10.))
+            .border_1()
+            .border_color(cx.theme().colors().border)
+            .bg(cx.theme().colors().element_background)
+            .child(
+                div()
+                    .w(px(18.))
+                    .pt_0p5()
+                    .flex()
+                    .justify_center()
+                    .child(marker),
+            )
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap_0p5()
+                    .child(Label::new(title).weight(gpui::FontWeight::MEDIUM))
+                    .child(
+                        Label::new(detail)
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
+                    )
+                    .child(
+                        Label::new(path)
+                            .size(LabelSize::XSmall)
+                            .buffer_font(cx)
+                            .color(Color::Placeholder),
+                    ),
+            )
+    }
+}
+
+impl Render for SettingsScopesNotice {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let default_name = load_profiles()
+            .ok()
+            .and_then(|profiles| {
+                profiles
+                    .into_iter()
+                    .find(|profile| profile.id == paths::DEFAULT_PROFILE_ID)
+            })
+            .map(|profile| profile.name)
+            .unwrap_or_else(|| default_profile().name);
+        let profile_color = ProfileStore::global(cx)
+            .read(cx)
+            .active_profile()
+            .color
+            .hsla();
+        let count = self.moved.len();
+        let moved = self.moved.join(", ");
+        ui::modal_surface(cx)
+            .key_context("SettingsScopesNotice")
+            .track_focus(&self.focus_handle)
+            .on_action(cx.listener(Self::dismiss))
+            .w(px(580.))
+            .child(
+                v_flex()
+                    .gap_1p5()
+                    .px_5()
+                    .pt_5()
+                    .pb_3p5()
+                    .child(
+                        Label::new(t!("zed.scopes.title"))
+                            .size(LabelSize::Large)
+                            .weight(gpui::FontWeight::BOLD),
+                    )
+                    .child(Label::new(t!("zed.scopes.detail")).color(Color::Muted)),
+            )
+            .child(
+                v_flex()
+                    .gap_2()
+                    .px_5()
+                    .pb_3p5()
+                    .child(Self::render_scope(
+                        Icon::new(IconName::UserGroup)
+                            .size(IconSize::Small)
+                            .color(Color::Muted)
+                            .into_any_element(),
+                        t!("zed.scopes.all_title"),
+                        t!("zed.scopes.all_detail"),
+                        "~/.config/asylum/settings.json".into(),
+                        cx,
+                    ))
+                    .child(Self::render_scope(
+                        div()
+                            .size(px(8.))
+                            .rounded_full()
+                            .bg(profile_color)
+                            .into_any_element(),
+                        t!("zed.scopes.profile_title"),
+                        t!("zed.scopes.profile_detail"),
+                        "profiles/<perfil>/config/settings.json".into(),
+                        cx,
+                    ))
+                    .child(Self::render_scope(
+                        Icon::new(IconName::Folder)
+                            .size(IconSize::Small)
+                            .color(Color::Muted)
+                            .into_any_element(),
+                        t!("zed.scopes.project_title"),
+                        t!("zed.scopes.project_detail"),
+                        ".zed/settings.json".into(),
+                        cx,
+                    )),
+            )
+            .child(
+                h_flex()
+                    .id("scopes-moved")
+                    .px_5()
+                    .py_2p5()
+                    .gap_2p5()
+                    .bg(Color::Warning.color(cx).opacity(0.06))
+                    .child(
+                        Icon::new(IconName::Info)
+                            .size(IconSize::Small)
+                            .color(Color::Muted),
+                    )
+                    .child(
+                        Label::new(t!("zed.scopes.moved", count = count, name = default_name))
+                            .size(LabelSize::Small),
+                    )
+                    .tooltip(Tooltip::text(moved)),
+            )
+            .child(
+                ui::modal_footer(cx)
+                    .child(
+                        Label::new(t!("zed.scopes.backup"))
+                            .size(LabelSize::Small)
+                            .color(Color::Placeholder),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        ui::secondary_button(
+                            "scopes-see-keys",
+                            None,
+                            t!("zed.scopes.see_keys", count = count),
+                            true,
+                            cx,
+                        )
+                        .on_click(cx.listener(|_, _, window, cx| {
+                            window.dispatch_action(
+                                Box::new(zed_actions::OpenSettingsPage {
+                                    page: "AI".to_string(),
+                                    target: None,
+                                }),
+                                cx,
+                            );
+                            cx.emit(DismissEvent);
+                        })),
+                    )
+                    .child(
+                        ui::primary_button(
+                            "scopes-got-it",
+                            None,
+                            t!("zed.scopes.got_it"),
+                            None,
+                            cx,
+                        )
+                        .on_click(cx.listener(|_, _, _, cx| cx.emit(DismissEvent))),
+                    ),
+            )
+    }
 }
 
 /// Opens `paths` in the running instance of `profile_id`, starting it with them when it
@@ -672,7 +930,27 @@ impl ProfileStore {
             store
         });
         cx.set_global(GlobalProfileStore(store.clone()));
+        let profiles = store.read(cx).settings_profiles();
+        settings_ui::set_settings_profiles(profiles, cx);
         store
+    }
+
+    /// Lets the settings window name the profile's scope and list the profiles.
+    fn publish_to_settings_window(&self, cx: &mut App) {
+        settings_ui::set_settings_profiles(self.settings_profiles(), cx);
+    }
+
+    fn settings_profiles(&self) -> settings_ui::SettingsProfiles {
+        let to_settings_profile = |profile: &AppProfile| settings_ui::SettingsProfile {
+            id: profile.id.clone().into(),
+            name: profile.name.clone().into(),
+            color: profile.color.hsla(),
+            running: profile.id == active_profile_id() || self.running.contains(&profile.id),
+        };
+        settings_ui::SettingsProfiles {
+            current: Some(to_settings_profile(&self.active_profile())),
+            all: self.profiles.iter().map(to_settings_profile).collect(),
+        }
     }
 
     fn active_profile(&self) -> AppProfile {
@@ -896,6 +1174,7 @@ impl ProfileStore {
                     }
                 }
                 this.running = running;
+                this.publish_to_settings_window(cx);
                 cx.notify();
             })
             .log_err();
@@ -1702,6 +1981,8 @@ pub struct ManageProfilesModal {
     /// The editors for who git commits as, while that identity is being edited.
     git_identity_editors: Option<(Entity<Editor>, Entity<Editor>)>,
     error: Option<SharedString>,
+    /// Shown as the Profiles page of the settings window instead of a modal.
+    embedded: bool,
     _subscriptions: Vec<gpui::Subscription>,
 }
 
@@ -1747,9 +2028,21 @@ impl ManageProfilesModal {
             name_editor,
             git_identity_editors: None,
             error: None,
+            embedded: false,
             _subscriptions: subscriptions,
         };
         this.select(active_profile_id().to_string(), window, cx);
+        this
+    }
+
+    fn new_embedded(
+        store: Entity<ProfileStore>,
+        workspace: WeakEntity<Workspace>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut this = Self::new(store, workspace, window, cx);
+        this.embedded = true;
         this
     }
 
@@ -1943,8 +2236,8 @@ impl ManageProfilesModal {
     fn render_section_title(title: SharedString) -> impl IntoElement {
         Label::new(title)
             .size(LabelSize::XSmall)
-            .weight(gpui::FontWeight::SEMIBOLD)
-            .color(Color::Muted)
+            .weight(gpui::FontWeight::BOLD)
+            .color(Color::Placeholder)
     }
 
     fn render_nav(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -2044,16 +2337,16 @@ impl ManageProfilesModal {
     ) -> impl IntoElement {
         v_flex()
             .w_full()
-            .rounded_lg()
+            .rounded(px(10.))
             .border_1()
-            .border_color(cx.theme().colors().border_variant)
-            .bg(cx.theme().colors().element_background.opacity(0.4))
+            .border_color(cx.theme().colors().border)
+            .bg(cx.theme().colors().element_background)
             .child(
                 h_flex()
                     .justify_between()
-                    .px_3()
-                    .py_1p5()
-                    .child(Self::render_section_title(title))
+                    .px(px(14.))
+                    .py_2p5()
+                    .child(Self::render_section_title(title.to_uppercase().into()))
                     .children(action),
             )
             .when(rows.is_empty(), |this| {
@@ -2071,7 +2364,7 @@ impl ManageProfilesModal {
             .children(rows.into_iter().map(|row| {
                 div()
                     .border_t_1()
-                    .border_color(cx.theme().colors().border_variant)
+                    .border_color(cx.theme().colors().border)
                     .child(row)
             }))
     }
@@ -2087,8 +2380,8 @@ impl ManageProfilesModal {
     ) -> AnyElement {
         h_flex()
             .gap_2p5()
-            .px_3()
-            .py_1p5()
+            .px(px(14.))
+            .py_2()
             .child(Icon::new(icon).size(IconSize::Small).color(icon_color))
             .child(
                 v_flex()
@@ -2223,7 +2516,25 @@ impl ManageProfilesModal {
             });
         }
         let fs = <dyn Fs>::global(cx);
-        settings::update_settings_file(fs, cx, move |settings, _| {
+        settings::update_settings_file(fs, cx, move |settings, cx| {
+            // A server from a project or an extension isn't in this profile's file yet, and
+            // switching it has to be remembered here all the same.
+            if !settings
+                .project
+                .context_servers
+                .contains_key(server.as_str())
+                && let Some(merged) = cx
+                    .global::<SettingsStore>()
+                    .merged_settings()
+                    .project
+                    .context_servers
+                    .get(server.as_str())
+            {
+                settings
+                    .project
+                    .context_servers
+                    .insert(server.as_str().into(), merged.clone());
+            }
             if let Some(server) = settings.project.context_servers.get_mut(server.as_str()) {
                 server.set_enabled(enabled);
             }
@@ -2771,11 +3082,21 @@ impl ManageProfilesModal {
 
     fn set_toolkit_enabled(&self, toolkit_id: String, enabled: bool, cx: &mut Context<Self>) {
         let fs = <dyn Fs>::global(cx);
-        settings::update_settings_file(fs, cx, move |settings, _| {
+        settings::update_settings_file(fs, cx, move |settings, cx| {
             let toolkits = &mut settings.project.agent_toolkits;
-            // Leaving the key out means on, so the file only names what was turned off.
+            // Leaving the key out means on, so the file only names what was turned off, unless
+            // the file every profile shares turns it off.
             if enabled {
                 toolkits.remove(toolkit_id.as_str());
+                let off_below = [SettingsFile::Shared, SettingsFile::Global]
+                    .into_iter()
+                    .filter_map(|file| cx.global::<SettingsStore>().get_content_for_file(file))
+                    .any(|content| {
+                        content.project.agent_toolkits.get(toolkit_id.as_str()) == Some(&false)
+                    });
+                if off_below {
+                    toolkits.insert(toolkit_id.as_str().into(), true);
+                }
             } else {
                 toolkits.insert(toolkit_id.as_str().into(), false);
             }
@@ -3089,8 +3410,403 @@ impl ManageProfilesModal {
     }
 }
 
+impl ManageProfilesModal {
+    /// The Profiles page of the settings window: a header with the profiles, then the selected
+    /// one's cards.
+    fn render_embedded(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let colors = cx.theme().colors();
+        let store = self.store.read(cx);
+        let segments = store
+            .profiles
+            .iter()
+            .enumerate()
+            .map(|(index, profile)| {
+                let selected = profile.id == self.selected_id;
+                let status = if profile.id == active_profile_id() {
+                    t!("zed.profiles.status_this_window")
+                } else if store.running.contains(&profile.id) {
+                    t!("zed.profiles.status_open")
+                } else {
+                    t!("zed.profiles.status_closed")
+                };
+                let profile_id = profile.id.clone();
+                h_flex()
+                    .id(("profile-segment", index))
+                    .h(px(26.))
+                    .px_2p5()
+                    .gap_1p5()
+                    .rounded(px(6.))
+                    .border_1()
+                    .border_color(gpui::transparent_black())
+                    .cursor_pointer()
+                    .when(selected, |this| {
+                        this.bg(colors.element_selected)
+                            .border_color(colors.border_focused)
+                    })
+                    .when(!selected, |this| {
+                        this.hover(|this| this.bg(colors.element_hover))
+                    })
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.select(profile_id.clone(), window, cx)
+                    }))
+                    .child(div().size(px(7.)).rounded_full().bg(profile.color.hsla()))
+                    .child(
+                        Label::new(profile.name.clone())
+                            .size(LabelSize::Small)
+                            .weight(gpui::FontWeight::MEDIUM)
+                            .color(if selected {
+                                Color::Default
+                            } else {
+                                Color::Muted
+                            }),
+                    )
+                    .child(
+                        Label::new(status)
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
+                    )
+            })
+            .collect::<Vec<_>>();
+
+        let selected = self.selected(cx);
+        let closed_banner = selected.as_ref().and_then(|profile| {
+            let store = self.store.read(cx);
+            let closed = profile.id != active_profile_id() && !store.running.contains(&profile.id);
+            closed.then(|| {
+                let open_id = profile.id.clone();
+                let color = profile.color.hsla();
+                v_flex()
+                    .w_full()
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .px_7()
+                            .py_2p5()
+                            .gap_2p5()
+                            .bg(color.opacity(0.06))
+                            .child(div().size(px(7.)).rounded_full().bg(color))
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .gap_0p5()
+                                    .child(
+                                        Label::new(t!(
+                                            "zed.profiles.closed_banner",
+                                            name = profile.name
+                                        ))
+                                        .size(LabelSize::Small),
+                                    )
+                                    .child(
+                                        Label::new(t!(
+                                            "zed.profiles.closed_banner_detail",
+                                            path = format!(
+                                                "profiles/{}/config/settings.json",
+                                                profile.id
+                                            )
+                                        ))
+                                        .size(LabelSize::XSmall)
+                                        .buffer_font(cx)
+                                        .color(Color::Muted),
+                                    ),
+                            )
+                            .child(
+                                ui::secondary_button(
+                                    "open-closed-profile",
+                                    None,
+                                    t!("zed.profiles.open_named", name = profile.name),
+                                    true,
+                                    cx,
+                                )
+                                .on_click(cx.listener(
+                                    move |this, _, window, cx| {
+                                        open_profile(open_id.clone(), cx).detach_and_notify_err(
+                                            this.workspace.clone(),
+                                            window,
+                                            cx,
+                                        );
+                                    },
+                                )),
+                            ),
+                    )
+                    .child(Divider::horizontal())
+            })
+        });
+
+        v_flex()
+            .size_full()
+            .child(
+                h_flex()
+                    .w_full()
+                    .h(px(56.))
+                    .flex_none()
+                    .px_7()
+                    .gap_3()
+                    .bg(colors.panel_background)
+                    .child(
+                        Label::new(t!("zed.profiles.page_title"))
+                            .size(LabelSize::Large)
+                            .weight(gpui::FontWeight::BOLD),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        h_flex()
+                            .h(px(32.))
+                            .p_0p5()
+                            .gap_0p5()
+                            .rounded_lg()
+                            .border_1()
+                            .border_color(colors.border_selected)
+                            .bg(colors.editor_background)
+                            .children(segments),
+                    )
+                    .child(
+                        ui::secondary_button(
+                            "new-profile",
+                            None,
+                            t!("zed.manager.new_profile"),
+                            true,
+                            cx,
+                        )
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.create_profile(window, cx)),
+                        ),
+                    ),
+            )
+            .child(Divider::horizontal())
+            .children(closed_banner)
+            .children(selected.map(|profile| self.render_embedded_details(&profile, cx)))
+            .into_any_element()
+    }
+
+    fn render_identity_card(&self, profile: &AppProfile, cx: &mut Context<Self>) -> AnyElement {
+        let colors = cx.theme().colors();
+        let swatches = ProfileColor::ALL
+            .into_iter()
+            .map(|color| {
+                let is_selected = color == profile.color;
+                div()
+                    .id(color.id())
+                    .size(px(18.))
+                    .rounded_full()
+                    .cursor_pointer()
+                    .border_2()
+                    .border_color(if is_selected {
+                        colors.text
+                    } else {
+                        gpui::transparent_black()
+                    })
+                    .bg(color.hsla())
+                    .tooltip(Tooltip::text(color.label()))
+                    .on_click(cx.listener(move |this, _, _, cx| this.set_color(color, cx)))
+            })
+            .collect::<Vec<_>>();
+        let launcher = self.store.read(cx).launchers.get(&profile.id).cloned();
+        let label_cell = |label: SharedString| {
+            div()
+                .w(px(110.))
+                .flex_none()
+                .child(Label::new(label).color(Color::Muted))
+        };
+        let mut rows = vec![
+            h_flex()
+                .px(px(14.))
+                .py_2()
+                .gap_3()
+                .child(label_cell(t!("zed.identity.name")))
+                .child(
+                    div()
+                        .flex_1()
+                        .h(px(28.))
+                        .px_2p5()
+                        .flex()
+                        .items_center()
+                        .rounded(px(6.))
+                        .border_1()
+                        .border_color(colors.border_selected)
+                        .bg(colors.editor_background)
+                        .child(self.name_editor.clone()),
+                )
+                .into_any_element(),
+            h_flex()
+                .px(px(14.))
+                .py_2()
+                .gap_3()
+                .child(label_cell(t!("zed.identity.color")))
+                .child(h_flex().gap_2().children(swatches))
+                .into_any_element(),
+        ];
+        if let Some(launcher) = launcher {
+            rows.push(Self::render_row(
+                IconName::ThisWindow,
+                Color::Muted,
+                t!("zed.identity.launcher"),
+                Some(t!("zed.identity.launcher_detail")),
+                Some(
+                    ui::secondary_button(
+                        "reveal-launcher",
+                        None,
+                        t!("zed.details.reveal_launcher"),
+                        true,
+                        cx,
+                    )
+                    .on_click(move |_, _, cx| cx.reveal_path(&launcher))
+                    .into_any_element(),
+                ),
+                false,
+                cx,
+            ));
+        }
+        let folders = self.render_folders_card(profile, cx).into_any_element();
+        v_flex()
+            .w_full()
+            .gap_4()
+            .child(Self::render_card(
+                t!("zed.identity.title"),
+                None,
+                rows,
+                None,
+                cx,
+            ))
+            .child(folders)
+            .into_any_element()
+    }
+
+    fn render_embedded_details(&self, profile: &AppProfile, cx: &mut Context<Self>) -> AnyElement {
+        let is_default = profile.id == paths::DEFAULT_PROFILE_ID;
+        let is_active = profile.id == active_profile_id();
+        let (is_running, summary) = {
+            let store = self.store.read(cx);
+            let summary = if is_active {
+                Some(store.current_summary(cx))
+            } else {
+                store.summaries.get(&profile.id).cloned()
+            };
+            (store.running.contains(&profile.id), summary)
+        };
+        let delete_hint = if is_default {
+            Some(t!("zed.details.hint_default"))
+        } else if is_active {
+            Some(t!("zed.details.hint_active"))
+        } else if is_running {
+            Some(t!("zed.details.hint_running"))
+        } else {
+            None
+        };
+        let danger = h_flex()
+            .w_full()
+            .px(px(14.))
+            .py_3()
+            .gap_3()
+            .rounded(px(10.))
+            .border_1()
+            .border_color(Color::Error.color(cx).opacity(0.25))
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap_0p5()
+                    .child(
+                        Label::new(t!("zed.details.delete_named", name = profile.name))
+                            .weight(gpui::FontWeight::MEDIUM),
+                    )
+                    .child(
+                        Label::new(match (&self.error, &delete_hint) {
+                            (Some(error), _) => error.clone(),
+                            (None, Some(hint)) => hint.clone(),
+                            (None, None) => t!("zed.details.delete_detail"),
+                        })
+                        .size(LabelSize::Small)
+                        .color(if self.error.is_some() {
+                            Color::Error
+                        } else {
+                            Color::Muted
+                        }),
+                    ),
+            )
+            .child(
+                ui::destructive_button(
+                    "delete-profile",
+                    t!("zed.details.delete"),
+                    delete_hint.is_none(),
+                    cx,
+                )
+                .when(delete_hint.is_none(), |this| {
+                    this.on_click(
+                        cx.listener(|this, _, window, cx| this.delete_selected(window, cx)),
+                    )
+                }),
+            );
+
+        let (left, right) = match &summary {
+            Some(summary) => (
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap_4()
+                    .child(self.render_identity_card(profile, cx))
+                    .child(self.render_git_card(profile, summary, cx))
+                    .child(self.render_data_card(profile, is_active, cx))
+                    .child(danger)
+                    .into_any_element(),
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap_4()
+                    .child(self.render_ai_card(summary, is_active, cx))
+                    .child(self.render_mcp_card(summary, is_active, cx))
+                    .children(self.render_toolkits_card(summary, is_active, cx))
+                    .children(self.render_integrations_card(summary, is_active, cx))
+                    .into_any_element(),
+            ),
+            None => (
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap_4()
+                    .child(self.render_identity_card(profile, cx))
+                    .child(self.render_data_card(profile, is_active, cx))
+                    .child(danger)
+                    .into_any_element(),
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap_4()
+                    .child(Self::render_card(
+                        t!("zed.details.unknown_title"),
+                        None,
+                        Vec::new(),
+                        Some(t!("zed.details.unknown_empty")),
+                        cx,
+                    ))
+                    .into_any_element(),
+            ),
+        };
+
+        div()
+            .id("profile-page-details")
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .child(
+                h_flex()
+                    .items_start()
+                    .px_7()
+                    .pt_5()
+                    .pb_5()
+                    .gap_4()
+                    .child(left)
+                    .child(right),
+            )
+            .into_any_element()
+    }
+}
+
 impl Render for ManageProfilesModal {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.embedded {
+            return self.render_embedded(cx);
+        }
         let details = self
             .selected(cx)
             .map(|profile| self.render_details(&profile, cx).into_any_element());
@@ -3106,6 +3822,7 @@ impl Render for ManageProfilesModal {
             .items_start()
             .child(self.render_nav(cx))
             .children(details)
+            .into_any_element()
     }
 }
 

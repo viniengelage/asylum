@@ -55,11 +55,19 @@ pub(crate) fn render_mcp_servers_page(
                 .px_8()
                 .gap_2()
                 .child(
-                    v_flex().child(Label::new("Configured Servers")).child(
-                        Label::new("Manage servers connected directly or via extensions.")
+                    v_flex()
+                        .child(Label::new(i18n::translate_text(
+                            "settings_ui_text",
+                            "Configured Servers",
+                        )))
+                        .child(
+                            Label::new(i18n::translate_text(
+                                "settings_ui_text",
+                                "Manage servers connected directly or via extensions.",
+                            ))
                             .size(LabelSize::Small)
                             .color(Color::Muted),
-                    ),
+                        ),
                 )
                 .child(server_list)
                 .child(Divider::horizontal()),
@@ -108,9 +116,12 @@ fn render_empty_state(cx: &App) -> AnyElement {
         .border_color(cx.theme().colors().border.opacity(0.6))
         .rounded_sm()
         .child(
-            Label::new("No MCP servers added yet. Click \"Add Server\" to get started.")
-                .color(Color::Muted)
-                .size(LabelSize::Small),
+            Label::new(i18n::translate_text(
+                "settings_ui_text",
+                "No MCP servers added yet. Click \"Add Server\" to get started.",
+            ))
+            .color(Color::Muted)
+            .size(LabelSize::Small),
         )
         .into_any_element()
 }
@@ -124,9 +135,12 @@ fn render_no_project_state(cx: &App) -> AnyElement {
         .border_color(cx.theme().colors().border.opacity(0.6))
         .rounded_sm()
         .child(
-            Label::new("No active project found. Open a workspace to manage MCP servers.")
-                .color(Color::Muted)
-                .size(LabelSize::Small),
+            Label::new(i18n::translate_text(
+                "settings_ui_text",
+                "No active project found. Open a workspace to manage MCP servers.",
+            ))
+            .color(Color::Muted)
+            .size(LabelSize::Small),
         )
         .into_any_element()
 }
@@ -197,7 +211,7 @@ fn render_context_server(
 
     let tool_label = if is_running && tool_count > 0 {
         Some(if tool_count == 1 {
-            SharedString::from("1 tool")
+            i18n::translate_text("settings_ui_text", "1 tool")
         } else {
             SharedString::from(format!("{} tools", tool_count))
         })
@@ -281,7 +295,10 @@ fn render_configure_button(
     )
     .icon_size(IconSize::Small)
     .tab_index(0isize)
-    .tooltip(Tooltip::text("Configure MCP Server"))
+    .tooltip(Tooltip::text(i18n::translate_text(
+        "settings_ui_text",
+        "Configure MCP Server",
+    )))
     .on_click(move |_event, window, cx| {
         let transport = match &server_settings {
             Some(ContextServerSettings::Http { .. }) => McpTransport::Http,
@@ -310,7 +327,10 @@ fn render_uninstall_button(
     )
     .icon_size(IconSize::Small)
     .tab_index(0isize)
-    .tooltip(Tooltip::text("Uninstall MCP Server"))
+    .tooltip(Tooltip::text(i18n::translate_text(
+        "settings_ui_text",
+        "Uninstall MCP Server",
+    )))
     .on_click(move |_event, _window, cx| {
         uninstall_server(&context_server_id, provided_by_extension, cx);
     })
@@ -408,18 +428,21 @@ fn render_status_details(
                     )
                     .when(should_show_logout, |this| {
                         this.child(
-                            Button::new("error-logout", "Log Out")
-                                .style(ButtonStyle::Outlined)
-                                .label_size(LabelSize::Small)
-                                .on_click({
-                                    let store = store.clone();
-                                    let context_server_id = context_server_id.clone();
-                                    move |_event, _window, cx| {
-                                        store.update(cx, |s, cx| {
-                                            s.logout_server(&context_server_id, cx).log_err();
-                                        });
-                                    }
-                                }),
+                            Button::new(
+                                "error-logout",
+                                i18n::translate_text("settings_ui_text", "Log Out"),
+                            )
+                            .style(ButtonStyle::Outlined)
+                            .label_size(LabelSize::Small)
+                            .on_click({
+                                let store = store.clone();
+                                let context_server_id = context_server_id.clone();
+                                move |_event, _window, cx| {
+                                    store.update(cx, |s, cx| {
+                                        s.logout_server(&context_server_id, cx).log_err();
+                                    });
+                                }
+                            }),
                         )
                     })
                     .into_any_element(),
@@ -441,22 +464,28 @@ fn render_status_details(
                                     .color(Color::Muted),
                             )
                             .child(
-                                Label::new("Authenticate to connect this server")
-                                    .color(Color::Muted)
-                                    .size(LabelSize::Small),
+                                Label::new(i18n::translate_text(
+                                    "settings_ui_text",
+                                    "Authenticate to connect this server",
+                                ))
+                                .color(Color::Muted)
+                                .size(LabelSize::Small),
                             ),
                     )
                     .child(
-                        Button::new("authenticate-server", "Authenticate")
-                            .style(ButtonStyle::Outlined)
-                            .label_size(LabelSize::Small)
-                            .on_click({
-                                move |_event, _window, cx| {
-                                    store.update(cx, |s, cx| {
-                                        s.authenticate_server(&context_server_id, cx).log_err();
-                                    });
-                                }
-                            }),
+                        Button::new(
+                            "authenticate-server",
+                            i18n::translate_text("settings_ui_text", "Authenticate"),
+                        )
+                        .style(ButtonStyle::Outlined)
+                        .label_size(LabelSize::Small)
+                        .on_click({
+                            move |_event, _window, cx| {
+                                store.update(cx, |s, cx| {
+                                    s.authenticate_server(&context_server_id, cx).log_err();
+                                });
+                            }
+                        }),
                     )
                     .into_any_element(),
             )
@@ -474,9 +503,12 @@ fn render_status_details(
                                 .color(Color::Muted),
                         )
                         .child(
-                            Label::new("A client secret is required to connect this server")
-                                .color(Color::Muted)
-                                .size(LabelSize::Small),
+                            Label::new(i18n::translate_text(
+                                "settings_ui_text",
+                                "A client secret is required to connect this server",
+                            ))
+                            .color(Color::Muted)
+                            .size(LabelSize::Small),
                         ),
                 )
                 .into_any_element(),
@@ -489,7 +521,7 @@ fn render_status_details(
                 .gap_2()
                 .child(div().size_3().flex_shrink_0())
                 .child(
-                    Label::new("Authenticating…")
+                    Label::new(i18n::translate_text("settings_ui_text", "Authenticating…"))
                         .color(Color::Muted)
                         .size(LabelSize::Small),
                 )
@@ -504,14 +536,17 @@ fn render_status_details(
                     .w_full()
                     .justify_end()
                     .child(
-                        Button::new("running-logout", "Log Out")
-                            .style(ButtonStyle::Outlined)
-                            .label_size(LabelSize::Small)
-                            .on_click(move |_event, _window, cx| {
-                                store.update(cx, |s, cx| {
-                                    s.logout_server(&context_server_id, cx).log_err();
-                                });
-                            }),
+                        Button::new(
+                            "running-logout",
+                            i18n::translate_text("settings_ui_text", "Log Out"),
+                        )
+                        .style(ButtonStyle::Outlined)
+                        .label_size(LabelSize::Small)
+                        .on_click(move |_event, _window, cx| {
+                            store.update(cx, |s, cx| {
+                                s.logout_server(&context_server_id, cx).log_err();
+                            });
+                        }),
                     )
                     .into_any_element(),
             )
@@ -544,76 +579,91 @@ pub(crate) fn render_add_server_popover(
 
     let popover = PopoverMenu::new("add-mcp-server-popover")
         .trigger(
-            Button::new("add-mcp-server", "Add Server")
-                .style(ButtonStyle::Outlined)
-                .track_focus(&focus_handle)
-                .start_icon(
-                    Icon::new(IconName::Plus)
-                        .size(IconSize::Small)
-                        .color(Color::Muted),
-                )
-                .label_size(LabelSize::Small),
+            Button::new(
+                "add-mcp-server",
+                i18n::translate_text("settings_ui_text", "Add Server"),
+            )
+            .style(ButtonStyle::Outlined)
+            .track_focus(&focus_handle)
+            .start_icon(
+                Icon::new(IconName::Plus)
+                    .size(IconSize::Small)
+                    .color(Color::Muted),
+            )
+            .label_size(LabelSize::Small),
         )
         .anchor(gpui::Anchor::TopRight)
         .menu({
             move |window, cx| {
                 let settings_window = settings_window.clone();
                 Some(ContextMenu::build(window, cx, move |menu, _window, _cx| {
-                    menu.entry("Add Local Server", None, {
-                        let settings_window = settings_window.clone();
-                        move |window, cx| {
-                            settings_window
-                                .update(cx, |this, cx| {
-                                    open_mcp_server_form(
-                                        this,
-                                        McpTransport::Stdio,
-                                        None,
-                                        window,
-                                        cx,
-                                    );
-                                })
-                                .log_err();
-                        }
-                    })
-                    .entry("Add Remote Server", None, {
-                        let settings_window = settings_window.clone();
-                        move |window, cx| {
-                            settings_window
-                                .update(cx, |this, cx| {
-                                    open_mcp_server_form(
-                                        this,
-                                        McpTransport::Http,
-                                        None,
-                                        window,
-                                        cx,
-                                    );
-                                })
-                                .log_err();
-                        }
-                    })
-                    .separator()
-                    .entry("Install from Extensions", None, {
-                        move |_window, cx| {
-                            if let Some(original_window) = original_window.as_ref() {
-                                cx.activate(true);
-                                original_window
-                                    .update(cx, |_, window, cx| {
-                                        window.activate_window();
-                                        window.dispatch_action(
-                                            zed_actions::Extensions {
-                                                category_filter: Some(
-                                                    ExtensionCategoryFilter::ContextServers,
-                                                ),
-                                                id: None,
-                                            }
-                                            .boxed_clone(),
+                    menu.entry(
+                        i18n::translate_text("settings_ui_text", "Add Local Server"),
+                        None,
+                        {
+                            let settings_window = settings_window.clone();
+                            move |window, cx| {
+                                settings_window
+                                    .update(cx, |this, cx| {
+                                        open_mcp_server_form(
+                                            this,
+                                            McpTransport::Stdio,
+                                            None,
+                                            window,
                                             cx,
                                         );
                                     })
                                     .log_err();
                             }
-                        }
-                    })
+                        },
+                    )
+                    .entry(
+                        i18n::translate_text("settings_ui_text", "Add Remote Server"),
+                        None,
+                        {
+                            let settings_window = settings_window.clone();
+                            move |window, cx| {
+                                settings_window
+                                    .update(cx, |this, cx| {
+                                        open_mcp_server_form(
+                                            this,
+                                            McpTransport::Http,
+                                            None,
+                                            window,
+                                            cx,
+                                        );
+                                    })
+                                    .log_err();
+                            }
+                        },
+                    )
+                    .separator()
+                    .entry(
+                        i18n::translate_text("settings_ui_text", "Install from Extensions"),
+                        None,
+                        {
+                            move |_window, cx| {
+                                if let Some(original_window) = original_window.as_ref() {
+                                    cx.activate(true);
+                                    original_window
+                                        .update(cx, |_, window, cx| {
+                                            window.activate_window();
+                                            window.dispatch_action(
+                                                zed_actions::Extensions {
+                                                    category_filter: Some(
+                                                        ExtensionCategoryFilter::ContextServers,
+                                                    ),
+                                                    id: None,
+                                                }
+                                                .boxed_clone(),
+                                                cx,
+                                            );
+                                        })
+                                        .log_err();
+                                }
+                            }
+                        },
+                    )
                 }))
             }
         });
@@ -804,7 +854,7 @@ impl McpServerForm {
             ),
             timeout: new_input("60", timeout_initial.as_deref(), window, cx),
             oauth_client_id: new_input(
-                "Optional OAuth client ID",
+                &i18n::translate_text("settings_ui_text", "Optional OAuth client ID"),
                 oauth_initial.as_deref(),
                 window,
                 cx,
@@ -850,8 +900,18 @@ fn new_kv_row(
     cx: &mut Context<SettingsWindow>,
 ) -> KeyValueRow {
     KeyValueRow {
-        key: new_input("Key", key, window, cx),
-        value: new_input("Value", value, window, cx),
+        key: new_input(
+            &i18n::translate_text("settings_ui_text", "Key"),
+            key,
+            window,
+            cx,
+        ),
+        value: new_input(
+            &i18n::translate_text("settings_ui_text", "Value"),
+            value,
+            window,
+            cx,
+        ),
     }
 }
 
@@ -867,17 +927,17 @@ pub(crate) fn open_mcp_server_form(
     settings_window.mcp_server_form = Some(McpServerForm::new(transport, existing, window, cx));
 
     let title = if is_edit {
-        "Configure MCP Server"
+        i18n::translate_text("settings_ui_text", "Configure MCP Server")
     } else {
         match transport {
-            McpTransport::Stdio => "Add Local MCP Server",
-            McpTransport::Http => "Add Remote MCP Server",
+            McpTransport::Stdio => i18n::translate_text("settings_ui_text", "Add Local MCP Server"),
+            McpTransport::Http => i18n::translate_text("settings_ui_text", "Add Remote MCP Server"),
         }
     };
 
     settings_window.push_dynamic_sub_page(
         title,
-        "Agent Configuration",
+        i18n::translate_text("settings_ui_text", "Agent Configuration"),
         Some("context_servers"),
         false,
         render_mcp_server_form_page,
@@ -1050,7 +1110,10 @@ fn render_kv_section(
                             IconButton::new((kind.remove_id(), ix), IconName::Close)
                                 .icon_size(IconSize::Small)
                                 .icon_color(Color::Muted)
-                                .tooltip(Tooltip::text("Remove"))
+                                .tooltip(Tooltip::text(i18n::translate_text(
+                                    "settings_ui_text",
+                                    "Remove",
+                                )))
                                 .on_click(cx.listener(move |this, _, _window, cx| {
                                     if let Some(form) = this.mcp_server_form.as_mut() {
                                         let rows = kind.rows_mut(form);
@@ -1065,21 +1128,24 @@ fn render_kv_section(
                 .child(input_box(&row.value, cx))
         }))
         .child(
-            Button::new(kind.add_id(), "Add")
-                .style(ButtonStyle::Outlined)
-                .label_size(LabelSize::Small)
-                .start_icon(
-                    Icon::new(IconName::Plus)
-                        .size(IconSize::Small)
-                        .color(Color::Muted),
-                )
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    let row = new_kv_row(None, None, window, cx);
-                    if let Some(form) = this.mcp_server_form.as_mut() {
-                        kind.rows_mut(form).push(row);
-                    }
-                    cx.notify();
-                })),
+            Button::new(
+                kind.add_id(),
+                i18n::translate_text("settings_ui_text", "Add"),
+            )
+            .style(ButtonStyle::Outlined)
+            .label_size(LabelSize::Small)
+            .start_icon(
+                Icon::new(IconName::Plus)
+                    .size(IconSize::Small)
+                    .color(Color::Muted),
+            )
+            .on_click(cx.listener(move |this, _, window, cx| {
+                let row = new_kv_row(None, None, window, cx);
+                if let Some(form) = this.mcp_server_form.as_mut() {
+                    kind.rows_mut(form).push(row);
+                }
+                cx.notify();
+            })),
         )
         .into_any_element();
 
@@ -1117,19 +1183,25 @@ fn render_form_actions(cx: &mut Context<SettingsWindow>) -> impl IntoElement {
         .justify_end()
         .pt_2()
         .child(
-            Button::new("mcp-form-cancel", "Cancel")
-                .style(ButtonStyle::Subtle)
-                .on_click(cx.listener(|this, _, window, cx| {
-                    this.mcp_server_form = None;
-                    this.pop_sub_page(window, cx);
-                })),
+            Button::new(
+                "mcp-form-cancel",
+                i18n::translate_text("settings_ui_text", "Cancel"),
+            )
+            .style(ButtonStyle::Subtle)
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.mcp_server_form = None;
+                this.pop_sub_page(window, cx);
+            })),
         )
         .child(
-            Button::new("mcp-form-save", "Save")
-                .style(ButtonStyle::Filled)
-                .on_click(cx.listener(|this, _, window, cx| {
-                    save_mcp_server_form(this, window, cx);
-                })),
+            Button::new(
+                "mcp-form-save",
+                i18n::translate_text("settings_ui_text", "Save"),
+            )
+            .style(ButtonStyle::Filled)
+            .on_click(cx.listener(|this, _, window, cx| {
+                save_mcp_server_form(this, window, cx);
+            })),
         )
 }
 
@@ -1247,7 +1319,10 @@ fn build_settings_from_values(
 > {
     let name = values.name.trim().to_string();
     if name.is_empty() {
-        return Err("Server name is required.".into());
+        return Err(i18n::translate_text(
+            "settings_ui_text",
+            "Server name is required.",
+        ));
     }
 
     let timeout = parse_timeout(&values.timeout)?;
@@ -1256,7 +1331,10 @@ fn build_settings_from_values(
         McpTransport::Stdio => {
             let command = values.command.trim().to_string();
             if command.is_empty() {
-                return Err("Command is required.".into());
+                return Err(i18n::translate_text(
+                    "settings_ui_text",
+                    "Command is required.",
+                ));
             }
             let args = values
                 .args
@@ -1278,7 +1356,7 @@ fn build_settings_from_values(
         McpTransport::Http => {
             let url = values.url.trim().to_string();
             if url.is_empty() {
-                return Err("URL is required.".into());
+                return Err(i18n::translate_text("settings_ui_text", "URL is required."));
             }
             // Validate the URL on save (a deliberate action) rather than on every
             // render, so a clearly invalid URL is reported to the user instead of
@@ -1314,9 +1392,9 @@ fn build_settings_from_values(
 /// whose URL cannot be parsed). Used to surface misconfiguration in the list.
 fn settings_validation_error(settings: Option<&ContextServerSettings>) -> Option<SharedString> {
     match settings? {
-        ContextServerSettings::Http { url, .. } if url::Url::parse(url).is_err() => {
-            Some("Invalid URL in settings.".into())
-        }
+        ContextServerSettings::Http { url, .. } if url::Url::parse(url).is_err() => Some(
+            i18n::translate_text("settings_ui_text", "Invalid URL in settings."),
+        ),
         _ => None,
     }
 }
@@ -1337,9 +1415,12 @@ fn parse_timeout(text: &str) -> Result<Option<u64>, SharedString> {
     if text.is_empty() {
         return Ok(None);
     }
-    text.parse::<u64>()
-        .map(Some)
-        .map_err(|_| "Timeout must be a positive whole number of seconds.".into())
+    text.parse::<u64>().map(Some).map_err(|_| {
+        i18n::translate_text(
+            "settings_ui_text",
+            "Timeout must be a positive whole number of seconds.",
+        )
+    })
 }
 
 fn collect_kv(

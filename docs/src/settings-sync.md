@@ -15,11 +15,21 @@ Once signed in, your avatar replaces the button. Its menu shows when the last sy
 
 ## What is synced
 
-- `settings.json`, `keymap.json`, `tasks.json`, `debug.json` and `AGENTS.md`
-- snippets and themes from your config folder
-- your personal task agents and flows
+Each [profile](./configuring-zed.md) syncs its own files to its own gist:
 
-API keys and other secrets live in your keychain and are never synced. Each [profile](./configuring-zed.md) syncs to its own gist.
+- its `settings.json`, `tasks.json`, `debug.json` and `AGENTS.md`
+- its snippets
+- its personal task agents and flows
+
+The files every profile shares go to one more gist, named "Asylum shared settings sync":
+
+- the shared `settings.json` that sits below every profile's own settings
+- `keymap.json` and your themes
+- the list of profiles, so a new machine gets the same profiles
+
+Only one running profile syncs the shared gist at a time; the others skip it until their next sync. API keys and other secrets live in your keychain and are never synced.
+
+A profile gist created before the shared gist existed may still hold a copy of `keymap.json` and your themes. Asylum stops syncing those copies there and leaves them untouched, so you can delete them from the gist yourself.
 
 ## How changes are merged
 

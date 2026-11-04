@@ -131,6 +131,71 @@ pub fn picker_button(
         )
 }
 
+/// Where a setting's value comes from, for [`scope_chip`].
+#[derive(Clone, Debug, PartialEq)]
+pub enum ScopeChipKind {
+    /// The file every profile shares.
+    AllProfiles,
+    /// A profile's own file, in the profile's color.
+    Profile(gpui::Hsla),
+    Project,
+    /// No file sets it.
+    Default,
+}
+
+/// The boards' Scope Chip: says where a setting's value comes from. The caller makes it open the
+/// scope menu.
+pub fn scope_chip(
+    id: impl Into<gpui::ElementId>,
+    kind: ScopeChipKind,
+    label: impl Into<SharedString>,
+    cx: &App,
+) -> Stateful<Div> {
+    let colors = cx.theme().colors();
+    let accent = colors.text_accent;
+    let base = h_flex()
+        .id(id)
+        .flex_none()
+        .h(px(18.))
+        .px(px(6.))
+        .gap_1()
+        .rounded(px(4.))
+        .cursor_pointer();
+    let label = Label::new(label)
+        .size(LabelSize::XSmall)
+        .weight(FontWeight::MEDIUM);
+    match kind {
+        ScopeChipKind::AllProfiles => base
+            .bg(colors.element_hover)
+            .hover(|this| this.bg(colors.element_selected))
+            .child(
+                Icon::new(IconName::UserGroup)
+                    .size(IconSize::XSmall)
+                    .color(Color::Muted),
+            )
+            .child(label.color(Color::Muted)),
+        ScopeChipKind::Profile(color) => base
+            .bg(color.opacity(0.14))
+            .hover(move |this| this.bg(color.opacity(0.24)))
+            .child(div().size(px(6.)).rounded_full().bg(color))
+            .child(label.color(Color::Custom(color))),
+        ScopeChipKind::Project => base
+            .bg(accent.opacity(0.14))
+            .hover(move |this| this.bg(accent.opacity(0.24)))
+            .child(
+                Icon::new(IconName::Folder)
+                    .size(IconSize::XSmall)
+                    .color(Color::Custom(accent)),
+            )
+            .child(label.color(Color::Custom(accent))),
+        ScopeChipKind::Default => base
+            .border_1()
+            .border_color(colors.border)
+            .hover(|this| this.bg(colors.element_hover))
+            .child(label.color(Color::Placeholder)),
+    }
+}
+
 /// Two or more choices side by side; the chosen one is filled and outlined in the accent, as in
 /// the boards.
 pub fn segment_option(

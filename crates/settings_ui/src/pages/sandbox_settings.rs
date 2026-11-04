@@ -61,10 +61,9 @@ pub(crate) fn render_sandbox_settings_page(
         .child(
             SwitchField::new(
                 "sandbox-enabled",
-                Some("Enable Sandbox"),
+                Some(i18n::translate_text("settings_ui_text", "Enable Sandbox")),
                 Some(
-                    "Wrap agent-run terminal commands in an OS-level sandbox. When off, commands run with Asylum's own permissions."
-                        .into(),
+                    i18n::translate_text("settings_ui_text", "Wrap agent-run terminal commands in an OS-level sandbox. When off, commands run with Asylum's own permissions."),
                 ),
                 sandbox_enabled,
                 move |state, _window, cx| {
@@ -80,7 +79,7 @@ pub(crate) fn render_sandbox_settings_page(
             // Wrap in a row so the button shrinks to its content width instead
             // of stretching across the settings page.
             h_flex().child(
-                Button::new("sandbox-docs-link", "Learn more about sandboxing")
+                Button::new("sandbox-docs-link", i18n::translate_text("settings_ui_text", "Learn more about sandboxing"))
                     .label_size(LabelSize::Small)
                     .color(Color::Muted)
                     .end_icon(
@@ -99,7 +98,7 @@ pub(crate) fn render_sandbox_settings_page(
                     .severity(Severity::Warning)
                     .child(Label::new(error).size(LabelSize::Small))
                     .action_slot(
-                        Button::new("dismiss-sandbox-host-error", "Dismiss")
+                        Button::new("dismiss-sandbox-host-error", i18n::translate_text("settings_ui_text", "Dismiss"))
                             .style(ButtonStyle::Tinted(ui::TintColor::Warning))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.sandbox_host_validation_error = None;
@@ -111,14 +110,13 @@ pub(crate) fn render_sandbox_settings_page(
         .child(
             v_flex()
                 .gap_4()
-                .child(SettingsSectionHeader::new("Network").no_padding(true))
+                .child(SettingsSectionHeader::new(i18n::translate_text("settings_ui_text", "Network")).no_padding(true))
                 .child(
                     SwitchField::new(
                         "sandbox-allow-all-hosts",
-                        Some("Allow All Domains"),
+                        Some(i18n::translate_text("settings_ui_text", "Allow All Domains")),
                         Some(
-                            "Let sandboxed commands reach any domain over the network without prompting."
-                                .into(),
+                            i18n::translate_text("settings_ui_text", "Let sandboxed commands reach any domain over the network without prompting."),
                         ),
                         permissions.allow_all_hosts,
                         move |state, _window, cx| {
@@ -140,14 +138,13 @@ pub(crate) fn render_sandbox_settings_page(
         .child(
             v_flex()
                 .gap_4()
-                .child(SettingsSectionHeader::new("File System").no_padding(true))
+                .child(SettingsSectionHeader::new(i18n::translate_text("settings_ui_text", "File System")).no_padding(true))
                 .child(
                     SwitchField::new(
                         "sandbox-allow-fs-write-all",
-                        Some("Allow All File System Writes"),
+                        Some(i18n::translate_text("settings_ui_text", "Allow All File System Writes")),
                         Some(
-                            "Let sandboxed commands write anywhere except protected Git metadata without prompting."
-                                .into(),
+                            i18n::translate_text("settings_ui_text", "Let sandboxed commands write anywhere except protected Git metadata without prompting."),
                         ),
                         permissions.allow_fs_write_all,
                         move |state, _window, cx| {
@@ -168,14 +165,13 @@ pub(crate) fn render_sandbox_settings_page(
         .child(
             v_flex()
                 .gap_4()
-                .child(SettingsSectionHeader::new("Escalation Prompts").no_padding(true))
+                .child(SettingsSectionHeader::new(i18n::translate_text("settings_ui_text", "Escalation Prompts")).no_padding(true))
                 .child(
                     SwitchField::new(
                         "sandbox-warn-confusable-unicode",
-                        Some("Warn About Confusable Unicode"),
+                        Some(i18n::translate_text("settings_ui_text", "Warn About Confusable Unicode")),
                         Some(
-                            "Warn when an approval prompt requests a domain or write path that contains potentially confusable Unicode characters, such as homoglyphs (i.e. two symbols that look similar, such as a Cyrillic `а`)"
-                                .into(),
+                            i18n::translate_text("settings_ui_text", "Warn when an approval prompt requests a domain or write path that contains potentially confusable Unicode characters, such as homoglyphs (i.e. two symbols that look similar, such as a Cyrillic `а`)"),
                         ),
                         permissions.warn_confusable_unicode,
                         move |state, _window, cx| {
@@ -187,10 +183,9 @@ pub(crate) fn render_sandbox_settings_page(
                 .child(
                     SwitchField::new(
                         "sandbox-warn-ntfs-grants",
-                        Some("Warn About Windows-Drive Grants"),
+                        Some(i18n::translate_text("settings_ui_text", "Warn About Windows-Drive Grants")),
                         Some(
-                            "Windows only: warn when a sandbox grant targets a file on a Windows drive (accessed inside WSL via DrvFs). Such grants are enforced through a translated path and their sandbox-integrity guarantees are weaker than files on the Linux distro's own filesystem."
-                                .into(),
+                            i18n::translate_text("settings_ui_text", "Windows only: warn when a sandbox grant targets a file on a Windows drive (accessed inside WSL via DrvFs). Such grants are enforced through a translated path and their sandbox-integrity guarantees are weaker than files on the Linux distro's own filesystem."),
                         ),
                         permissions.warn_ntfs_grants,
                         move |state, _window, cx| {
@@ -215,9 +210,9 @@ fn render_list_section(
 
     v_flex()
         .gap_0p5()
-        .child(Label::new(title))
+        .child(Label::new(i18n::translate_text("settings_ui_text", title)))
         .child(
-            Label::new(description)
+            Label::new(i18n::translate_text("settings_ui_text", description))
                 .size(LabelSize::Small)
                 .color(Color::Muted),
         )
@@ -244,9 +239,12 @@ fn render_empty_state(border_color: gpui::Hsla) -> AnyElement {
         .border_dashed()
         .border_color(border_color)
         .child(
-            Label::new("Nothing configured")
-                .size(LabelSize::Small)
-                .color(Color::Disabled),
+            Label::new(i18n::translate_text(
+                "settings_ui_text",
+                "Nothing configured",
+            ))
+            .size(LabelSize::Small)
+            .color(Color::Disabled),
         )
         .into_any_element()
 }
@@ -265,7 +263,10 @@ fn render_host_row(index: usize, host: String, cx: &mut Context<SettingsWindow>)
             IconButton::new(format!("sandbox-host-delete-{}", index), IconName::Trash)
                 .icon_size(IconSize::Small)
                 .icon_color(Color::Muted)
-                .tooltip(Tooltip::text("Remove Domain"))
+                .tooltip(Tooltip::text(i18n::translate_text(
+                    "settings_ui_text",
+                    "Remove Domain",
+                )))
                 .on_click(cx.listener(move |_, _, _, cx| {
                     remove_network_host(host_for_delete.clone(), cx);
                 })),
@@ -348,7 +349,10 @@ fn render_path_row(index: usize, path: PathBuf, cx: &mut Context<SettingsWindow>
             IconButton::new(format!("sandbox-path-delete-{}", index), IconName::Trash)
                 .icon_size(IconSize::Small)
                 .icon_color(Color::Muted)
-                .tooltip(Tooltip::text("Remove Path"))
+                .tooltip(Tooltip::text(i18n::translate_text(
+                    "settings_ui_text",
+                    "Remove Path",
+                )))
                 .on_click(cx.listener(move |_, _, _, cx| {
                     remove_write_path(path_for_delete.clone(), cx);
                 })),
@@ -433,17 +437,24 @@ fn canonicalize_host(host: &str) -> Result<String, String> {
     HostPattern::parse(host)
         .map(|pattern| pattern.to_string())
         .map_err(|error| match error {
-            HostPatternError::Empty => "Domain cannot be empty.".to_string(),
-            HostPatternError::IpLiteral(_) => {
-                "IP addresses and local domains aren't allowed; enter a domain like github.com."
-                    .to_string()
+            HostPatternError::Empty => {
+                i18n::translate_text("settings_ui_text", "Domain cannot be empty.").to_string()
             }
-            HostPatternError::InvalidWildcard(_) => {
-                "Wildcards are only allowed as a leading label, e.g. *.github.com.".to_string()
-            }
-            HostPatternError::Invalid { .. } => {
-                "Not a valid domain. Use a domain like github.com or *.npmjs.org.".to_string()
-            }
+            HostPatternError::IpLiteral(_) => i18n::translate_text(
+                "settings_ui_text",
+                "IP addresses and local domains aren't allowed; enter a domain like github.com.",
+            )
+            .to_string(),
+            HostPatternError::InvalidWildcard(_) => i18n::translate_text(
+                "settings_ui_text",
+                "Wildcards are only allowed as a leading label, e.g. *.github.com.",
+            )
+            .to_string(),
+            HostPatternError::Invalid { .. } => i18n::translate_text(
+                "settings_ui_text",
+                "Not a valid domain. Use a domain like github.com or *.npmjs.org.",
+            )
+            .to_string(),
         })
 }
 

@@ -85,15 +85,18 @@ pub(crate) fn render_add_llm_provider_popover(
 
     PopoverMenu::new("add-llm-provider-popover")
         .trigger(
-            Button::new("add-llm-provider", "Add Provider")
-                .style(ButtonStyle::Outlined)
-                .track_focus(&focus_handle)
-                .label_size(LabelSize::Small)
-                .start_icon(
-                    Icon::new(IconName::Plus)
-                        .size(IconSize::Small)
-                        .color(Color::Muted),
-                ),
+            Button::new(
+                "add-llm-provider",
+                i18n::translate_text("settings_ui_text", "Add Provider"),
+            )
+            .style(ButtonStyle::Outlined)
+            .track_focus(&focus_handle)
+            .label_size(LabelSize::Small)
+            .start_icon(
+                Icon::new(IconName::Plus)
+                    .size(IconSize::Small)
+                    .color(Color::Muted),
+            ),
         )
         .anchor(gpui::Anchor::TopRight)
         .offset(gpui::Point {
@@ -103,7 +106,7 @@ pub(crate) fn render_add_llm_provider_popover(
         .menu(move |window, cx| {
             let settings_window = settings_window.clone();
             Some(ContextMenu::build(window, cx, move |menu, _window, _cx| {
-                menu.header("Compatible APIs")
+                menu.header(i18n::translate_text("settings_ui_text", "Compatible APIs"))
                     .entry("OpenAI", None, {
                         let settings_window = settings_window.clone();
                         move |window, cx| {
@@ -223,14 +226,14 @@ fn render_api_key_providers_item(
 
     if has_key {
         let configured_label = if is_from_env_var {
-            "API Key Set in Environment Variable"
+            i18n::translate_text("settings_ui_text", "API Key Set in Environment Variable")
         } else {
-            "API Key Configured"
+            i18n::translate_text("settings_ui_text", "API Key Configured")
         };
         let button_id = format!("reset-api-key-{}", provider_id.0);
 
         let card = ConfiguredApiCard::new(button_id, configured_label)
-            .button_label("Reset Key")
+            .button_label(i18n::translate_text("settings_ui_text", "Reset Key"))
             .button_tab_index(0)
             .disabled(is_from_env_var)
             .when(is_from_env_var, |this| {
@@ -267,7 +270,7 @@ fn render_api_key_providers_item(
                         .min_w_0()
                         .max_w_1_2()
                         .gap_0p5()
-                        .child(Label::new("API Key"))
+                        .child(Label::new(i18n::translate_text("settings_ui_text", "API Key")))
                         .child(
                             h_flex()
                                 .w_full()
@@ -275,7 +278,7 @@ fn render_api_key_providers_item(
                                 .flex_wrap()
                                 .gap_0p5()
                                 .child(
-                                    Label::new("Visit the")
+                                    Label::new(i18n::translate_text("settings_ui_text", "Visit the"))
                                         .size(LabelSize::Small)
                                         .color(Color::Muted),
                                 )
@@ -289,7 +292,7 @@ fn render_api_key_providers_item(
                                     .label_color(Color::Muted),
                                 )
                                 .child(
-                                    Label::new("to generate an API key.")
+                                    Label::new(i18n::translate_text("settings_ui_text", "to generate an API key."))
                                         .size(LabelSize::Small)
                                         .color(Color::Muted),
                                 ),
@@ -385,24 +388,30 @@ fn render_subpage_item(
                 .min_w_0()
                 .max_w_1_2()
                 .gap_0p5()
-                .child(Label::new("Configure Provider"))
+                .child(Label::new(i18n::translate_text(
+                    "settings_ui_text",
+                    "Configure Provider",
+                )))
                 .when_some(description, |this, description| {
                     this.child(render_inline_description(provider_name, description))
                 }),
         )
         .child(
-            Button::new(format!("configure-{}", provider_id.0), "Configure")
-                .style(ButtonStyle::OutlinedGhost)
-                .size(ButtonSize::Medium)
-                .end_icon(
-                    Icon::new(IconName::ChevronRight)
-                        .size(IconSize::Small)
-                        .color(Color::Muted),
-                )
-                .tab_index(0isize)
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    open_provider_configuration(this, provider_id.clone(), window, cx);
-                })),
+            Button::new(
+                format!("configure-{}", provider_id.0),
+                i18n::translate_text("settings_ui_text", "Configure"),
+            )
+            .style(ButtonStyle::OutlinedGhost)
+            .size(ButtonSize::Medium)
+            .end_icon(
+                Icon::new(IconName::ChevronRight)
+                    .size(IconSize::Small)
+                    .color(Color::Muted),
+            )
+            .tab_index(0isize)
+            .on_click(cx.listener(move |this, _, window, cx| {
+                open_provider_configuration(this, provider_id.clone(), window, cx);
+            })),
         )
         .into_any_element()
 }
@@ -415,9 +424,12 @@ fn render_inline_description(
         InlineDescription::ApiKeyUrl(url) => h_flex()
             .gap_0p5()
             .child(
-                Label::new("To find an API key, visit the")
-                    .size(LabelSize::Small)
-                    .color(Color::Muted),
+                Label::new(i18n::translate_text(
+                    "settings_ui_text",
+                    "To find an API key, visit the",
+                ))
+                .size(LabelSize::Small)
+                .color(Color::Muted),
             )
             .child(
                 ButtonLink::new(format!("{provider_name} dashboard."), url)
@@ -446,7 +458,7 @@ fn open_provider_configuration(
 
     settings_window.push_dynamic_sub_page(
         title,
-        "Agent Configuration",
+        i18n::translate_text("settings_ui_text", "Agent Configuration"),
         Some("llm_providers"),
         true,
         render_provider_config_sub_page,
@@ -583,15 +595,30 @@ impl ModelInput {
 
         Self {
             name: new_input(
-                "e.g. gpt-5, claude-opus-4, gemini-2.5-pro",
+                &i18n::translate_text(
+                    "settings_ui_text",
+                    "e.g. gpt-5, claude-opus-4, gemini-2.5-pro",
+                ),
                 None,
                 false,
                 window,
                 cx,
             ),
             max_completion_tokens: new_input("200000", Some("200000"), false, window, cx),
-            max_output_tokens: new_input("Max Output Tokens", Some("32000"), false, window, cx),
-            max_tokens: new_input("Max Tokens", Some("200000"), false, window, cx),
+            max_output_tokens: new_input(
+                &i18n::translate_text("settings_ui_text", "Max Output Tokens"),
+                Some("32000"),
+                false,
+                window,
+                cx,
+            ),
+            max_tokens: new_input(
+                &i18n::translate_text("settings_ui_text", "Max Tokens"),
+                Some("200000"),
+                false,
+                window,
+                cx,
+            ),
             reasoning_effort: OpenAiReasoningEffort::Medium,
             supports_tools: tools.into(),
             supports_images: images.into(),
@@ -634,7 +661,7 @@ fn open_llm_provider_form(
     settings_window.llm_provider_form = Some(LlmProviderForm::new(kind, window, cx));
     settings_window.push_dynamic_sub_page(
         format!("Add {}-Compatible Provider", kind.label()),
-        "Agent Configuration",
+        i18n::translate_text("settings_ui_text", "Agent Configuration"),
         Some("llm_providers"),
         true,
         render_llm_provider_form_page,
@@ -665,12 +692,14 @@ fn render_llm_provider_form_page(
                 .gap_4()
                 .overflow_y_scroll()
                 .child(Label::new(match form.kind {
-                    CompatibleProviderKind::OpenAi => {
-                        "This provider will use an OpenAI-compatible API."
-                    }
-                    CompatibleProviderKind::Anthropic => {
-                        "This provider will use an Anthropic Messages-compatible API."
-                    }
+                    CompatibleProviderKind::OpenAi => i18n::translate_text(
+                        "settings_ui_text",
+                        "This provider will use an OpenAI-compatible API.",
+                    ),
+                    CompatibleProviderKind::Anthropic => i18n::translate_text(
+                        "settings_ui_text",
+                        "This provider will use an Anthropic Messages-compatible API.",
+                    ),
                 }))
                 .child(Divider::horizontal().flex_shrink_0())
                 .child(render_form_field(
@@ -723,15 +752,18 @@ fn render_form_field(
             v_flex()
                 .gap_0p5()
                 .child(
-                    h_flex().gap_0p5().child(Label::new(title)).child(
-                        Label::new("*")
-                            .size(LabelSize::Small)
-                            .color(Color::Error)
-                            .mb_2(),
-                    ),
+                    h_flex()
+                        .gap_0p5()
+                        .child(Label::new(i18n::translate_text("settings_ui_text", title)))
+                        .child(
+                            Label::new("*")
+                                .size(LabelSize::Small)
+                                .color(Color::Error)
+                                .mb_2(),
+                        ),
                 )
                 .child(
-                    Label::new(description)
+                    Label::new(i18n::translate_text("settings_ui_text", description))
                         .size(LabelSize::Small)
                         .color(Color::Muted),
                 ),
@@ -764,22 +796,28 @@ fn render_models_section(
         .child(
             h_flex()
                 .justify_between()
-                .child(Label::new("Models"))
+                .child(Label::new(i18n::translate_text(
+                    "settings_ui_text",
+                    "Models",
+                )))
                 .child(
-                    Button::new("add-model", "Add Model")
-                        .start_icon(
-                            Icon::new(IconName::Plus)
-                                .size(IconSize::XSmall)
-                                .color(Color::Muted),
-                        )
-                        .label_size(LabelSize::Small)
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            if let Some(form) = this.llm_provider_form.as_mut() {
-                                let index = form.models.len();
-                                form.models.push(ModelInput::new(index, window, cx));
-                            }
-                            cx.notify();
-                        })),
+                    Button::new(
+                        "add-model",
+                        i18n::translate_text("settings_ui_text", "Add Model"),
+                    )
+                    .start_icon(
+                        Icon::new(IconName::Plus)
+                            .size(IconSize::XSmall)
+                            .color(Color::Muted),
+                    )
+                    .label_size(LabelSize::Small)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        if let Some(form) = this.llm_provider_form.as_mut() {
+                            let index = form.models.len();
+                            form.models.push(ModelInput::new(index, window, cx));
+                        }
+                        cx.notify();
+                    })),
                 ),
         )
         .children(form.models.iter().enumerate().map(|(index, model)| {
@@ -832,23 +870,26 @@ fn render_model(
         .child(render_model_capabilities(kind, model, index, window, cx))
         .when(model_count > 1, |this| {
             this.child(
-                Button::new(("remove-model", index), "Remove Model")
-                    .start_icon(
-                        Icon::new(IconName::Trash)
-                            .size(IconSize::XSmall)
-                            .color(Color::Muted),
-                    )
-                    .label_size(LabelSize::Small)
-                    .style(ButtonStyle::Outlined)
-                    .full_width()
-                    .on_click(cx.listener(move |this, _, _window, cx| {
-                        if let Some(form) = this.llm_provider_form.as_mut()
-                            && index < form.models.len()
-                        {
-                            form.models.remove(index);
-                        }
-                        cx.notify();
-                    })),
+                Button::new(
+                    ("remove-model", index),
+                    i18n::translate_text("settings_ui_text", "Remove Model"),
+                )
+                .start_icon(
+                    Icon::new(IconName::Trash)
+                        .size(IconSize::XSmall)
+                        .color(Color::Muted),
+                )
+                .label_size(LabelSize::Small)
+                .style(ButtonStyle::Outlined)
+                .full_width()
+                .on_click(cx.listener(move |this, _, _window, cx| {
+                    if let Some(form) = this.llm_provider_form.as_mut()
+                        && index < form.models.len()
+                    {
+                        form.models.remove(index);
+                    }
+                    cx.notify();
+                })),
             )
         })
         .into_any_element()
@@ -952,7 +993,7 @@ fn render_capability_checkbox(
     cx: &mut Context<SettingsWindow>,
 ) -> impl IntoElement {
     Checkbox::new((id, index), state)
-        .label(label)
+        .label(i18n::translate_text("settings_ui_text", label))
         .on_click(cx.listener(move |this, checked, _window, cx| {
             if let Some(form) = this.llm_provider_form.as_mut()
                 && let Some(model) = form.models.get_mut(index)
@@ -996,7 +1037,13 @@ fn render_reasoning_effort_selector(
 
     v_flex()
         .gap_1()
-        .child(Label::new("Default reasoning effort").size(LabelSize::Small))
+        .child(
+            Label::new(i18n::translate_text(
+                "settings_ui_text",
+                "Default reasoning effort",
+            ))
+            .size(LabelSize::Small),
+        )
         .child(
             DropdownMenu::new(
                 ElementId::Name(format!("reasoning-effort-selector-{index}").into()),
@@ -1006,7 +1053,10 @@ fn render_reasoning_effort_selector(
             .style(DropdownStyle::Outlined)
             .trigger_size(ButtonSize::Compact)
             .full_width(true)
-            .aria_label("Default reasoning effort"),
+            .aria_label(i18n::translate_text(
+                "settings_ui_text",
+                "Default reasoning effort",
+            )),
         )
 }
 
@@ -1028,19 +1078,24 @@ fn render_form_actions(cx: &mut Context<SettingsWindow>) -> impl IntoElement {
         .gap_1()
         .justify_end()
         .child(
-            Button::new("llm-provider-form-cancel", "Cancel").on_click(cx.listener(
-                |this, _, window, cx| {
-                    this.llm_provider_form = None;
-                    this.pop_sub_page(window, cx);
-                },
-            )),
+            Button::new(
+                "llm-provider-form-cancel",
+                i18n::translate_text("settings_ui_text", "Cancel"),
+            )
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.llm_provider_form = None;
+                this.pop_sub_page(window, cx);
+            })),
         )
         .child(
-            Button::new("llm-provider-form-save", "Save Provider")
-                .style(ButtonStyle::Filled)
-                .on_click(cx.listener(|this, _, window, cx| {
-                    save_llm_provider_form(this, window, cx);
-                })),
+            Button::new(
+                "llm-provider-form-save",
+                i18n::translate_text("settings_ui_text", "Save Provider"),
+            )
+            .style(ButtonStyle::Filled)
+            .on_click(cx.listener(|this, _, window, cx| {
+                save_llm_provider_form(this, window, cx);
+            })),
         )
 }
 
@@ -1202,7 +1257,10 @@ fn validate_llm_provider_form(
 ) -> Result<(String, String, String, ParsedModels), SharedString> {
     let provider_name = values.provider_name.clone();
     if provider_name.is_empty() {
-        return Err("Provider Name cannot be empty".into());
+        return Err(i18n::translate_text(
+            "settings_ui_text",
+            "Provider Name cannot be empty",
+        ));
     }
 
     if LanguageModelRegistry::read_global(cx)
@@ -1213,17 +1271,26 @@ fn validate_llm_provider_form(
                 || provider.name().0.as_ref() == provider_name.as_str()
         })
     {
-        return Err("Provider Name is already taken by another provider".into());
+        return Err(i18n::translate_text(
+            "settings_ui_text",
+            "Provider Name is already taken by another provider",
+        ));
     }
 
     let api_url = values.api_url.clone();
     if api_url.is_empty() {
-        return Err("API URL cannot be empty".into());
+        return Err(i18n::translate_text(
+            "settings_ui_text",
+            "API URL cannot be empty",
+        ));
     }
 
     let api_key = values.api_key.clone();
     if api_key.is_empty() {
-        return Err("API Key cannot be empty".into());
+        return Err(i18n::translate_text(
+            "settings_ui_text",
+            "API Key cannot be empty",
+        ));
     }
 
     let models = match values.kind {
@@ -1253,7 +1320,10 @@ fn validate_llm_provider_form(
             .all(|model| model_names.insert(model.name.clone())),
     };
     if !model_names_are_unique {
-        return Err("Model Names must be unique".into());
+        return Err(i18n::translate_text(
+            "settings_ui_text",
+            "Model Names must be unique",
+        ));
     }
 
     Ok((provider_name, api_url, api_key, models))
@@ -1261,7 +1331,10 @@ fn validate_llm_provider_form(
 
 fn parse_model_name(model: &ModelValues) -> Result<String, SharedString> {
     if model.name.is_empty() {
-        return Err("Model Name cannot be empty".into());
+        return Err(i18n::translate_text(
+            "settings_ui_text",
+            "Model Name cannot be empty",
+        ));
     }
     Ok(model.name.clone())
 }

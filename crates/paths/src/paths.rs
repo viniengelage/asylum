@@ -513,20 +513,54 @@ pub fn crashes_retired_dir() -> &'static Option<PathBuf> {
     CRASHES_RETIRED_DIR.get_or_init(|| crashes_dir().as_ref().map(|dir| dir.join("Retired")))
 }
 
-/// Returns the path to the `settings.json` file.
-pub fn settings_file() -> &'static PathBuf {
-    static SETTINGS_FILE: OnceLock<PathBuf> = OnceLock::new();
-    SETTINGS_FILE.get_or_init(|| config_dir().join("settings.json"))
+static PROFILE_SCOPED_SETTINGS: OnceLock<()> = OnceLock::new();
+
+/// Splits the settings into the file every profile shares and one file per
+/// profile, the default profile included. The app turns this on before any
+/// path is resolved; the remote server, a custom data directory and tests keep
+/// a single `settings.json`.
+pub fn enable_profile_scoped_settings() {
+    PROFILE_SCOPED_SETTINGS.set(()).ok();
 }
 
-/// Returns the default profile's `settings.json` when this process runs as
-/// another profile, which inherits every setting from it that it doesn't
-/// isolate or override.
-pub fn inherited_settings_file() -> Option<&'static PathBuf> {
-    static INHERITED_SETTINGS_FILE: OnceLock<Option<PathBuf>> = OnceLock::new();
-    INHERITED_SETTINGS_FILE
-        .get_or_init(|| active_profile_id().map(|_| shared_config_dir().join("settings.json")))
+/// Whether the settings are split by [`enable_profile_scoped_settings`].
+pub fn profile_scoped_settings() -> bool {
+    PROFILE_SCOPED_SETTINGS.get().is_some()
+}
+
+/// The `settings.json` that holds the settings of profile `id`, whether or not
+/// this process runs as it.
+pub fn profile_settings_file_for(id: &str) -> PathBuf {
+    profiles_dir().join(id).join("config").join("settings.json")
+}
+
+/// Returns the path to this profile's `settings.json` file.
+pub fn settings_file() -> &'static PathBuf {
+    static SETTINGS_FILE: OnceLock<PathBuf> = OnceLock::new();
+    SETTINGS_FILE.get_or_init(|| {
+        if profile_scoped_settings() && active_profile_id().is_none() {
+            profile_settings_file_for(DEFAULT_PROFILE_ID)
+        } else {
+            config_dir().join("settings.json")
+        }
+    })
+}
+
+/// Returns the `settings.json` that every profile shares, below each profile's
+/// own file, when there is one.
+pub fn shared_settings_file() -> Option<&'static PathBuf> {
+    static SHARED_SETTINGS_FILE: OnceLock<Option<PathBuf>> = OnceLock::new();
+    SHARED_SETTINGS_FILE
+        .get_or_init(|| {
+            (profile_scoped_settings() || active_profile_id().is_some())
+                .then(|| shared_config_dir().join("settings.json"))
+        })
         .as_ref()
+}
+
+/// The id of the profile this process runs as, the default one included.
+pub fn current_profile_id() -> &'static str {
+    active_profile_id().unwrap_or(DEFAULT_PROFILE_ID)
 }
 
 /// Returns the path to the global settings file.

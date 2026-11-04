@@ -9,6 +9,7 @@
   "error.read_state": "reading the settings sync state",
   "error.reading": "reading {path}",
   "error.save_sign_in": "saving the GitHub sign-in",
+  "error.shared_lock": "locking the shared settings sync at {path}",
   "error.sign_in_failed": "GitHub sign-in failed: {reason}",
   "error.sign_in_refused": "GitHub refused to start the sign-in ({status}): {response}",
   "error.sign_in_rejected": "GitHub rejected the saved sign-in. Sign in again.",

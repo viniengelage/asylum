@@ -44,4 +44,5 @@ zlog.workspace = true
 
 indoc.workspace = true
 pretty_assertions.workspace = true
+tempfile.workspace = true
 unindent.workspace = true

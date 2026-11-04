@@ -46,7 +46,7 @@ where
         move |mut menu, _, _cx| {
             let is_system_default = current_device.is_none();
             menu = menu.toggleable_entry(
-                SYSTEM_DEFAULT,
+                i18n::translate_text("settings_ui_text", SYSTEM_DEFAULT),
                 is_system_default,
                 IconPosition::Start,
                 None,
@@ -86,7 +86,9 @@ where
         dropdown_id,
         current_device
             .map(|info| info.desc.name().to_string())
-            .unwrap_or(SYSTEM_DEFAULT.to_string()),
+            .unwrap_or_else(|| {
+                i18n::translate_text("settings_ui_text", SYSTEM_DEFAULT).to_string()
+            }),
         menu,
     )
     .style(DropdownStyle::Outlined)

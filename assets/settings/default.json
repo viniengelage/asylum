@@ -3099,6 +3099,19 @@
   "context_servers": {},
   // Configures agent servers available in the agent panel.
   "agent_servers": {},
+  // Which agent toolkits are on, by id. A toolkit that is off is hidden from the agent, the
+  // status bar and the mentions of this profile.
+  "agent_toolkits": {
+    "api": true,
+    "browser": true,
+    "clickup": true,
+    "database": true,
+    "devices": true,
+    "docker": true,
+    "elastic": true,
+    "github_projects": true,
+    "repo": true
+  },
   "debugger": {
     "stepping_granularity": "line",
     "save_breakpoints": true,

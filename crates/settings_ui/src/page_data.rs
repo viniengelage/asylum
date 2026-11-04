@@ -57,22 +57,237 @@ macro_rules! concat_sections {
 }
 
 pub(crate) fn settings_data(cx: &App) -> Vec<SettingsPage> {
+    let [appearance, fonts] = appearance_pages();
+    let (behavior, display, vim) = editor_pages();
+    let [languages, code_and_diagnostics] = languages_and_tools_pages(cx, debugger_page().items);
+    let [agent, providers, external_agents, mcp, edit_predictions] = ai_pages(cx);
     vec![
+        profiles_page(),
+        integrations_page(),
+        devices_page(),
+        browser_page(),
         general_page(cx),
-        appearance_page(),
-        keymap_page(),
-        editor_page(),
-        languages_and_tools_page(cx),
-        search_and_files_page(),
+        appearance,
+        fonts,
+        keymap_page(vim),
+        behavior,
+        display,
+        languages,
+        code_and_diagnostics,
         window_and_layout_page(),
         panels_page(),
-        debugger_page(),
+        search_and_files_page(),
         terminal_page(),
         version_control_page(),
-        ai_page(cx),
+        agent,
+        providers,
+        external_agents,
+        mcp,
+        edit_predictions,
         network_page(),
+        sync_page(),
         developer_page(cx),
     ]
+}
+
+fn toolkit_item(
+    title: &'static str,
+    description: &'static str,
+    json_path: &'static str,
+    pick: fn(&SettingsContent) -> Option<&bool>,
+    write: fn(&mut SettingsContent, Option<bool>, &App),
+) -> SettingsPageItem {
+    SettingsPageItem::SettingItem(SettingItem {
+        title,
+        description,
+        field: Box::new(SettingField {
+            organization_override: None,
+            json_path: Some(json_path),
+            pick,
+            write,
+        }),
+        metadata: None,
+        files: USER | PROJECT,
+    })
+}
+
+macro_rules! toolkit_field {
+    ($title:expr, $description:expr, $id:literal) => {
+        toolkit_item(
+            $title,
+            $description,
+            concat!("agent_toolkits.", $id),
+            |settings_content| settings_content.project.agent_toolkits.get($id),
+            |settings_content, value, _| match value {
+                Some(value) => {
+                    settings_content
+                        .project
+                        .agent_toolkits
+                        .insert($id.into(), value);
+                }
+                None => {
+                    settings_content.project.agent_toolkits.remove($id);
+                }
+            },
+        )
+    };
+}
+
+fn profiles_page() -> SettingsPage {
+    SettingsPage::new("Profiles", "Asylum", ui::IconName::UserGroup, Box::new([]))
+        .landing(SubPageLink {
+            title: "Profiles".into(),
+            r#type: Default::default(),
+            description: None,
+            search_aliases: &["profile", "perfil", "work", "personal"],
+            json_path: Some("profiles"),
+            in_json: false,
+            files: USER,
+            render: crate::render_profiles_page,
+        })
+        .profile_scoped()
+}
+
+fn integrations_page() -> SettingsPage {
+    SettingsPage::new(
+        "Integrations",
+        "Asylum",
+        ui::IconName::Blocks,
+        Box::new([
+            SettingsPageItem::SectionHeader("Agent Toolkit"),
+            toolkit_field!(
+                "Repo",
+                "Pull requests, checks and merges of the remote repository, in the agent and the status bar.",
+                "repo"
+            ),
+            toolkit_field!(
+                "GitHub Projects",
+                "The project's board and items, for the agent and the Tasks dock.",
+                "github_projects"
+            ),
+            toolkit_field!(
+                "ClickUp",
+                "Tasks, comments and the timer of ClickUp.",
+                "clickup"
+            ),
+            toolkit_field!(
+                "Database",
+                "Queries and schemas of the database connections.",
+                "database"
+            ),
+            toolkit_field!(
+                "API Client",
+                "Requests and collections of the API client.",
+                "api"
+            ),
+            toolkit_field!(
+                "Elasticsearch",
+                "Logs, ES|QL queries and traces of Elasticsearch.",
+                "elastic"
+            ),
+            toolkit_field!(
+                "Docker",
+                "Containers, logs and the terminal of Docker.",
+                "docker"
+            ),
+        ]),
+    )
+    .profile_scoped()
+}
+
+fn devices_page() -> SettingsPage {
+    SettingsPage::new(
+        "Devices",
+        "Asylum",
+        ui::IconName::Smartphone,
+        Box::new([
+            SettingsPageItem::SectionHeader("Agent Toolkit"),
+            toolkit_field!(
+                "Device Tools",
+                "Lets the agent list, open and drive the Android emulator and the iOS simulator.",
+                "devices"
+            ),
+        ]),
+    )
+    .profile_scoped()
+}
+
+fn browser_page() -> SettingsPage {
+    SettingsPage::new(
+        "Browser",
+        "Asylum",
+        ui::IconName::Public,
+        Box::new([
+            SettingsPageItem::SectionHeader("Agent Toolkit"),
+            toolkit_field!(
+                "Browser Tools",
+                "Lets the agent open, read and click through pages in the built-in browser.",
+                "browser"
+            ),
+        ]),
+    )
+    .profile_scoped()
+}
+
+fn sync_action_link(
+    title: &'static str,
+    description: &'static str,
+    button_text: &'static str,
+    action_name: &'static str,
+) -> SettingsPageItem {
+    SettingsPageItem::ActionLink(ActionLink {
+        title: crate::t(title),
+        description: Some(crate::t(description)),
+        button_text: crate::t(button_text),
+        on_click: Arc::new(move |settings_window, _window, cx| {
+            let Some(original_window) = settings_window.original_window else {
+                return;
+            };
+            let action = match cx.build_action(action_name, None) {
+                Ok(action) => action,
+                Err(error) => {
+                    log::error!("{action_name} isn't registered: {error:#}");
+                    return;
+                }
+            };
+            original_window
+                .update(cx, |_workspace, original_window, cx| {
+                    original_window.dispatch_action(action, cx);
+                })
+                .ok();
+        }),
+        files: USER,
+    })
+}
+
+fn sync_page() -> SettingsPage {
+    SettingsPage::new(
+        "Sync",
+        "System",
+        ui::IconName::ArrowCircle,
+        Box::new([
+            SettingsPageItem::SectionHeader("Settings Sync"),
+            sync_action_link(
+                "Sync Through GitHub",
+                "Keeps the shared settings, the keymap, the themes and the profile list in one gist, and each profile's own settings in a gist of its own.",
+                "Sign In",
+                "settings_sync::SignIn",
+            ),
+            sync_action_link(
+                "Sync Now",
+                "Sends and receives the changes without waiting for the next round.",
+                "Sync",
+                "settings_sync::SyncNow",
+            ),
+            sync_action_link(
+                "Stop Syncing",
+                "Signs this profile out of GitHub. The gists stay on GitHub.",
+                "Sign Out",
+                "settings_sync::SignOut",
+            ),
+        ]),
+    )
+    .profile_scoped()
 }
 
 fn developer_page(cx: &App) -> SettingsPage {
@@ -122,10 +337,12 @@ fn developer_page(cx: &App) -> SettingsPage {
         files: USER,
     }));
 
-    SettingsPage {
-        title: "Developer",
-        items: items.into_boxed_slice(),
-    }
+    SettingsPage::new(
+        "Developer",
+        "System",
+        ui::IconName::Wrench,
+        items.into_boxed_slice(),
+    )
 }
 
 fn general_page(cx: &App) -> SettingsPage {
@@ -402,42 +619,6 @@ fn general_page(cx: &App) -> SettingsPage {
         ]
     }
 
-    fn scoped_settings_section() -> [SettingsPageItem; 3] {
-        [
-            SettingsPageItem::SectionHeader("Scoped Settings"),
-            SettingsPageItem::SettingItem(SettingItem {
-                files: USER,
-                title: "Preview Channel",
-                description: "Which settings should be activated only in Preview build of Asylum.",
-                field: Box::new(
-                    SettingField {
-                        organization_override: None,
-                        json_path: Some("preview_channel_settings"),
-                        pick: |settings_content| Some(settings_content),
-                        write: |_settings_content, _value, _| {},
-                    }
-                    .unimplemented(),
-                ),
-                metadata: None,
-            }),
-            SettingsPageItem::SettingItem(SettingItem {
-                files: USER,
-                title: "Settings Profiles",
-                description: "Any number of settings profiles that are temporarily applied on top of your existing user settings.",
-                field: Box::new(
-                    SettingField {
-                        organization_override: None,
-                        json_path: Some("settings_profiles"),
-                        pick: |settings_content| Some(settings_content),
-                        write: |_settings_content, _value, _| {},
-                    }
-                    .unimplemented(),
-                ),
-                metadata: None,
-            }),
-        ]
-    }
-
     fn privacy_section() -> [SettingsPageItem; 2] {
         [
             SettingsPageItem::SectionHeader("Privacy"),
@@ -506,23 +687,24 @@ fn general_page(cx: &App) -> SettingsPage {
         ]
     }
 
-    SettingsPage {
-        title: "General",
-        items: concat_sections!(
+    SettingsPage::new(
+        "General",
+        "General",
+        ui::IconName::Settings,
+        concat_sections!(
             @vec,
             general_settings_section(cx),
             security_section(),
             workspace_restoration_section(),
-            scoped_settings_section(),
             privacy_section(),
             auto_update_section(),
             extensions_section(),
         )
         .into(),
-    }
+    )
 }
 
-fn appearance_page() -> SettingsPage {
+fn appearance_pages() -> [SettingsPage; 2] {
     fn theme_section() -> [SettingsPageItem; 3] {
         [
             SettingsPageItem::SectionHeader("Theme"),
@@ -1638,26 +1820,35 @@ fn appearance_page() -> SettingsPage {
         ]
     }
 
-    let items: Box<[SettingsPageItem]> = concat_sections!(
-        theme_section(),
-        buffer_font_section(),
-        ui_font_section(),
-        agent_panel_font_section(),
-        markdown_preview_font_section(),
-        mermaid_font_section(),
-        text_rendering_section(),
-        cursor_section(),
-        highlighting_section(),
-        guides_section(),
-    );
-
-    SettingsPage {
-        title: "Appearance",
-        items,
-    }
+    [
+        SettingsPage::new(
+            "Appearance",
+            "General",
+            ui::IconName::Eye,
+            concat_sections!(
+                theme_section(),
+                cursor_section(),
+                highlighting_section(),
+                guides_section(),
+                text_rendering_section(),
+            ),
+        ),
+        SettingsPage::new(
+            "Fonts",
+            "General",
+            ui::IconName::CaseSensitive,
+            concat_sections!(
+                buffer_font_section(),
+                ui_font_section(),
+                agent_panel_font_section(),
+                markdown_preview_font_section(),
+                mermaid_font_section(),
+            ),
+        ),
+    ]
 }
 
-fn keymap_page() -> SettingsPage {
+fn keymap_page(vim: Box<[SettingsPageItem]>) -> SettingsPage {
     fn keybindings_section() -> [SettingsPageItem; 2] {
         [
             SettingsPageItem::SectionHeader("Keybindings"),
@@ -1736,19 +1927,20 @@ fn keymap_page() -> SettingsPage {
         ]
     }
 
-    let items: Box<[SettingsPageItem]> = concat_sections!(
-        keybindings_section(),
-        base_keymap_section(),
-        modal_editing_section(),
-    );
-
-    SettingsPage {
-        title: "Keymap",
-        items,
-    }
+    SettingsPage::new(
+        "Keymap",
+        "General",
+        ui::IconName::Keyboard,
+        concat_sections!(
+            keybindings_section(),
+            base_keymap_section(),
+            modal_editing_section(),
+            vim,
+        ),
+    )
 }
 
-fn editor_page() -> SettingsPage {
+fn editor_pages() -> (SettingsPage, SettingsPage, Box<[SettingsPageItem]>) {
     fn auto_save_section() -> [SettingsPageItem; 2] {
         [
             SettingsPageItem::SectionHeader("Auto Save"),
@@ -3361,29 +3553,37 @@ fn editor_page() -> SettingsPage {
         ]
     }
 
-    let items = concat_sections!(
-        auto_save_section(),
-        which_key_section(),
-        multibuffer_section(),
-        scrolling_section(),
-        signature_help_section(),
-        hover_popover_section(),
-        drag_and_drop_selection_section(),
-        gutter_section(),
-        scrollbar_section(),
-        minimap_section(),
-        toolbar_section(),
-        vim_settings_section(),
-        language_settings_data(),
-    );
-
-    SettingsPage {
-        title: "Editor",
-        items: items,
-    }
+    (
+        SettingsPage::new(
+            "Behavior",
+            "Editor",
+            ui::IconName::CursorIBeam,
+            concat_sections!(
+                auto_save_section(),
+                which_key_section(),
+                multibuffer_section(),
+                scrolling_section(),
+                signature_help_section(),
+                hover_popover_section(),
+                drag_and_drop_selection_section(),
+            ),
+        ),
+        SettingsPage::new(
+            "Display",
+            "Editor",
+            ui::IconName::PanelLeft,
+            concat_sections!(
+                gutter_section(),
+                scrollbar_section(),
+                minimap_section(),
+                toolbar_section(),
+            ),
+        ),
+        Box::new(vim_settings_section()),
+    )
 }
 
-fn languages_and_tools_page(cx: &App) -> SettingsPage {
+fn languages_and_tools_pages(cx: &App, debugger: Box<[SettingsPageItem]>) -> [SettingsPage; 2] {
     fn file_types_section() -> [SettingsPageItem; 2] {
         [
             SettingsPageItem::SectionHeader("File Types"),
@@ -3684,9 +3884,17 @@ fn languages_and_tools_page(cx: &App) -> SettingsPage {
             .collect()
     }
 
-    SettingsPage {
-        title: "Languages & Tools",
-        items: {
+    [
+        SettingsPage::new(
+            "Languages",
+            "Editor",
+            ui::IconName::Code,
+            concat_sections!(language_settings_data(), languages_list_section(cx)),
+        ),
+        SettingsPage::new(
+            "Code & Diagnostics",
+            "Editor",
+            ui::IconName::ToolDiagnostics,
             concat_sections!(
                 non_editor_language_settings_data(),
                 file_types_section(),
@@ -3694,10 +3902,10 @@ fn languages_and_tools_page(cx: &App) -> SettingsPage {
                 inline_diagnostics_section(),
                 lsp_pull_diagnostics_section(),
                 lsp_highlights_section(),
-                languages_list_section(cx),
-            )
-        },
-    }
+                debugger,
+            ),
+        ),
+    ]
 }
 
 fn search_and_files_page() -> SettingsPage {
@@ -4128,15 +4336,17 @@ fn search_and_files_page() -> SettingsPage {
         ]
     }
 
-    SettingsPage {
-        title: "Search & Files",
-        items: concat_sections![
+    SettingsPage::new(
+        "Search & Files",
+        "Workspace",
+        ui::IconName::MagnifyingGlass,
+        concat_sections![
             search_section(),
             command_palette_section(),
             file_finder_section(),
             file_scan_section(),
         ],
-    }
+    )
 }
 
 fn window_and_layout_page() -> SettingsPage {
@@ -5419,9 +5629,11 @@ fn window_and_layout_page() -> SettingsPage {
         ]
     }
 
-    SettingsPage {
-        title: "Window & Layout",
-        items: concat_sections![
+    SettingsPage::new(
+        "Window & Layout",
+        "Workspace",
+        ui::IconName::Screen,
+        concat_sections![
             status_bar_section(),
             title_bar_section(),
             tab_bar_section(),
@@ -5432,7 +5644,7 @@ fn window_and_layout_page() -> SettingsPage {
             pane_modifiers_section(),
             pane_split_direction_section(),
         ],
-    }
+    )
 }
 
 fn panels_page() -> SettingsPage {
@@ -7013,9 +7225,11 @@ fn panels_page() -> SettingsPage {
         ]
     }
 
-    SettingsPage {
-        title: "Panels",
-        items: concat_sections![
+    SettingsPage::new(
+        "Panels",
+        "Workspace",
+        ui::IconName::PanelRight,
+        concat_sections![
             project_panel_section(),
             terminal_panel_section(),
             outline_panel_section(),
@@ -7023,7 +7237,7 @@ fn panels_page() -> SettingsPage {
             debugger_panel_section(),
             agent_panel_section(),
         ],
-    }
+    )
 }
 
 fn debugger_page() -> SettingsPage {
@@ -7139,10 +7353,12 @@ fn debugger_page() -> SettingsPage {
         ]
     }
 
-    SettingsPage {
-        title: "Debugger",
-        items: concat_sections![general_section()],
-    }
+    SettingsPage::new(
+        "Debugger",
+        "Editor",
+        ui::IconName::Debug,
+        concat_sections![general_section()],
+    )
 }
 
 fn terminal_page() -> SettingsPage {
@@ -8009,9 +8225,11 @@ fn terminal_page() -> SettingsPage {
         ]
     }
 
-    SettingsPage {
-        title: "Terminal",
-        items: concat_sections![
+    SettingsPage::new(
+        "Terminal",
+        "Workspace",
+        ui::IconName::Terminal,
+        concat_sections![
             environment_section(),
             font_section(),
             display_settings_section(),
@@ -8021,7 +8239,7 @@ fn terminal_page() -> SettingsPage {
             toolbar_section(),
             scrollbar_section(),
         ],
-    }
+    )
 }
 
 fn version_control_page() -> SettingsPage {
@@ -8520,9 +8738,11 @@ fn version_control_page() -> SettingsPage {
         ]
     }
 
-    SettingsPage {
-        title: "Version Control",
-        items: concat_sections![
+    SettingsPage::new(
+        "Version Control",
+        "Workspace",
+        ui::IconName::GitBranch,
+        concat_sections![
             git_integration_section(),
             git_gutter_section(),
             inline_git_blame_section(),
@@ -8531,10 +8751,10 @@ fn version_control_page() -> SettingsPage {
             file_diff_section(),
             git_hunks_section(),
         ],
-    }
+    )
 }
 
-fn ai_page(cx: &App) -> SettingsPage {
+fn ai_pages(cx: &App) -> [SettingsPage; 5] {
     fn general_section() -> [SettingsPageItem; 8] {
         [
             SettingsPageItem::SectionHeader("General"),
@@ -9180,17 +9400,54 @@ fn ai_page(cx: &App) -> SettingsPage {
         })]
     }
 
-    SettingsPage {
-        title: "AI",
-        items: concat_sections!(
-            @vec,
-            general_section(),
-            agent_configuration_section(cx),
-            edit_prediction_language_settings_section(),
-            edit_prediction_display_sub_section(),
-        )
-        .into(),
+    let mut general = Vec::new();
+    let mut providers = None;
+    let mut external_agents = None;
+    let mut mcp = None;
+    for item in general_section() {
+        match item {
+            SettingsPageItem::SubPageLink(link) if link.json_path == Some("llm_providers") => {
+                providers = Some(link)
+            }
+            SettingsPageItem::SubPageLink(link) if link.json_path == Some("agent_servers") => {
+                external_agents = Some(link)
+            }
+            SettingsPageItem::SubPageLink(link) if link.json_path == Some("context_servers") => {
+                mcp = Some(link)
+            }
+            item => general.push(item),
+        }
     }
+    let landing = |title: &'static str, icon, link: Option<SubPageLink>| {
+        let page = SettingsPage::new(title, "AI", icon, Box::new([])).profile_scoped();
+        match link {
+            Some(link) => page.landing(link),
+            None => page,
+        }
+    };
+    [
+        SettingsPage::new(
+            "Agent",
+            "AI",
+            ui::IconName::ZedAgent,
+            concat_sections!(@vec, general, agent_configuration_section(cx)).into(),
+        )
+        .profile_scoped(),
+        landing("Providers", ui::IconName::Sparkle, providers),
+        landing("External Agents", ui::IconName::Inception, external_agents),
+        landing("MCP", ui::IconName::Server, mcp),
+        SettingsPage::new(
+            "Edit Predictions",
+            "AI",
+            ui::IconName::ZedPredict,
+            concat_sections!(
+                @vec,
+                edit_prediction_language_settings_section(),
+                edit_prediction_display_sub_section(),
+            )
+            .into(),
+        ),
+    ]
 }
 
 fn network_page() -> SettingsPage {
@@ -9234,10 +9491,12 @@ fn network_page() -> SettingsPage {
         ]
     }
 
-    SettingsPage {
-        title: "Network",
-        items: concat_sections![network_section()],
-    }
+    SettingsPage::new(
+        "Network",
+        "System",
+        ui::IconName::SignalHigh,
+        concat_sections![network_section()],
+    )
 }
 
 fn language_settings_field<T>(

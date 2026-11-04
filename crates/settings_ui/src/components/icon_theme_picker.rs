@@ -82,7 +82,9 @@ impl PickerDelegate for IconThemePickerDelegate {
     }
 
     fn placeholder_text(&self, _window: &mut Window, _cx: &mut App) -> Arc<str> {
-        "Search icon themes…".into()
+        i18n::translate_text("settings_ui_text", "Search icon themes…")
+            .as_ref()
+            .into()
     }
 
     fn update_matches(

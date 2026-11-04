@@ -58,9 +58,16 @@ pub(crate) fn render_skills_setup_page(
         .map(|this| {
             if skills.is_empty() {
                 let message = match &settings_window.current_file {
-                    SettingsUiFile::User => "No global skills installed.",
-                    SettingsUiFile::Project(_) => "No project skills found.",
-                    _ => "No skills available for this context.",
+                    SettingsUiFile::User => {
+                        i18n::translate_text("settings_ui_text", "No global skills installed.")
+                    }
+                    SettingsUiFile::Project(_) => {
+                        i18n::translate_text("settings_ui_text", "No project skills found.")
+                    }
+                    _ => i18n::translate_text(
+                        "settings_ui_text",
+                        "No skills available for this context.",
+                    ),
                 };
 
                 this.px_8().items_center().justify_center().child(
@@ -69,21 +76,26 @@ pub(crate) fn render_skills_setup_page(
                         .gap_2()
                         .child(Label::new(message).color(Color::Muted))
                         .child(
-                            Button::new("open-skill-creator-empty", "Create a Skill")
-                                .tab_index(0_isize)
-                                .style(ButtonStyle::Outlined)
-                                .start_icon(
-                                    Icon::new(IconName::Plus)
-                                        .size(IconSize::Small)
-                                        .color(Color::Muted),
-                                )
-                                .on_click(cx.listener(move |this, _event, window, cx| {
+                            Button::new(
+                                "open-skill-creator-empty",
+                                i18n::translate_text("settings_ui_text", "Create a Skill"),
+                            )
+                            .tab_index(0_isize)
+                            .style(ButtonStyle::Outlined)
+                            .start_icon(
+                                Icon::new(IconName::Plus)
+                                    .size(IconSize::Small)
+                                    .color(Color::Muted),
+                            )
+                            .on_click(cx.listener(
+                                move |this, _event, window, cx| {
                                     this.open_skill_creator_sub_page(
                                         SkillCreatorOpenMode::Form,
                                         window,
                                         cx,
                                     );
-                                })),
+                                },
+                            )),
                         ),
                 )
             } else {
@@ -153,7 +165,10 @@ fn render_skill_row(
             .shape(ui::IconButtonShape::Square)
             .icon_size(IconSize::Small)
             .icon_color(share_icon_color)
-            .tooltip(Tooltip::text("Copy Share Link"))
+            .tooltip(Tooltip::text(i18n::translate_text(
+                "settings_ui_text",
+                "Copy Share Link",
+            )))
             .visible_on_hover(&group)
             .on_click(cx.listener(move |_settings_window, _event, _window, cx| {
                 let skill_file_path = share_skill_file_path.clone();
@@ -262,7 +277,10 @@ fn render_skill_row(
                     )
                     .tab_index(0_isize)
                     .icon_size(IconSize::Small)
-                    .tooltip(Tooltip::text("Add Subcommand"))
+                    .tooltip(Tooltip::text(i18n::translate_text(
+                        "settings_ui_text",
+                        "Add Subcommand",
+                    )))
                     .on_click(cx.listener(
                         move |settings_window, _event, window, cx| {
                             settings_window.open_skill_creator_sub_page(
@@ -280,7 +298,10 @@ fn render_skill_row(
                     )
                     .tab_index(0_isize)
                     .icon_size(IconSize::Small)
-                    .tooltip(Tooltip::text("Delete Skill"))
+                    .tooltip(Tooltip::text(i18n::translate_text(
+                        "settings_ui_text",
+                        "Delete Skill",
+                    )))
                     .on_click(cx.listener(
                         move |settings_window, _event, window, cx| {
                             let directory_path = directory_path.clone();
@@ -299,11 +320,13 @@ fn render_skill_row(
                                  them either.",
                                 directory_path.compact().display(),
                             );
+                            let delete_label = i18n::translate_text("settings_ui_text", "Delete");
+                            let cancel_label = i18n::translate_text("settings_ui_text", "Cancel");
                             let answer = window.prompt(
                                 PromptLevel::Info,
                                 &prompt_message,
                                 Some(&prompt_detail),
-                                &["Delete", "Cancel"],
+                                &[delete_label.as_ref(), cancel_label.as_ref()],
                                 cx,
                             );
 
@@ -358,23 +381,28 @@ fn render_skill_row(
                     )),
                 )
                 .child(
-                    Button::new(SharedString::from(format!("open-{}", skill.name)), "Open")
-                        .tab_index(0_isize)
-                        .style(ButtonStyle::OutlinedGhost)
-                        .size(ButtonSize::Medium)
-                        .end_icon(
-                            Icon::new(IconName::ArrowUpRight)
-                                .size(IconSize::Small)
-                                .color(Color::Muted),
-                        )
-                        .on_click(cx.listener(move |settings_window, _event, window, cx| {
+                    Button::new(
+                        SharedString::from(format!("open-{}", skill.name)),
+                        i18n::translate_text("settings_ui_text", "Open"),
+                    )
+                    .tab_index(0_isize)
+                    .style(ButtonStyle::OutlinedGhost)
+                    .size(ButtonSize::Medium)
+                    .end_icon(
+                        Icon::new(IconName::ArrowUpRight)
+                            .size(IconSize::Small)
+                            .color(Color::Muted),
+                    )
+                    .on_click(cx.listener(
+                        move |settings_window, _event, window, cx| {
                             open_in_original_workspace(
                                 settings_window,
                                 skill_file_path.clone(),
                                 window,
                                 cx,
                             );
-                        })),
+                        },
+                    )),
                 ),
         )
         .into_any_element()

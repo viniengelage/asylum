@@ -5,6 +5,7 @@ mod editorconfig_store;
 mod granted_write_path;
 mod keymap_file;
 mod settings_file;
+mod settings_scope;
 mod settings_store;
 mod vscode_import;
 
@@ -45,6 +46,10 @@ pub use keymap_file::{
 };
 pub use settings_file::*;
 pub use settings_json::*;
+pub use settings_scope::{
+    PROFILE_SCOPED_SETTINGS, SettingsScope, is_profile_scoped, migrate_to_profile_scopes,
+    migration_record_file, natural_scope,
+};
 pub use settings_store::{
     DefaultSemanticTokenRules, InvalidSettingsError, LSP_SETTINGS_SCHEMA_URL_PREFIX,
     LocalSettingsKind, LocalSettingsPath, MigrationStatus, Settings, SettingsFile,
@@ -190,7 +195,7 @@ pub const SPECIFIC_OVERRIDES_KEYMAP_PATH: &str = "keymaps/specific-overrides.jso
 pub fn initial_user_settings_content() -> Cow<'static, str> {
     // The template pins a theme and font sizes, which in a profile would hide
     // the ones it inherits from the default profile.
-    if paths::inherited_settings_file().is_some() {
+    if paths::shared_settings_file().is_some() {
         asset_str::<SettingsAssets>("settings/initial_profile_settings.json")
     } else {
         asset_str::<SettingsAssets>("settings/initial_user_settings.json")

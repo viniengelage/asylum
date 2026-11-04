@@ -150,10 +150,9 @@ pub struct SettingsStore {
     default_settings: Rc<SettingsContent>,
     user_settings: Option<UserSettingsContent>,
     global_settings: Option<Box<SettingsContent>>,
-    inherited_settings: Option<Box<SettingsContent>>,
-    /// The global settings with the ones inherited from the default profile on
-    /// top, as a single layer below the user settings.
-    global_layer: Option<Box<SettingsContent>>,
+    /// The settings every profile shares, below this profile's own (the user
+    /// settings).
+    shared_settings: Option<Box<SettingsContent>>,
 
     extension_settings: Option<Box<SettingsContent>>,
     server_settings: Option<Box<SettingsContent>>,
@@ -164,7 +163,7 @@ pub struct SettingsStore {
 
     last_user_settings_content: Option<String>,
     last_global_settings_content: Option<String>,
-    last_inherited_settings_content: Option<String>,
+    last_shared_settings_content: Option<String>,
     local_settings: BTreeMap<(WorktreeId, Arc<RelPath>), SettingsContent>,
     pub editorconfig_store: Entity<EditorconfigStore>,
 
@@ -179,6 +178,9 @@ pub struct SettingsStore {
 pub enum SettingsFile {
     Default,
     Global,
+    /// The settings every profile shares.
+    Shared,
+    /// This profile's own settings.
     User,
     Server,
     /// Represents project settings in ssh projects as well as local projects
@@ -198,6 +200,8 @@ impl Ord for SettingsFile {
         use std::cmp::Ordering;
         match (self, other) {
             (User, User) => Ordering::Equal,
+            (Shared, Shared) => Ordering::Equal,
+            (Global, Global) => Ordering::Equal,
             (Server, Server) => Ordering::Equal,
             (Default, Default) => Ordering::Equal,
             (Project((id1, rel_path1)), Project((id2, rel_path2))) => id1
@@ -209,6 +213,8 @@ impl Ord for SettingsFile {
             (_, Server) => Ordering::Greater,
             (User, _) => Ordering::Less,
             (_, User) => Ordering::Greater,
+            (Shared, _) => Ordering::Less,
+            (_, Shared) => Ordering::Greater,
             (Global, _) => Ordering::Less,
             (_, Global) => Ordering::Greater,
         }
@@ -318,8 +324,7 @@ impl SettingsStore {
             setting_values: Default::default(),
             default_settings: default_settings.clone(),
             global_settings: None,
-            inherited_settings: None,
-            global_layer: None,
+            shared_settings: None,
             server_settings: None,
             user_settings: None,
             extension_settings: None,
@@ -328,7 +333,7 @@ impl SettingsStore {
             merged_settings: default_settings,
             last_user_settings_content: None,
             last_global_settings_content: None,
-            last_inherited_settings_content: None,
+            last_shared_settings_content: None,
             local_settings: BTreeMap::default(),
             editorconfig_store: cx.new(|_| EditorconfigStore::default()),
             _settings_files_watcher: None,
@@ -377,15 +382,16 @@ impl SettingsStore {
             fs.clone(),
             paths::global_settings_file().clone(),
         );
-        let mut inherited_settings_file = paths::inherited_settings_file()
+        let mut shared_settings_file = paths::shared_settings_file()
             .map(|path| crate::watch_config_file(cx.background_executor(), fs, path.clone()));
 
-        if let Some((inherited_settings_file_rx, _)) = inherited_settings_file.as_mut()
-            && let Some(inherited_content) = cx
+        if let Some((shared_settings_file_rx, _)) = shared_settings_file.as_mut()
+            && let Some(shared_content) = cx
                 .foreground_executor()
-                .block_on(inherited_settings_file_rx.next())
+                .block_on(shared_settings_file_rx.next())
         {
-            self.set_inherited_settings(&inherited_content, cx);
+            let result = self.set_shared_settings(&shared_content, cx);
+            settings_changed(SettingsFile::Shared, result, cx);
         }
         let global_content = cx
             .foreground_executor()
@@ -401,28 +407,28 @@ impl SettingsStore {
         let result = self.set_global_settings(&global_content, cx);
         settings_changed(SettingsFile::Global, result, cx);
 
-        let (inherited_settings_file_rx, inherited_settings_watcher) =
-            inherited_settings_file.unzip();
+        let (shared_settings_file_rx, shared_settings_watcher) = shared_settings_file.unzip();
         self._settings_files_watcher = Some(cx.spawn(async move |cx| {
             let _user_settings_watcher = user_settings_watcher;
             let _global_settings_watcher = global_settings_watcher;
-            let _inherited_settings_watcher = inherited_settings_watcher;
-            // `None` marks the default profile's settings, which aren't one of
-            // this profile's settings files.
+            let _shared_settings_watcher = shared_settings_watcher;
             let mut settings_streams = futures::stream::select_all(
                 [
                     Some(
                         global_settings_file_rx
-                            .map(|content| (Some(SettingsFile::Global), content))
+                            .map(|content| (SettingsFile::Global, content))
                             .boxed(),
                     ),
                     Some(
                         user_settings_file_rx
-                            .map(|content| (Some(SettingsFile::User), content))
+                            .map(|content| (SettingsFile::User, content))
                             .boxed(),
                     ),
-                    inherited_settings_file_rx
-                        .map(|receiver| receiver.map(|content| (None, content)).boxed()),
+                    shared_settings_file_rx.map(|receiver| {
+                        receiver
+                            .map(|content| (SettingsFile::Shared, content))
+                            .boxed()
+                    }),
                 ]
                 .into_iter()
                 .flatten(),
@@ -430,13 +436,9 @@ impl SettingsStore {
 
             while let Some((settings_file, content)) = settings_streams.next().await {
                 cx.update_global(|store: &mut SettingsStore, cx| {
-                    let Some(settings_file) = settings_file else {
-                        store.set_inherited_settings(&content, cx);
-                        cx.refresh_windows();
-                        return;
-                    };
                     let result = match settings_file {
                         SettingsFile::User => store.set_user_settings(&content, cx),
+                        SettingsFile::Shared => store.set_shared_settings(&content, cx),
                         SettingsFile::Global => store.set_global_settings(&content, cx),
                         _ => return,
                     };
@@ -600,44 +602,83 @@ impl SettingsStore {
         }
     }
 
-    fn update_settings_file_inner(
+    async fn load_settings_at(fs: &Arc<dyn Fs>, path: &Path) -> Result<String> {
+        match fs.load(path).await {
+            Ok(text) => Ok(text),
+            Err(err) => {
+                if let Some(e) = err.downcast_ref::<std::io::Error>()
+                    && e.kind() == std::io::ErrorKind::NotFound
+                {
+                    return Ok(String::new());
+                }
+                Err(err)
+            }
+        }
+    }
+
+    async fn write_settings_text(fs: &Arc<dyn Fs>, path: &Path, text: String) -> Result<()> {
+        if fs.is_file(path).await {
+            let resolved_path = fs
+                .canonicalize(path)
+                .await
+                .with_context(|| format!("Failed to canonicalize settings path {:?}", path))?;
+            fs.atomic_write(resolved_path.clone(), text)
+                .await
+                .with_context(|| format!("Failed to write settings to file {:?}", resolved_path))
+        } else {
+            if let Some(parent) = path.parent() {
+                fs.create_dir(parent).await.ok();
+            }
+            fs.atomic_write(path.to_path_buf(), text)
+                .await
+                .with_context(|| format!("Failed to write settings to file {:?}", path))
+        }
+    }
+
+    /// Queues an update of this profile's file and the shared one. `update` gets their current
+    /// text and returns the new text of each file it changes.
+    fn update_settings_files_inner(
         &self,
         fs: Arc<dyn Fs>,
-        update: Box<dyn Send + FnOnce(String, AsyncApp) -> Result<String>>,
+        update: Box<
+            dyn FnOnce(
+                String,
+                Option<String>,
+                AsyncApp,
+            ) -> Result<(Option<String>, Option<String>)>,
+        >,
     ) -> oneshot::Receiver<Result<()>> {
         let (tx, rx) = oneshot::channel::<Result<()>>();
         self.setting_file_updates_tx
             .unbounded_send(Box::new(move |cx: AsyncApp| {
                 async move {
                     let res = async move {
-                        let old_text = Self::load_settings(&fs).await?;
-                        let new_text = update(old_text, cx.clone())?;
+                        let profile_text = Self::load_settings(&fs).await?;
+                        let shared_text = match paths::shared_settings_file() {
+                            Some(path) => Some(Self::load_settings_at(&fs, path).await?),
+                            None => None,
+                        };
+                        let (new_profile_text, new_shared_text) =
+                            update(profile_text, shared_text, cx.clone())?;
 
-                        let settings_path = paths::settings_file().as_path();
-                        if fs.is_file(settings_path).await {
-                            let resolved_path =
-                                fs.canonicalize(settings_path).await.with_context(|| {
-                                    format!(
-                                        "Failed to canonicalize settings path {:?}",
-                                        settings_path
-                                    )
-                                })?;
-
-                            fs.atomic_write(resolved_path.clone(), new_text.clone())
-                                .await
-                                .with_context(|| {
-                                    format!("Failed to write settings to file {:?}", resolved_path)
-                                })?;
-                        } else {
-                            fs.atomic_write(settings_path.to_path_buf(), new_text.clone())
-                                .await
-                                .with_context(|| {
-                                    format!("Failed to write settings to file {:?}", settings_path)
-                                })?;
+                        if let Some(text) = &new_profile_text {
+                            Self::write_settings_text(&fs, paths::settings_file(), text.clone())
+                                .await?;
+                        }
+                        if let (Some(text), Some(path)) =
+                            (&new_shared_text, paths::shared_settings_file())
+                        {
+                            Self::write_settings_text(&fs, path, text.clone()).await?;
                         }
 
                         cx.update_global(|store: &mut SettingsStore, cx| {
-                            store.set_user_settings(&new_text, cx).result().map(|_| ())
+                            if let Some(text) = &new_shared_text {
+                                store.set_shared_settings(text, cx).result()?;
+                            }
+                            if let Some(text) = &new_profile_text {
+                                store.set_user_settings(text, cx).result()?;
+                            }
+                            anyhow::Ok(())
                         })
                     }
                     .await;
@@ -657,6 +698,20 @@ impl SettingsStore {
         return rx;
     }
 
+    fn update_settings_file_inner(
+        &self,
+        fs: Arc<dyn Fs>,
+        update: Box<dyn Send + FnOnce(String, AsyncApp) -> Result<String>>,
+    ) -> oneshot::Receiver<Result<()>> {
+        self.update_settings_files_inner(
+            fs,
+            Box::new(move |profile_text, _, cx| Ok((Some(update(profile_text, cx)?), None))),
+        )
+    }
+
+    /// Updates the settings, writing each change to where it belongs: the profile's own settings
+    /// and the ones it already overrides go to its file, everything else to the file every
+    /// profile shares.
     pub fn update_settings_file(
         &self,
         fs: Arc<dyn Fs>,
@@ -670,17 +725,129 @@ impl SettingsStore {
         fs: Arc<dyn Fs>,
         update: impl 'static + Send + FnOnce(&mut SettingsContent, &App),
     ) -> oneshot::Receiver<Result<()>> {
-        let mut update = Some(update);
-        self.update_settings_file_inner(
+        if paths::shared_settings_file().is_none() {
+            let mut update = Some(update);
+            return self.update_settings_file_inner(
+                fs,
+                Box::new(move |old_text: String, cx: AsyncApp| {
+                    cx.read_global(|store: &SettingsStore, cx| {
+                        store.new_text_for_update_inner(old_text, &mut |content| {
+                            (update.take().expect("called once"))(content, cx)
+                        })
+                    })
+                }),
+            );
+        }
+        self.update_settings_files_inner(
             fs,
-            Box::new(move |old_text: String, cx: AsyncApp| {
-                cx.read_global(|store: &SettingsStore, cx| {
+            Box::new(move |profile_text, shared_text, cx| {
+                let shared_text = shared_text.unwrap_or_default();
+                let profile_old = crate::settings_scope::parse_settings_value(&profile_text)?;
+                let mut content: UserSettingsContent = if profile_text.trim().is_empty() {
+                    UserSettingsContent::default()
+                } else {
+                    serde_json::from_value(profile_old.clone())?
+                };
+                cx.read_global(|_: &SettingsStore, cx| update(&mut content.content, cx));
+                let profile_updated = serde_json::to_value(&content)?;
+
+                let changes = crate::settings_scope::diff(&profile_old, &profile_updated);
+                let (to_profile, to_shared) = crate::settings_scope::route(changes, &profile_old);
+
+                let new_profile_text = (!to_profile.is_empty()).then(|| {
+                    let mut profile_new = profile_old.clone();
+                    for change in &to_profile {
+                        crate::settings_scope::apply(&mut profile_new, change);
+                    }
+                    crate::settings_scope::text_with_value(
+                        &profile_text,
+                        &profile_old,
+                        &profile_new,
+                    )
+                });
+                let new_shared_text = if to_shared.is_empty() {
+                    None
+                } else {
+                    let shared_old = crate::settings_scope::parse_settings_value(&shared_text)?;
+                    let mut shared_new = shared_old.clone();
+                    for change in &to_shared {
+                        crate::settings_scope::apply(&mut shared_new, change);
+                    }
+                    Some(crate::settings_scope::text_with_value(
+                        &shared_text,
+                        &shared_old,
+                        &shared_new,
+                    ))
+                };
+                Ok((new_profile_text, new_shared_text))
+            }),
+        )
+    }
+
+    /// Updates the settings of one scope only: what `update` changes is written to that file even
+    /// when another scope would be its natural place.
+    pub fn update_settings_file_in_scope(
+        &self,
+        fs: Arc<dyn Fs>,
+        scope: crate::SettingsScope,
+        update: impl 'static + Send + FnOnce(&mut SettingsContent, &App),
+    ) -> oneshot::Receiver<Result<()>> {
+        let shared =
+            scope == crate::SettingsScope::Shared && paths::shared_settings_file().is_some();
+        let mut update = Some(update);
+        self.update_settings_files_inner(
+            fs,
+            Box::new(move |profile_text, shared_text, cx| {
+                let old_text = if shared {
+                    shared_text.unwrap_or_default()
+                } else {
+                    profile_text
+                };
+                let new_text = cx.read_global(|store: &SettingsStore, cx| {
                     store.new_text_for_update_inner(old_text, &mut |content| {
                         (update.take().expect("called once"))(content, cx)
                     })
+                })?;
+                Ok(if shared {
+                    (None, Some(new_text))
+                } else {
+                    (Some(new_text), None)
                 })
             }),
         )
+    }
+
+    /// Updates a settings file this process doesn't load, such as another profile's. That
+    /// profile picks the change up from its file watcher when it runs.
+    pub fn update_settings_file_at(
+        &self,
+        fs: Arc<dyn Fs>,
+        path: PathBuf,
+        update: impl 'static + Send + FnOnce(&mut SettingsContent),
+    ) -> oneshot::Receiver<Result<()>> {
+        let (tx, rx) = oneshot::channel::<Result<()>>();
+        self.setting_file_updates_tx
+            .unbounded_send(Box::new(move |cx: AsyncApp| {
+                async move {
+                    let res = async {
+                        let old_text = Self::load_settings_at(&fs, &path).await?;
+                        let new_text = cx.read_global(|store: &SettingsStore, _| {
+                            store.new_text_for_update(old_text, update)
+                        })?;
+                        Self::write_settings_text(&fs, &path, new_text).await
+                    }
+                    .await;
+                    _ = tx.send(match &res {
+                        Ok(_) => anyhow::Ok(()),
+                        Err(e) => Err(anyhow::anyhow!("{:?}", e)),
+                    });
+                    res
+                }
+                .boxed_local()
+            }))
+            .map_err(|err| anyhow::format_err!("Failed to update settings file: {}", err))
+            .log_with_level(log::Level::Warn);
+        rx
     }
 
     pub fn import_vscode_settings(
@@ -719,9 +886,10 @@ impl SettingsStore {
         if self.user_settings.is_some() {
             files.push(SettingsFile::User);
         }
-        // Listed so that the values a profile inherits show up as its values
-        // instead of the defaults.
-        if self.global_layer.is_some() {
+        if self.shared_settings.is_some() {
+            files.push(SettingsFile::Shared);
+        }
+        if self.global_settings.is_some() {
             files.push(SettingsFile::Global);
         }
         files.push(SettingsFile::Default);
@@ -737,7 +905,8 @@ impl SettingsStore {
             SettingsFile::Default => Some(self.default_settings.as_ref()),
             SettingsFile::Server => self.server_settings.as_deref(),
             SettingsFile::Project(ref key) => self.local_settings.get(key),
-            SettingsFile::Global => self.global_layer.as_deref(),
+            SettingsFile::Shared => self.shared_settings.as_deref(),
+            SettingsFile::Global => self.global_settings.as_deref(),
         }
     }
 
@@ -1051,48 +1220,38 @@ impl SettingsStore {
 
         if let Some(settings) = settings {
             self.global_settings = Some(Box::new(settings));
-            self.update_global_layer();
             self.recompute_values(None, cx);
         }
         return parse_result;
     }
 
-    /// Sets the default profile's settings, which a profile inherits, via a
-    /// JSON string. Errors in them are the default profile's to report.
-    pub fn set_inherited_settings(&mut self, inherited_settings_content: &str, cx: &mut App) {
-        if self.last_inherited_settings_content.as_deref() == Some(inherited_settings_content) {
-            return;
+    /// Sets the settings every profile shares via a JSON string.
+    #[must_use]
+    pub fn set_shared_settings(
+        &mut self,
+        shared_settings_content: &str,
+        cx: &mut App,
+    ) -> SettingsParseResult {
+        if self.last_shared_settings_content.as_deref() == Some(shared_settings_content) {
+            return SettingsParseResult {
+                parse_status: ParseStatus::Unchanged,
+                migration_status: MigrationStatus::NotNeeded,
+            };
         }
-        self.last_inherited_settings_content = Some(inherited_settings_content.to_string());
+        self.last_shared_settings_content = Some(shared_settings_content.to_string());
 
-        let content = if inherited_settings_content.trim().is_empty() {
-            "{}".to_string()
-        } else {
-            migrator::migrate_settings(inherited_settings_content)
-                .log_err()
-                .flatten()
-                .unwrap_or_else(|| inherited_settings_content.to_string())
-        };
-        let (settings, parse_status) = UserSettingsContent::parse_json(&content);
-        if let ParseStatus::Failed { error } = parse_status {
-            log::error!("failed to parse the default profile's settings: {error}");
-        }
+        let (settings, parse_result) = self.parse_and_migrate_zed_settings::<UserSettingsContent>(
+            shared_settings_content,
+            SettingsFile::Shared,
+        );
         if let Some(settings) = settings {
-            self.inherited_settings = Some(Box::new(inheritable_settings(settings)));
-            self.update_global_layer();
+            let mut content = settings.content.as_ref().clone();
+            content.merge_from_option(settings.for_release_channel());
+            content.merge_from_option(settings.for_os());
+            self.shared_settings = Some(Box::new(content));
             self.recompute_values(None, cx);
         }
-    }
-
-    fn update_global_layer(&mut self) {
-        self.global_layer = match (&self.global_settings, &self.inherited_settings) {
-            (None, None) => None,
-            (global, inherited) => {
-                let mut layer = global.as_deref().cloned().unwrap_or_default();
-                layer.merge_from_option(inherited.as_deref());
-                Some(Box::new(layer))
-            }
-        };
+        parse_result
     }
 
     pub fn set_server_settings(
@@ -1456,7 +1615,8 @@ impl SettingsStore {
         if changed_local_path.is_none() {
             let mut merged = self.default_settings.as_ref().clone();
             merged.merge_from_option(self.extension_settings.as_deref());
-            merged.merge_from_option(self.global_layer.as_deref());
+            merged.merge_from_option(self.global_settings.as_deref());
+            merged.merge_from_option(self.shared_settings.as_deref());
             if let Some(user_settings) = self.user_settings.as_ref() {
                 let active_profile = user_settings.for_profile(cx);
                 let should_merge_user_settings =
@@ -1497,11 +1657,14 @@ impl SettingsStore {
             let mut merged = (*self.merged_settings).clone();
             // Reset disable_ai to compute fresh from base settings
             merged.project.disable_ai = self.default_settings.project.disable_ai;
-            if let Some(global) = &self.global_layer {
+            for layer in [&self.global_settings, &self.shared_settings]
+                .into_iter()
+                .flatten()
+            {
                 merged
                     .project
                     .disable_ai
-                    .merge_from(&global.project.disable_ai);
+                    .merge_from(&layer.project.disable_ai);
             }
             if let Some(user) = &self.user_settings {
                 merged
@@ -1761,34 +1924,6 @@ impl<T: Settings> AnySettingValue for SettingValue<T> {
         self.local_values
             .retain(|(worktree_id, _, _)| *worktree_id != root_id);
     }
-}
-
-/// Returns what a profile inherits from the default profile's settings: all of
-/// them but the language models, external agents and MCP servers, which each
-/// profile keeps to itself so personal and work accounts don't mix.
-fn inheritable_settings(settings: UserSettingsContent) -> SettingsContent {
-    let mut content = settings.content.as_ref().clone();
-    content.merge_from_option(settings.for_release_channel());
-    content.merge_from_option(settings.for_os());
-
-    content.language_models = None;
-    content.agent_servers = None;
-    content.project.context_servers.clear();
-    if let Some(edit_predictions) = content.project.all_languages.edit_predictions.as_mut() {
-        edit_predictions.provider = None;
-    }
-    if let Some(agent) = content.agent.as_mut() {
-        agent.default_model = None;
-        agent.subagent_model = None;
-        agent.inline_assistant_model = None;
-        agent.commit_message_model = None;
-        agent.thread_summary_model = None;
-        agent.compaction_model = None;
-        agent.inline_alternatives = None;
-        agent.favorite_models.clear();
-        agent.model_parameters.clear();
-    }
-    content
 }
 
 #[cfg(test)]
@@ -2926,26 +3061,21 @@ mod tests {
     }
 
     #[gpui::test]
-    fn test_inherited_settings(cx: &mut App) {
+    fn test_shared_settings(cx: &mut App) {
         let mut store = SettingsStore::new(cx, &test_settings());
         store.register_setting::<ItemSettings>();
 
-        store.set_inherited_settings(
-            r#"{
+        store
+            .set_shared_settings(
+                r#"{
                 "tabs": {
                     "close_position": "right",
                     "git_status": true,
                 },
-                "context_servers": {
-                    "personal": { "command": "personal-mcp" }
-                },
-                "agent": {
-                    "dock": "right",
-                    "default_model": { "provider": "anthropic", "model": "claude-opus-5-5" }
-                }
             }"#,
-            cx,
-        );
+                cx,
+            )
+            .unwrap();
         store
             .set_user_settings(r#"{ "tabs": { "close_position": "left" } }"#, cx)
             .unwrap();
@@ -2958,22 +3088,17 @@ mod tests {
             }
         );
 
-        let inherited = store
-            .inherited_settings
-            .as_deref()
-            .expect("the default profile's settings were set");
-        assert!(inherited.project.context_servers.is_empty());
-        let agent = inherited
-            .agent
-            .as_ref()
-            .expect("the agent settings are inherited");
-        assert_eq!(agent.dock, Some(crate::DockPosition::Right));
-        assert_eq!(agent.default_model, None);
-
         let (file, git_status) = store.get_value_from_file(SettingsFile::User, |settings| {
             settings.tabs.as_ref()?.git_status
         });
-        assert_eq!((file, git_status), (SettingsFile::Global, Some(true)));
+        assert_eq!((file, git_status), (SettingsFile::Shared, Some(true)));
+        let (file, close_position) = store.get_value_up_to_file(SettingsFile::User, |settings| {
+            settings.tabs.as_ref()?.close_position
+        });
+        assert_eq!(
+            (file, close_position),
+            (SettingsFile::Shared, Some(ClosePosition::Right))
+        );
     }
 
     #[gpui::test]

@@ -307,6 +307,9 @@ fn main() {
         }
         (None, None) => Vec::new(),
     };
+    if args.user_data_dir.is_none() {
+        paths::enable_profile_scoped_settings();
+    }
 
     #[cfg(target_os = "windows")]
     match util::get_zed_cli_path() {
@@ -323,6 +326,9 @@ fn main() {
     if !file_errors.is_empty() {
         files_not_created_on_launch(file_errors);
         return;
+    }
+    if let Err(error) = settings::migrate_to_profile_scopes() {
+        eprintln!("Failed to split the settings between profiles: {error:#}");
     }
 
     zlog::init();

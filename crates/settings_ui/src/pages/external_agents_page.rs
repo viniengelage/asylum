@@ -48,11 +48,17 @@ pub(crate) fn render_external_agents_page(
         .pb_16()
         .track_scroll(scroll_handle)
         .overflow_y_scroll()
-        .child(Label::new("External Agents"))
+        .child(Label::new(i18n::translate_text(
+            "settings_ui_text",
+            "External Agents",
+        )))
         .child(
-            Label::new("Agents connected through the Agent Client Protocol.")
-                .size(LabelSize::Small)
-                .color(Color::Muted),
+            Label::new(i18n::translate_text(
+                "settings_ui_text",
+                "Agents connected through the Agent Client Protocol.",
+            ))
+            .size(LabelSize::Small)
+            .color(Color::Muted),
         )
         .child(agent_list)
         .into_any_element()
@@ -117,9 +123,12 @@ fn render_empty_state(cx: &App) -> AnyElement {
         .border_color(cx.theme().colors().border.opacity(0.6))
         .rounded_sm()
         .child(
-            Label::new("No external agents added yet. Click \"Add Agent\" to get started.")
-                .color(Color::Muted)
-                .size(LabelSize::Small),
+            Label::new(i18n::translate_text(
+                "settings_ui_text",
+                "No external agents added yet. Click \"Add Agent\" to get started.",
+            ))
+            .color(Color::Muted)
+            .size(LabelSize::Small),
         )
         .into_any_element()
 }
@@ -133,9 +142,12 @@ fn render_no_project_state(cx: &App) -> AnyElement {
         .border_color(cx.theme().colors().border.opacity(0.6))
         .rounded_sm()
         .child(
-            Label::new("No active project found. Open a workspace to manage external agents.")
-                .color(Color::Muted)
-                .size(LabelSize::Small),
+            Label::new(i18n::translate_text(
+                "settings_ui_text",
+                "No active project found. Open a workspace to manage external agents.",
+            ))
+            .color(Color::Muted)
+            .size(LabelSize::Small),
         )
         .into_any_element()
 }
@@ -182,7 +194,10 @@ fn render_agent(
             .icon_size(IconSize::Small)
             .size(ButtonSize::Medium)
             .tab_index(0isize)
-            .tooltip(Tooltip::text("Configure Agent"))
+            .tooltip(Tooltip::text(i18n::translate_text(
+                "settings_ui_text",
+                "Configure Agent",
+            )))
             .on_click(cx.listener({
                 let id = id.clone();
                 move |this, _event, window, cx| {
@@ -194,8 +209,12 @@ fn render_agent(
     });
 
     let remove_tooltip = match source {
-        ExternalAgentSource::Registry => "Remove Registry Agent",
-        ExternalAgentSource::Custom => "Remove Custom Agent",
+        ExternalAgentSource::Registry => {
+            i18n::translate_text("settings_ui_text", "Remove Registry Agent")
+        }
+        ExternalAgentSource::Custom => {
+            i18n::translate_text("settings_ui_text", "Remove Custom Agent")
+        }
     };
 
     let remove_button = IconButton::new(format!("uninstall-{}", id_string), IconName::Trash)
@@ -267,40 +286,51 @@ pub(crate) fn render_add_agent_popover(
 
     let popover = PopoverMenu::new("add-agent-server-popover")
         .trigger(
-            Button::new("add-agent", "Add Agent")
-                .style(ButtonStyle::Outlined)
-                .track_focus(&focus_handle)
-                .start_icon(
-                    Icon::new(IconName::Plus)
-                        .size(IconSize::Small)
-                        .color(Color::Muted),
-                )
-                .label_size(LabelSize::Small),
+            Button::new(
+                "add-agent",
+                i18n::translate_text("settings_ui_text", "Add Agent"),
+            )
+            .style(ButtonStyle::Outlined)
+            .track_focus(&focus_handle)
+            .start_icon(
+                Icon::new(IconName::Plus)
+                    .size(IconSize::Small)
+                    .color(Color::Muted),
+            )
+            .label_size(LabelSize::Small),
         )
         .anchor(gpui::Anchor::TopRight)
         .menu(move |window, cx| {
             let settings_window = settings_window.clone();
             Some(ContextMenu::build(window, cx, move |menu, _window, _cx| {
-                menu.entry("Install from Registry", None, move |_window, cx| {
-                    if let Some(original_window) = original_window {
-                        cx.activate(true);
-                        original_window
-                            .update(cx, |_, window, cx| {
-                                window.activate_window();
-                                window.dispatch_action(Box::new(zed_actions::AcpRegistry), cx);
+                menu.entry(
+                    i18n::translate_text("settings_ui_text", "Install from Registry"),
+                    None,
+                    move |_window, cx| {
+                        if let Some(original_window) = original_window {
+                            cx.activate(true);
+                            original_window
+                                .update(cx, |_, window, cx| {
+                                    window.activate_window();
+                                    window.dispatch_action(Box::new(zed_actions::AcpRegistry), cx);
+                                })
+                                .log_err();
+                        }
+                    },
+                )
+                .entry(
+                    i18n::translate_text("settings_ui_text", "Add Custom Agent"),
+                    None,
+                    move |window, cx| {
+                        settings_window
+                            .update(cx, |this, cx| {
+                                open_custom_agent_form(this, None, window, cx);
                             })
                             .log_err();
-                    }
-                })
-                .entry("Add Custom Agent", None, move |window, cx| {
-                    settings_window
-                        .update(cx, |this, cx| {
-                            open_custom_agent_form(this, None, window, cx);
-                        })
-                        .log_err();
-                })
+                    },
+                )
                 .separator()
-                .header("Learn More")
+                .header(i18n::translate_text("settings_ui_text", "Learn More"))
                 .item(
                     ContextMenuEntry::new("ACP Docs")
                         .icon(IconName::ArrowUpRight)
@@ -451,8 +481,18 @@ fn new_kv_row(
     cx: &mut Context<SettingsWindow>,
 ) -> KeyValueRow {
     KeyValueRow {
-        key: new_input("Key", key, window, cx),
-        value: new_input("Value", value, window, cx),
+        key: new_input(
+            &i18n::translate_text("settings_ui_text", "Key"),
+            key,
+            window,
+            cx,
+        ),
+        value: new_input(
+            &i18n::translate_text("settings_ui_text", "Value"),
+            value,
+            window,
+            cx,
+        ),
     }
 }
 
@@ -467,14 +507,14 @@ pub(crate) fn open_custom_agent_form(
     settings_window.custom_agent_form = Some(CustomAgentForm::new(existing, window, cx));
 
     let title = if is_edit {
-        "Configure External Agent"
+        i18n::translate_text("settings_ui_text", "Configure External Agent")
     } else {
-        "Add Custom Agent"
+        i18n::translate_text("settings_ui_text", "Add Custom Agent")
     };
 
     settings_window.push_dynamic_sub_page(
         title,
-        "Agent Configuration",
+        i18n::translate_text("settings_ui_text", "Agent Configuration"),
         Some("agent_servers"),
         false,
         render_custom_agent_form_page,
@@ -597,7 +637,10 @@ fn render_env_section(
                             .icon_size(IconSize::Small)
                             .icon_color(Color::Muted)
                             .tab_index(0isize)
-                            .tooltip(Tooltip::text("Remove"))
+                            .tooltip(Tooltip::text(i18n::translate_text(
+                                "settings_ui_text",
+                                "Remove",
+                            )))
                             .on_click(cx.listener(move |this, _, _window, cx| {
                                 if let Some(form) = this.custom_agent_form.as_mut()
                                     && ix < form.env.len()
@@ -610,26 +653,29 @@ fn render_env_section(
             )
         }))
         .child(
-            Button::new("custom-agent-env-add", "Add")
-                .style(ButtonStyle::Outlined)
-                .label_size(LabelSize::Small)
-                .tab_index(0isize)
-                .start_icon(
-                    Icon::new(IconName::Plus)
-                        .size(IconSize::Small)
-                        .color(Color::Muted),
-                )
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    let row = new_kv_row(None, None, window, cx);
-                    // Focus the new key so the user can type immediately and tab
-                    // through the new row (key -> value -> ... -> Add button).
-                    let key_handle = row.key.focus_handle(cx);
-                    if let Some(form) = this.custom_agent_form.as_mut() {
-                        form.env.push(row);
-                    }
-                    key_handle.focus(window, cx);
-                    cx.notify();
-                })),
+            Button::new(
+                "custom-agent-env-add",
+                i18n::translate_text("settings_ui_text", "Add"),
+            )
+            .style(ButtonStyle::Outlined)
+            .label_size(LabelSize::Small)
+            .tab_index(0isize)
+            .start_icon(
+                Icon::new(IconName::Plus)
+                    .size(IconSize::Small)
+                    .color(Color::Muted),
+            )
+            .on_click(cx.listener(move |this, _, window, cx| {
+                let row = new_kv_row(None, None, window, cx);
+                // Focus the new key so the user can type immediately and tab
+                // through the new row (key -> value -> ... -> Add button).
+                let key_handle = row.key.focus_handle(cx);
+                if let Some(form) = this.custom_agent_form.as_mut() {
+                    form.env.push(row);
+                }
+                key_handle.focus(window, cx);
+                cx.notify();
+            })),
         )
         .into_any_element();
 
@@ -681,13 +727,16 @@ fn render_form_actions(
                 .border_1()
                 .border_color(cancel_border)
                 .child(
-                    Button::new("custom-agent-form-cancel", "Cancel")
-                        .style(ButtonStyle::Subtle)
-                        .track_focus(&cancel_handle)
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.custom_agent_form = None;
-                            this.pop_sub_page(window, cx);
-                        })),
+                    Button::new(
+                        "custom-agent-form-cancel",
+                        i18n::translate_text("settings_ui_text", "Cancel"),
+                    )
+                    .style(ButtonStyle::Subtle)
+                    .track_focus(&cancel_handle)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.custom_agent_form = None;
+                        this.pop_sub_page(window, cx);
+                    })),
                 ),
         )
         .child(
@@ -696,12 +745,15 @@ fn render_form_actions(
                 .border_1()
                 .border_color(save_border)
                 .child(
-                    Button::new("custom-agent-form-save", "Save")
-                        .style(ButtonStyle::Filled)
-                        .track_focus(&save_handle)
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            save_custom_agent_form(this, window, cx);
-                        })),
+                    Button::new(
+                        "custom-agent-form-save",
+                        i18n::translate_text("settings_ui_text", "Save"),
+                    )
+                    .style(ButtonStyle::Filled)
+                    .track_focus(&save_handle)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        save_custom_agent_form(this, window, cx);
+                    })),
                 ),
         )
 }
@@ -814,12 +866,18 @@ fn build_settings_from_values(
 ) -> Result<(AgentId, Option<AgentId>, CustomAgentServerSettings), SharedString> {
     let name = values.name.trim().to_string();
     if name.is_empty() {
-        return Err("Agent name is required.".into());
+        return Err(i18n::translate_text(
+            "settings_ui_text",
+            "Agent name is required.",
+        ));
     }
 
     let command = values.command.trim().to_string();
     if command.is_empty() {
-        return Err("Command is required.".into());
+        return Err(i18n::translate_text(
+            "settings_ui_text",
+            "Command is required.",
+        ));
     }
 
     let args = values

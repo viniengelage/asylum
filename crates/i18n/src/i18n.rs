@@ -156,6 +156,21 @@ pub fn translate_with(key: &'static str, arguments: &[(&str, &dyn Display)]) -> 
     text.into()
 }
 
+/// Translates an English text that is its own key, for interfaces whose strings are
+/// `&'static str` data spread over many files, like the settings window. The catalog is
+/// `assets/locales/<language>/<namespace>.json` keyed by the English text; a text without a
+/// translation shows as is.
+pub fn translate_text(namespace: &str, text: &'static str) -> SharedString {
+    let language = current_language();
+    if language == Language::English {
+        return SharedString::new_static(text);
+    }
+    TABLES[language as usize]
+        .get(&format!("{namespace}.{text}"))
+        .cloned()
+        .unwrap_or_else(|| SharedString::new_static(text))
+}
+
 #[derive(RegisterSetting)]
 pub struct UiLanguageSettings {
     pub ui_language: UiLanguageContent,
@@ -210,7 +225,8 @@ mod tests {
                 let empty = HashMap::new();
                 let english_entries = english.get(namespace).unwrap_or(&empty);
                 let entries = other.get(namespace).unwrap_or(&empty);
-                let keys: BTreeSet<&String> = english_entries.keys().chain(entries.keys()).collect();
+                let keys: BTreeSet<&String> =
+                    english_entries.keys().chain(entries.keys()).collect();
                 for key in keys {
                     match (english_entries.get(key), entries.get(key)) {
                         (Some(english_text), Some(text)) => {
@@ -222,10 +238,9 @@ mod tests {
                             }
                         }
                         (None, _) => problems.push(format!("en: missing {namespace}.{key}")),
-                        (_, None) => problems.push(format!(
-                            "{}: missing {namespace}.{key}",
-                            language.code()
-                        )),
+                        (_, None) => {
+                            problems.push(format!("{}: missing {namespace}.{key}", language.code()))
+                        }
                     }
                 }
             }
@@ -267,7 +282,11 @@ mod tests {
                 }
             }
         }
-        assert!(missing.is_empty(), "keys missing from assets/locales/en:\n{}", missing.join("\n"));
+        assert!(
+            missing.is_empty(),
+            "keys missing from assets/locales/en:\n{}",
+            missing.join("\n")
+        );
     }
 
     #[test]

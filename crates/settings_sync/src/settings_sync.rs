@@ -28,7 +28,7 @@ pub use github::{DeviceCode, GitHubUser};
 pub use sign_in_modal::SignInModal;
 pub use title_bar_button::render_title_bar_button;
 
-use crate::local_files::{MANIFEST_CONTENT, MANIFEST_NAME, SyncRecord};
+use crate::local_files::{MANIFEST_CONTENT, MANIFEST_NAME, SyncRecord, SyncScope};
 use crate::sync_plan::{ConflictWinner, Hashes, SyncAction, content_hash, plan_sync};
 
 actions!(
@@ -252,8 +252,9 @@ impl SettingsSync {
                 .await
                 .with_context(|| t!("settings_sync.error.delete_sign_in").to_string())?;
             // The next account to sign in may use a different gist, so this machine starts over
-            // as if it had never synced.
-            cx.background_spawn(async move { local_files::delete_record() })
+            // as if it had never synced. The shared record stays for the other profiles, and is
+            // only reused by the account that wrote it.
+            cx.background_spawn(async move { local_files::delete_profile_record() })
                 .await
         })
         .detach_and_log_err(cx);
@@ -271,11 +272,13 @@ impl SettingsSync {
 
         let http = self.http.clone();
         let token = token.clone();
-        let description = gist_description();
         let login = user.login.clone();
         self.sync_task = Some(cx.spawn(async move |this, cx| {
             let result = cx
-                .background_spawn(async move { run_sync(&http, &token, &description).await })
+                .background_spawn({
+                    let login = login.clone();
+                    async move { run_all_syncs(&http, &token, &login).await }
+                })
                 .await;
             this.update(cx, |this, cx| {
                 let State::SignedIn { sync, .. } = &mut this.state else {
@@ -364,21 +367,65 @@ async fn authorize(
     Ok((user, token))
 }
 
-/// Each app profile syncs to its own gist, the same way each one keeps its own settings.
-fn gist_description() -> String {
+/// Each app profile syncs its own files to its own gist, the same way each one keeps its own
+/// settings.
+fn profile_gist_description() -> String {
     match paths::active_profile_id() {
         Some(profile) => format!("Asylum settings sync ({profile})"),
         None => "Asylum settings sync".to_string(),
     }
 }
 
+/// Not "Asylum settings sync (shared)", since `shared` is a valid profile id.
+const SHARED_GIST_DESCRIPTION: &str = "Asylum shared settings sync";
+
+async fn run_all_syncs(http: &Arc<dyn HttpClient>, token: &str, login: &str) -> Result<SyncReport> {
+    let mut report = run_sync(
+        http,
+        token,
+        login,
+        SyncScope::Profile,
+        &profile_gist_description(),
+    )
+    .await?;
+    let Some(_lock) = local_files::try_lock_shared_sync()? else {
+        log::info!("settings sync: another profile is syncing the shared settings; skipping them");
+        return Ok(report);
+    };
+    let shared_report = run_sync(
+        http,
+        token,
+        login,
+        SyncScope::Shared,
+        SHARED_GIST_DESCRIPTION,
+    )
+    .await?;
+    report.add(&shared_report);
+    Ok(report)
+}
+
+impl SyncReport {
+    fn add(&mut self, other: &SyncReport) {
+        self.uploaded += other.uploaded;
+        self.downloaded += other.downloaded;
+        self.deleted += other.deleted;
+        self.backups += other.backups;
+    }
+}
+
 async fn run_sync(
     http: &Arc<dyn HttpClient>,
     token: &str,
+    login: &str,
+    scope: SyncScope,
     description: &str,
 ) -> Result<SyncReport> {
-    let mut record = local_files::read_record()?;
-    let local = local_files::read_local_files()?;
+    let mut record = local_files::read_record(scope)?;
+    if record.owner.as_deref().is_some_and(|owner| owner != login) {
+        record = SyncRecord::default();
+    }
+    let local = local_files::read_local_files(scope)?;
+    let owner = (scope == SyncScope::Shared).then(|| login.to_string());
 
     let mut remote = None;
     if let Some(gist_id) = record.gist_id.clone() {
@@ -399,19 +446,25 @@ async fn run_sync(
         let mut files = local.clone();
         files.insert(MANIFEST_NAME.to_string(), MANIFEST_CONTENT.to_string());
         let gist_id = github::create_gist(http, token, description, &files).await?;
-        local_files::write_record(&SyncRecord {
-            gist_id: Some(gist_id),
-            base: hashes(&local),
-        })?;
+        local_files::write_record(
+            scope,
+            &SyncRecord {
+                gist_id: Some(gist_id),
+                owner,
+                base: hashes(&local),
+            },
+        )?;
         return Ok(SyncReport {
             uploaded: local.len(),
             ..SyncReport::default()
         });
     };
 
+    // Files this scope doesn't sync are left alone in the gist, which is how a profile gist
+    // from before the shared gist keeps its keymap and themes instead of losing them.
     remote.remove(MANIFEST_NAME);
     remote.retain(|name, content| {
-        local_files::local_path(name).is_some() && !content.trim().is_empty()
+        local_files::local_path(scope, name).is_some() && !content.trim().is_empty()
     });
 
     // A machine that has never synced takes what's in the gist, so signing in on a new
@@ -428,12 +481,17 @@ async fn run_sync(
         conflict_winner,
     );
 
+    let backup_prefix = match scope {
+        SyncScope::Shared => "shared-",
+        SyncScope::Profile => "",
+    };
     let mut report = SyncReport::default();
     let mut remote_changes: BTreeMap<String, Option<String>> = BTreeMap::new();
     for (name, action) in &actions {
-        let Some(path) = local_files::local_path(name) else {
+        let Some(path) = local_files::local_path(scope, name) else {
             continue;
         };
+        let backup_name = format!("{backup_prefix}{name}");
         match action {
             SyncAction::Upload => {
                 remote_changes.insert(name.clone(), local.get(name).cloned());
@@ -441,7 +499,7 @@ async fn run_sync(
             }
             SyncAction::UploadKeepingRemoteBackup => {
                 if let Some(content) = remote.get(name) {
-                    local_files::write_backup(name, content, "github")?;
+                    local_files::write_backup(&backup_name, content, "github")?;
                     report.backups += 1;
                 }
                 remote_changes.insert(name.clone(), local.get(name).cloned());
@@ -455,7 +513,7 @@ async fn run_sync(
             }
             SyncAction::DownloadKeepingLocalBackup => {
                 if let Some(content) = local.get(name) {
-                    local_files::write_backup(name, content, "local")?;
+                    local_files::write_backup(&backup_name, content, "local")?;
                     report.backups += 1;
                 }
                 if let Some(content) = remote.get(name) {
@@ -479,8 +537,9 @@ async fn run_sync(
     }
 
     record.gist_id = Some(gist_id);
-    record.base = hashes(&local_files::read_local_files()?);
-    local_files::write_record(&record)?;
+    record.owner = owner;
+    record.base = hashes(&local_files::read_local_files(scope)?);
+    local_files::write_record(scope, &record)?;
     Ok(report)
 }
 
