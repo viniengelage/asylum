@@ -230,12 +230,28 @@ struct CreateForm {
     /// Already on the remote and not on the destination, newest first.
     commits: Vec<api::Commit>,
     commits_loaded: bool,
+    /// In the checkout but not on the remote yet, newest first; pushed when the PR is created.
+    local_commits: Vec<api::Commit>,
+    /// What the PR would change against the destination, from the local checkout.
+    diff_summary: Option<DiffSummary>,
+    local_loaded: bool,
     /// Title and description are filled from the commits once; after that they are the user's.
     autofilled: bool,
+    /// The autofilled title and where it came from, so the hint goes away once it is edited.
+    autofilled_title: Option<(String, SharedString)>,
+    has_default_reviewers: bool,
     error: Option<SharedString>,
     submitting: bool,
     _load_task: Task<()>,
     commits_task: Option<Task<()>>,
+    local_task: Option<Task<()>>,
+}
+
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+struct DiffSummary {
+    added: u64,
+    removed: u64,
+    files: usize,
 }
 
 pub struct RepoPanel {
@@ -1532,11 +1548,7 @@ impl RepoPanel {
             if self.pull_requests.synced_at.is_none() {
                 return None;
             }
-            let new_url = format!(
-                "{}/pull-requests/new?source={}",
-                repository.web_url(),
-                urlencoding::encode(&branch)
-            );
+            let new_url = repository.new_pull_request_url(&branch, None);
             return Some(
                 card.child(header(None))
                     .child(
@@ -2785,7 +2797,7 @@ impl RepoPanel {
         }
         for (index, commit) in detail.commits.iter().enumerate() {
             let selected = open_pull_request.selected_commit == Some(index);
-            list = list.child(self.render_commit_row(commit, opening, selected, now, cx));
+            list = list.child(self.render_commit_row(commit, opening, selected, false, now, cx));
         }
 
         let added: u64 = detail.files.iter().map(|file| file.lines_added).sum();
@@ -2819,6 +2831,7 @@ impl RepoPanel {
         commit: &api::Commit,
         opening: bool,
         selected: bool,
+        unpushed: bool,
         now: DateTime<Utc>,
         cx: &Context<Self>,
     ) -> impl IntoElement {
@@ -2853,7 +2866,11 @@ impl RepoPanel {
                 h_flex().h(DynamicSpacing::Base20.px(cx)).child(
                     Icon::new(IconName::GitCommit)
                         .size(IconSize::Small)
-                        .color(Color::Muted),
+                        .color(if unpushed {
+                            Color::Warning
+                        } else {
+                            Color::Muted
+                        }),
                 ),
             )
             .child(
@@ -2885,7 +2902,19 @@ impl RepoPanel {
                                     .size(LabelSize::XSmall)
                                     .color(Color::Muted)
                                     .truncate(),
-                            ),
+                            )
+                            .when(unpushed, |this| {
+                                this.child(
+                                    Label::new("·")
+                                        .size(LabelSize::XSmall)
+                                        .color(Color::Disabled),
+                                )
+                                .child(
+                                    Label::new(t!("repo_hosting.create.not_pushed"))
+                                        .size(LabelSize::XSmall)
+                                        .color(Color::Warning),
+                                )
+                            }),
                     ),
             )
     }
@@ -3794,11 +3823,12 @@ impl RepoPanel {
                 form.branches = branches;
                 // Default reviewers need a repository admin to have set them; without them
                 // (or without permission to read them) the form just starts empty.
-                for reviewer in reviewers
+                let reviewers = reviewers
                     .context("Repo: revisores padrão indisponíveis")
                     .log_err()
-                    .unwrap_or_default()
-                {
+                    .unwrap_or_default();
+                form.has_default_reviewers = !reviewers.is_empty();
+                for reviewer in reviewers {
                     add_person(&mut form.candidates, &reviewer, my_id.as_deref());
                     if Some(reviewer.id.as_str()) != my_id.as_deref() {
                         add_person(&mut form.reviewers, &reviewer, None);
@@ -3823,11 +3853,17 @@ impl RepoPanel {
             draft: false,
             commits: Vec::new(),
             commits_loaded: false,
+            local_commits: Vec::new(),
+            diff_summary: None,
+            local_loaded: false,
             autofilled: false,
+            autofilled_title: None,
+            has_default_reviewers: false,
             error: None,
             submitting: false,
             _load_task: load_task,
             commits_task: None,
+            local_task: None,
         });
         cx.notify();
     }
@@ -3864,6 +3900,7 @@ impl RepoPanel {
         let needs_upstream = self
             .local_branch_status(cx)
             .is_none_or(|status| status.needs_upstream);
+        self.reload_local_commits(window, cx);
         let Some(form) = &mut self.creating else {
             return;
         };
@@ -3903,25 +3940,93 @@ impl RepoPanel {
         }));
     }
 
+    /// The commits only the checkout has and the diff against the destination, read with the
+    /// git CLI because the remote can't see either before the push.
+    fn reload_local_commits(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Target::Hosted { remote_name, .. } = self.target.clone() else {
+            return;
+        };
+        let status = self.local_branch_status(cx);
+        let work_directory = self
+            .project
+            .read(cx)
+            .active_repository(cx)
+            .map(|repository| repository.read(cx).work_directory_abs_path.clone());
+        let Some(form) = &mut self.creating else {
+            return;
+        };
+        let destination = form.destination.clone();
+        let (Some(work_directory), Some(destination), Some(status)) =
+            (work_directory, destination, status)
+        else {
+            form.local_commits.clear();
+            form.diff_summary = None;
+            form.local_loaded = true;
+            form.local_task = None;
+            return;
+        };
+        let base_ref = format!("{remote_name}/{destination}");
+        // Before the first push everything the destination lacks is local; after it, only
+        // what is ahead of the upstream.
+        let unpushed_range = if status.needs_upstream || status.tracks_other_remote {
+            format!("{base_ref}..HEAD")
+        } else {
+            "@{upstream}..HEAD".to_string()
+        };
+        form.local_loaded = false;
+        let load = cx.background_spawn(async move {
+            let commits = git_output(
+                &work_directory,
+                &[
+                    "log",
+                    "--max-count=100",
+                    "--format=%H%x1f%an%x1f%aI%x1f%s",
+                    &unpushed_range,
+                ],
+            )
+            .await
+            .map(|output| parse_local_commits(&output));
+            let diff = git_output(
+                &work_directory,
+                &["diff", "--numstat", &format!("{base_ref}...HEAD")],
+            )
+            .await
+            .map(|output| parse_numstat(&output));
+            (commits, diff)
+        });
+        form.local_task = Some(cx.spawn_in(window, async move |this, cx| {
+            let (commits, diff) = load.await;
+            this.update_in(cx, |this, window, cx| {
+                let Some(form) = &mut this.creating else {
+                    return;
+                };
+                form.local_commits = commits
+                    .context("Repo: falha ao listar os commits locais")
+                    .log_err()
+                    .unwrap_or_default();
+                form.diff_summary = diff
+                    .context("Repo: falha ao calcular o diff contra o destino")
+                    .log_err();
+                form.local_loaded = true;
+                this.autofill(window, cx);
+                cx.notify();
+            })
+            .log_err();
+        }));
+    }
+
     fn autofill(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let status = self.local_branch_status(cx);
         let Some(form) = &mut self.creating else {
             return;
         };
-        if form.autofilled {
+        if form.autofilled || !form.commits_loaded || !form.local_loaded {
             return;
         }
         form.autofilled = true;
         let head_subject = status
             .as_ref()
             .and_then(|status| status.head_subject.clone());
-        let unpushed = status.as_ref().map_or(0, |status| {
-            if status.needs_upstream {
-                1
-            } else {
-                status.ahead
-            }
-        });
 
         let mut subjects: Vec<String> = form
             .commits
@@ -3929,20 +4034,31 @@ impl RepoPanel {
             .rev()
             .map(|commit| commit.summary.clone())
             .collect();
-        if unpushed > 0
+        for commit in form.local_commits.iter().rev() {
+            if !subjects.contains(&commit.summary) {
+                subjects.push(commit.summary.clone());
+            }
+        }
+        if subjects.is_empty()
             && let Some(head_subject) = &head_subject
-            && !subjects.contains(head_subject)
         {
             subjects.push(head_subject.clone());
         }
 
         if form.title_input.read(cx).is_empty(cx) {
-            let title = match subjects.as_slice() {
-                [only] => only.clone(),
-                _ => humanize_branch(&form.source_branch)
-                    .or(head_subject)
-                    .unwrap_or_default(),
+            let (title, source) = match subjects.as_slice() {
+                [only] => (only.clone(), t!("repo_hosting.create.title_hint_commit")),
+                _ => match humanize_branch(&form.source_branch) {
+                    Some(title) => (title, t!("repo_hosting.create.title_hint_branch")),
+                    None => (
+                        head_subject.unwrap_or_default(),
+                        t!("repo_hosting.create.title_hint_commit"),
+                    ),
+                },
             };
+            if !title.is_empty() {
+                form.autofilled_title = Some((title.clone(), source));
+            }
             form.title_input
                 .update(cx, |input, cx| input.set_text(&title, window, cx));
         }
@@ -4320,7 +4436,13 @@ impl RepoPanel {
             .child(
                 v_flex()
                     .gap(DynamicSpacing::Base06.px(cx))
-                    .child(field_label(t!("repo_hosting.create.field_title"), None))
+                    .child(field_label(
+                        t!("repo_hosting.create.field_title"),
+                        form.autofilled_title
+                            .as_ref()
+                            .filter(|(title, _)| form.title_input.read(cx).text(cx) == *title)
+                            .map(|(_, source)| source.clone()),
+                    ))
                     .child(form.title_input.clone()),
             )
             .child(
@@ -4343,7 +4465,11 @@ impl RepoPanel {
             .child(
                 v_flex()
                     .gap(DynamicSpacing::Base06.px(cx))
-                    .child(field_label(t!("repo_hosting.detail.field_reviewers"), None))
+                    .child(field_label(
+                        t!("repo_hosting.detail.field_reviewers"),
+                        form.has_default_reviewers
+                            .then(|| t!("repo_hosting.create.reviewers_hint")),
+                    ))
                     .child(reviewers),
             )
             .child(
@@ -4364,7 +4490,8 @@ impl RepoPanel {
                         cx,
                     )),
             )
-            .child(commits);
+            .child(commits)
+            .children(self.render_create_changes(form, cx));
 
         let submit_label = if form.submitting {
             if needs_push {
@@ -4406,9 +4533,15 @@ impl RepoPanel {
                             })),
                     )
                     .child(
-                        Label::new(t!("repo_hosting.create.new_badge"))
-                            .size(LabelSize::XSmall)
-                            .color(Color::Muted),
+                        h_flex()
+                            .gap_1()
+                            .child(
+                                Label::new(t!("repo_hosting.create.new_badge"))
+                                    .size(LabelSize::XSmall)
+                                    .buffer_font(cx)
+                                    .color(Color::Muted),
+                            )
+                            .child(self.render_create_menu(form, needs_push)),
                     ),
             )
             .child(content)
@@ -4619,16 +4752,9 @@ impl RepoPanel {
         cx: &Context<Self>,
     ) -> impl IntoElement {
         let now = Utc::now();
-        let unpushed = status.map_or(0, |status| {
-            if status.needs_upstream {
-                0
-            } else {
-                status.ahead
-            }
-        });
         let mut list = v_flex().gap_0p5().child(Self::render_section_header(
             t!("repo_hosting.create.commits_header"),
-            Some(form.commits.len() + unpushed as usize),
+            Some(form.commits.len() + form.local_commits.len()),
             Some(
                 Label::new(t!("repo_hosting.create.commits_hint"))
                     .size(LabelSize::XSmall)
@@ -4637,46 +4763,236 @@ impl RepoPanel {
             ),
             cx,
         ));
-        if status.is_some_and(|status| status.needs_upstream) {
-            list = list.child(
-                Label::new(t!("repo_hosting.create.commits_not_published"))
-                    .size(LabelSize::Small)
-                    .color(Color::Muted),
-            );
-        } else if !form.commits_loaded {
+        if !form.commits_loaded || !form.local_loaded {
             list = list.child(
                 Label::new(t!("repo_hosting.detail.loading_commits"))
                     .size(LabelSize::Small)
                     .color(Color::Muted),
             );
-        }
-        if unpushed > 0 {
+        } else if form.local_commits.is_empty()
+            && status.is_some_and(|status| status.needs_upstream)
+        {
             list = list.child(
-                h_flex()
-                    .gap(DynamicSpacing::Base06.px(cx))
-                    .px(DynamicSpacing::Base08.px(cx))
-                    .py(DynamicSpacing::Base04.px(cx))
-                    .child(
-                        Icon::new(IconName::ArrowUp)
-                            .size(IconSize::XSmall)
-                            .color(Color::Warning),
-                    )
-                    .child(
-                        Label::new(if unpushed == 1 {
-                            t!("repo_hosting.create.unpushed.one")
-                        } else {
-                            t!("repo_hosting.create.unpushed.other", count = unpushed)
-                        })
-                        .size(LabelSize::XSmall)
-                        .color(Color::Warning),
-                    ),
+                Label::new(t!("repo_hosting.create.commits_not_published"))
+                    .size(LabelSize::Small)
+                    .color(Color::Muted),
             );
         }
+        for commit in &form.local_commits {
+            list = list.child(self.render_commit_row(commit, false, false, true, now, cx));
+        }
         for commit in &form.commits {
-            list = list.child(self.render_commit_row(commit, false, false, now, cx));
+            if form
+                .local_commits
+                .iter()
+                .any(|local| local.hash == commit.hash)
+            {
+                continue;
+            }
+            list = list.child(self.render_commit_row(commit, false, false, false, now, cx));
         }
         list
     }
+
+    /// The board's "+482 −97 em 12 arquivos · Diff contra develop" card.
+    fn render_create_changes(&self, form: &CreateForm, cx: &Context<Self>) -> Option<AnyElement> {
+        let summary = form.diff_summary?;
+        let destination = form.destination.clone()?;
+        if summary.files == 0 {
+            return None;
+        }
+        Some(
+            h_flex()
+                .gap_2()
+                .py_2()
+                .pl(px(10.))
+                .pr_2()
+                .rounded_lg()
+                .border_1()
+                .border_color(cx.theme().colors().border)
+                .bg(cx.theme().colors().element_background)
+                .child(
+                    Icon::new(IconName::FileDiff)
+                        .size(IconSize::Small)
+                        .color(Color::Muted),
+                )
+                .child(
+                    Label::new(format!("+{}", summary.added))
+                        .size(LabelSize::Small)
+                        .weight(FontWeight::SEMIBOLD)
+                        .color(Color::Created),
+                )
+                .child(
+                    Label::new(format!("−{}", summary.removed))
+                        .size(LabelSize::Small)
+                        .weight(FontWeight::SEMIBOLD)
+                        .color(Color::Deleted),
+                )
+                .child(
+                    div().flex_1().min_w_0().child(
+                        Label::new(if summary.files == 1 {
+                            t!("repo_hosting.create.changed_files.one")
+                        } else {
+                            t!(
+                                "repo_hosting.create.changed_files.other",
+                                count = summary.files
+                            )
+                        })
+                        .size(LabelSize::Small)
+                        .color(Color::Muted)
+                        .truncate(),
+                    ),
+                )
+                .child(
+                    h_flex()
+                        .id("repo-create-diff")
+                        .flex_none()
+                        .h(px(26.))
+                        .pl_2()
+                        .pr(px(10.))
+                        .gap(px(6.))
+                        .rounded_lg()
+                        .cursor_pointer()
+                        .hover(|this| this.bg(cx.theme().colors().ghost_element_hover))
+                        .child(
+                            Icon::new(IconName::DiffSplit)
+                                .size(IconSize::XSmall)
+                                .color(Color::Default),
+                        )
+                        .child(
+                            Label::new(t!(
+                                "repo_hosting.create.diff_against",
+                                branch = destination
+                            ))
+                            .size(LabelSize::Small),
+                        )
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.open_create_diff(window, cx)),
+                        ),
+                )
+                .into_any_element(),
+        )
+    }
+
+    fn open_create_diff(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Target::Hosted { remote_name, .. } = &self.target else {
+            return;
+        };
+        let Some(destination) = self
+            .creating
+            .as_ref()
+            .and_then(|form| form.destination.clone())
+        else {
+            return;
+        };
+        let Some(repository) = self.project.read(cx).active_repository(cx) else {
+            return;
+        };
+        let base_ref: SharedString = format!("{remote_name}/{destination}").into();
+        let project = self.project.clone();
+        self.workspace
+            .update(cx, |workspace, cx| {
+                BranchDiff::deploy_branch_diff_with_base_ref(
+                    workspace, project, repository, base_ref, None, window, cx,
+                );
+            })
+            .log_err();
+    }
+
+    fn render_create_menu(&self, form: &CreateForm, needs_push: bool) -> impl IntoElement {
+        let Target::Hosted { repository, .. } = &self.target else {
+            return div().into_any_element();
+        };
+        let host = self.hosting().name();
+        let web_url =
+            repository.new_pull_request_url(&form.source_branch, form.destination.as_deref());
+        let source_branch = form.source_branch.clone();
+        PopoverMenu::new("repo-create-menu")
+            .trigger(
+                IconButton::new("repo-create-menu-button", IconName::Ellipsis)
+                    .icon_size(IconSize::Small)
+                    .icon_color(Color::Muted),
+            )
+            .menu(move |window, cx| {
+                let web_url = web_url.clone();
+                let source_branch = source_branch.clone();
+                Some(ContextMenu::build(window, cx, move |menu, _, _| {
+                    menu.item(
+                        ContextMenuEntry::new(t!("repo_hosting.common.open_in", host = host))
+                            .icon(IconName::ArrowUpRight)
+                            .disabled(needs_push)
+                            .handler(move |_, cx| cx.open_url(&web_url)),
+                    )
+                    .item(
+                        ContextMenuEntry::new(t!("repo_hosting.create.copy_branch"))
+                            .icon(IconName::Copy)
+                            .handler(move |_, cx| {
+                                cx.write_to_clipboard(ClipboardItem::new_string(
+                                    source_branch.clone(),
+                                ))
+                            }),
+                    )
+                }))
+            })
+            .into_any_element()
+    }
+}
+
+/// Runs git in the checkout and returns what it printed.
+async fn git_output(work_directory: &std::path::Path, args: &[&str]) -> anyhow::Result<String> {
+    let output = util::command::new_command("git")
+        .current_dir(work_directory)
+        .args(args)
+        .output()
+        .await
+        .context("git não encontrado")?;
+    anyhow::ensure!(
+        output.status.success(),
+        "git {}: {}",
+        args.first().copied().unwrap_or_default(),
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// `git log --format=%H%x1f%an%x1f%aI%x1f%s` lines, newest first.
+fn parse_local_commits(output: &str) -> Vec<api::Commit> {
+    output
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.splitn(4, '\u{1f}');
+            let hash = fields.next()?.to_string();
+            let author = fields.next()?.to_string();
+            let date = DateTime::parse_from_rfc3339(fields.next()?)
+                .ok()
+                .map(|date| date.with_timezone(&Utc));
+            let summary = fields.next()?.to_string();
+            (!hash.is_empty()).then_some(api::Commit {
+                hash,
+                summary,
+                author,
+                date,
+            })
+        })
+        .collect()
+}
+
+/// Sums `git diff --numstat`; binary files count as changed without lines.
+fn parse_numstat(output: &str) -> DiffSummary {
+    let mut summary = DiffSummary::default();
+    for line in output.lines().filter(|line| !line.trim().is_empty()) {
+        let mut fields = line.split('\t');
+        summary.added += fields
+            .next()
+            .and_then(|added| added.parse::<u64>().ok())
+            .unwrap_or(0);
+        summary.removed += fields
+            .next()
+            .and_then(|removed| removed.parse::<u64>().ok())
+            .unwrap_or(0);
+        summary.files += 1;
+    }
+    summary
 }
 
 fn add_person(people: &mut Vec<api::Person>, person: &api::Person, except_id: Option<&str>) {
@@ -7296,6 +7612,27 @@ mod tests {
                 })
                 .collect(),
         }
+    }
+
+    #[test]
+    fn reads_local_commits_and_numstat() {
+        let commits = parse_local_commits(
+            "e41c9a2ff\u{1f}Ana Souza\u{1f}2026-11-03T10:00:00-03:00\u{1f}LoginScreen: Face ID\n\
+             7b03d1fee\u{1f}Ana Souza\u{1f}not a date\u{1f}Guarda o token\n",
+        );
+        assert_eq!(commits.len(), 2);
+        assert_eq!(commits[0].summary, "LoginScreen: Face ID");
+        assert_eq!(commits[0].date, DateTime::from_timestamp(1_793_710_800, 0));
+        assert_eq!(commits[1].date, None);
+
+        assert_eq!(
+            parse_numstat("10\t2\tsrc/a.ts\n-\t-\tlogo.png\n0\t5\tsrc/b.ts\n"),
+            DiffSummary {
+                added: 10,
+                removed: 7,
+                files: 3,
+            }
+        );
     }
 
     #[test]

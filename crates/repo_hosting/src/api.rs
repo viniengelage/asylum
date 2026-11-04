@@ -82,6 +82,27 @@ impl RemoteRepository {
             Hosting::GitHub => format!("https://github.com/{}/{}", self.owner, self.name),
         }
     }
+
+    /// The host's page for opening a pull request from `source`.
+    pub fn new_pull_request_url(&self, source: &str, destination: Option<&str>) -> String {
+        let source = urlencoding::encode(source);
+        match (self.hosting, destination) {
+            (Hosting::Bitbucket, Some(destination)) => format!(
+                "{}/pull-requests/new?source={source}&dest={}",
+                self.web_url(),
+                urlencoding::encode(destination)
+            ),
+            (Hosting::Bitbucket, None) => {
+                format!("{}/pull-requests/new?source={source}", self.web_url())
+            }
+            (Hosting::GitHub, Some(destination)) => format!(
+                "{}/compare/{}...{source}?expand=1",
+                self.web_url(),
+                urlencoding::encode(destination)
+            ),
+            (Hosting::GitHub, None) => format!("{}/pull/new/{source}", self.web_url()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
