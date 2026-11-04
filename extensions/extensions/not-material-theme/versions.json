@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "github.com/iamawatermelo"
+   ],
+   "description": "Pastel material themes in various colours",
+   "download_count": 0,
+   "id": "not-material-theme",
+   "name": "Not Material Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:09:20Z",
+   "repository": "https://github.com/iamawatermelo/zed-hct-theme-maker",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "dev-five-git"
+   ],
+   "description": "Colors JSX component tags by RSC client/server boundary (matches the VS Code extension).",
+   "download_count": 0,
+   "id": "react-component-lens-lsp",
+   "name": "React Component Lens",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-11-04T12:24:23Z",
+   "repository": "https://github.com/dev-five-git/react-component-lens",
+   "schema_version": 1,
+   "version": "1.0.5",
+   "wasm_api_version": "0.7.0"
+  }
+ ]
+}

@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Stanislav Chernov <bintocher@yandex.com>"
+   ],
+   "description": "Syntax highlighting for Qlik Sense / QlikView script files (.qvs)",
+   "download_count": 0,
+   "id": "qlik",
+   "name": "Qlik",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-04T12:23:26Z",
+   "repository": "https://github.com/bintocher/zed-qlik-editor",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

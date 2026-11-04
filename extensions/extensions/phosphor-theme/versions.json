@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Codenii <me@codeni.wiki>"
+   ],
+   "description": "A bold, high-contrast theme family with six variants. Punchy syntax highlighting that refuses to be subtle.",
+   "download_count": 0,
+   "id": "phosphor-theme",
+   "name": "Phosphor",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:14:47Z",
+   "repository": "https://github.com/Codenii/phosphor-zed",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

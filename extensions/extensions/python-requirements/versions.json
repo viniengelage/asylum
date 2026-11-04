@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Gabriel Linder <linder.gabriel@gmail.com>"
+   ],
+   "description": "Syntax highlighting for requirements.txt and constraints.txt files",
+   "download_count": 0,
+   "id": "python-requirements",
+   "name": "Python requirements and constraints",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-04T12:23:23Z",
+   "repository": "https://github.com/dargor/zed-python-requirements",
+   "schema_version": 1,
+   "version": "0.0.5",
+   "wasm_api_version": null
+  }
+ ]
+}

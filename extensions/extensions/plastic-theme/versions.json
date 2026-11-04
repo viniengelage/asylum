@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Muhammad Ibnuh <ibnuhdev@gmail.com>"
+   ],
+   "description": "A port of Will Stone's Plastic theme for Zed. A simple syntax and UI theme with a dark variant.",
+   "download_count": 0,
+   "id": "plastic-theme",
+   "name": "Plastic Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:15:36Z",
+   "repository": "https://github.com/ibnuh/zed-plastic-theme",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

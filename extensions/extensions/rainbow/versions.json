@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Athan Xiao <athanseal@gmail.com>"
+   ],
+   "description": "Rainbow theme for Zed",
+   "download_count": 0,
+   "id": "rainbow",
+   "name": "Rainbow",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:23:49Z",
+   "repository": "https://github.com/athxx/zed-theme-rainbow",
+   "schema_version": 1,
+   "version": "1.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

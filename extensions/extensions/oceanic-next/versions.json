@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Rosen Kanev <rkunev@gmail.com"
+   ],
+   "description": "Minimalist theme, a port of the popular Oceanic Next with slight changes.",
+   "download_count": 0,
+   "id": "oceanic-next",
+   "name": "Oceanic Next Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:11:08Z",
+   "repository": "https://github.com/rkunev/oceanic-next",
+   "schema_version": 1,
+   "version": "1.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

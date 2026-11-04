@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "blaqat <blaqat.ag@gmail.com>"
+   ],
+   "description": "A port of polar, a pure white light theme based from nord colors.",
+   "download_count": 0,
+   "id": "polar-theme",
+   "name": "Polar Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:20:14Z",
+   "repository": "https://github.com/biaqat/polar-theme-zed",
+   "schema_version": 1,
+   "version": "0.8.1",
+   "wasm_api_version": null
+  }
+ ]
+}

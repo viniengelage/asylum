@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Iftekhar"
+   ],
+   "description": "A beautiful dark minimal theme for Zed editor",
+   "download_count": 0,
+   "id": "optima-theme",
+   "name": "Optima Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:12:32Z",
+   "repository": "https://github.com/iftekhar-ifat/optima-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

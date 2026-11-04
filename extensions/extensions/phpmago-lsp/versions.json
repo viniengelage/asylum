@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Lirim Sakura <sakura@lirim.net>"
+   ],
+   "description": "Language Server for using Mago. Support lint and analyze. Mago is required in your $PATH.",
+   "download_count": 0,
+   "id": "phpmago-lsp",
+   "name": "PHP Mago",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-11-04T12:15:14Z",
+   "repository": "https://github.com/LirimSakura/zed-php-mago/tree/main/php-mago",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": "0.7.0"
+  }
+ ]
+}

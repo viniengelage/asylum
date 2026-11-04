@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "VitMach Converted from VS Code Pace Dark by Fabian Hilleh"
+   ],
+   "description": "Pace Dark, Pace Dark Pro OLED and Pace Light Pro themes",
+   "download_count": 0,
+   "id": "pace-pro-theme",
+   "name": "Pace Pro",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:13:07Z",
+   "repository": "https://github.com/VMachihin/pace-theme-pro",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

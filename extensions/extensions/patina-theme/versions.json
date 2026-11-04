@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Luis Markmann"
+   ],
+   "description": "Warm, muted theme with earthy tones. Teal oxidation and amber warmth. Includes Dark, Dark Soft, Moss, Light, Lichen, and Stellar variants.",
+   "download_count": 0,
+   "id": "patina-theme",
+   "name": "Patina",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:14:26Z",
+   "repository": "https://github.com/lmarkmann/patina-theme",
+   "schema_version": 1,
+   "version": "1.4.0",
+   "wasm_api_version": null
+  }
+ ]
+}

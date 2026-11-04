@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "ugi-dev <hello@ugi.dev>"
+   ],
+   "description": "Converts CSS px values to rem and vice versa via LSP code actions.",
+   "download_count": 0,
+   "id": "px-to-rem",
+   "name": "Px to Rem",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-11-04T12:22:16Z",
+   "repository": "https://github.com/ugi-dev/px-to-rem",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": "0.7.0"
+  }
+ ]
+}

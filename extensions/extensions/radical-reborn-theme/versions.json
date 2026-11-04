@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Aqua <neku113@gmail.com>"
+   ],
+   "description": "A maintained fork of Radical \u2014 retro-futuristic dark theme.",
+   "download_count": 0,
+   "id": "radical-reborn-theme",
+   "name": "Radical Reborn",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:23:47Z",
+   "repository": "https://github.com/AquaOctet/radical-reborn",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

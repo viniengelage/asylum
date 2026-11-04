@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "nstlgy <yvsh7.btw@gmail.com>"
+   ],
+   "description": "Elegant dark theme with vibrant syntax highlighting inspired by the code playground theme made by Josh W Comeau at joshwcomeau.com",
+   "download_count": 0,
+   "id": "nstlgy-dark",
+   "name": "Nstlgy Dark Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:09:53Z",
+   "repository": "https://github.com/nstlgy/zed-nstlgy-dark",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Menouer Nobach <menouer.nobach@bettyblocks.com>"
+   ],
+   "description": "Faithful port of the Outrun VS Code theme by samrapdev \u2014 synthwave colors, Night and Electric variants",
+   "download_count": 0,
+   "id": "outrun-vscode-theme",
+   "name": "Outrun (VS Code Port)",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:12:43Z",
+   "repository": "https://github.com/exkungen/outrun-vscode-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

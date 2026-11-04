@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Bikossor <perfect-dusk@almost.mozmail.com>"
+   ],
+   "description": "Beautiful and accessible dark theme for your favorite code editor",
+   "download_count": 0,
+   "id": "perfect-dusk",
+   "name": "Perfect Dusk",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:14:34Z",
+   "repository": "https://github.com/Bikossor/Perfect-Dusk-Zed",
+   "schema_version": 1,
+   "version": "1.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

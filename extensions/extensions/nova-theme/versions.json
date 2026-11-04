@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Peng Lyu <penn.lv@gmail.com>",
+    "Ming Jiang <jm1179356055@gmail.com>"
+   ],
+   "description": "Nova color scheme for Zed, ported from VSCode",
+   "download_count": 0,
+   "id": "nova-theme",
+   "name": "Nova",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:09:24Z",
+   "repository": "https://github.com/overstarry/zed-nova",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

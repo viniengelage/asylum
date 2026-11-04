@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Mikhael Khrustik <misha@myrt.co>"
+   ],
+   "description": "Syntax highlighting for OpenType Feature files (.fea)",
+   "download_count": 0,
+   "id": "opentype-feature",
+   "name": "OpenType\u2122 Feature",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-04T12:12:31Z",
+   "repository": "https://github.com/mishamyrt/zed-opentype-feature",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

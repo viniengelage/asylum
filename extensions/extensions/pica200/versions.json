@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Finn Dooley"
+   ],
+   "description": "Syntax highlighting for PICA200 GPU assembly.",
+   "download_count": 0,
+   "id": "pica200",
+   "name": "pica200",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-04T12:15:19Z",
+   "repository": "https://github.com/Squareheron942/zed-pica200",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

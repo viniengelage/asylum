@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Eser Ozvataf <eser@ozvataf.com> (http://eser.ozvataf.com)",
+    "Sami Salih Ibrahimbas <contact@9ssi7.dev> (https://9ssi7.dev)"
+   ],
+   "description": "A Darker One Dark Pro variation with Monokai scheme",
+   "download_count": 0,
+   "id": "one-dark-pro-monokai-darker",
+   "name": "One Dark Pro Monokai Darker Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:11:57Z",
+   "repository": "https://github.com/9ssi7/zed-one-dark-pro-monokai-darker",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Sergei Metlenkin <s.metlenkin@gmail.com>"
+   ],
+   "description": "Nord color schemes for Zed. Includes light and dark variants.",
+   "download_count": 0,
+   "id": "nord",
+   "name": "Nord Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:09:13Z",
+   "repository": "https://github.com/mikasius/zed-nord-theme",
+   "schema_version": 1,
+   "version": "0.1.7",
+   "wasm_api_version": null
+  }
+ ]
+}

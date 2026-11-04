@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Peter Tripp <petertripp@gmail.com>"
+   ],
+   "description": "Playdate support for Zed.",
+   "download_count": 0,
+   "id": "playdate",
+   "name": "Playdate",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-04T12:15:39Z",
+   "repository": "https://github.com/notpeter/playdate-zed-extension",
+   "schema_version": 1,
+   "version": "0.1.2",
+   "wasm_api_version": null
+  }
+ ]
+}

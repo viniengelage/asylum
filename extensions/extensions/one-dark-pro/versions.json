@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "MordFustang21"
+   ],
+   "description": "A port of VSCode One Dark Pro with some tweaks",
+   "download_count": 0,
+   "id": "one-dark-pro",
+   "name": "One Dark Pro",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:11:54Z",
+   "repository": "https://github.com/mordfustang21/zed-one-dark-pro",
+   "schema_version": 1,
+   "version": "0.0.11",
+   "wasm_api_version": null
+  }
+ ]
+}

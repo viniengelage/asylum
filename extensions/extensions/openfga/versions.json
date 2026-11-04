@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Art Rosnovsky <job@rosnovsky.us>"
+   ],
+   "description": "Syntax highlighting for OpenFGA authorization model files",
+   "download_count": 0,
+   "id": "openfga",
+   "name": "Syntax Highlighting for OpenFGA files",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-04T12:12:26Z",
+   "repository": "https://github.com/rosnovsky/zed-extension-fga",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

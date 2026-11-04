@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "R1N-K0"
+   ],
+   "description": "A darker version of the awesome Nord theme \u2014 a Zed port of the VS Code theme by Dimitrios Lytras.",
+   "download_count": 0,
+   "id": "nord-wave-theme",
+   "name": "Nord Wave",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:09:15Z",
+   "repository": "https://github.com/R1N-K0/zed-nord-wave",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

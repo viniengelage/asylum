@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "blaqat <blaqat.ag@gmail.com>"
+   ],
+   "description": "Panda Syntax theme for Zed",
+   "download_count": 0,
+   "id": "panda-theme",
+   "name": "Panda Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:14:08Z",
+   "repository": "https://github.com/biaqat/panda-theme-zed",
+   "schema_version": 1,
+   "version": "0.9.0",
+   "wasm_api_version": null
+  }
+ ]
+}

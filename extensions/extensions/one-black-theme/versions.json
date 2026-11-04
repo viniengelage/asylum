@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Serhii Boreiko <jestersunborn@gmail.com>"
+   ],
+   "description": "One Dark got even dar..kier",
+   "download_count": 0,
+   "id": "one-black-theme",
+   "name": "One Black Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:11:51Z",
+   "repository": "https://github.com/serhiiboreiko/one-black-theme-zed",
+   "schema_version": 1,
+   "version": "0.0.4",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "George Aidonidis <george.aidonidis@gmail.com>"
+   ],
+   "description": "A dark theme with vivid colors based on One Dark",
+   "download_count": 0,
+   "id": "one-dark-ocean",
+   "name": "One Dark Ocean",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:11:54Z",
+   "repository": "https://github.com/george-aidonidis/zed-one-dark-ocean",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

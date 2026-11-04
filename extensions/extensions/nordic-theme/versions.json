@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "blaqat <blaqat.ag@gmail.com>"
+   ],
+   "description": "Nordic theme for Zed",
+   "download_count": 0,
+   "id": "nordic-theme",
+   "name": "Nordic Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:09:16Z",
+   "repository": "https://github.com/biaqat/nordic-theme-zed",
+   "schema_version": 1,
+   "version": "0.5.2",
+   "wasm_api_version": null
+  }
+ ]
+}

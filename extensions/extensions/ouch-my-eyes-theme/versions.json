@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Kevin Beltr\u00e3o <kevin@kevbeltrao.com.br>"
+   ],
+   "description": "Dark theme focused on high contrast colors",
+   "download_count": 0,
+   "id": "ouch-my-eyes-theme",
+   "name": "Ouch My Eyes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:12:41Z",
+   "repository": "https://github.com/KevBeltrao/ouch-my-eyes-theme",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

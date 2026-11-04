@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Evan Simpson <evan@evan.news>"
+   ],
+   "description": "\ud83d\udce5 Highlights outdated npm packages and shows changelogs in package.json. Changelogs from GitHub releases and/or CHANGELOG.md. Shown minimalistically without UI bloat.",
+   "download_count": 0,
+   "id": "npm-package-json-checker",
+   "name": "NPM Package.json Update Checker",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-11-04T12:09:47Z",
+   "repository": "https://github.com/e-simpson/zed-npm-update-checker",
+   "schema_version": 1,
+   "version": "1.0.7",
+   "wasm_api_version": "0.7.0"
+  }
+ ]
+}

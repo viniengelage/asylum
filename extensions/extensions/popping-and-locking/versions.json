@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "randoneering <justin@randoneering.tech>"
+   ],
+   "description": "An attempted port of the Popping and Locking Theme from iTerm,atom, and vscode",
+   "download_count": 0,
+   "id": "popping-and-locking",
+   "name": "Popping and Locking Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:20:30Z",
+   "repository": "https://github.com/randoneering/popping-and-locking-zed-theme",
+   "schema_version": 1,
+   "version": "1.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

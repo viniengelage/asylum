@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Viet Dinh <54ckb0y789@gmail.com>"
+   ],
+   "description": "Language server for Odoo Python/XML/JS",
+   "download_count": 0,
+   "id": "odoo-lsp",
+   "name": "Odoo LSP",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-11-04T12:11:44Z",
+   "repository": "https://github.com/Desdaemon/odoo-lsp/tree/main/crates/extension-zed",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": "0.6.0"
+  }
+ ]
+}

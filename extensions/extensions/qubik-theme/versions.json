@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "qnbhd <1qnbhd@gmail.com>"
+   ],
+   "description": "Qubik theme for Zed",
+   "download_count": 0,
+   "id": "qubik-theme",
+   "name": "Qubik",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:23:37Z",
+   "repository": "https://github.com/qnbhd/qubik-theme-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

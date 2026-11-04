@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Edney Osf <edney.osf@gmail.com>"
+   ],
+   "description": "Pandora theme for Zed",
+   "download_count": 0,
+   "id": "pandora",
+   "name": "Pandora",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:14:09Z",
+   "repository": "https://github.com/edneyosf/pandora-zed",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

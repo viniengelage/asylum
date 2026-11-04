@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "injirez"
+   ],
+   "description": "Pycharm Modern Themes \ud83d\udc0d\u26a1",
+   "download_count": 0,
+   "id": "pycharm-modern-themes",
+   "name": "Pycharm Modern Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:22:17Z",
+   "repository": "https://github.com/injirez/zed-pycharm-modern-themes",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

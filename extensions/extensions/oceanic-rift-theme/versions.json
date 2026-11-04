@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Jeff Schuil"
+   ],
+   "description": "A deep-ocean dark theme for Zed, adapted from the Oceanic Reef theme.",
+   "download_count": 0,
+   "id": "oceanic-rift-theme",
+   "name": "Oceanic Rift",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:11:08Z",
+   "repository": "https://github.com/jeffschuil/oceanic-rift-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

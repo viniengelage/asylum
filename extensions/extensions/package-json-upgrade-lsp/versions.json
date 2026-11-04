@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Arthur Monteiro <arthurmtro@gmail.com>"
+   ],
+   "description": "Show available npm updates inline in package.json with quick-fix code actions to upgrade.",
+   "download_count": 0,
+   "id": "package-json-upgrade-lsp",
+   "name": "Package.json Upgrade",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-11-04T12:13:30Z",
+   "repository": "https://github.com/Arthurmtro/zed-package-json-upgrade",
+   "schema_version": 1,
+   "version": "0.1.7",
+   "wasm_api_version": "0.7.0"
+  }
+ ]
+}

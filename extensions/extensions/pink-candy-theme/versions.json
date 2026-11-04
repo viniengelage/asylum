@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Adapted from KubaP/vscode-pink-candy"
+   ],
+   "description": "A vivid pink accent dark theme, ported from the VS Code Pink Candy theme by KubaP. Features a striking #FF1277 pink accent with a carefully balanced dark palette.",
+   "download_count": 0,
+   "id": "pink-candy-theme",
+   "name": "Pink Candy",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:15:27Z",
+   "repository": "https://github.com/paulovictor237/pink-candy-theme",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

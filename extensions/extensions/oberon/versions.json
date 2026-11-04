@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "KnyazLV"
+   ],
+   "description": "Oberon-07 language support",
+   "download_count": 0,
+   "id": "oberon",
+   "name": "Oberon",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-04T12:10:20Z",
+   "repository": "https://github.com/KnyazLV/zed-oberon",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

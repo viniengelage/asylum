@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Steve Simkins <steve@pinata.cloud>"
+   ],
+   "description": "A theme modeled after the Pinata design system",
+   "download_count": 0,
+   "id": "pinata-theme",
+   "name": "Pinata Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:15:23Z",
+   "repository": "https://github.com/stevedylandev/pinata-theme-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

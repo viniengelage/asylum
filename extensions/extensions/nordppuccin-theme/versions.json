@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "franqong"
+   ],
+   "description": "A hybrid theme combining Nord's cold icy aesthetic with Catppuccin's pastel syntax.",
+   "download_count": 0,
+   "id": "nordppuccin-theme",
+   "name": "Nordppuccin",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:09:17Z",
+   "repository": "https://github.com/franqong/nordppuccin-zed",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

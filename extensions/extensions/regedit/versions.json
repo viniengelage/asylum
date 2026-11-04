@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Jason Ghantous <jason.ghantous@outlook.com>"
+   ],
+   "description": "Windows Registry language support",
+   "download_count": 0,
+   "id": "regedit",
+   "name": "Regedit",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-04T12:24:34Z",
+   "repository": "https://github.com/JasonGH17/regedit",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

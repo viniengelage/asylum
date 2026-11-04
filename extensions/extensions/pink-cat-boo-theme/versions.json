@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "jjsalinas"
+   ],
+   "description": "A port of the Pink Cat Boo VS Code theme by Fiona Fan (ftsamoyed) for Zed.",
+   "download_count": 0,
+   "id": "pink-cat-boo-theme",
+   "name": "Pink Cat Boo",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:15:29Z",
+   "repository": "https://github.com/jjsalinas/PinkCatBooZed",
+   "schema_version": 1,
+   "version": "1.3.0",
+   "wasm_api_version": null
+  }
+ ]
+}

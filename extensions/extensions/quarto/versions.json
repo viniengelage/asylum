@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Prefrontal Systems"
+   ],
+   "description": "Quarto support for Zed",
+   "download_count": 0,
+   "id": "quarto",
+   "name": "Quarto",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-04T12:23:36Z",
+   "repository": "https://github.com/prefrontal-systems/zed-quarto-plugin",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

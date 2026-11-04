@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Dalpat Singh"
+   ],
+   "description": "Muted green themes: deep forest dark and warm ivory light, with lime, olive, gold, and teal syntax.",
+   "download_count": 0,
+   "id": "olive-green-theme",
+   "name": "Olive Green",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:11:48Z",
+   "repository": "https://github.com/dalpat/zed-olive-green",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

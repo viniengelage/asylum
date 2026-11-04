@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Philipp Schaffrath <philipp.schaffrath@gmail.com>"
+   ],
+   "description": "A phine zed theme.",
+   "download_count": 0,
+   "id": "phine-theme",
+   "name": "Phine Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:14:45Z",
+   "repository": "https://github.com/phisch/phine-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

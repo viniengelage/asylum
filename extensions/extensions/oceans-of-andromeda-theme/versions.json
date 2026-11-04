@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "samlovescoding",
+    "jdonlucas"
+   ],
+   "description": "A beautiful dark theme inspired by the waters of Andromeda. Ported from VS Code.",
+   "download_count": 0,
+   "id": "oceans-of-andromeda-theme",
+   "name": "Oceans of Andromeda",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:11:09Z",
+   "repository": "https://github.com/jdonlucas/zed-oceans-of-andromeda",
+   "schema_version": 1,
+   "version": "1.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

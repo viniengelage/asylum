@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Aleksei Gusev <aleksei.gusev@gmail.com>"
+   ],
+   "description": "Org Mode support for Zed",
+   "download_count": 0,
+   "id": "org",
+   "name": "Org Mode",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-04T12:12:37Z",
+   "repository": "https://github.com/hron/zed-org",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

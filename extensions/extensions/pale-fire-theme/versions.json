@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Samad Ahmed"
+   ],
+   "description": "A faithful Pale Fire and Zenburn-inspired theme family with broad syntax coverage and carefully tested Ruby support.",
+   "download_count": 0,
+   "id": "pale-fire-theme",
+   "name": "Pale Fire",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:13:33Z",
+   "repository": "https://github.com/sahmed007/pale-fire-zed",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

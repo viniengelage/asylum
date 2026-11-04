@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Zachary Waldowski <zach@waldowski.me>"
+   ],
+   "description": "Xcode project and strings syntax highlighting",
+   "download_count": 0,
+   "id": "pbxproj",
+   "name": "Xcode Project",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-04T12:14:27Z",
+   "repository": "https://github.com/zwaldowski/zed-pbxproj",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

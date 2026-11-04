@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Onurcan Sever"
+   ],
+   "description": "Two vibrant theme families for Zed, each with dark and light variants.",
+   "download_count": 0,
+   "id": "phoenix-pulse-theme",
+   "name": "Phoenix Pulse Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:14:46Z",
+   "repository": "https://github.com/phoenix-pulse/zed-themes",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

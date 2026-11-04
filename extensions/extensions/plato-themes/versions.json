@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Denis Mishankov <mishankov@mail.com>"
+   ],
+   "description": "Set of themes with purposeful syntax highlighting",
+   "download_count": 0,
+   "id": "plato-themes",
+   "name": "Plato themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:15:37Z",
+   "repository": "https://github.com/mishankov/plato",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

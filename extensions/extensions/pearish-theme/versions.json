@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "BitsByD <dvhthomas@users.noreply.github.com>"
+   ],
+   "description": "A warm, earthy theme for Zed with light and dark variants",
+   "download_count": 0,
+   "id": "pearish-theme",
+   "name": "Pearish",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:14:29Z",
+   "repository": "https://github.com/dvhthomas/pearish-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

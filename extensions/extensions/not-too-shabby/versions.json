@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Stas Syritsyn <staleo@hey.com>"
+   ],
+   "description": "Pretty much fine dark theme for Zed",
+   "download_count": 0,
+   "id": "not-too-shabby",
+   "name": "NotTooShabby",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:09:21Z",
+   "repository": "https://github.com/staleo/zed-nottooshabby-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

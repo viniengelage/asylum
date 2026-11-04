@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Reza Tavasoli"
+   ],
+   "description": "Some themes with uncommon color combinations that I like.",
+   "download_count": 0,
+   "id": "oddities-theme",
+   "name": "Oddities: Uncommon Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:11:09Z",
+   "repository": "https://github.com/tavasolireza/oddities-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

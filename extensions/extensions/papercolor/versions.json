@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Lewin Probst <info@emirror.de>"
+   ],
+   "description": "The original PaperColor Theme, inspired by Google Material Design, ported to Zed.",
+   "download_count": 0,
+   "id": "papercolor",
+   "name": "PaperColor",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:14:10Z",
+   "repository": "https://github.com/emirror-de/papercolor-zed",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

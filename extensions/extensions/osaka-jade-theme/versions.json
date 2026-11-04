@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ruslan Kurchenko <ruslan.kurchenko@gmail.com>"
+   ],
+   "description": "A jade-inspired dark theme with Dark, Soft, Muted, and Light variants. Ported from the Osaka Jade theme by Justin Lowry (Omarchy / basecamp).",
+   "download_count": 0,
+   "id": "osaka-jade-theme",
+   "name": "Osaka Jade",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:12:39Z",
+   "repository": "https://github.com/ruslan-kurchenko/osaka-jade-zed-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

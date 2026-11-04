@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Konstantin Gorodinskii <mail@konstantin.io>"
+   ],
+   "description": "A colorscheme inspired by the feel of aged books. Minimal, soft, and readable.",
+   "download_count": 0,
+   "id": "oldbook-theme",
+   "name": "Old Book",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:11:47Z",
+   "repository": "https://github.com/gko/oldbook-theme",
+   "schema_version": 1,
+   "version": "1.5.5",
+   "wasm_api_version": null
+  }
+ ]
+}

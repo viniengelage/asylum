@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "pierrecomputer"
+   ],
+   "description": "Modern light and dark color themes built by Pierre for Diffs.com, and now for you.",
+   "download_count": 0,
+   "id": "pierre-theme",
+   "name": "Pierre",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:15:20Z",
+   "repository": "https://github.com/pierrecomputer/pierre-theme",
+   "schema_version": 1,
+   "version": "0.0.29",
+   "wasm_api_version": null
+  }
+ ]
+}

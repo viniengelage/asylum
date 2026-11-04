@@ -1,0 +1,23 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Dave McCaldon <davem@intersystems.com>",
+    "Hannah Kimura <hannah.kimura@intersystems.com>"
+   ],
+   "description": "InterSystems IRIS ObjectScript Extension",
+   "download_count": 0,
+   "id": "objectscript",
+   "name": "InterSystems ObjectScript",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-04T12:11:02Z",
+   "repository": "https://github.com/intersystems/zed-objectscript",
+   "schema_version": 1,
+   "version": "1.4.0",
+   "wasm_api_version": null
+  }
+ ]
+}

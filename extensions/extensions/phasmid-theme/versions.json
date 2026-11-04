@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Thijs Lander <contact@thijslander.com>"
+   ],
+   "description": "Neutral theme that blends with application UI's such as Obsidian and Figma, using Jetbrains syntax colors.",
+   "download_count": 0,
+   "id": "phasmid-theme",
+   "name": "Phasmid",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:14:44Z",
+   "repository": "https://github.com/t-lander/phasmid-zed",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ollayor M <muhammadnabiyevolloyor@gmail.com>"
+   ],
+   "description": "Pearl - sepia light, charcoal dark.",
+   "download_count": 0,
+   "id": "pearl-theme",
+   "name": "Pearl Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:14:29Z",
+   "repository": "https://github.com/olllayor/zed-themes",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "tinzleung <tinzlive@gmail.com>"
+   ],
+   "description": "Pine Script language support for Zed (v6-first, with v5 compatibility), including syntax highlighting and basic editor intelligence",
+   "download_count": 0,
+   "id": "pine-script",
+   "name": "Pine Script",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-04T12:15:27Z",
+   "repository": "https://github.com/Pvxlabs/pine-script-zed.git",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Dyqer"
+   ],
+   "description": "OpenAPI language support: spec detection, $ref jump, hover, completion, and diagnostics",
+   "download_count": 0,
+   "id": "openapi-lsp",
+   "name": "OpenAPI",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-11-04T12:12:24Z",
+   "repository": "https://github.com/Dyqer/openapi",
+   "schema_version": 1,
+   "version": "0.2.1",
+   "wasm_api_version": "0.7.0"
+  }
+ ]
+}

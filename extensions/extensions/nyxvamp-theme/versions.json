@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "zoedsoupe <zoey.spessanha@zeetech.io>"
+   ],
+   "description": "theme inspired by transfem emo aesthetics - special for cat girls \ud83d\udc9c\ud83d\ude3a",
+   "download_count": 0,
+   "id": "nyxvamp-theme",
+   "name": "nyxvamp",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:10:10Z",
+   "repository": "https://github.com/nyxvamp-theme/zed",
+   "schema_version": 1,
+   "version": "0.3.0",
+   "wasm_api_version": null
+  }
+ ]
+}

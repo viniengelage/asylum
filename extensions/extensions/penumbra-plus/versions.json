@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "everdrone"
+   ],
+   "description": "Zed port of Helix penumbra+",
+   "download_count": 0,
+   "id": "penumbra-plus",
+   "name": "Penumbra+",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:14:32Z",
+   "repository": "https://github.com/everdrone/zed-penumbra-plus",
+   "schema_version": 1,
+   "version": "0.0.6",
+   "wasm_api_version": null
+  }
+ ]
+}

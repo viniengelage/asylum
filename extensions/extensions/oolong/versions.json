@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Jos\u00e9 Duarte <duarte.gmj@gmail.com>"
+   ],
+   "description": "Deep green theme for Zed",
+   "download_count": 0,
+   "id": "oolong",
+   "name": "Oolong",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:12:00Z",
+   "repository": "https://github.com/jmg-duarte/oolong-zed",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

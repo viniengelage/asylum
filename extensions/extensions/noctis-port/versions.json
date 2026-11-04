@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Siddha Wachche"
+   ],
+   "description": "A Noctis theme for Zed",
+   "download_count": 0,
+   "id": "noctis-port",
+   "name": "Noctis",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:09:07Z",
+   "repository": "https://github.com/sidwachche/noctis-port",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

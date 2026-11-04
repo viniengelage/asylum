@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "c0mpiler <c0mpiler@ins8s.dev>"
+   ],
+   "description": "A sleek, modern twist to a collection of minimalistic, high-contrast themes - optimized for readability, and efficient performance.",
+   "download_count": 0,
+   "id": "ninja",
+   "name": "Ninja",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:09:01Z",
+   "repository": "https://github.com/c0mpiler/theme.ninja",
+   "schema_version": 1,
+   "version": "1.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

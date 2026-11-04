@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Chase Weaver <chase.weaver34@gmail.com>"
+   ],
+   "description": "Minimal black and white themes for Zed",
+   "download_count": 0,
+   "id": "noir-and-blanc-theme",
+   "name": "Noir & Blanc",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:09:12Z",
+   "repository": "https://github.com/chaseweaver/noir-and-blanc",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

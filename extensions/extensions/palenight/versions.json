@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Alan Montgomery <alanmontgomerycoding@gmail.com>"
+   ],
+   "description": "The popular Palenight theme now in Zed!",
+   "download_count": 0,
+   "id": "palenight",
+   "name": "Palenight Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:13:34Z",
+   "repository": "https://github.com/alanmontgomery/palenight-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

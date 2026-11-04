@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Specy <specy.dev@gmail.com>"
+   ],
+   "description": "A purpleish dark and blurred theme",
+   "download_count": 0,
+   "id": "pruple-theme",
+   "name": "Pruple theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:21:44Z",
+   "repository": "https://github.com/Specy/zed-pruple-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

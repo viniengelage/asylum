@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Kusuma",
+    "BoyeDarat"
+   ],
+   "description": "One Dark Pro Max/Glass theme for Zed :)",
+   "download_count": 0,
+   "id": "one-dark-pro-max",
+   "name": "One Dark Pro Max",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:11:56Z",
+   "repository": "https://github.com/kussumma/one-dark-pro-max",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

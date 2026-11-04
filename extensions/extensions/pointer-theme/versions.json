@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Yuri Nezdemkovski"
+   ],
+   "description": "A theme inspired by the Cursor IDE aesthetic, bringing its familiar dark and light styling to Zed",
+   "download_count": 0,
+   "id": "pointer-theme",
+   "name": "Pointer Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:20:12Z",
+   "repository": "https://github.com/nezdemkovski/pointer-theme-for-zed",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

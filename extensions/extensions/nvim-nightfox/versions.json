@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "cange"
+   ],
+   "description": "\ud83e\udd8a A port of the Neovim Nightfox themes. Includes all variants as opaque and blurred version.",
+   "download_count": 0,
+   "id": "nvim-nightfox",
+   "name": "Nightfox",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:10:09Z",
+   "repository": "https://github.com/cange/nightfox.zed",
+   "schema_version": 1,
+   "version": "0.10.6",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "\u0141ukasz Czerniawski <l.czerniawski@icloud.com>"
+   ],
+   "description": "Obsidian Sunset is a dark and colorful theme for Zed, VSCode and IntelliJ that enhances the readability and aesthetics of your code.",
+   "download_count": 0,
+   "id": "obsidian-sunset",
+   "name": "Obsidian Sunset Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:11:03Z",
+   "repository": "https://github.com/lczerniawski/ObsidianSunset-Zed",
+   "schema_version": 1,
+   "version": "1.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

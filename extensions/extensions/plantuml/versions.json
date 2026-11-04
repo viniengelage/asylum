@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Gabriel Silva <gabe@gabe.id>"
+   ],
+   "description": "PlantUML support.",
+   "download_count": 0,
+   "id": "plantuml",
+   "name": "PlantUML",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-04T12:15:35Z",
+   "repository": "https://github.com/gabeidx/zed-plantuml",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

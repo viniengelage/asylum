@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "mikaeladev <mikaeladev@icloud.com>"
+   ],
+   "description": "Syntax highlighting for RASI files",
+   "download_count": 0,
+   "id": "rasi",
+   "name": "RASI",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-04T12:23:57Z",
+   "repository": "https://github.com/mikaeladev/zed-rasi",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

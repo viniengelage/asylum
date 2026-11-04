@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Johan Larsson <johan@jolars.co>"
+   ],
+   "description": "Language server for Quarto and other Markdown flavors",
+   "download_count": 0,
+   "id": "panache-language-server",
+   "name": "Panache",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-11-04T12:14:07Z",
+   "repository": "https://github.com/jolars/panache",
+   "schema_version": 1,
+   "version": "2.36.1",
+   "wasm_api_version": "0.6.0"
+  }
+ ]
+}

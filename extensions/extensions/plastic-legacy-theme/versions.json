@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Bipin Thapa <thapabipin139@gmail.com>"
+   ],
+   "description": "A port of Will Stone's Plastic Legacy theme for Zed. A simple syntax and dark UI theme with a warmer color palette.",
+   "download_count": 0,
+   "id": "plastic-legacy-theme",
+   "name": "Plastic Legacy Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:15:35Z",
+   "repository": "https://github.com/justbipin/zed-plastic-legacy-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

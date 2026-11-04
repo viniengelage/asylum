@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Hans <weartistt@gmail.com>"
+   ],
+   "description": "Highlight CSV with different rainbow colors to make them more readable",
+   "download_count": 0,
+   "id": "rainbow-csv",
+   "name": "Rainbow CSV",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-04T12:23:51Z",
+   "repository": "https://github.com/weartist/zed-rainbow-csv",
+   "schema_version": 1,
+   "version": "1.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

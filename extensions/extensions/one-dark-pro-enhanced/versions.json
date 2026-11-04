@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "hadez8877"
+   ],
+   "description": "The most installed theme in Visual Studio Code modified for Zed",
+   "download_count": 0,
+   "id": "one-dark-pro-enhanced",
+   "name": "One Dark Pro Enhanced",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:11:56Z",
+   "repository": "https://github.com/hadez8877/one-dark-pro-enhanced",
+   "schema_version": 1,
+   "version": "0.0.12",
+   "wasm_api_version": null
+  }
+ ]
+}

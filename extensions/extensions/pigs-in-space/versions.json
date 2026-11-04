@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "kreek"
+   ],
+   "description": "A dark color theme designed to be easy on the eyes. Inspired by Solarized with a pastel twist.",
+   "download_count": 0,
+   "id": "pigs-in-space",
+   "name": "Pigs in Space",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:15:22Z",
+   "repository": "https://github.com/kreek/pigs-in-space-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

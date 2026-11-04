@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Trace Panic <tracepanic.com>"
+   ],
+   "description": "And now I have been become green",
+   "download_count": 0,
+   "id": "ocean-green",
+   "name": "Ocean Green",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:11:06Z",
+   "repository": "https://github.com/tracepanic/zed-ocean-green",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

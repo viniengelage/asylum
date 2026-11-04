@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Webhooked <hello@webhooked.dev>"
+   ],
+   "description": "An unapologetically dark and minimal colorscheme for Zed. Inspired by the Oscura Theme by Fey.",
+   "download_count": 0,
+   "id": "oscura",
+   "name": "Oscura Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:12:40Z",
+   "repository": "https://github.com/webhooked/oscura-zed",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

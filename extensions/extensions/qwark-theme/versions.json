@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Flavio Biancospino <flavio.biancospino@gmail.com>"
+   ],
+   "description": "A muted green theme family designed for comfortable long reading sessions.",
+   "download_count": 0,
+   "id": "qwark-theme",
+   "name": "Qwark",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:23:42Z",
+   "repository": "https://github.com/biancofla/qwark",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Stefano <gazzottistefano@gmail.com>"
+   ],
+   "description": "A dark theme with colorful syntax highlighting, inspired by the Peppermint theme for Ghostty",
+   "download_count": 0,
+   "id": "peppermint-theme",
+   "name": "Peppermint",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:14:34Z",
+   "repository": "https://github.com/sttefaano/peppermint-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

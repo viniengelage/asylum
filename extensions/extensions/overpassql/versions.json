@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Edwin Kortman <edwin.kortman@pm.me>"
+   ],
+   "description": "OverpassQL (Overpass API query language) syntax highlighting support to Zed.",
+   "download_count": 0,
+   "id": "overpassql",
+   "name": "OverpassQL",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-04T12:12:45Z",
+   "repository": "https://github.com/edwinkortman/overpassql-zed-extension",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

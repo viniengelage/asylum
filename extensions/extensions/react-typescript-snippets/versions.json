@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Vishnu Roshan"
+   ],
+   "description": "A collection of useful React + TypeScript snippets to speed up your development.",
+   "download_count": 0,
+   "id": "react-typescript-snippets",
+   "name": "React Typescript Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-04T12:24:30Z",
+   "repository": "https://github.com/vishnuroshan/zed-react-ts-snippets",
+   "schema_version": 1,
+   "version": "0.1.4",
+   "wasm_api_version": null
+  }
+ ]
+}

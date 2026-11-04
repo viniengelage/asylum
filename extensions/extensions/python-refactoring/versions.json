@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Roy Williams <roy.williams.iii@gmail.com>"
+   ],
+   "description": "Refactoring support for Python.",
+   "download_count": 0,
+   "id": "python-refactoring",
+   "name": "PythonRefactoring",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-11-04T12:23:22Z",
+   "repository": "https://github.com/rowillia/zed-python-refactoring",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": "0.0.6"
+  }
+ ]
+}

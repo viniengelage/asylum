@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ruud van Asseldonk <dev@veniogames.com>"
+   ],
+   "description": "Support for the RCL configuration language.",
+   "download_count": 0,
+   "id": "rcl",
+   "name": "RCL",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-04T12:23:59Z",
+   "repository": "https://github.com/rcl-lang/zed-rcl",
+   "schema_version": 1,
+   "version": "0.12.0",
+   "wasm_api_version": null
+  }
+ ]
+}

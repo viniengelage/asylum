@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "qb-bbq-bq"
+   ],
+   "description": "A brown-based theme with green accents and light pink cursor",
+   "download_count": 0,
+   "id": "qb-woodland-theme",
+   "name": "Woodland Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:23:24Z",
+   "repository": "https://github.com/qb-bbq-bq/zed-woodland-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

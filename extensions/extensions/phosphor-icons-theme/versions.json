@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Theo Luciano <theojluciano@gmail.com>"
+   ],
+   "description": "Use Phosphor Icons within the Zed code editor.",
+   "download_count": 0,
+   "id": "phosphor-icons-theme",
+   "name": "Phosphor Icons Theme",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-11-04T12:14:47Z",
+   "repository": "https://github.com/theoluciano/phosphor-icons-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

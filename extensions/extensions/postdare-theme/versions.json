@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "kim"
+   ],
+   "description": "Postdare Light & Dark \u2014 a warm, low-contrast theme family for the Zed editor.",
+   "download_count": 0,
+   "id": "postdare-theme",
+   "name": "Postdare",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:20:33Z",
+   "repository": "https://github.com/postdare/zed-postdare",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Valery Sergeeva <valeriia.sergeeva@gmail.com>"
+   ],
+   "description": "Verdant Garden \u2014 a prose-optimized dark/light theme for Markdown editing in Zed. Companion theme for the Noted extension.",
+   "download_count": 0,
+   "id": "noted-theme",
+   "name": "Noted Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:09:23Z",
+   "repository": "https://github.com/sergeevalera/noted-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

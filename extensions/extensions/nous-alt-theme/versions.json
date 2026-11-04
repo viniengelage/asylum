@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Abara <lvabarajithan@gmail.com>"
+   ],
+   "description": "Whole-editor Nous theme: glass neutrals in light mode, cream on mission-blue in dark mode.",
+   "download_count": 0,
+   "id": "nous-alt-theme",
+   "name": "Nous Alt Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:09:23Z",
+   "repository": "https://github.com/lvabarajithan/nous-alt-theme",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

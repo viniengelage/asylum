@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "mshaugh <max@mshaugh.com>",
+    "luk4h <luizmarcondes@lgvm.dev>"
+   ],
+   "description": "poimandres themes",
+   "download_count": 0,
+   "id": "poimandres",
+   "name": "poimandres",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:20:11Z",
+   "repository": "https://github.com/mshaugh/poimandres.zed",
+   "schema_version": 1,
+   "version": "0.0.4",
+   "wasm_api_version": null
+  }
+ ]
+}

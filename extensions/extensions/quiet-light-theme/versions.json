@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "blaqat <blaqat.ag@gmail.com>"
+   ],
+   "description": "VSCode's Quiet Light theme for Zed",
+   "download_count": 0,
+   "id": "quiet-light-theme",
+   "name": "Quiet Light Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:23:38Z",
+   "repository": "https://github.com/biaqat/quiet-light-theme-zed",
+   "schema_version": 1,
+   "version": "0.8.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Luke Dunwoody <luked4422@gmail.com>"
+   ],
+   "description": "A cool-toned dark theme for Zed featuring vibrant syntax highlighting inspired by the star Polaris.",
+   "download_count": 0,
+   "id": "polaris-theme",
+   "name": "Polaris",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:20:15Z",
+   "repository": "https://github.com/lukedunwoody/zed-polaris",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

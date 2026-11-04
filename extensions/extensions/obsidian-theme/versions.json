@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "narcilee7"
+   ],
+   "description": "A faithful port of Obsidian's default theme (dark and light) for Zed.",
+   "download_count": 0,
+   "id": "obsidian-theme",
+   "name": "Obsidian Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:11:03Z",
+   "repository": "https://github.com/narcilee7/zed-obsidian-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "kirqe <kirqe@yahoo.com>"
+   ],
+   "description": "Ocean Dark Motifs theme for Zed",
+   "download_count": 0,
+   "id": "ocean-dark-motifs",
+   "name": "Ocean Dark Motifs Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:11:06Z",
+   "repository": "https://github.com/kirqe/zed-ocean-dark-motifs-theme",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

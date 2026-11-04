@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "GGORG <me@ggorg.xyz>"
+   ],
+   "description": "Raspberry Pi Pico PIO Assembly syntax highlighting",
+   "download_count": 0,
+   "id": "pioasm",
+   "name": "PIO Assembly",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-04T12:15:31Z",
+   "repository": "https://github.com/GGORG0/zed-pioasm-syntax",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

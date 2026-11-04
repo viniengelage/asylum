@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "tseileinn"
+   ],
+   "description": "A near-black, ultra-high-contrast theme inspired by Synthwave themes.",
+   "download_count": 0,
+   "id": "ratveteinn-theme",
+   "name": "ratveteinn",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:23:58Z",
+   "repository": "https://github.com/ArtemiszenN/ratveteinn",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

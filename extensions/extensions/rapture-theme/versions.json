@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Pustur <loris.bettazza@gmail.com>",
+    "gabors0 <gabors0@proton.me>"
+   ],
+   "description": "A dark blue theme with bright accents inspired by the fictional city of Rapture, ported to Zed! Original by Pustur",
+   "download_count": 0,
+   "id": "rapture-theme",
+   "name": "Rapture",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:23:53Z",
+   "repository": "https://github.com/gabors0/rapture-zed",
+   "schema_version": 1,
+   "version": "1.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

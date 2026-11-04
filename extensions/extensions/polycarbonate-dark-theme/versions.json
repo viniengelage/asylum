@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Sha1rholder <sha1rholder@outlook.com>"
+   ],
+   "description": "Turn Zed into a clean slab of dark glass.",
+   "download_count": 0,
+   "id": "polycarbonate-dark-theme",
+   "name": "Polycarbonate Dark Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:20:21Z",
+   "repository": "https://github.com/Sha1rholder/polycarbonate-dark-theme",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

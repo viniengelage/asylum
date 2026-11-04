@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Priyanshu"
+   ],
+   "description": "A Highly Contrasted dark Theme for Zed",
+   "download_count": 0,
+   "id": "prime-dark-theme",
+   "name": "Prime-dark",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:20:55Z",
+   "repository": "https://github.com/priyanshu00001/prime-dark",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

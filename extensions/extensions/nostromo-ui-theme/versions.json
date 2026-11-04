@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Tad Scritchfield"
+   ],
+   "description": "Theme based on the Nostromo computer UI from the movie Alien",
+   "download_count": 0,
+   "id": "nostromo-ui-theme",
+   "name": "Nostromo UI",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:09:19Z",
+   "repository": "https://github.com/tscritch/nostromo-ui-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

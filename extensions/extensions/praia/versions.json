@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Viggo Lekdorf"
+   ],
+   "description": "Syntax highlighting for the Praia programming language",
+   "download_count": 0,
+   "id": "praia",
+   "name": "Praia",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-04T12:20:51Z",
+   "repository": "https://github.com/praia-lang/praia-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

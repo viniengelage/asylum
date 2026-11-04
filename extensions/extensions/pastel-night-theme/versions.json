@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "leolorenzato"
+   ],
+   "description": "\ud83c\udf03 Night vibes with pastel lights",
+   "download_count": 0,
+   "id": "pastel-night-theme",
+   "name": "Pastel Night Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:14:20Z",
+   "repository": "https://github.com/leolorenzato/zed-pastel-night-theme",
+   "schema_version": 1,
+   "version": "0.6.4",
+   "wasm_api_version": null
+  }
+ ]
+}

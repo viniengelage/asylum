@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "David C Cavalcante <davcavalcante@proton.me>",
+    "Takk\u2122 Innovate Studio <say@takk.ag>"
+   ],
+   "description": "\ud83d\udcfa A theme faithfully based on the Nixdorf 8870 amber phosphor screen, recreating the authentic monochrome terminal experience",
+   "download_count": 0,
+   "id": "nixdorf-8870",
+   "name": "Nixdorf 8870 Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:09:05Z",
+   "repository": "https://github.com/takk8is/nixdorf-8870-theme-for-zed",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

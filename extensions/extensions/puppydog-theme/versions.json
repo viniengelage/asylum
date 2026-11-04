@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Lillian Rose <me@lillianro.se>"
+   ],
+   "description": "A soft purple theme for pups!",
+   "download_count": 0,
+   "id": "puppydog-theme",
+   "name": "Puppydog Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:21:50Z",
+   "repository": "https://github.com/lillianrubyrose/puppydog-theme-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

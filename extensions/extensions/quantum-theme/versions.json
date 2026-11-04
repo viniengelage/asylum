@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Andrej Aratov"
+   ],
+   "description": "A dark theme for inspired by the space, calm colors for focused work.",
+   "download_count": 0,
+   "id": "quantum-theme",
+   "name": "Quantum",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:23:32Z",
+   "repository": "https://github.com/begprod/quantum-zed",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

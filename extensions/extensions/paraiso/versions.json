@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Simon Holywell",
+    "Jan T. Sott"
+   ],
+   "description": "Para\u00edso theme adapted from the TextMate theme of the same name originally created by Jan T. Sott",
+   "download_count": 0,
+   "id": "paraiso",
+   "name": "Para\u00edso theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:14:14Z",
+   "repository": "https://github.com/treffynnon/zed-Paraiso",
+   "schema_version": 1,
+   "version": "1.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

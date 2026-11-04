@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Al-Pharaday <cybo.strewn077@passinbox.com>"
+   ],
+   "description": "Railgun Themes based on the gorgeous theme suite by be5invis",
+   "download_count": 0,
+   "id": "railgun",
+   "name": "Railgun Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:23:48Z",
+   "repository": "https://github.com/Al-Pharaday/zed-theme-railgun",
+   "schema_version": 1,
+   "version": "1.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "PandaDEV"
+   ],
+   "description": "A port of VSCode One Dark Flat",
+   "download_count": 0,
+   "id": "one-dark-flat",
+   "name": "One Dark Flat",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:11:53Z",
+   "repository": "https://github.com/0pandadev/zed-one-dark-flat",
+   "schema_version": 1,
+   "version": "1.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "memiux <me@memiux.com>"
+   ],
+   "description": "A Zed theme inspired by the world's first virtual YouTuber, Kizuna AI \ud83c\udf80",
+   "download_count": 0,
+   "id": "pinkzuna-theme",
+   "name": "Pinkzuna",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:15:29Z",
+   "repository": "https://github.com/memiux/pinkzuna-zed",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Rajzik"
+   ],
+   "description": "A dark theme for Zed generated from the Rajzik VS Code theme.",
+   "download_count": 0,
+   "id": "rajzik-theme",
+   "name": "Rajzik Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:23:53Z",
+   "repository": "https://github.com/rajzik/vs-code-theme",
+   "schema_version": 1,
+   "version": "1.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

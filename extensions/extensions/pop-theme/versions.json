@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Anatoly Tsyplenkov <sharp.couch9400@fastmail.com>"
+   ],
+   "description": "A port of the Pop!_OS design language for Zed, inspired by System76.",
+   "download_count": 0,
+   "id": "pop-theme",
+   "name": "Pop Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-04T12:20:28Z",
+   "repository": "https://github.com/atsyplenkov/zed-pop-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}
