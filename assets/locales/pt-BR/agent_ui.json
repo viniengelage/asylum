@@ -340,6 +340,7 @@
   "new_agent.error.no_description": "Diga o que o agente deve fazer.",
   "new_agent.error.no_model": "Escolha um modelo no painel do Agent para gerar a sugestão.",
   "new_agent.error.suggestion_failed": "Não foi possível gerar a sugestão: {error}",
+  "new_agent.error.missing_identity": "Dê um nome e um comando ao agente.",
   "new_agent.field.base_profile": "Perfil base",
   "new_agent.field.command": "Comando",
   "new_agent.field.model": "Modelo",

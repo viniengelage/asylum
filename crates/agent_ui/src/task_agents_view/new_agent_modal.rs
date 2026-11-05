@@ -1,14 +1,16 @@
 //! The "Novo agente" modal: start from a template, an imported `.claude/agents` file or a free
 //! description that the default model turns into an agent, review the suggestion and create it.
 
-use super::{MAX_AUTHORING_REPAIRS, TEMPLATES, TaskAgentsView, permission_label, template_agent};
+use super::{
+    MAX_AUTHORING_REPAIRS, TEMPLATES, TaskAgentsView, model_menu, permission_label, template_agent,
+};
 use agent_settings::AgentProfile;
 use anyhow::Result;
-use editor::Editor;
+use editor::{Editor, EditorEvent};
 use futures::StreamExt as _;
 use gpui::{
-    App, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, Task, WeakEntity,
-    Window, actions,
+    App, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, Subscription, Task,
+    WeakEntity, Window, actions,
 };
 use i18n::t;
 use language_model::{
@@ -21,7 +23,11 @@ use task_agents::{
     ALL_TOOLS_PERMISSION_KEY, AuthoringCatalog, PermissionMode, TaskAgent, TaskAgentSource,
     ToolAccess, toolkits,
 };
-use ui::{ContextMenu, PopoverMenu, Switch, Tooltip, prelude::*};
+use ui::{
+    ContextMenu, PopoverMenu, PopoverTriggerArea, Tooltip, choice_chip, modal_footer,
+    modal_surface, prelude::*, primary_button, secondary_button, segment_option, segmented_control,
+    select_field, text_field, toggle_switch,
+};
 use util::ResultExt as _;
 use workspace::ModalView;
 
@@ -57,12 +63,15 @@ pub(super) struct NewAgentModal {
     view: WeakEntity<TaskAgentsView>,
     focus_handle: FocusHandle,
     description: Entity<Editor>,
+    name: Entity<Editor>,
+    command: Entity<Editor>,
     catalog: Arc<AuthoringCatalog>,
     imported: Vec<TaskAgent>,
     start: Start,
     suggestion: TaskAgent,
     personal: bool,
     generation: Generation,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl NewAgentModal {
@@ -85,17 +94,56 @@ impl NewAgentModal {
             editor
         });
         window.focus(&description.focus_handle(cx), cx);
+        let suggestion = template_agent(None);
+        let name = cx.new(|cx| {
+            let mut editor = Editor::single_line(window, cx);
+            editor.set_text(suggestion.name.clone(), window, cx);
+            editor
+        });
+        let command = cx.new(|cx| {
+            let mut editor = Editor::single_line(window, cx);
+            editor.set_text(suggestion.command.clone(), window, cx);
+            editor
+        });
+        let subscriptions = vec![
+            cx.subscribe(&name, |this, editor, event: &EditorEvent, cx| {
+                if matches!(event, EditorEvent::BufferEdited) {
+                    this.suggestion.name = editor.read(cx).text(cx).trim().to_string();
+                    cx.notify();
+                }
+            }),
+            cx.subscribe(&command, |this, editor, event: &EditorEvent, cx| {
+                if matches!(event, EditorEvent::BufferEdited) {
+                    this.suggestion.command = normalize_command(&editor.read(cx).text(cx));
+                    cx.notify();
+                }
+            }),
+        ];
         Self {
             view,
             focus_handle: cx.focus_handle(),
             description,
+            name,
+            command,
             catalog,
             imported,
             start: Start::Blank,
-            suggestion: template_agent(None),
+            suggestion,
             personal,
             generation: Generation::default(),
+            _subscriptions: subscriptions,
         }
+    }
+
+    /// Replaces the suggestion and shows its name and command in the editable fields.
+    fn set_suggestion(&mut self, agent: TaskAgent, window: &mut Window, cx: &mut Context<Self>) {
+        let name = agent.name.clone();
+        let command = agent.command.clone();
+        self.suggestion = agent;
+        self.name
+            .update(cx, |editor, cx| editor.set_text(name, window, cx));
+        self.command
+            .update(cx, |editor, cx| editor.set_text(command, window, cx));
     }
 
     fn start_from_template(
@@ -106,7 +154,7 @@ impl NewAgentModal {
     ) {
         let template = index.and_then(|index| TEMPLATES.get(index));
         self.cancel_generation();
-        self.suggestion = template_agent(template);
+        self.set_suggestion(template_agent(template), window, cx);
         self.start = index.map_or(Start::Blank, Start::Template);
         let text = template.map_or("", |template| template.description);
         self.description.update(cx, |editor, cx| {
@@ -126,7 +174,7 @@ impl NewAgentModal {
         };
         self.cancel_generation();
         let description = agent.description.clone();
-        self.suggestion = agent;
+        self.set_suggestion(agent, window, cx);
         self.start = Start::Imported(path);
         self.description.update(cx, |editor, cx| {
             editor.set_text(description, window, cx);
@@ -138,7 +186,7 @@ impl NewAgentModal {
         self.generation = Generation::default();
     }
 
-    fn suggest(&mut self, _: &SuggestAgent, _window: &mut Window, cx: &mut Context<Self>) {
+    fn suggest(&mut self, _: &SuggestAgent, window: &mut Window, cx: &mut Context<Self>) {
         if self.generation.running {
             return;
         }
@@ -181,7 +229,7 @@ impl NewAgentModal {
                 reasoning_details: None,
             },
         ];
-        let task = cx.spawn(async move |this, cx| {
+        let task = cx.spawn_in(window, async move |this, cx| {
             let mut attempt = 0;
             let result: Result<TaskAgent> = async {
                 loop {
@@ -242,12 +290,12 @@ impl NewAgentModal {
                 }
             }
             .await;
-            this.update(cx, |this, cx| {
+            this.update_in(cx, |this, window, cx| {
                 this.generation.running = false;
                 this.generation.progress = None;
                 match result {
                     Ok(agent) => {
-                        this.suggestion = agent;
+                        this.set_suggestion(agent, window, cx);
                         this.start = Start::Generated;
                         this.generation.output.clear();
                     }
@@ -280,6 +328,11 @@ impl NewAgentModal {
         if self.generation.running {
             return;
         }
+        if self.suggestion.name.is_empty() || self.suggestion.command.is_empty() {
+            self.generation.error = Some(t!("agent_ui.new_agent.error.missing_identity"));
+            cx.notify();
+            return;
+        }
         let agent = self.suggestion.clone();
         let personal = self.personal;
         let generated = self.start == Start::Generated;
@@ -302,31 +355,15 @@ impl NewAgentModal {
             .color(Color::Muted)
     }
 
-    fn render_start_chip(
-        &self,
-        id: impl Into<ElementId>,
-        label: impl Into<SharedString>,
-        icon: IconName,
-        selected: bool,
-    ) -> Button {
-        Button::new(id, label)
-            .style(ButtonStyle::Outlined)
-            .label_size(LabelSize::Small)
-            .start_icon(Icon::new(icon).size(IconSize::Small).color(if selected {
-                Color::Default
-            } else {
-                Color::Muted
-            }))
-            .toggle_state(selected)
-    }
-
     fn render_starts(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let mut row = h_flex().flex_wrap().gap_1p5().child(
-            self.render_start_chip(
+        let mut row = h_flex().flex_wrap().gap_2().child(
+            choice_chip(
                 "new-agent-blank",
+                Some(IconName::Plus),
                 t!("agent_ui.new_agent.start.blank"),
-                IconName::Plus,
                 self.start == Start::Blank,
+                true,
+                cx,
             )
             .on_click(cx.listener(|this, _, window, cx| {
                 this.start_from_template(None, window, cx);
@@ -334,11 +371,13 @@ impl NewAgentModal {
         );
         for (index, template) in TEMPLATES.iter().enumerate() {
             row = row.child(
-                self.render_start_chip(
+                choice_chip(
                     ("new-agent-template", index),
+                    Some(template.icon),
                     template.name,
-                    template.icon,
                     self.start == Start::Template(index),
+                    true,
+                    cx,
                 )
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.start_from_template(Some(index), window, cx);
@@ -350,15 +389,17 @@ impl NewAgentModal {
 
     fn render_import_chip(&self, cx: &mut Context<Self>) -> AnyElement {
         let selected = matches!(self.start, Start::Imported(_));
-        let chip = self.render_start_chip(
+        let enabled = !self.imported.is_empty();
+        let chip = choice_chip(
             "new-agent-import",
+            Some(IconName::Download),
             t!("agent_ui.new_agent.start.import"),
-            IconName::Download,
             selected,
+            enabled,
+            cx,
         );
-        if self.imported.is_empty() {
+        if !enabled {
             return chip
-                .disabled(true)
                 .tooltip(Tooltip::text(t!("agent_ui.new_agent.start.import_empty")))
                 .into_any_element();
         }
@@ -375,7 +416,7 @@ impl NewAgentModal {
             })
             .collect::<Vec<_>>();
         PopoverMenu::new("new-agent-import-menu")
-            .trigger(chip)
+            .trigger(PopoverTriggerArea::new(chip))
             .menu(move |window, cx| {
                 let modal = modal.clone();
                 let imported = imported.clone();
@@ -422,7 +463,7 @@ impl NewAgentModal {
             .px_4()
             .pt_3()
             .pb_2()
-            .rounded_md()
+            .rounded(px(10.))
             .border_1()
             .border_color(if description_focus.is_focused(window) {
                 colors.border_focused
@@ -469,9 +510,9 @@ impl NewAgentModal {
         v_flex()
             .flex_1()
             .min_w_0()
-            .rounded_md()
+            .rounded(px(10.))
             .border_1()
-            .border_color(cx.theme().colors().border_variant)
+            .border_color(cx.theme().colors().border)
             .bg(cx.theme().colors().surface_background)
     }
 
@@ -481,13 +522,13 @@ impl NewAgentModal {
             .px_3()
             .py_2p5()
             .border_b_1()
-            .border_color(cx.theme().colors().border_variant)
+            .border_color(cx.theme().colors().border)
             .child(Self::render_section_label(title))
     }
 
     fn render_value(label: SharedString, value: impl IntoElement) -> impl IntoElement {
         v_flex()
-            .gap_0p5()
+            .gap_1()
             .child(
                 Label::new(label)
                     .size(LabelSize::XSmall)
@@ -500,15 +541,22 @@ impl NewAgentModal {
         id: &'static str,
         label: impl Into<SharedString>,
         tooltip: SharedString,
+        cx: &App,
     ) -> impl IntoElement {
-        div().id(id).tooltip(Tooltip::text(tooltip)).child(
-            Switch::new(id, ToggleState::Selected)
-                .label(label)
-                .label_size(LabelSize::Small),
-        )
+        h_flex()
+            .id(id)
+            .gap_2()
+            .tooltip(Tooltip::text(tooltip))
+            .child(toggle_switch(id, true, true, cx))
+            .child(
+                Label::new(label)
+                    .size(LabelSize::Small)
+                    .single_line()
+                    .truncate(),
+            )
     }
 
-    fn render_identity(&self, cx: &App) -> impl IntoElement {
+    fn render_identity(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let agent = &self.suggestion;
         let profiles = AgentProfile::available_profiles(cx);
         let profile = match agent.profile.as_deref() {
@@ -519,38 +567,118 @@ impl NewAgentModal {
                 .map(|(_, name)| name.to_string())
                 .unwrap_or_else(|| id.to_string()),
         };
-        let model = agent
-            .model
-            .clone()
-            .unwrap_or_else(|| t!("agent_ui.task_agents.model.thread").to_string());
+        let modal = cx.entity().downgrade();
+        let profile_menu = ContextMenu::build(window, cx, {
+            let modal = modal.clone();
+            let current = agent.profile.clone();
+            move |mut menu, _window, _cx| {
+                let keep = modal.clone();
+                menu = menu.toggleable_entry(
+                    t!("agent_ui.task_agents.profile.current_thread"),
+                    current.is_none(),
+                    IconPosition::Start,
+                    None,
+                    move |_window, cx| {
+                        keep.update(cx, |modal, cx| {
+                            modal.suggestion.profile = None;
+                            cx.notify();
+                        })
+                        .log_err();
+                    },
+                );
+                for (profile_id, name) in profiles.iter() {
+                    let modal = modal.clone();
+                    let id = profile_id.0.to_string();
+                    let toggled = current.as_deref() == Some(id.as_str());
+                    menu = menu.toggleable_entry(
+                        name.clone(),
+                        toggled,
+                        IconPosition::Start,
+                        None,
+                        move |_window, cx| {
+                            let id = id.clone();
+                            modal
+                                .update(cx, |modal, cx| {
+                                    modal.suggestion.profile = Some(id);
+                                    cx.notify();
+                                })
+                                .log_err();
+                        },
+                    );
+                }
+                menu
+            }
+        });
+        let (model, model_menu) = model_menu(
+            agent.model.clone(),
+            t!("agent_ui.task_agents.model.thread"),
+            move |model, cx| {
+                modal
+                    .update(cx, |modal, cx| {
+                        modal.suggestion.model = model;
+                        cx.notify();
+                    })
+                    .log_err();
+            },
+            window,
+            cx,
+        );
+        let name_focused = self.name.focus_handle(cx).is_focused(window);
+        let command_focused = self.command.focus_handle(cx).is_focused(window);
         Self::render_column(cx).child(
             v_flex()
                 .p_3()
                 .gap_3()
                 .child(Self::render_value(
                     t!("agent_ui.new_agent.field.name"),
-                    Label::new(agent.name.clone()).single_line().truncate(),
+                    text_field(name_focused, cx).child(div().flex_1().child(self.name.clone())),
                 ))
                 .child(Self::render_value(
                     t!("agent_ui.new_agent.field.command"),
-                    Label::new(format!("/{}", agent.command))
-                        .size(LabelSize::Small)
-                        .color(Color::Accent)
-                        .buffer_font(cx),
+                    text_field(command_focused, cx)
+                        .child(
+                            Label::new("/")
+                                .size(LabelSize::Small)
+                                .color(Color::Muted)
+                                .buffer_font(cx),
+                        )
+                        .child(div().flex_1().child(self.command.clone())),
                 ))
-                .child(Self::render_value(
-                    t!("agent_ui.new_agent.field.base_profile"),
-                    Label::new(profile).single_line().truncate(),
-                ))
-                .child(Self::render_value(
-                    t!("agent_ui.new_agent.field.model"),
-                    Label::new(model).single_line().truncate(),
-                ))
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .child(
+                            div().flex_1().min_w_0().child(Self::render_value(
+                                t!("agent_ui.new_agent.field.base_profile"),
+                                PopoverMenu::new("new-agent-profile-menu")
+                                    .full_width(true)
+                                    .trigger(PopoverTriggerArea::new(select_field(
+                                        "new-agent-profile",
+                                        profile,
+                                        cx,
+                                    )))
+                                    .menu(move |_window, _cx| Some(profile_menu.clone())),
+                            )),
+                        )
+                        .child(
+                            div().flex_1().min_w_0().child(Self::render_value(
+                                t!("agent_ui.new_agent.field.model"),
+                                PopoverMenu::new("new-agent-model-menu")
+                                    .full_width(true)
+                                    .trigger(PopoverTriggerArea::new(select_field(
+                                        "new-agent-model",
+                                        model,
+                                        cx,
+                                    )))
+                                    .menu(move |_window, _cx| Some(model_menu.clone())),
+                            )),
+                        ),
+                )
                 .child(Self::render_value(
                     t!("agent_ui.new_agent.field.triggers"),
                     v_flex()
                         .pt_1()
-                        .gap_1p5()
+                        .gap_2()
                         .child(Self::render_trigger(
                             "new-agent-trigger-composer",
                             t!(
@@ -558,11 +686,13 @@ impl NewAgentModal {
                                 command = agent.command
                             ),
                             t!("agent_ui.new_agent.trigger.composer_tooltip"),
+                            cx,
                         ))
                         .child(Self::render_trigger(
                             "new-agent-trigger-sidebar",
                             t!("agent_ui.new_agent.trigger.sidebar"),
                             t!("agent_ui.new_agent.trigger.sidebar_tooltip"),
+                            cx,
                         )),
                 )),
         )
@@ -583,12 +713,10 @@ impl NewAgentModal {
             .child(
                 h_flex()
                     .flex_none()
-                    .size_7()
+                    .size(px(26.))
                     .justify_center()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(colors.border_variant)
-                    .bg(colors.element_background)
+                    .rounded(px(7.))
+                    .bg(colors.element_selected)
                     .child(icon.size(IconSize::Small).color(Color::Muted)),
             )
             .child(
@@ -719,7 +847,6 @@ impl NewAgentModal {
             .unwrap_or_default();
         let (title, preview) = instructions_summary(&self.suggestion.instructions);
         let personal = self.personal;
-        let colors = cx.theme().colors();
         Self::render_column(cx)
             .child(Self::render_column_header(
                 t!("agent_ui.new_agent.output.title"),
@@ -746,22 +873,16 @@ impl NewAgentModal {
                     .child(Self::render_value(
                         t!("agent_ui.new_agent.output.destination"),
                         h_flex().pt_0p5().child(
-                            h_flex()
-                                .gap_0p5()
-                                .p_0p5()
-                                .rounded_md()
-                                .border_1()
-                                .border_color(colors.border_variant)
-                                .bg(colors.editor_background)
+                            segmented_control(cx)
+                                .w(px(200.))
                                 .child(
-                                    Button::new(
+                                    segment_option(
                                         "new-agent-project",
                                         t!("agent_ui.new_agent.output.project"),
+                                        !personal,
+                                        true,
+                                        cx,
                                     )
-                                    .style(ButtonStyle::Subtle)
-                                    .label_size(LabelSize::Small)
-                                    .toggle_state(!personal)
-                                    .selected_style(ButtonStyle::Tinted(ui::TintColor::Accent))
                                     .tooltip(Tooltip::text(t!(
                                         "agent_ui.new_agent.output.project_tooltip"
                                     )))
@@ -773,14 +894,13 @@ impl NewAgentModal {
                                     )),
                                 )
                                 .child(
-                                    Button::new(
+                                    segment_option(
                                         "new-agent-personal",
                                         t!("agent_ui.new_agent.output.personal"),
+                                        personal,
+                                        true,
+                                        cx,
                                     )
-                                    .style(ButtonStyle::Subtle)
-                                    .label_size(LabelSize::Small)
-                                    .toggle_state(personal)
-                                    .selected_style(ButtonStyle::Tinted(ui::TintColor::Accent))
                                     .tooltip(Tooltip::text(t!(
                                         "agent_ui.new_agent.output.personal_tooltip"
                                     )))
@@ -853,6 +973,15 @@ fn instructions_summary(instructions: &str) -> (String, String) {
     (title, preview)
 }
 
+/// What the agent is called with after `/`: no slash and no spaces, which the composer can't take.
+fn normalize_command(text: &str) -> String {
+    text.trim()
+        .trim_start_matches('/')
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
 fn permission_color(mode: PermissionMode) -> Color {
     match mode {
         PermissionMode::Allow => Color::Success,
@@ -895,16 +1024,14 @@ impl Render for NewAgentModal {
         } else {
             self.focus_handle.clone()
         };
-        v_flex()
+        modal_surface(cx)
             .key_context("NewTaskAgent")
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::suggest))
             .on_action(cx.listener(Self::create))
             .on_action(cx.listener(Self::cancel))
-            .w(px(960.).min(viewport.width - px(64.)))
+            .w(px(1000.).min(viewport.width - px(64.)))
             .max_h(viewport.height - px(140.))
-            .elevation_3(cx)
-            .overflow_hidden()
             .child(
                 h_flex()
                     .items_start()
@@ -995,7 +1122,7 @@ impl Render for NewAgentModal {
                                     h_flex()
                                         .items_stretch()
                                         .gap_3()
-                                        .child(self.render_identity(cx))
+                                        .child(self.render_identity(window, cx))
                                         .child(self.render_tools(cx))
                                         .child(self.render_output(cx)),
                                 )
@@ -1003,12 +1130,7 @@ impl Render for NewAgentModal {
                     ),
             )
             .child(
-                h_flex()
-                    .gap_2()
-                    .px_6()
-                    .py_3()
-                    .border_t_1()
-                    .border_color(cx.theme().colors().border_variant)
+                modal_footer(cx)
                     .child(
                         Label::new(t!("agent_ui.new_agent.footer"))
                             .size(LabelSize::XSmall)
@@ -1016,32 +1138,44 @@ impl Render for NewAgentModal {
                             .flex_1(),
                     )
                     .child(
-                        Button::new(
+                        secondary_button(
                             "new-agent-create-and-run",
+                            Some((IconName::PlayOutlined, Color::Default)),
                             t!("agent_ui.new_agent.create_and_run"),
+                            !running,
+                            cx,
                         )
-                        .style(ButtonStyle::Outlined)
-                        .disabled(running)
-                        .start_icon(Icon::new(IconName::PlayOutlined).size(IconSize::XSmall))
+                        .h(px(34.))
+                        .rounded(px(8.))
                         .tooltip(Tooltip::text(t!(
                             "agent_ui.new_agent.create_and_run_tooltip"
                         )))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.create_suggested(true, window, cx)
-                        })),
+                        .when(!running, |this| {
+                            this.on_click(cx.listener(|this, _, window, cx| {
+                                this.create_suggested(true, window, cx)
+                            }))
+                        }),
                     )
                     .child(
-                        Button::new("new-agent-create", t!("agent_ui.new_agent.create"))
-                            .style(ButtonStyle::Tinted(ui::TintColor::Accent))
-                            .disabled(running)
-                            .key_binding(ui::KeyBinding::for_action_in(
+                        primary_button(
+                            "new-agent-create",
+                            None,
+                            t!("agent_ui.new_agent.create"),
+                            Some(ui::KeyBinding::for_action_in(
                                 &CreateSuggestedAgent,
                                 &create_binding_focus,
                                 cx,
-                            ))
-                            .on_click(cx.listener(|this, _, window, cx| {
+                            )),
+                            cx,
+                        )
+                        .h(px(34.))
+                        .rounded(px(8.))
+                        .when(running, |this| this.opacity(0.5).cursor_default())
+                        .when(!running, |this| {
+                            this.on_click(cx.listener(|this, _, window, cx| {
                                 this.create(&CreateSuggestedAgent, window, cx)
-                            })),
+                            }))
+                        }),
                     ),
             )
     }

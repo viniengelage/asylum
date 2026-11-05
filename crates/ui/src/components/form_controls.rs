@@ -69,6 +69,113 @@ pub fn secondary_button(
         }))
 }
 
+/// The boards' bordered choice in a row of starting points (a template, "Em branco"); the chosen
+/// one is filled.
+pub fn choice_chip(
+    id: impl Into<gpui::ElementId>,
+    icon: Option<IconName>,
+    label: impl Into<SharedString>,
+    selected: bool,
+    enabled: bool,
+    cx: &App,
+) -> Stateful<Div> {
+    let colors = cx.theme().colors();
+    h_flex()
+        .id(id)
+        .h(px(32.))
+        .pl(px(10.))
+        .pr_3()
+        .gap_1p5()
+        .flex_none()
+        .rounded(px(8.))
+        .border_1()
+        .map(|this| {
+            if selected {
+                this.bg(colors.element_selected)
+                    .border_color(colors.border_selected)
+            } else {
+                this.border_color(colors.border)
+            }
+        })
+        .when(enabled && !selected, |this| {
+            this.cursor_pointer()
+                .hover(|this| this.bg(colors.element_hover))
+        })
+        .when(!enabled, |this| this.opacity(0.5))
+        .children(icon.map(|icon| {
+            Icon::new(icon).size(IconSize::Small).color(if selected {
+                Color::Default
+            } else {
+                Color::Muted
+            })
+        }))
+        .child(
+            Label::new(label)
+                .size(LabelSize::Small)
+                .weight(FontWeight::MEDIUM)
+                .color(if selected {
+                    Color::Default
+                } else {
+                    Color::Muted
+                }),
+        )
+}
+
+/// The boards' single-line input box; the caller puts the editor (and any prefix) inside.
+pub fn text_field(focused: bool, cx: &App) -> Div {
+    let colors = cx.theme().colors();
+    h_flex()
+        .w_full()
+        .min_w_0()
+        .h(px(30.))
+        .px(px(10.))
+        .gap(px(1.))
+        .rounded(px(8.))
+        .border_1()
+        .border_color(if focused {
+            colors.border_focused
+        } else {
+            colors.border
+        })
+        .bg(colors.editor_background)
+}
+
+/// The boards' select box: the chosen value and a chevron, in the [`text_field`] frame. Wrap it
+/// in [`PopoverTriggerArea`] to open the choices.
+pub fn select_field(
+    id: impl Into<gpui::ElementId>,
+    label: impl Into<SharedString>,
+    cx: &App,
+) -> Stateful<Div> {
+    let colors = cx.theme().colors();
+    h_flex()
+        .id(id)
+        .w_full()
+        .min_w_0()
+        .h(px(30.))
+        .px(px(10.))
+        .gap_1()
+        .justify_between()
+        .rounded(px(8.))
+        .border_1()
+        .border_color(colors.border)
+        .bg(colors.editor_background)
+        .cursor_pointer()
+        .hover(|this| this.bg(colors.element_hover))
+        .child(
+            Label::new(label)
+                .size(LabelSize::Small)
+                .weight(FontWeight::MEDIUM)
+                .single_line()
+                .truncate(),
+        )
+        .child(
+            Icon::new(IconName::ChevronDown)
+                .size(IconSize::XSmall)
+                .color(Color::Muted),
+        )
+}
+
 /// The boards' round, bordered chip action, e.g. "+ Adicionar" next to a row of people.
 pub fn pill_button(
     id: impl Into<gpui::ElementId>,

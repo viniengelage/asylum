@@ -27,7 +27,10 @@ use task_agents::{
     TaskAgent, TaskAgentSource, ToolAccess, ToolPermissionRules, ToolkitSummary, command_slug,
     load_task_agents, personal_agents_dir, toolkits,
 };
-use ui::{ContextMenu, DropdownMenu, KeyBinding, Switch, Tooltip, prelude::*, primary_button};
+use ui::{
+    ContextMenu, DropdownMenu, KeyBinding, Tooltip, pill_button, prelude::*, primary_button,
+    secondary_button, segment_option, segmented_control, toggle_switch,
+};
 use util::ResultExt as _;
 use workspace::{
     HideStatusItem, ItemHandle, StatusItemView, ToolkitEntry, Workspace,
@@ -527,26 +530,15 @@ impl TaskAgentsView {
                        value: Segment,
                        current: Segment,
                        cx: &mut Context<Self>| {
-            div().flex_1().min_w_0().child(
-                Button::new(id, label)
-                    .label_size(LabelSize::Small)
-                    .full_width()
-                    .toggle_state(value == current)
-                    .style(ButtonStyle::Subtle)
-                    .on_click(cx.listener(move |this, _, _window, cx| {
-                        this.segment = value;
-                        cx.notify();
-                    })),
-            )
+            segment_option(id, label, value == current, true, cx).on_click(cx.listener(
+                move |this, _, _window, cx| {
+                    this.segment = value;
+                    cx.notify();
+                },
+            ))
         };
         div().px_2().pt_2().child(
-            h_flex()
-                .p_0p5()
-                .gap_0p5()
-                .rounded_md()
-                .border_1()
-                .border_color(cx.theme().colors().border)
-                .bg(cx.theme().colors().editor_background)
+            segmented_control(cx)
                 .child(segment(
                     "segment-agents",
                     t!("agent_ui.task_agents.segment.agents"),
@@ -740,9 +732,15 @@ impl TaskAgentsView {
                             ),
                     )
                     .child(
-                        Button::new("open-flow", t!("agent_ui.task_agents.flows.edit"))
-                            .style(ButtonStyle::Outlined)
-                            .on_click(cx.listener(move |this, _, window, cx| {
+                        secondary_button(
+                            "open-flow",
+                            None,
+                            t!("agent_ui.task_agents.flows.edit"),
+                            true,
+                            cx,
+                        )
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
                                 let path = path.clone();
                                 this.workspace
                                     .update(cx, |workspace, cx| {
@@ -751,21 +749,26 @@ impl TaskAgentsView {
                                         )
                                     })
                                     .log_err();
-                            })),
+                            },
+                        )),
                     )
                     .child(
-                        Button::new("run-flow-from-list", t!("agent_ui.task_agents.flows.run"))
-                            .start_icon(Icon::new(IconName::PlayFilled).size(IconSize::Small))
-                            .style(ButtonStyle::Filled)
-                            .on_click(move |_, window, cx| {
-                                window.dispatch_action(
-                                    Box::new(crate::flows_view::RunFlow {
-                                        flow: flow_id.clone(),
-                                        input: String::new(),
-                                    }),
-                                    cx,
-                                )
-                            }),
+                        primary_button(
+                            "run-flow-from-list",
+                            Some(IconName::PlayFilled),
+                            t!("agent_ui.task_agents.flows.run"),
+                            None,
+                            cx,
+                        )
+                        .on_click(move |_, window, cx| {
+                            window.dispatch_action(
+                                Box::new(crate::flows_view::RunFlow {
+                                    flow: flow_id.clone(),
+                                    input: String::new(),
+                                }),
+                                cx,
+                            )
+                        }),
                     ),
             )
             .when(!flow.input.is_empty(), |this| {
@@ -1562,7 +1565,7 @@ impl TaskAgentsView {
             .w_full()
             .rounded_lg()
             .border_1()
-            .border_color(cx.theme().colors().border_variant)
+            .border_color(cx.theme().colors().border)
             .bg(cx.theme().colors().panel_background)
             .overflow_hidden()
             .child(
@@ -1572,7 +1575,7 @@ impl TaskAgentsView {
                     .px_3p5()
                     .gap_2()
                     .border_b_1()
-                    .border_color(cx.theme().colors().border_variant)
+                    .border_color(cx.theme().colors().border)
                     .child(
                         Label::new(title.into())
                             .size(LabelSize::XSmall)
@@ -1749,14 +1752,16 @@ impl TaskAgentsView {
                 .child(Label::new(t!("agent_ui.task_agents.intro.title")).size(LabelSize::Large))
                 .child(Label::new(t!("agent_ui.task_agents.intro.body")).color(Color::Muted))
                 .child(
-                    Button::new("empty-new-agent", t!("agent_ui.task_agents.new_agent"))
-                        .style(ButtonStyle::Filled)
-                        .start_icon(Icon::new(IconName::Plus).size(IconSize::XSmall))
-                        .on_click(
-                            cx.listener(|this, _, window, cx| {
-                                this.open_new_agent_modal(window, cx)
-                            }),
-                        ),
+                    primary_button(
+                        "empty-new-agent",
+                        Some(IconName::Plus),
+                        t!("agent_ui.task_agents.new_agent"),
+                        None,
+                        cx,
+                    )
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.open_new_agent_modal(window, cx)),
+                    ),
                 )
                 .into_any_element();
         };
@@ -1774,7 +1779,7 @@ impl TaskAgentsView {
                     .rounded_md()
                     .border_1()
                     .border_color(gpui::transparent_black())
-                    .hover(|this| this.border_color(cx.theme().colors().border_variant))
+                    .hover(|this| this.border_color(cx.theme().colors().border))
                     .text_color(cx.theme().colors().text_muted)
                     .child(draft.description.clone()),
             )
@@ -1887,23 +1892,20 @@ impl TaskAgentsView {
             .child(div().flex_1())
             .when(editable, |this| {
                 this.child(
-                    h_flex().gap_2().child(
-                        Switch::new(
-                            "task-agent-enabled",
-                            if agent.enabled {
-                                ToggleState::Selected
-                            } else {
-                                ToggleState::Unselected
-                            },
-                        )
-                        .label(t!("agent_ui.task_agents.enabled"))
+                    h_flex()
+                        .id("task-agent-enabled-row")
+                        .gap_2()
+                        .cursor_pointer()
                         .on_click(cx.listener(|this, _, _window, cx| {
                             if let Some(draft) = this.draft.as_mut() {
                                 draft.agent.enabled = !draft.agent.enabled;
                                 cx.notify();
                             }
-                        })),
-                    ),
+                        }))
+                        .child(toggle_switch("task-agent-enabled", agent.enabled, true, cx))
+                        .child(
+                            Label::new(t!("agent_ui.task_agents.enabled")).size(LabelSize::Small),
+                        ),
                 )
                 .child(
                     IconButton::new("delete-agent", IconName::Trash)
@@ -1916,11 +1918,15 @@ impl TaskAgentsView {
                 )
             })
             .child(
-                Button::new("run-agent", t!("agent_ui.task_agents.run"))
-                    .style(ButtonStyle::Outlined)
-                    .start_icon(Icon::new(IconName::PlayOutlined).size(IconSize::XSmall))
-                    .tooltip(Tooltip::text(t!("agent_ui.task_agents.run_tooltip")))
-                    .on_click(cx.listener(|this, _, window, cx| this.run_selected(window, cx))),
+                secondary_button(
+                    "run-agent",
+                    Some((IconName::PlayOutlined, Color::Default)),
+                    t!("agent_ui.task_agents.run"),
+                    true,
+                    cx,
+                )
+                .tooltip(Tooltip::text(t!("agent_ui.task_agents.run_tooltip")))
+                .on_click(cx.listener(|this, _, window, cx| this.run_selected(window, cx))),
             )
             .map(|this| {
                 if editable {
@@ -1940,12 +1946,17 @@ impl TaskAgentsView {
                     )
                 } else {
                     this.child(
-                        Button::new("copy-agent", t!("agent_ui.task_agents.copy_to_project"))
-                            .style(ButtonStyle::Filled)
-                            .tooltip(Tooltip::text(t!(
-                                "agent_ui.task_agents.copy_to_project_tooltip"
-                            )))
-                            .on_click(cx.listener(|this, _, _window, cx| this.copy_to_project(cx))),
+                        primary_button(
+                            "copy-agent",
+                            None,
+                            t!("agent_ui.task_agents.copy_to_project"),
+                            None,
+                            cx,
+                        )
+                        .tooltip(Tooltip::text(t!(
+                            "agent_ui.task_agents.copy_to_project_tooltip"
+                        )))
+                        .on_click(cx.listener(|this, _, _window, cx| this.copy_to_project(cx))),
                     )
                 }
             })
@@ -2374,14 +2385,13 @@ impl TaskAgentsView {
                 }
                 _ if editable => {
                     chips = chips.child(
-                        Button::new(
+                        pill_button(
                             SharedString::from(format!("io-add-{list:?}")),
+                            Some(IconName::Plus),
                             t!("agent_ui.task_agents.io.add"),
+                            true,
+                            cx,
                         )
-                        .style(ButtonStyle::Outlined)
-                        .label_size(LabelSize::Small)
-                        .color(Color::Muted)
-                        .start_icon(Icon::new(IconName::Plus).size(IconSize::XSmall))
                         .on_click(cx.listener(
                             move |this, _, window, cx| {
                                 this.start_adding_io(list, window, cx);
@@ -2466,7 +2476,7 @@ impl TaskAgentsView {
                     .px_3p5()
                     .gap_2()
                     .border_t_1()
-                    .border_color(cx.theme().colors().border_variant)
+                    .border_color(cx.theme().colors().border)
                     .child(
                         Icon::new(IconName::Info)
                             .size(IconSize::XSmall)
@@ -2593,8 +2603,7 @@ fn card_row(
         .py_2p5()
         .gap_2p5()
         .when(!last, |this| {
-            this.border_b_1()
-                .border_color(cx.theme().colors().border_variant)
+            this.border_b_1().border_color(cx.theme().colors().border)
         })
         .when_some(icon, |this, icon| {
             this.child(Icon::new(icon).size(IconSize::Small).color(Color::Muted))
@@ -2624,8 +2633,7 @@ fn chip_row(
         .py_2p5()
         .gap_2()
         .when(!last, |this| {
-            this.border_b_1()
-                .border_color(cx.theme().colors().border_variant)
+            this.border_b_1().border_color(cx.theme().colors().border)
         })
         .child(
             h_flex()
@@ -2772,6 +2780,18 @@ pub(crate) fn model_dropdown(
     window: &mut Window,
     cx: &mut App,
 ) -> DropdownMenu {
+    let (label, menu) = model_menu(current, empty_label, on_select, window, cx);
+    selector(id, IconName::Sparkle, label, menu)
+}
+
+/// The chosen model's name and the menu of the signed-in providers' models.
+pub(crate) fn model_menu(
+    current: Option<String>,
+    empty_label: impl Into<SharedString>,
+    on_select: impl Fn(Option<String>, &mut App) + 'static,
+    window: &mut Window,
+    cx: &mut App,
+) -> (SharedString, Entity<ContextMenu>) {
     let empty_label: SharedString = empty_label.into();
     let registry = LanguageModelRegistry::read_global(cx);
     let mut groups: Vec<(SharedString, Vec<(String, SharedString)>)> = Vec::new();
@@ -2837,7 +2857,7 @@ pub(crate) fn model_dropdown(
         }
         menu
     });
-    selector(id, IconName::Sparkle, label, menu)
+    (label, menu)
 }
 
 /// The trigger of the tab's choices: what is chosen, with an icon for what kind of choice it is,
@@ -2913,7 +2933,7 @@ impl Render for TaskAgentsView {
                                 .px_2()
                                 .rounded_md()
                                 .border_1()
-                                .border_color(cx.theme().colors().border_variant)
+                                .border_color(cx.theme().colors().border)
                                 .bg(cx.theme().colors().editor_background)
                                 .child(
                                     Icon::new(IconName::MagnifyingGlass)
@@ -2980,7 +3000,7 @@ impl Render for TaskAgentsView {
                                 .gap_1()
                                 .rounded_lg()
                                 .border_1()
-                                .border_color(cx.theme().colors().border_variant)
+                                .border_color(cx.theme().colors().border)
                                 .bg(cx.theme().colors().editor_background)
                                 .child(
                                     Label::new(t!("agent_ui.task_agents.repo.title"))
