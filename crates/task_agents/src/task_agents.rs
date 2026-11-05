@@ -144,6 +144,30 @@ struct Frontmatter {
     gives: Option<ToolkitsEntry>,
     context_servers: Option<ToolkitsEntry>,
     enabled: Option<bool>,
+    #[serde(default)]
+    triggers: TriggersEntry,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct TriggersEntry {
+    composer: Option<bool>,
+    #[serde(default)]
+    repo_dock: bool,
+    shortcut: Option<String>,
+}
+
+#[derive(Serialize)]
+struct TriggersOut<'a> {
+    #[serde(skip_serializing_if = "is_true")]
+    composer: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    repo_dock: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    shortcut: Option<&'a str>,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 fn is_true(value: &bool) -> bool {
@@ -178,6 +202,8 @@ struct FrontmatterOut<'a> {
     context_servers: &'a Vec<String>,
     #[serde(skip_serializing_if = "is_true")]
     enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    triggers: Option<TriggersOut<'a>>,
 }
 
 /// A `provider/model` pair, e.g. `anthropic/claude-opus-5-5`. Claude Code's aliases (`opus`,
@@ -204,6 +230,27 @@ impl ModelReference {
 impl std::fmt::Display for ModelReference {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}/{}", self.provider, self.model)
+    }
+}
+
+/// Where an agent can be called from besides a flow step and the Agentes tab.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskAgentTriggers {
+    /// Offered in the composer's `/` menu. Off still lets the other triggers start it.
+    pub composer: bool,
+    /// A button on the Repo dock's pull requests that hands the PR to the agent.
+    pub repo_dock: bool,
+    /// A keystroke in the keymap's syntax, e.g. `alt-cmd-r`, that starts the agent.
+    pub shortcut: Option<String>,
+}
+
+impl Default for TaskAgentTriggers {
+    fn default() -> Self {
+        Self {
+            composer: true,
+            repo_dock: false,
+            shortcut: None,
+        }
     }
 }
 
@@ -244,6 +291,8 @@ pub struct TaskAgent {
     /// Off keeps the file but hides the agent from the composer and the esteiras.
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+    #[serde(default)]
+    pub triggers: TaskAgentTriggers,
     pub instructions: String,
     pub source: TaskAgentSource,
     pub file_path: PathBuf,
@@ -309,6 +358,11 @@ impl TaskAgent {
             context_servers: &self.context_servers,
             gives: &self.gives,
             enabled: self.enabled,
+            triggers: (self.triggers != TaskAgentTriggers::default()).then(|| TriggersOut {
+                composer: self.triggers.composer,
+                repo_dock: self.triggers.repo_dock,
+                shortcut: self.triggers.shortcut.as_deref(),
+            }),
         };
         let yaml = serde_yaml_ng::to_string(&frontmatter)?;
         let instructions = self.instructions.trim();
@@ -415,6 +469,15 @@ pub fn parse_task_agent(path: &Path, content: &str, source: TaskAgentSource) -> 
         gives,
         context_servers,
         enabled: frontmatter.enabled.unwrap_or(true),
+        triggers: TaskAgentTriggers {
+            composer: frontmatter.triggers.composer.unwrap_or(true),
+            repo_dock: frontmatter.triggers.repo_dock,
+            shortcut: frontmatter
+                .triggers
+                .shortcut
+                .map(|shortcut| shortcut.trim().to_string())
+                .filter(|shortcut| !shortcut.is_empty()),
+        },
         instructions: body.trim().to_string(),
         source,
         file_path: path.to_path_buf(),
@@ -566,6 +629,54 @@ impl gpui::Global for TaskAgentsRevision {}
 
 pub fn notify_task_agents_changed(cx: &mut gpui::App) {
     cx.default_global::<TaskAgentsRevision>().0 += 1;
+}
+
+/// The enabled agents of the active workspace, published by whoever loads them (the sidebar),
+/// so the Repo dock can offer its buttons and the keymap can bind their shortcuts.
+#[derive(Default)]
+pub struct ActiveTaskAgents {
+    pub agents: Vec<TaskAgent>,
+    /// Rebinds the keymap; set by the app, which owns the keymap files.
+    pub reload_keymap: Option<std::rc::Rc<dyn Fn(&mut gpui::App)>>,
+}
+
+impl gpui::Global for ActiveTaskAgents {}
+
+impl ActiveTaskAgents {
+    /// `(keystroke, command)` of every enabled agent that has a shortcut.
+    pub fn shortcuts(cx: &gpui::App) -> Vec<(String, String)> {
+        cx.try_global::<Self>()
+            .map(|active| {
+                active
+                    .agents
+                    .iter()
+                    .filter(|agent| agent.enabled)
+                    .filter_map(|agent| {
+                        agent
+                            .triggers
+                            .shortcut
+                            .clone()
+                            .map(|shortcut| (shortcut, agent.command.clone()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}
+
+pub fn set_active_task_agents(agents: Vec<TaskAgent>, cx: &mut gpui::App) {
+    let shortcuts_before = ActiveTaskAgents::shortcuts(cx);
+    let active = cx.default_global::<ActiveTaskAgents>();
+    if active.agents == agents {
+        return;
+    }
+    active.agents = agents;
+    let reload = active.reload_keymap.clone();
+    if ActiveTaskAgents::shortcuts(cx) != shortcuts_before
+        && let Some(reload) = reload
+    {
+        reload(cx);
+    }
 }
 
 #[cfg(test)]
@@ -721,6 +832,37 @@ mod tests {
         )
         .expect("round trip should parse");
         assert!(!reparsed.enabled);
+    }
+
+    #[test]
+    fn test_triggers_round_trip() {
+        let path = Path::new("/app/.asylum/agents/revisar.md");
+        let agent = parse_task_agent(path, "---\nname: Revisor\n---\nRevisa.", project_source())
+            .expect("agent should parse");
+        assert_eq!(agent.triggers, TaskAgentTriggers::default());
+        assert!(
+            !agent
+                .to_markdown()
+                .expect("serializes")
+                .contains("triggers")
+        );
+
+        let triggers = TaskAgentTriggers {
+            composer: false,
+            repo_dock: true,
+            shortcut: Some("alt-cmd-r".into()),
+        };
+        let changed = TaskAgent {
+            triggers: triggers.clone(),
+            ..agent
+        };
+        let reparsed = parse_task_agent(
+            path,
+            &changed.to_markdown().expect("serializes"),
+            project_source(),
+        )
+        .expect("round trip should parse");
+        assert_eq!(reparsed.triggers, triggers);
     }
 
     #[test]

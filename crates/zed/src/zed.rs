@@ -2326,6 +2326,11 @@ pub fn handle_keymap_file_changes(
 ) {
     let (base_keymap_tx, mut base_keymap_rx) = mpsc::unbounded();
     let (keyboard_layout_tx, mut keyboard_layout_rx) = mpsc::unbounded();
+    let (task_agent_shortcuts_tx, mut task_agent_shortcuts_rx) = mpsc::unbounded();
+    cx.default_global::<task_agents::ActiveTaskAgents>()
+        .reload_keymap = Some(std::rc::Rc::new(move |_cx: &mut App| {
+        task_agent_shortcuts_tx.unbounded_send(()).ok();
+    }));
     let mut old_base_keymap = *BaseKeymap::get_global(cx);
     let mut old_vim_enabled = VimModeSetting::get_global(cx).0;
     let mut old_helix_enabled = vim_mode_setting::HelixModeSetting::get_global(cx).0;
@@ -2395,6 +2400,7 @@ pub fn handle_keymap_file_changes(
             select_biased! {
                 _ = base_keymap_rx.next() => {},
                 _ = keyboard_layout_rx.next() => {},
+                _ = task_agent_shortcuts_rx.next() => {},
                 content = user_keymap_file_rx.next() => {
                     if let Some(content) = content {
                         if let Ok(Some(migrated_content)) = migrate_keymap(&content) {
@@ -2520,6 +2526,7 @@ fn reload_keymaps(cx: &mut App, mut user_key_bindings: Vec<KeyBinding>) {
     cx.clear_key_bindings();
     load_default_keymap(cx);
 
+    cx.bind_keys(filter_disabled_ai_bindings(task_agent_key_bindings(cx), cx));
     for key_binding in &mut user_key_bindings {
         key_binding.set_meta(KeybindSource::User.meta());
     }
@@ -2533,6 +2540,47 @@ fn reload_keymaps(cx: &mut App, mut user_key_bindings: Vec<KeyBinding>) {
     )]);
     // todo: nicer api here?
     keymap_editor::KeymapEventChannel::trigger_keymap_changed(cx);
+}
+
+/// The shortcuts set in the task agents' "Quando chamar", bound before the user's keymap so a
+/// binding of the user's own wins.
+fn task_agent_key_bindings(cx: &App) -> Vec<KeyBinding> {
+    let shortcuts = task_agents::ActiveTaskAgents::shortcuts(cx);
+    if shortcuts.is_empty() {
+        return Vec::new();
+    }
+    let bindings = shortcuts
+        .into_iter()
+        .map(|(keystroke, command)| {
+            (
+                keystroke,
+                serde_json::json!(["task_agents::RunTaskAgent", { "command": command }]),
+            )
+        })
+        .collect::<serde_json::Map<_, _>>();
+    let keymap = serde_json::json!([{ "bindings": bindings }]).to_string();
+    match KeymapFile::load(&keymap, cx) {
+        KeymapFileLoadResult::Success { mut key_bindings } => {
+            for key_binding in &mut key_bindings {
+                key_binding.set_meta(KeybindSource::User.meta());
+            }
+            key_bindings
+        }
+        KeymapFileLoadResult::SomeFailedToLoad {
+            mut key_bindings,
+            error_message,
+        } => {
+            log::warn!("some task agent shortcuts were not bound: {error_message}");
+            for key_binding in &mut key_bindings {
+                key_binding.set_meta(KeybindSource::User.meta());
+            }
+            key_bindings
+        }
+        KeymapFileLoadResult::JsonParseFailure { error } => {
+            log::warn!("task agent shortcuts were not bound: {error}");
+            Vec::new()
+        }
+    }
 }
 
 pub fn load_default_keymap(cx: &mut App) {

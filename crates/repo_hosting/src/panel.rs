@@ -343,6 +343,7 @@ impl RepoPanel {
             ));
         }
         subscriptions.push(cx.observe(&store, |this, _, cx| this.connection_changed(cx)));
+        subscriptions.push(cx.observe_global::<task_agents::ActiveTaskAgents>(|_, cx| cx.notify()));
         subscriptions.push(cx.observe_global::<SettingsStore>(|this: &mut Self, cx| {
             if this.sync_paused
                 && task_agents::toolkit_enabled(task_agents::toolkit_ids::REPO, &this.project, cx)
@@ -3666,6 +3667,7 @@ impl RepoPanel {
                                 this.review_with_agent(window, cx)
                             })),
                     )
+                    .children(self.render_task_agent_buttons(pull_request, &url, cx))
                     .child(
                         IconButton::new("repo-pr-copy-link", IconName::Copy)
                             .icon_size(IconSize::Small)
@@ -3684,6 +3686,51 @@ impl RepoPanel {
                             .on_click(move |_, _, cx| cx.open_url(&url)),
                     ),
             )
+    }
+
+    /// The task agents that asked for a button here (their "botão no dock Repo" trigger); each
+    /// starts the agent with this pull request as the request.
+    fn render_task_agent_buttons(
+        &self,
+        pull_request: &PullRequest,
+        url: &str,
+        cx: &Context<Self>,
+    ) -> Vec<AnyElement> {
+        let Some(active) = cx.try_global::<task_agents::ActiveTaskAgents>() else {
+            return Vec::new();
+        };
+        let prompt = format!(
+            "PR #{} — {} ({url})",
+            pull_request.number, pull_request.title
+        );
+        active
+            .agents
+            .iter()
+            .filter(|agent| agent.enabled && agent.triggers.repo_dock)
+            .enumerate()
+            .map(|(index, agent)| {
+                let command = agent.command.clone();
+                let prompt = prompt.clone();
+                Button::new(("repo-pr-task-agent", index), agent.name.clone())
+                    .style(ButtonStyle::Outlined)
+                    .label_size(LabelSize::XSmall)
+                    .start_icon(Icon::new(IconName::PlayOutlined).size(IconSize::XSmall))
+                    .tooltip(Tooltip::text(t!(
+                        "repo_hosting.common.run_task_agent",
+                        command = command
+                    )))
+                    .on_click(move |_, window, cx| {
+                        match cx.build_action(
+                            "task_agents::RunTaskAgent",
+                            Some(serde_json::json!({ "command": command, "prompt": prompt })),
+                        ) {
+                            Ok(action) => window.dispatch_action(action, cx),
+                            Err(error) => log::error!("couldn't start the task agent: {error}"),
+                        }
+                    })
+                    .into_any_element()
+            })
+            .collect()
     }
 
     fn render_composer(

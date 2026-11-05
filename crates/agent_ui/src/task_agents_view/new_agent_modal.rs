@@ -114,7 +114,7 @@ impl NewAgentModal {
             }),
             cx.subscribe(&command, |this, editor, event: &EditorEvent, cx| {
                 if matches!(event, EditorEvent::BufferEdited) {
-                    this.suggestion.command = normalize_command(&editor.read(cx).text(cx));
+                    this.suggestion.command = task_agents::command_slug(&editor.read(cx).text(cx));
                     cx.notify();
                 }
             }),
@@ -541,13 +541,25 @@ impl NewAgentModal {
         id: &'static str,
         label: impl Into<SharedString>,
         tooltip: SharedString,
-        cx: &App,
+        on: bool,
+        toggle: fn(&mut task_agents::TaskAgentTriggers),
+        cx: &mut Context<Self>,
     ) -> impl IntoElement {
         h_flex()
             .id(id)
             .gap_2()
+            .cursor_pointer()
             .tooltip(Tooltip::text(tooltip))
-            .child(toggle_switch(id, true, true, cx))
+            .on_click(cx.listener(move |this, _, _window, cx| {
+                toggle(&mut this.suggestion.triggers);
+                cx.notify();
+            }))
+            .child(toggle_switch(
+                SharedString::from(format!("{id}-switch")),
+                on,
+                true,
+                cx,
+            ))
             .child(
                 Label::new(label)
                     .size(LabelSize::Small)
@@ -623,6 +635,9 @@ impl NewAgentModal {
             window,
             cx,
         );
+        let composer = agent.triggers.composer;
+        let repo_dock = agent.triggers.repo_dock;
+        let command = agent.command.clone();
         let name_focused = self.name.focus_handle(cx).is_focused(window);
         let command_focused = self.command.focus_handle(cx).is_focused(window);
         Self::render_column(cx).child(
@@ -681,17 +696,18 @@ impl NewAgentModal {
                         .gap_2()
                         .child(Self::render_trigger(
                             "new-agent-trigger-composer",
-                            t!(
-                                "agent_ui.new_agent.trigger.composer",
-                                command = agent.command
-                            ),
+                            t!("agent_ui.new_agent.trigger.composer", command = command),
                             t!("agent_ui.new_agent.trigger.composer_tooltip"),
+                            composer,
+                            |triggers| triggers.composer = !triggers.composer,
                             cx,
                         ))
                         .child(Self::render_trigger(
-                            "new-agent-trigger-sidebar",
-                            t!("agent_ui.new_agent.trigger.sidebar"),
-                            t!("agent_ui.new_agent.trigger.sidebar_tooltip"),
+                            "new-agent-trigger-repo-dock",
+                            t!("agent_ui.task_agents.call.repo_dock"),
+                            t!("agent_ui.task_agents.call.repo_dock_hint"),
+                            repo_dock,
+                            |triggers| triggers.repo_dock = !triggers.repo_dock,
                             cx,
                         )),
                 )),
@@ -971,15 +987,6 @@ fn instructions_summary(instructions: &str) -> (String, String) {
         .collect::<Vec<_>>()
         .join(" ");
     (title, preview)
-}
-
-/// What the agent is called with after `/`: no slash and no spaces, which the composer can't take.
-fn normalize_command(text: &str) -> String {
-    text.trim()
-        .trim_start_matches('/')
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join("-")
 }
 
 fn permission_color(mode: PermissionMode) -> Color {

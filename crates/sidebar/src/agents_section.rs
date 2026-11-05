@@ -110,6 +110,14 @@ impl Sidebar {
                 );
             }
             this.update(cx, |this, cx| {
+                task_agents::set_active_task_agents(
+                    agents
+                        .iter()
+                        .filter(|agent| agent.enabled)
+                        .cloned()
+                        .collect(),
+                    cx,
+                );
                 this.task_agents.agents = agents;
                 cx.notify();
             })

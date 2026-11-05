@@ -737,5 +737,20 @@
   "tool_verb.search.done": "Buscou",
   "tool_verb.search.running": "Buscando",
   "tool_verb.search_web.done": "Buscou na web",
-  "tool_verb.search_web.running": "Buscando na web"
+  "tool_verb.search_web.running": "Buscando na web",
+  "task_agents.call.repo_dock": "Botão no dock Repo",
+  "task_agents.call.repo_dock_hint": "no pull request, entrega o PR ao agente",
+  "task_agents.call.shortcut": "Atalho",
+  "task_agents.call.shortcut_hint": "teclas no formato do keymap; o seu keymap vence se colidir",
+  "task_agents.call.shortcut_placeholder": "alt-cmd-r",
+  "task_agents.tab.general": "Geral",
+  "task_agents.tab.tools": "Ferramentas",
+  "task_agents.tab.instructions": "Instruções",
+  "task_agents.tab.runs": "Execuções",
+  "task_agents.tools_tab.count": "{on} de {total} toolkits",
+  "task_agents.tools_tab.mcps": "MCPs externos",
+  "task_agents.tools_tab.mcps_id": "context servers",
+  "task_agents.runs.title": "THREADS",
+  "task_agents.runs.empty": "Nenhuma execução ainda.",
+  "task_agents.runs.empty_hint": "Toda thread entregue a este agente aparece aqui."
 }

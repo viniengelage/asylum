@@ -737,5 +737,20 @@
   "tool_verb.search.done": "Searched",
   "tool_verb.search.running": "Searching",
   "tool_verb.search_web.done": "Searched the web",
-  "tool_verb.search_web.running": "Searching the web"
+  "tool_verb.search_web.running": "Searching the web",
+  "task_agents.call.repo_dock": "Repo dock button",
+  "task_agents.call.repo_dock_hint": "on the pull request, hands the PR to the agent",
+  "task_agents.call.shortcut": "Shortcut",
+  "task_agents.call.shortcut_hint": "keys in the keymap's format; your keymap wins on a clash",
+  "task_agents.call.shortcut_placeholder": "alt-cmd-r",
+  "task_agents.tab.general": "General",
+  "task_agents.tab.tools": "Tools",
+  "task_agents.tab.instructions": "Instructions",
+  "task_agents.tab.runs": "Runs",
+  "task_agents.tools_tab.count": "{on} of {total} toolkits",
+  "task_agents.tools_tab.mcps": "External MCPs",
+  "task_agents.tools_tab.mcps_id": "context servers",
+  "task_agents.runs.title": "THREADS",
+  "task_agents.runs.empty": "No runs yet.",
+  "task_agents.runs.empty_hint": "Every thread handed to this agent shows up here."
 }

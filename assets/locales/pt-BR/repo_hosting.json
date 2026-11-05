@@ -46,6 +46,7 @@
   "common.opening": "Abrindo…",
   "common.removed_user": "Usuário removido",
   "common.review_with_agent": "Revisar com o Agent",
+  "common.run_task_agent": "Entregar este PR ao /{command}",
   "connect.bitbucket_footer": "O token só vale para este perfil. Outros perfis não veem este repositório nem os PRs dele.",
   "connect.bitbucket_hint": "Autentica com o e-mail Atlassian. Fica no Keychain do perfil.",
   "connect.bitbucket_origin": "origin aponta para bitbucket.org/{owner}.",

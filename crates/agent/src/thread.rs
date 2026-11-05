@@ -10214,7 +10214,10 @@ mod tests {
         cx.update(|cx| {
             <settings::SettingsStore as gpui::UpdateGlobal>::update_global(cx, |store, cx| {
                 store.update_user_settings(cx, |content| {
-                    content.agent.get_or_insert_default().subagent_thinking_effort =
+                    content
+                        .agent
+                        .get_or_insert_default()
+                        .subagent_thinking_effort =
                         effort.and_then(settings::SubagentThinkingEffort::from_value);
                 });
             });
@@ -10222,9 +10225,7 @@ mod tests {
     }
 
     #[gpui::test]
-    async fn test_subagent_thinking_effort_setting_replaces_parent_effort(
-        cx: &mut TestAppContext,
-    ) {
+    async fn test_subagent_thinking_effort_setting_replaces_parent_effort(cx: &mut TestAppContext) {
         let (parent, _event_stream, _) = setup_thread_for_test(cx).await;
         set_subagent_thinking_effort(Some("low"), cx);
         cx.update(|cx| {

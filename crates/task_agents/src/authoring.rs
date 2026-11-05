@@ -316,6 +316,7 @@ pub fn example_markdown(
         gives: Vec::new(),
         context_servers: Vec::new(),
         enabled: true,
+        triggers: Default::default(),
         instructions: instructions.to_string(),
         source: crate::TaskAgentSource::Personal,
         file_path: Default::default(),

@@ -46,6 +46,7 @@
   "common.opening": "Opening…",
   "common.removed_user": "Removed user",
   "common.review_with_agent": "Review with Agent",
+  "common.run_task_agent": "Hand this PR to /{command}",
   "connect.bitbucket_footer": "The token only applies to this profile. Other profiles don't see this repository or its pull requests.",
   "connect.bitbucket_hint": "Signs in with your Atlassian e-mail. Stored in the profile's Keychain.",
   "connect.bitbucket_origin": "origin points to bitbucket.org/{owner}.",

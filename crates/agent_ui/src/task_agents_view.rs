@@ -24,12 +24,12 @@ use std::rc::Rc;
 use std::sync::Arc;
 use task_agents::{
     ALL_TOOLS_PERMISSION_KEY, AuthoringCatalog, PROJECT_AGENTS_DIR, PermissionMode, ProfileSummary,
-    TaskAgent, TaskAgentSource, ToolAccess, ToolPermissionRules, ToolkitSummary, command_slug,
-    load_task_agents, personal_agents_dir, toolkits,
+    TaskAgent, TaskAgentSource, ToolAccess, ToolPermissionRules, Toolkit, ToolkitSummary,
+    command_slug, load_task_agents, personal_agents_dir, toolkits,
 };
 use ui::{
-    ContextMenu, DropdownMenu, KeyBinding, Tooltip, pill_button, prelude::*, primary_button,
-    secondary_button, segment_option, segmented_control, toggle_switch,
+    ContextMenu, DropdownMenu, KeyBinding, Tooltip, choice_chip, pill_button, prelude::*,
+    primary_button, secondary_button, segment_option, segmented_control, text_field, toggle_switch,
 };
 use util::ResultExt as _;
 use workspace::{
@@ -311,6 +311,7 @@ fn template_agent(template: Option<&Template>) -> TaskAgent {
         gives: Vec::new(),
         context_servers: Vec::new(),
         enabled: true,
+        triggers: Default::default(),
         instructions: template
             .map(|template| template.instructions.to_string())
             .unwrap_or_else(|| t!("agent_ui.task_agents.default_instructions").to_string()),
@@ -404,6 +405,8 @@ struct Draft {
     command: Entity<Editor>,
     description: Entity<Editor>,
     instructions: Entity<Editor>,
+    /// The keystroke of the "atalho" trigger; empty means no shortcut.
+    shortcut: Entity<Editor>,
 }
 
 pub struct TaskAgentsView {
@@ -421,6 +424,7 @@ pub struct TaskAgentsView {
     search: Entity<Editor>,
     status: Option<SharedString>,
     segment: Segment,
+    detail_tab: DetailTab,
     editing_name: bool,
     adding_io: Option<(IoList, Entity<Editor>)>,
     flows: Vec<flows::Flow>,
@@ -434,6 +438,15 @@ pub struct TaskAgentsView {
 enum Segment {
     Agents,
     Flows,
+}
+
+/// The tabs of an agent's page.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DetailTab {
+    General,
+    Tools,
+    Instructions,
+    Runs,
 }
 
 /// Opens the Agentes tab on its Esteiras segment.
@@ -473,6 +486,7 @@ impl TaskAgentsView {
             search: search.clone(),
             status: None,
             segment: Segment::Agents,
+            detail_tab: DetailTab::General,
             editing_name: false,
             adding_io: None,
             flows: Vec::new(),
@@ -865,6 +879,12 @@ impl TaskAgentsView {
             window,
             cx,
         );
+        let shortcut = text_editor(
+            agent.triggers.shortcut.as_deref().unwrap_or_default(),
+            t!("agent_ui.task_agents.call.shortcut_placeholder"),
+            window,
+            cx,
+        );
         let instructions = {
             let text = agent.instructions.clone();
             cx.new(|cx| {
@@ -890,6 +910,7 @@ impl TaskAgentsView {
             command,
             description,
             instructions,
+            shortcut,
         });
         self.status = None;
         cx.notify();
@@ -919,6 +940,8 @@ impl TaskAgentsView {
         agent.command = command_slug(&draft.command.read(cx).text(cx));
         agent.description = draft.description.read(cx).text(cx).trim().to_string();
         agent.instructions = draft.instructions.read(cx).text(cx);
+        let shortcut = draft.shortcut.read(cx).text(cx).trim().to_string();
+        agent.triggers.shortcut = (!shortcut.is_empty()).then_some(shortcut);
         Some(agent)
     }
 
@@ -1790,38 +1813,493 @@ impl TaskAgentsView {
                         .color(Color::Muted),
                 )
             })
-            .child(
-                h_flex()
+            .child(self.render_detail_tabs(cx))
+            .child(match self.detail_tab {
+                DetailTab::General => self.render_general_tab(window, cx).into_any_element(),
+                DetailTab::Tools => self.render_tools_tab(cx).into_any_element(),
+                DetailTab::Instructions => div()
                     .flex_1()
                     .min_h_0()
-                    .items_start()
+                    .w_full()
+                    .child(self.render_instructions_card(cx))
+                    .into_any_element(),
+                DetailTab::Runs => self.render_runs_tab(cx).into_any_element(),
+            })
+            .into_any_element()
+    }
+
+    fn render_general_tab(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        h_flex()
+            .flex_1()
+            .min_h_0()
+            .items_start()
+            .gap_4()
+            .child(
+                v_flex()
+                    .id("task-agent-settings")
+                    .w(px(560.))
+                    .flex_none()
+                    .h_full()
                     .gap_4()
+                    .overflow_y_scroll()
+                    .child(self.render_call_card(window, cx))
+                    .child(self.render_model_card(window, cx))
+                    .child(self.render_io_card(cx))
                     .child(
-                        v_flex()
-                            .id("task-agent-settings")
-                            .w(px(560.))
-                            .flex_none()
-                            .h_full()
-                            .gap_4()
-                            .overflow_y_scroll()
-                            .child(self.render_call_card(cx))
-                            .child(self.render_model_card(window, cx))
-                            .child(self.render_io_card(cx))
-                            .child(
-                                Label::new(t!("agent_ui.task_agents.io.flows_hint"))
-                                    .size(LabelSize::XSmall)
-                                    .color(Color::Muted),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .h_full()
-                            .child(self.render_instructions_card(cx)),
+                        Label::new(t!("agent_ui.task_agents.io.flows_hint"))
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
                     ),
             )
-            .into_any_element()
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .child(self.render_instructions_card(cx)),
+            )
+    }
+
+    /// The agent's threads, newest first, by the command they were handed to.
+    fn runs(&self, cx: &App) -> Vec<crate::thread_metadata_store::ThreadMetadata> {
+        let Some(draft) = self.draft.as_ref() else {
+            return Vec::new();
+        };
+        let Some(store) = crate::thread_metadata_store::ThreadMetadataStore::try_global(cx) else {
+            return Vec::new();
+        };
+        let command = draft.original.command.as_str();
+        let mut runs = store
+            .read(cx)
+            .entries()
+            .filter(|thread| thread.task_agent.as_deref() == Some(command))
+            .cloned()
+            .collect::<Vec<_>>();
+        runs.sort_by_key(|run| std::cmp::Reverse(run.updated_at));
+        runs
+    }
+
+    fn render_detail_tabs(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let runs = self.runs(cx).len();
+        let tab =
+            |id: &'static str, label: SharedString, value: DetailTab, cx: &mut Context<Self>| {
+                choice_chip(id, None, label, self.detail_tab == value, true, cx).on_click(
+                    cx.listener(move |this, _, _window, cx| {
+                        this.detail_tab = value;
+                        cx.notify();
+                    }),
+                )
+            };
+        let legend = |label: SharedString, color: gpui::Hsla| {
+            h_flex()
+                .gap_1()
+                .child(div().size(px(6.)).rounded_full().bg(color))
+                .child(
+                    Label::new(label)
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted),
+                )
+        };
+        let (success, warning, error) = {
+            let status = cx.theme().status();
+            (status.success, status.warning, status.error)
+        };
+        h_flex()
+            .w_full()
+            .gap_1()
+            .child(tab(
+                "agent-tab-general",
+                t!("agent_ui.task_agents.tab.general"),
+                DetailTab::General,
+                cx,
+            ))
+            .child(tab(
+                "agent-tab-tools",
+                t!("agent_ui.task_agents.tab.tools"),
+                DetailTab::Tools,
+                cx,
+            ))
+            .child(tab(
+                "agent-tab-instructions",
+                t!("agent_ui.task_agents.tab.instructions"),
+                DetailTab::Instructions,
+                cx,
+            ))
+            .child(
+                tab(
+                    "agent-tab-runs",
+                    t!("agent_ui.task_agents.tab.runs"),
+                    DetailTab::Runs,
+                    cx,
+                )
+                .when(runs > 0, |this| {
+                    this.child(list_badge(runs.to_string(), cx))
+                }),
+            )
+            .child(div().flex_1())
+            .when(self.detail_tab == DetailTab::Tools, |this| {
+                let on = self
+                    .draft
+                    .as_ref()
+                    .map_or(0, |draft| draft.agent.toolkits.len());
+                this.gap_3()
+                    .child(
+                        Label::new(t!(
+                            "agent_ui.task_agents.tools_tab.count",
+                            on = on,
+                            total = toolkits(cx).len()
+                        ))
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted),
+                    )
+                    .child(legend(t!("agent_ui.task_agents.permission.allow"), success))
+                    .child(legend(
+                        t!("agent_ui.task_agents.permission.confirm"),
+                        warning,
+                    ))
+                    .child(legend(t!("agent_ui.task_agents.permission.deny"), error))
+            })
+    }
+
+    /// A tool's chip, in the color of what the agent may do with it; a click cycles the mode.
+    fn tool_permission_chip(
+        &self,
+        agent: &TaskAgent,
+        registered: &[Arc<Toolkit>],
+        name: String,
+        label: SharedString,
+        title: SharedString,
+        access: Option<ToolAccess>,
+        editable: bool,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let mode_of = |key: &str| agent.permissions.get(key).and_then(|rules| rules.default);
+        let tool_mode = mode_of(&name);
+        let toolkit_mode = access.and_then(|_| {
+            registered
+                .iter()
+                .find(|toolkit| toolkit.tools.iter().any(|tool| tool.name.as_ref() == name))
+                .and_then(|toolkit| mode_of(toolkit.id.as_ref()))
+        });
+        let effective = tool_mode
+            .or(toolkit_mode)
+            .or(mode_of(ALL_TOOLS_PERMISSION_KEY));
+        let look = match (effective, access) {
+            (Some(PermissionMode::Allow), _) => ChipLook::On,
+            (Some(PermissionMode::Confirm), _) => ChipLook::Ask,
+            (Some(PermissionMode::Deny), _) => ChipLook::Never,
+            (None, Some(ToolAccess::Read)) => ChipLook::On,
+            (None, Some(_)) => ChipLook::Ask,
+            (None, None) => ChipLook::Off,
+        };
+        let mode_label = match (effective, access) {
+            (None, Some(ToolAccess::Read)) => t!("agent_ui.task_agents.permission.default_allow"),
+            (None, Some(_)) => t!("agent_ui.task_agents.permission.default_confirm"),
+            (mode, _) => permission_label(mode),
+        };
+        let key = name.clone();
+        chip(
+            SharedString::from(format!("perm-{name}")),
+            label,
+            look,
+            false,
+            cx,
+        )
+        .tooltip(Tooltip::text(t!(
+            "agent_ui.task_agents.permission.tooltip",
+            title = title,
+            mode = mode_label
+        )))
+        .when(editable, |this| {
+            this.on_click(cx.listener(move |this, _, _window, cx| {
+                this.cycle_permission(&key, cx);
+            }))
+        })
+    }
+
+    fn render_tools_tab(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let Some(draft) = self.draft.as_ref() else {
+            return div().id("task-agent-tools");
+        };
+        let agent = draft.agent.clone();
+        let editable = agent.source.is_editable();
+        let registered = toolkits(cx);
+        let mut cards = Vec::new();
+        for toolkit in registered.iter() {
+            let on = agent.toolkits.iter().any(|id| id == toolkit.id.as_ref());
+            let toolkit_id = toolkit.id.to_string();
+            let mut tools = h_flex().flex_wrap().gap_1p5();
+            for tool in &toolkit.tools {
+                let chip = self.tool_permission_chip(
+                    &agent,
+                    &registered,
+                    tool.name.to_string(),
+                    tool.title.to_lowercase().into(),
+                    tool.description.clone(),
+                    Some(tool.access),
+                    editable && on,
+                    cx,
+                );
+                tools = tools.child(chip.when(!on, |this| this.opacity(0.5)));
+            }
+            cards.push(
+                Self::render_toolkit_card(
+                    SharedString::from(format!("toolkit-card-{toolkit_id}")),
+                    Icon::from_path(format!("icons/{}.svg", toolkit.icon)),
+                    toolkit.name.clone(),
+                    toolkit.id.clone(),
+                    on,
+                    editable,
+                    tools,
+                    Some(toolkit.description.clone()),
+                    cx,
+                )
+                .when(editable, |this| {
+                    this.on_click(cx.listener(move |this, _, _window, cx| {
+                        this.toggle_toolkit(&toolkit_id, cx);
+                    }))
+                })
+                .into_any_element(),
+            );
+        }
+
+        let configured = self
+            .project
+            .read(cx)
+            .context_server_store()
+            .read(cx)
+            .configured_server_ids()
+            .into_iter()
+            .map(|id| id.0.to_string())
+            .collect::<Vec<_>>();
+        let mut servers = configured.clone();
+        for server in &agent.context_servers {
+            if !servers.contains(server) {
+                servers.push(server.clone());
+            }
+        }
+        let mut server_chips = h_flex().flex_wrap().gap_1p5();
+        for server in servers {
+            let on = agent.context_servers.contains(&server);
+            let missing = !configured.contains(&server);
+            let server_id = server.clone();
+            server_chips = server_chips.child(
+                chip(
+                    SharedString::from(format!("tools-tab-mcp-{server}")),
+                    server.into(),
+                    if missing {
+                        ChipLook::Never
+                    } else if on {
+                        ChipLook::On
+                    } else {
+                        ChipLook::Off
+                    },
+                    true,
+                    cx,
+                )
+                .when(editable, |this| {
+                    this.on_click(cx.listener(move |this, _, _window, cx| {
+                        this.toggle_context_server(&server_id, cx);
+                    }))
+                }),
+            );
+        }
+        cards.push(
+            Self::render_toolkit_card(
+                "toolkit-card-mcps".into(),
+                Icon::new(IconName::Blocks),
+                t!("agent_ui.task_agents.tools_tab.mcps"),
+                t!("agent_ui.task_agents.tools_tab.mcps_id"),
+                !agent.context_servers.is_empty(),
+                false,
+                server_chips,
+                Some(t!("agent_ui.task_agents.model_card.mcps_hint")),
+                cx,
+            )
+            .into_any_element(),
+        );
+
+        let mut left = v_flex().flex_1().min_w_0().gap_3();
+        let mut right = v_flex().flex_1().min_w_0().gap_3();
+        for (index, card) in cards.into_iter().enumerate() {
+            if index % 2 == 0 {
+                left = left.child(card);
+            } else {
+                right = right.child(card);
+            }
+        }
+        div()
+            .id("task-agent-tools")
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .overflow_y_scroll()
+            .child(h_flex().items_start().gap_3().child(left).child(right))
+    }
+
+    fn render_toolkit_card(
+        id: SharedString,
+        icon: Icon,
+        name: SharedString,
+        subtitle: SharedString,
+        on: bool,
+        clickable: bool,
+        chips: Div,
+        hint: Option<SharedString>,
+        cx: &App,
+    ) -> Stateful<Div> {
+        let colors = cx.theme().colors();
+        v_flex()
+            .id(id.clone())
+            .w_full()
+            .p_3()
+            .gap_2p5()
+            .rounded_lg()
+            .border_1()
+            .border_color(colors.border)
+            .bg(colors.panel_background)
+            .child(
+                h_flex()
+                    .gap_2p5()
+                    .child(
+                        h_flex()
+                            .flex_none()
+                            .size(px(28.))
+                            .justify_center()
+                            .rounded(px(7.))
+                            .bg(colors.element_selected)
+                            .child(icon.size(IconSize::Small).color(Color::Muted)),
+                    )
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .child(Label::new(name).weight(FontWeight::SEMIBOLD).truncate())
+                            .child(
+                                Label::new(subtitle)
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted)
+                                    .buffer_font(cx)
+                                    .truncate(),
+                            ),
+                    )
+                    .child(toggle_switch(
+                        SharedString::from(format!("{id}-switch")),
+                        on,
+                        clickable,
+                        cx,
+                    )),
+            )
+            .child(chips)
+            .when_some(hint, |this, hint| {
+                this.child(
+                    Label::new(hint)
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted)
+                        .truncate(),
+                )
+            })
+    }
+
+    fn render_runs_tab(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let runs = self.runs(cx);
+        let mut list = v_flex()
+            .id("task-agent-runs")
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .overflow_y_scroll();
+        if runs.is_empty() {
+            return list.child(
+                v_flex()
+                    .py_8()
+                    .items_center()
+                    .gap_1()
+                    .child(Label::new(t!("agent_ui.task_agents.runs.empty")).color(Color::Muted))
+                    .child(
+                        Label::new(t!("agent_ui.task_agents.runs.empty_hint"))
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
+                    ),
+            );
+        }
+        let count = runs.len();
+        let mut card = Self::render_card(t!("agent_ui.task_agents.runs.title"), None, cx);
+        for (index, run) in runs.into_iter().enumerate() {
+            let when = run
+                .updated_at
+                .with_timezone(&chrono::Local)
+                .format("%d/%m %H:%M")
+                .to_string();
+            card = card.child(
+                h_flex()
+                    .id(("task-agent-run", index))
+                    .w_full()
+                    .px_3p5()
+                    .py_2p5()
+                    .gap_2p5()
+                    .cursor_pointer()
+                    .hover(|this| this.bg(cx.theme().colors().element_hover))
+                    .when(index + 1 < count, |this| {
+                        this.border_b_1().border_color(cx.theme().colors().border)
+                    })
+                    .child(
+                        Icon::new(if run.archived {
+                            IconName::Archive
+                        } else {
+                            IconName::Thread
+                        })
+                        .size(IconSize::Small)
+                        .color(Color::Muted),
+                    )
+                    .child(
+                        Label::new(run.display_title())
+                            .single_line()
+                            .truncate()
+                            .flex_1(),
+                    )
+                    .child(
+                        Label::new(when)
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted)
+                            .buffer_font(cx),
+                    )
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.open_run(&run, window, cx);
+                    })),
+            );
+        }
+        list = list.child(card);
+        list
+    }
+
+    fn open_run(
+        &self,
+        run: &crate::thread_metadata_store::ThreadMetadata,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(workspace) = self.workspace.upgrade() else {
+            return;
+        };
+        workspace.update(cx, |workspace, cx| {
+            workspace.focus_panel::<AgentPanel>(window, cx);
+            let Some(panel) = workspace.panel::<AgentPanel>(cx) else {
+                return;
+            };
+            panel.update(cx, |panel, cx| {
+                panel.load_agent_thread(
+                    crate::Agent::from(run.agent_id.clone()),
+                    run.thread_id,
+                    Some(run.folder_paths().clone()),
+                    run.title.clone(),
+                    true,
+                    AgentThreadSource::AgentPanel,
+                    window,
+                    cx,
+                );
+            });
+        });
     }
 
     fn render_detail_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1975,7 +2453,7 @@ impl TaskAgentsView {
         }
     }
 
-    fn render_call_card(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_call_card(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(draft) = self.draft.as_ref() else {
             return div();
         };
@@ -1995,6 +2473,24 @@ impl TaskAgentsView {
             ),
         };
         let first_flow = using.first().copied();
+        let editable = draft.agent.source.is_editable();
+        let triggers = draft.agent.triggers.clone();
+        let trigger_switch = |id: &'static str,
+                              on: bool,
+                              toggle: fn(&mut task_agents::TaskAgentTriggers),
+                              cx: &mut Context<Self>| {
+            toggle_switch(id, on, editable, cx)
+                .when(editable, |this| {
+                    this.on_click(cx.listener(move |this, _, _window, cx| {
+                        if let Some(draft) = this.draft.as_mut() {
+                            toggle(&mut draft.agent.triggers);
+                            cx.notify();
+                        }
+                    }))
+                })
+                .into_any_element()
+        };
+        let shortcut_focused = draft.shortcut.focus_handle(cx).is_focused(window);
         div().child(
             Self::render_card(t!("agent_ui.task_agents.call.title"), None, cx)
                 .child(card_row(
@@ -2024,7 +2520,46 @@ impl TaskAgentsView {
                         )
                         .into_any_element(),
                     t!("agent_ui.task_agents.call.composer_hint"),
-                    None,
+                    Some(trigger_switch(
+                        "trigger-composer",
+                        triggers.composer,
+                        |triggers| triggers.composer = !triggers.composer,
+                        cx,
+                    )),
+                    false,
+                    cx,
+                ))
+                .child(card_row(
+                    Some(IconName::PullRequest),
+                    Label::new(t!("agent_ui.task_agents.call.repo_dock"))
+                        .weight(FontWeight::MEDIUM)
+                        .into_any_element(),
+                    t!("agent_ui.task_agents.call.repo_dock_hint"),
+                    Some(trigger_switch(
+                        "trigger-repo-dock",
+                        triggers.repo_dock,
+                        |triggers| triggers.repo_dock = !triggers.repo_dock,
+                        cx,
+                    )),
+                    false,
+                    cx,
+                ))
+                .child(card_row(
+                    Some(IconName::Keyboard),
+                    Label::new(t!("agent_ui.task_agents.call.shortcut"))
+                        .weight(FontWeight::MEDIUM)
+                        .into_any_element(),
+                    t!("agent_ui.task_agents.call.shortcut_hint"),
+                    Some(
+                        div()
+                            .w(px(150.))
+                            .child(
+                                text_field(shortcut_focused, cx)
+                                    .h(px(26.))
+                                    .child(div().flex_1().child(draft.shortcut.clone())),
+                            )
+                            .into_any_element(),
+                    ),
                     false,
                     cx,
                 ))
@@ -2157,49 +2692,16 @@ impl TaskAgentsView {
             }
         }
         for (name, label, title, access) in permission_tools {
-            let tool_mode = mode_of(&name);
-            let toolkit_mode = access.and_then(|_| {
-                registered
-                    .iter()
-                    .find(|toolkit| toolkit.tools.iter().any(|tool| tool.name.as_ref() == name))
-                    .and_then(|toolkit| mode_of(toolkit.id.as_ref()))
-            });
-            let effective = tool_mode.or(toolkit_mode).or(all_mode);
-            let look = match (effective, access) {
-                (Some(PermissionMode::Allow), _) => ChipLook::On,
-                (Some(PermissionMode::Confirm), _) => ChipLook::Ask,
-                (Some(PermissionMode::Deny), _) => ChipLook::Never,
-                (None, Some(ToolAccess::Read)) => ChipLook::On,
-                (None, Some(_)) => ChipLook::Ask,
-                (None, None) => ChipLook::Off,
-            };
-            let mode_label = match (effective, access) {
-                (None, Some(ToolAccess::Read)) => {
-                    t!("agent_ui.task_agents.permission.default_allow")
-                }
-                (None, Some(_)) => t!("agent_ui.task_agents.permission.default_confirm"),
-                (mode, _) => permission_label(mode),
-            };
-            let key = name.clone();
-            permission_chips = permission_chips.child(
-                chip(
-                    SharedString::from(format!("perm-{name}")),
-                    label,
-                    look,
-                    false,
-                    cx,
-                )
-                .tooltip(Tooltip::text(t!(
-                    "agent_ui.task_agents.permission.tooltip",
-                    title = title,
-                    mode = mode_label
-                )))
-                .when(editable, |this| {
-                    this.on_click(cx.listener(move |this, _, _window, cx| {
-                        this.cycle_permission(&key, cx);
-                    }))
-                }),
-            );
+            permission_chips = permission_chips.child(self.tool_permission_chip(
+                &agent,
+                &registered,
+                name,
+                label,
+                title,
+                access,
+                editable,
+                cx,
+            ));
         }
 
         let dropdown = |element: AnyElement| div().w(px(210.)).flex().justify_end().child(element);

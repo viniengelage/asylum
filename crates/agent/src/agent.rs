@@ -2006,39 +2006,43 @@ impl NativeAgent {
         });
 
         let disabled_toolkits = task_agents::disabled_toolkit_names(&state.project, cx);
-        let task_agent_commands = state.task_agents.iter().map(|agent| {
-            let mut description = if agent.description.is_empty() {
-                agent.name.clone()
-            } else {
-                format!("{} — {}", agent.name, agent.description)
-            };
-            let missing = agent
-                .toolkits
-                .iter()
-                .filter_map(|id| disabled_toolkits.get(id.as_str()))
-                .map(|name| name.as_ref())
-                .collect::<Vec<_>>();
-            if !missing.is_empty() {
-                description.push_str(&format!(
-                    " · {}",
-                    i18n::t!(
-                        "agent.task_agent_command.toolkits_off_in_profile",
-                        toolkits = missing.join(", ")
-                    )
-                ));
-            }
-            acp_v2::AvailableCommand::Command(
-                acp_v2::Command::new(agent.command.clone(), description)
-                    .meta(acp_thread::meta_with_command_category(
-                        acp_thread::CommandCategory::TaskAgent,
-                    ))
-                    .input(acp_v2::AvailableCommandInput::Text(
-                        acp_v2::TextCommandInput::new(
-                            i18n::t!("agent.task_agent_command.input_hint").to_string(),
-                        ),
-                    )),
-            )
-        });
+        let task_agent_commands = state
+            .task_agents
+            .iter()
+            .filter(|agent| agent.triggers.composer)
+            .map(|agent| {
+                let mut description = if agent.description.is_empty() {
+                    agent.name.clone()
+                } else {
+                    format!("{} — {}", agent.name, agent.description)
+                };
+                let missing = agent
+                    .toolkits
+                    .iter()
+                    .filter_map(|id| disabled_toolkits.get(id.as_str()))
+                    .map(|name| name.as_ref())
+                    .collect::<Vec<_>>();
+                if !missing.is_empty() {
+                    description.push_str(&format!(
+                        " · {}",
+                        i18n::t!(
+                            "agent.task_agent_command.toolkits_off_in_profile",
+                            toolkits = missing.join(", ")
+                        )
+                    ));
+                }
+                acp_v2::AvailableCommand::Command(
+                    acp_v2::Command::new(agent.command.clone(), description)
+                        .meta(acp_thread::meta_with_command_category(
+                            acp_thread::CommandCategory::TaskAgent,
+                        ))
+                        .input(acp_v2::AvailableCommandInput::Text(
+                            acp_v2::TextCommandInput::new(
+                                i18n::t!("agent.task_agent_command.input_hint").to_string(),
+                            ),
+                        )),
+                )
+            });
 
         let flow_commands = state.flows.iter().map(|flow| {
             let steps = flow.steps.len();
