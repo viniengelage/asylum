@@ -9199,6 +9199,29 @@ fn ai_pages(cx: &App) -> [SettingsPage; 5] {
                 files: USER,
             }),
             SettingsPageItem::SettingItem(SettingItem {
+                title: "Subagent Thinking Effort",
+                description: "How hard subagents think. 'Inherit' uses the parent thread's effort; a lower level spends fewer tokens. Ignored when the subagent's model doesn't offer the level.",
+                field: Box::new(SettingField {
+                    organization_override: None,
+                    json_path: Some("agent.subagent_thinking_effort"),
+                    pick: |settings_content| {
+                        settings_content
+                            .agent
+                            .as_ref()?
+                            .subagent_thinking_effort
+                            .as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .agent
+                            .get_or_insert_default()
+                            .subagent_thinking_effort = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
                 title: "Cancel Generation On Terminal Stop",
                 description: "Whether clicking the stop button on a running terminal tool should also cancel the agent's generation. Note that this only applies to the stop button, not to ctrl+c inside the terminal.",
                 field: Box::new(SettingField {

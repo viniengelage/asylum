@@ -1411,6 +1411,9 @@ pub struct Thread {
     /// Weak references to running subagent threads for cancellation propagation
     running_subagents: Vec<WeakEntity<Thread>>,
     inherits_parent_model_settings: bool,
+    /// False when `subagent_thinking_effort` replaced the parent's effort, so
+    /// later changes to the parent's effort don't undo it.
+    inherits_parent_thinking_effort: bool,
     sandboxed_terminal_temp_dir: Option<PathBuf>,
     /// Sandbox permissions the user approved "for the rest of the thread".
     /// Shared with each tool call's event stream so repeated requests for
@@ -1477,11 +1480,48 @@ impl Thread {
                 })
             })
             .or_else(|| AgentSettings::get_global(cx).subagent_model.clone());
+        let settings = AgentSettings::get_global(cx);
+        let effort_comes_from_subagent_model = model_selection
+            .as_ref()
+            .is_some_and(|selection| settings.subagent_model.as_ref() == Some(selection));
+        let task_agent_effort = thread
+            .parent_task_agent
+            .as_ref()
+            .and_then(|agent| agent.subagent_effort?.value())
+            .map(str::to_string);
+        let subagent_thinking_effort = task_agent_effort.or_else(|| {
+            settings
+                .subagent_thinking_effort
+                .clone()
+                .filter(|_| !effort_comes_from_subagent_model)
+        });
         if let Some(model_selection) = model_selection {
             thread.inherits_parent_model_settings = false;
             thread.apply_model_selection(&model_selection, cx);
         }
+        if let Some(effort) = subagent_thinking_effort {
+            thread.apply_subagent_thinking_effort(effort);
+        }
         thread
+    }
+
+    fn apply_subagent_thinking_effort(&mut self, effort: String) {
+        let Some(model) = self.model() else {
+            return;
+        };
+        let supported = model
+            .supported_effort_levels()
+            .iter()
+            .any(|level| level.value.as_ref() == effort);
+        if !supported {
+            log::warn!(
+                "subagent_thinking_effort {effort:?} isn't supported by {}; using the parent's effort",
+                model.name().0
+            );
+            return;
+        }
+        self.thinking_effort = Some(effort);
+        self.inherits_parent_thinking_effort = false;
     }
 
     pub fn new(
@@ -1581,6 +1621,7 @@ impl Thread {
             ui_scroll_position: None,
             running_subagents: Vec::new(),
             inherits_parent_model_settings: true,
+            inherits_parent_thinking_effort: true,
             sandboxed_terminal_temp_dir: None,
             sandbox_grants: Rc::new(RefCell::new(ThreadSandboxGrants::default())),
             task_agent: None,
@@ -1967,6 +2008,7 @@ impl Thread {
             }),
             running_subagents: Vec::new(),
             inherits_parent_model_settings: true,
+            inherits_parent_thinking_effort: true,
             sandboxed_terminal_temp_dir: db_thread.sandboxed_terminal_temp_dir,
             sandbox_grants: Rc::new(RefCell::new(ThreadSandboxGrants::from_db(
                 &db_thread.sandbox_grants,
@@ -2292,7 +2334,9 @@ impl Thread {
         for subagent in &self.running_subagents {
             subagent
                 .update(cx, |thread, cx| {
-                    if thread.inherits_parent_model_settings {
+                    if thread.inherits_parent_model_settings
+                        && thread.inherits_parent_thinking_effort
+                    {
                         thread.set_thinking_effort(effort.clone(), cx)
                     }
                 })
@@ -10141,6 +10185,103 @@ mod tests {
             assert!(sub.thinking_enabled());
             assert_eq!(sub.thinking_effort().map(|s| s.as_str()), Some("high"));
             assert_eq!(sub.profile(), &AgentProfileId("custom-profile".into()));
+        });
+    }
+
+    fn model_with_effort_levels(values: &[&'static str]) -> LanguageModel {
+        let mut model = LanguageModel::new(
+            language_model::LanguageModelId("effortful".into()),
+            language_model::LanguageModelName("Effortful".into()),
+            language_model::LanguageModelProviderId("fake".into()),
+            language_model::LanguageModelProviderName("Fake".into()),
+            "fake/effortful",
+            200_000,
+        );
+        model.supported_effort_levels = values
+            .iter()
+            .map(|value| language_model::LanguageModelEffortLevel {
+                name: (*value).into(),
+                value: (*value).into(),
+                is_default: *value == "high",
+                supports_disabling_thinking: None,
+            })
+            .collect::<Vec<_>>()
+            .into();
+        model
+    }
+
+    fn set_subagent_thinking_effort(effort: Option<&str>, cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            <settings::SettingsStore as gpui::UpdateGlobal>::update_global(cx, |store, cx| {
+                store.update_user_settings(cx, |content| {
+                    content.agent.get_or_insert_default().subagent_thinking_effort =
+                        effort.and_then(settings::SubagentThinkingEffort::from_value);
+                });
+            });
+        });
+    }
+
+    #[gpui::test]
+    async fn test_subagent_thinking_effort_setting_replaces_parent_effort(
+        cx: &mut TestAppContext,
+    ) {
+        let (parent, _event_stream, _) = setup_thread_for_test(cx).await;
+        set_subagent_thinking_effort(Some("low"), cx);
+        cx.update(|cx| {
+            parent.update(cx, |thread, cx| {
+                thread.set_model(model_with_effort_levels(&["low", "high"]), cx);
+                thread.set_thinking_effort(Some("high".to_string()), cx);
+            });
+        });
+
+        let subagents = setup_parent_with_subagents(cx, &parent, 1);
+
+        cx.update(|cx| {
+            assert_eq!(
+                subagents[0].read(cx).thinking_effort().map(String::as_str),
+                Some("low")
+            );
+
+            parent.update(cx, |thread, cx| {
+                thread.set_thinking_effort(Some("high".to_string()), cx);
+            });
+            assert_eq!(
+                subagents[0].read(cx).thinking_effort().map(String::as_str),
+                Some("low"),
+                "changing the parent's effort must not undo the setting"
+            );
+        });
+    }
+
+    #[gpui::test]
+    async fn test_unsupported_subagent_thinking_effort_falls_back_to_parent(
+        cx: &mut TestAppContext,
+    ) {
+        let (parent, _event_stream, _) = setup_thread_for_test(cx).await;
+        set_subagent_thinking_effort(Some("low"), cx);
+        cx.update(|cx| {
+            parent.update(cx, |thread, cx| {
+                thread.set_model(model_with_effort_levels(&["medium", "high"]), cx);
+                thread.set_thinking_effort(Some("high".to_string()), cx);
+            });
+        });
+
+        let subagents = setup_parent_with_subagents(cx, &parent, 1);
+
+        cx.update(|cx| {
+            assert_eq!(
+                subagents[0].read(cx).thinking_effort().map(String::as_str),
+                Some("high")
+            );
+
+            parent.update(cx, |thread, cx| {
+                thread.set_thinking_effort(Some("medium".to_string()), cx);
+            });
+            assert_eq!(
+                subagents[0].read(cx).thinking_effort().map(String::as_str),
+                Some("medium"),
+                "a subagent without the override keeps following the parent"
+            );
         });
     }
 

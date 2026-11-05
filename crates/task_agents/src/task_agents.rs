@@ -135,6 +135,7 @@ struct Frontmatter {
     profile: Option<String>,
     model: Option<String>,
     subagent_model: Option<String>,
+    subagent_effort: Option<String>,
     toolkits: Option<ToolkitsEntry>,
     tools: Option<ToolsEntry>,
     #[serde(default)]
@@ -161,6 +162,8 @@ struct FrontmatterOut<'a> {
     model: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     subagent_model: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    subagent_effort: Option<&'static str>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     toolkits: &'a Vec<String>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
@@ -221,6 +224,10 @@ pub struct TaskAgent {
     pub model: Option<String>,
     /// The model of the subagents this agent spawns, over the `subagent_model` setting.
     pub subagent_model: Option<String>,
+    /// The thinking effort of the subagents this agent spawns, over the
+    /// `subagent_thinking_effort` setting.
+    #[serde(default)]
+    pub subagent_effort: Option<settings::SubagentThinkingEffort>,
     /// Toolkit ids whose tools are all turned on.
     pub toolkits: Vec<String>,
     /// Per-tool overrides on top of the profile and the toolkits.
@@ -290,6 +297,7 @@ impl TaskAgent {
             profile: self.profile.as_deref(),
             model: self.model.as_deref(),
             subagent_model: self.subagent_model.as_deref(),
+            subagent_effort: self.subagent_effort.and_then(|effort| effort.value()),
             toolkits: &self.toolkits,
             tools: &self.tools,
             permissions: self
@@ -382,6 +390,10 @@ pub fn parse_task_agent(path: &Path, content: &str, source: TaskAgentSource) -> 
     let subagent_model = frontmatter
         .subagent_model
         .filter(|model| ModelReference::parse(model).is_some());
+    let subagent_effort = frontmatter
+        .subagent_effort
+        .as_deref()
+        .and_then(|effort| settings::SubagentThinkingEffort::from_value(effort.trim()));
 
     Ok(TaskAgent {
         id,
@@ -391,6 +403,7 @@ pub fn parse_task_agent(path: &Path, content: &str, source: TaskAgentSource) -> 
         profile: frontmatter.profile.filter(|profile| !profile.is_empty()),
         model,
         subagent_model,
+        subagent_effort,
         toolkits,
         tools,
         permissions: frontmatter
@@ -657,6 +670,36 @@ mod tests {
         )
         .expect("round trip should parse");
         assert_eq!(reparsed.permissions, agent.permissions);
+    }
+
+    #[test]
+    fn test_subagent_effort_round_trips_and_ignores_unknown_levels() {
+        let path = Path::new("/app/.asylum/agents/explorar.md");
+        let agent = parse_task_agent(
+            path,
+            "---\nname: Explorar\nsubagent_effort: xhigh\n---\nExplora.",
+            project_source(),
+        )
+        .expect("agent should parse");
+        assert_eq!(
+            agent.subagent_effort,
+            Some(settings::SubagentThinkingEffort::XHigh)
+        );
+        let reparsed = parse_task_agent(
+            path,
+            &agent.to_markdown().expect("serializes"),
+            project_source(),
+        )
+        .expect("round trip should parse");
+        assert_eq!(reparsed.subagent_effort, agent.subagent_effort);
+
+        let unknown = parse_task_agent(
+            path,
+            "---\nname: Explorar\nsubagent_effort: turbo\n---\nExplora.",
+            project_source(),
+        )
+        .expect("an unknown level should not break the agent");
+        assert_eq!(unknown.subagent_effort, None);
     }
 
     #[test]

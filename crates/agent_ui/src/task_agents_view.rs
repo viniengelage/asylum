@@ -282,6 +282,7 @@ fn template_agent(template: Option<&Template>) -> TaskAgent {
         profile: template.map(|template| template.profile.to_string()),
         model: None,
         subagent_model: None,
+        subagent_effort: None,
         toolkits: template
             .map(|template| template.toolkits.iter().map(|id| id.to_string()).collect())
             .unwrap_or_default(),
@@ -1310,6 +1311,17 @@ impl TaskAgentsView {
         }
     }
 
+    fn set_subagent_effort(
+        &mut self,
+        effort: Option<settings::SubagentThinkingEffort>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(draft) = self.draft.as_mut() {
+            draft.agent.subagent_effort = effort;
+            cx.notify();
+        }
+    }
+
     fn set_profile(&mut self, profile: Option<String>, cx: &mut Context<Self>) {
         if let Some(draft) = self.draft.as_mut() {
             draft.agent.profile = profile;
@@ -1660,6 +1672,65 @@ impl TaskAgentsView {
             },
             window,
             cx,
+        )
+    }
+
+    fn render_subagent_effort_dropdown(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        use settings::SubagentThinkingEffort;
+
+        let current = self
+            .draft
+            .as_ref()
+            .and_then(|draft| draft.agent.subagent_effort);
+        let label = |effort: Option<SubagentThinkingEffort>| -> SharedString {
+            match effort {
+                None | Some(SubagentThinkingEffort::Inherit) => {
+                    t!("agent_ui.task_agents.effort.default")
+                }
+                Some(SubagentThinkingEffort::Low) => t!("agent_ui.task_agents.effort.low"),
+                Some(SubagentThinkingEffort::Medium) => t!("agent_ui.task_agents.effort.medium"),
+                Some(SubagentThinkingEffort::High) => t!("agent_ui.task_agents.effort.high"),
+                Some(SubagentThinkingEffort::XHigh) => t!("agent_ui.task_agents.effort.xhigh"),
+                Some(SubagentThinkingEffort::Max) => t!("agent_ui.task_agents.effort.max"),
+            }
+        };
+        let view = cx.entity().downgrade();
+        let menu = ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
+            let options = std::iter::once(None).chain(
+                [
+                    SubagentThinkingEffort::Low,
+                    SubagentThinkingEffort::Medium,
+                    SubagentThinkingEffort::High,
+                    SubagentThinkingEffort::XHigh,
+                    SubagentThinkingEffort::Max,
+                ]
+                .into_iter()
+                .map(Some),
+            );
+            for effort in options {
+                let view = view.clone();
+                menu = menu.toggleable_entry(
+                    label(effort),
+                    effort == current,
+                    IconPosition::End,
+                    None,
+                    move |_window, cx| {
+                        view.update(cx, |view, cx| view.set_subagent_effort(effort, cx))
+                            .log_err();
+                    },
+                );
+            }
+            menu
+        });
+        selector(
+            "task-agent-subagent-effort",
+            IconName::Sparkle,
+            label(current),
+            menu,
         )
     }
 
@@ -2158,6 +2229,22 @@ impl TaskAgentsView {
                     Some(
                         dropdown(
                             self.render_agent_subagent_model_dropdown(window, cx)
+                                .into_any_element(),
+                        )
+                        .into_any_element(),
+                    ),
+                    false,
+                    cx,
+                ))
+                .child(card_row(
+                    None,
+                    Label::new(t!("agent_ui.task_agents.model_card.subagent_effort"))
+                        .weight(FontWeight::MEDIUM)
+                        .into_any_element(),
+                    t!("agent_ui.task_agents.model_card.subagent_effort_hint"),
+                    Some(
+                        dropdown(
+                            self.render_subagent_effort_dropdown(window, cx)
                                 .into_any_element(),
                         )
                         .into_any_element(),

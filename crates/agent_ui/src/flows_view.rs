@@ -2066,6 +2066,7 @@ mod tests {
             profile: None,
             model: None,
             subagent_model: None,
+            subagent_effort: None,
             toolkits: Vec::new(),
             tools: BTreeMap::new(),
             permissions: BTreeMap::new(),

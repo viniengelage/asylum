@@ -82,6 +82,55 @@ pub enum SidebarSide {
     strum::VariantNames,
 )]
 #[serde(rename_all = "snake_case")]
+pub enum SubagentThinkingEffort {
+    /// Subagents use the parent thread's effort.
+    #[default]
+    Inherit,
+    Low,
+    Medium,
+    High,
+    #[serde(rename = "xhigh")]
+    #[strum(serialize = "Extra High")]
+    XHigh,
+    Max,
+}
+
+impl SubagentThinkingEffort {
+    /// The effort level value models advertise, or `None` for [`Self::Inherit`].
+    pub fn value(self) -> Option<&'static str> {
+        match self {
+            Self::Inherit => None,
+            Self::Low => Some("low"),
+            Self::Medium => Some("medium"),
+            Self::High => Some("high"),
+            Self::XHigh => Some("xhigh"),
+            Self::Max => Some("max"),
+        }
+    }
+
+    pub fn from_value(value: &str) -> Option<Self> {
+        <Self as strum::VariantArray>::VARIANTS
+            .iter()
+            .copied()
+            .find(|effort| effort.value() == Some(value))
+    }
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    MergeFrom,
+    strum::VariantArray,
+    strum::VariantNames,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum ThinkingBlockDisplay {
     /// Thinking blocks fully expand during streaming, then auto-collapse
     /// when the model finishes thinking. Users can re-expand after collapse.
@@ -286,6 +335,12 @@ pub struct AgentSettingsContent {
     /// thinking, effort, and speed settings when not specified. If the configured
     /// model is unavailable, the parent thread's model is used instead.
     pub subagent_model: Option<LanguageModelSelection>,
+    /// Thinking effort for subagents, used instead of the parent thread's effort.
+    /// The effort set in `subagent_model` takes precedence, and a level the
+    /// subagent's model doesn't support is ignored.
+    ///
+    /// Default: inherit
+    pub subagent_thinking_effort: Option<SubagentThinkingEffort>,
     /// Favorite models to show at the top of the model selector.
     #[serde(default)]
     pub favorite_models: Vec<LanguageModelSelection>,
