@@ -338,6 +338,15 @@ impl Clickable for Button {
     }
 }
 
+impl Button {
+    /// Overrides the height that [`ButtonSize`] sets, for bars laid out to sizes between the
+    /// presets.
+    pub fn height(mut self, height: DefiniteLength) -> Self {
+        self.base = self.base.height(height);
+        self
+    }
+}
+
 impl FixedWidth for Button {
     /// Sets a fixed width for the button.
     ///

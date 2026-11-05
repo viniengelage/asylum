@@ -27,14 +27,14 @@ use settings::{
 };
 use std::{ops::Range, rc::Rc, sync::Arc, time::Duration};
 use ui::{
-    Clickable, ContextMenu, ContextMenuEntry, DocumentationSide, IconButton, IconButtonShape,
-    Indicator, PopoverMenu, PopoverMenuHandle, Tooltip, prelude::*,
+    Clickable, ContextMenu, ContextMenuEntry, DocumentationSide, IconButton, Indicator,
+    PopoverMenu, PopoverMenuHandle, Tooltip, prelude::*,
 };
 use util::ResultExt as _;
 
 use workspace::{
-    HideStatusItem, StatusItemView, Toast, Workspace, create_and_open_local_file, item::ItemHandle,
-    notifications::NotificationId,
+    HideStatusItem, StatusBarItemSize as _, StatusItemView, Toast, Workspace,
+    create_and_open_local_file, item::ItemHandle, notifications::NotificationId,
 };
 use zed_actions::{OpenBrowser, OpenSettingsAt};
 
@@ -104,6 +104,7 @@ impl Render for EditPredictionButton {
                 if let Status::Error(e) = status {
                     return div().child(
                         IconButton::new("copilot-error", icon)
+                            .status_bar_size(cx)
                             .icon_size(IconSize::Small)
                             .tab_index(0isize)
                             .aria_label("GitHub Copilot")
@@ -179,6 +180,7 @@ impl Render for EditPredictionButton {
                         .anchor(Anchor::BottomRight)
                         .trigger_with_tooltip(
                             IconButton::new("copilot-icon", icon)
+                                .status_bar_size(cx)
                                 .tab_index(0isize)
                                 .aria_label("GitHub Copilot"),
                             |_window, cx| {
@@ -231,7 +233,7 @@ impl Render for EditPredictionButton {
                         .anchor(Anchor::BottomRight)
                         .trigger_with_tooltip(
                             IconButton::new("codestral-icon", IconName::AiMistral)
-                                .shape(IconButtonShape::Square)
+                                .status_bar_size(cx)
                                 .tab_index(0isize)
                                 .aria_label("Edit Prediction")
                                 .when(!has_api_key, |this| {
@@ -277,7 +279,7 @@ impl Render for EditPredictionButton {
                         .anchor(Anchor::BottomRight)
                         .trigger(
                             IconButton::new("openai-compatible-api-icon", IconName::AiOpenAiCompat)
-                                .shape(IconButtonShape::Square)
+                                .status_bar_size(cx)
                                 .tab_index(0isize)
                                 .aria_label("Edit Prediction")
                                 .when(!enabled, |this| {
@@ -309,7 +311,7 @@ impl Render for EditPredictionButton {
                         .anchor(Anchor::BottomRight)
                         .trigger_with_tooltip(
                             IconButton::new("ollama-icon", IconName::AiOllama)
-                                .shape(IconButtonShape::Square)
+                                .status_bar_size(cx)
                                 .tab_index(0isize)
                                 .aria_label("Edit Prediction")
                                 .when(!enabled, |this| {
@@ -399,7 +401,7 @@ impl Render for EditPredictionButton {
 
                     return div().child(
                         IconButton::new("zed-predict-pending-button", ep_icon)
-                            .shape(IconButtonShape::Square)
+                            .status_bar_size(cx)
                             .tab_index(0isize)
                             .aria_label("Edit Predictions")
                             .indicator(Indicator::dot().color(Color::Muted))
@@ -471,7 +473,7 @@ impl Render for EditPredictionButton {
                     || zed_cloud_has_no_active_subscription;
 
                 let icon_button = IconButton::new("zed-predict-pending-button", ep_icon)
-                    .shape(IconButtonShape::Square)
+                    .status_bar_size(cx)
                     .tab_index(0isize)
                     .aria_label("Edit Prediction")
                     .when_some(indicator_color, |this, color| {

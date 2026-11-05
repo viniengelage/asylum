@@ -23,6 +23,7 @@ use std::{
 };
 use ui::{ContextMenu, PopoverMenu, PopoverMenuHandle, Tooltip, prelude::*};
 use util::truncate_and_trailoff;
+use workspace::StatusBarItemSize as _;
 use workspace::{StatusItemView, Workspace, item::ItemHandle};
 
 const GIT_OPERATION_DELAY: Duration = Duration::from_millis(0);
@@ -759,6 +760,7 @@ impl Render for ActivityIndicator {
                         }
                     })
                     .label_size(LabelSize::Small)
+                    .status_bar_size(cx)
                     .width(ACTIVITY_INDICATOR_WIDTH)
                     .truncate(true)
                     .tab_index(0isize)

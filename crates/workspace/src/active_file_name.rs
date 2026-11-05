@@ -5,6 +5,7 @@ use settings::Settings;
 use ui::{Button, Tooltip, prelude::*};
 use util::paths::PathStyle;
 
+use crate::StatusBarItemSize as _;
 use crate::{
     HideStatusItem, StatusItemView, item::ItemHandle, workspace_settings::StatusBarSettings,
 };
@@ -42,6 +43,7 @@ impl Render for ActiveFileName {
             .child(
                 Button::new("active-file-name-button", project_path)
                     .label_size(LabelSize::Small)
+                    .status_bar_size(cx)
                     .tooltip(Tooltip::text(tooltip_text)),
             )
             .into_any_element()

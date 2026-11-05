@@ -27,7 +27,7 @@ use ui::{
 };
 
 use util::{ResultExt, paths::PathExt, rel_path::RelPath};
-use workspace::{StatusItemView, ToggleWorktreeSecurity, Workspace};
+use workspace::{StatusBarItemSize as _, StatusItemView, ToggleWorktreeSecurity, Workspace};
 
 use crate::lsp_log_view;
 
@@ -1467,6 +1467,7 @@ impl Render for LspButton {
                     IconButton::new("zed-lsp-tool-button", IconName::BoltOutlined)
                         .when_some(indicator, IconButton::indicator)
                         .icon_size(IconSize::Small)
+                        .status_bar_size(cx)
                         .tab_index(0isize)
                         .aria_label("Language Servers")
                         .when(is_restricted, |s| s.icon_color(Color::Warning))

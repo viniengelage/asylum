@@ -9,7 +9,8 @@ use gpui::{
 use settings::{SettingsContent, SettingsStore, update_settings_file};
 use std::{any::TypeId, rc::Rc, sync::Arc};
 use ui::{
-    ContextMenu, ContextMenuEntry, IconPosition, PopoverMenu, Tooltip, prelude::*, right_click_menu,
+    ButtonLike, ContextMenu, ContextMenuEntry, IconButtonShape, IconPosition, PopoverMenu, Tooltip,
+    prelude::*, right_click_menu,
 };
 
 /// Describes how a status-bar item can be hidden by the user.
@@ -50,6 +51,40 @@ pub struct ToolkitEntry {
     pub action: Box<dyn Action>,
     /// Opens the tool, or closes it when it is open.
     pub toggle: Rc<dyn Fn(&mut Window, &mut App)>,
+}
+
+/// The height of every control in the status bar, so hovers and active fills line up with
+/// the dock buttons whatever crate draws the item.
+pub fn status_bar_item_height(cx: &App) -> Rems {
+    DynamicSpacing::Base24.rems(cx)
+}
+
+/// Sizes a control to the status bar's slot. `ui` buttons default to 22px, a size the status
+/// bar never uses.
+pub trait StatusBarItemSize {
+    fn status_bar_size(self, cx: &App) -> Self;
+}
+
+impl StatusBarItemSize for IconButton {
+    fn status_bar_size(self, cx: &App) -> Self {
+        let size = status_bar_item_height(cx);
+        // A square shape sizes the button to its icon at render time, overriding these.
+        self.shape(IconButtonShape::Wide)
+            .width(size)
+            .height(size.into())
+    }
+}
+
+impl StatusBarItemSize for Button {
+    fn status_bar_size(self, cx: &App) -> Self {
+        self.height(status_bar_item_height(cx).into())
+    }
+}
+
+impl StatusBarItemSize for ButtonLike {
+    fn status_bar_size(self, cx: &App) -> Self {
+        self.height(status_bar_item_height(cx).into())
+    }
 }
 
 pub trait StatusItemView: Render {
@@ -106,6 +141,8 @@ pub(crate) enum StatusItemZone {
     Profile,
     /// Buttons that show and hide whole docks.
     Docks,
+    /// Buttons for the left dock's panels and project search: ways to find a file.
+    Navigation,
     /// Project state: diagnostics, git and language servers. Where left items go.
     Status,
     /// Facts about the active editor, such as the cursor position and language. Where right
@@ -122,6 +159,7 @@ impl StatusItemZone {
         match self {
             Self::Profile => "status-bar-profile",
             Self::Docks => "status-bar-docks",
+            Self::Navigation => "status-bar-navigation",
             Self::Status => "status-bar-status",
             Self::EditorInfo => "status-bar-editor-info",
             Self::Toolkit => "status-bar-toolkit",
@@ -186,8 +224,12 @@ impl Render for StatusBar {
             )
             .justify_between()
             .gap(DynamicSpacing::Base08.rems(cx))
-            .px(DynamicSpacing::Base08.rems(cx))
-            .py(DynamicSpacing::Base04.rems(cx))
+            .h(DynamicSpacing::Base32.rems(cx))
+            .when(
+                self.items_in_zone(StatusItemZone::Profile, cx).is_empty(),
+                |this| this.pl(DynamicSpacing::Base08.rems(cx)),
+            )
+            .pr(DynamicSpacing::Base08.rems(cx))
             .workspace_card(cx)
             .bg(cx.theme().colors().panel_background)
             .child(self.render_left_tools(cx))
@@ -197,15 +239,26 @@ impl Render for StatusBar {
 
 impl StatusBar {
     fn render_left_tools(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        // The left side reads as one strip, so its divider takes the zones' own gap.
+        let profile_items = self.items_in_zone(StatusItemZone::Profile, cx);
         h_flex()
-            .gap(DynamicSpacing::Base04.rems(cx))
+            .h_full()
             .min_w_0()
             .overflow_x_hidden()
+            // The profile is the bar's left edge rather than a zone among the others, so it
+            // fills the bar's height and is set off by space instead of a divider.
+            .when(!profile_items.is_empty(), |this| {
+                this.child(
+                    h_flex()
+                        .flex_none()
+                        .h_full()
+                        .children(profile_items.iter().map(|item| item.to_any())),
+                )
+                .child(div().flex_none().w(DynamicSpacing::Base08.rems(cx)))
+            })
             .children(self.render_zones(
                 &[
-                    StatusItemZone::Profile,
                     StatusItemZone::Docks,
+                    StatusItemZone::Navigation,
                     StatusItemZone::Status,
                 ],
                 cx,
@@ -215,7 +268,6 @@ impl StatusBar {
     fn render_right_tools(&self, cx: &mut Context<Self>) -> impl IntoElement {
         h_flex()
             .flex_shrink_0()
-            .gap(DynamicSpacing::Base08.rems(cx))
             .overflow_x_hidden()
             .children(self.render_zones(
                 &[
@@ -245,12 +297,18 @@ impl StatusBar {
 
     /// The items shown in `zone`, in the order they are rendered.
     fn items_in_zone(&self, zone: StatusItemZone, cx: &App) -> Vec<&dyn StatusItemViewHandle> {
-        let mut items: Vec<&dyn StatusItemViewHandle> = self
+        let zoned_items = self
             .zoned_items
             .iter()
             .filter(|(item_zone, _)| *item_zone == zone)
-            .map(|(_, item)| item.as_ref())
-            .collect();
+            .map(|(_, item)| item.as_ref());
+        // Project search follows the left dock's panel buttons, which are added later as
+        // plain left items.
+        let zoned_items_last = zone == StatusItemZone::Navigation;
+        let mut items: Vec<&dyn StatusItemViewHandle> = Vec::new();
+        if !zoned_items_last {
+            items.extend(zoned_items.clone());
+        }
         items.extend(
             self.left_items
                 .iter()
@@ -268,6 +326,9 @@ impl StatusBar {
             items.extend(right_items.rev());
         } else {
             items.extend(right_items);
+        }
+        if zoned_items_last {
+            items.extend(zoned_items);
         }
         items.retain(|item| !item.is_hidden(cx));
         items
@@ -295,7 +356,7 @@ fn render_zone(zone: StatusItemZone, items: &[&dyn StatusItemViewHandle], cx: &A
                 this.flex_none()
             }
         })
-        .h(DynamicSpacing::Base24.rems(cx))
+        .h(status_bar_item_height(cx))
         .gap(DynamicSpacing::Base04.rems(cx))
         .map(|this| {
             if zone == StatusItemZone::Toolkit {
@@ -351,12 +412,18 @@ fn render_toolkit_menu(items: &[&dyn StatusItemViewHandle], cx: &App) -> AnyElem
         .into_any_element()
 }
 
+/// The divider carries the space on both of its sides, so zones sit the same distance apart
+/// on the left and right of the bar.
 fn render_zone_divider(cx: &App) -> AnyElement {
     div()
         .flex_none()
-        .w_px()
-        .h(DynamicSpacing::Base16.rems(cx))
-        .bg(cx.theme().colors().border_selected)
+        .px(DynamicSpacing::Base08.rems(cx))
+        .child(
+            div()
+                .w_px()
+                .h(DynamicSpacing::Base16.rems(cx))
+                .bg(cx.theme().colors().border_selected),
+        )
         .into_any_element()
 }
 
@@ -446,6 +513,18 @@ impl StatusBar {
         T: 'static + StatusItemView,
     {
         self.add_zoned_item(StatusItemZone::Profile, item, window, cx);
+    }
+
+    /// Adds an item after the left dock's panel buttons, for ways to find a file.
+    pub fn add_navigation_item<T>(
+        &mut self,
+        item: Entity<T>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) where
+        T: 'static + StatusItemView,
+    {
+        self.add_zoned_item(StatusItemZone::Navigation, item, window, cx);
     }
 
     /// Adds an item to the left edge, with the buttons that show and hide whole docks.

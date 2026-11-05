@@ -8,6 +8,7 @@ use gpui::{
 };
 use project::Project;
 use ui::{Button, ButtonCommon, Clickable, LabelSize, Tooltip};
+use workspace::StatusBarItemSize as _;
 use workspace::{
     EncodingDisplayOptions, HideStatusItem, StatusBarSettings, StatusItemView, Workspace,
     item::{ItemHandle, Settings},
@@ -88,6 +89,7 @@ impl Render for ActiveBufferEncoding {
         div().child(
             Button::new("change-encoding", text)
                 .label_size(LabelSize::Small)
+                .status_bar_size(cx)
                 .tab_index(0isize)
                 .on_click(cx.listener(move |this, _, window, cx| {
                     if disabled {

@@ -10,6 +10,7 @@ use project::project_settings::{GoToDiagnosticSeverityFilter, ProjectSettings};
 use settings::Settings;
 use ui::{Button, ButtonLike, Color, Icon, IconName, Label, Tooltip, h_flex, prelude::*};
 use util::ResultExt;
+use workspace::StatusBarItemSize as _;
 use workspace::{HideStatusItem, StatusItemView, ToolbarItemEvent, Workspace, item::ItemHandle};
 
 use crate::{Deploy, IncludeWarnings, ProjectDiagnosticsEditor};
@@ -39,23 +40,41 @@ impl Render for DiagnosticIndicator {
                     .size(IconSize::Small)
                     .color(Color::Default),
             ),
+            // Each count sits with its own icon and the pairs are spaced apart, so "2 5" never
+            // reads as one number; the buffer font keeps the width steady as counts change.
             (error_count, warning_count) => h_flex()
-                .gap_1()
+                .gap_2()
                 .when(error_count > 0, |this| {
                     this.child(
-                        Icon::new(IconName::XCircle)
-                            .size(IconSize::Small)
-                            .color(Color::Error),
+                        h_flex()
+                            .gap_1()
+                            .child(
+                                Icon::new(IconName::XCircle)
+                                    .size(IconSize::Small)
+                                    .color(Color::Error),
+                            )
+                            .child(
+                                Label::new(error_count.to_string())
+                                    .size(LabelSize::Small)
+                                    .buffer_font(cx),
+                            ),
                     )
-                    .child(Label::new(error_count.to_string()).size(LabelSize::Small))
                 })
                 .when(warning_count > 0, |this| {
                     this.child(
-                        Icon::new(IconName::Warning)
-                            .size(IconSize::Small)
-                            .color(Color::Warning),
+                        h_flex()
+                            .gap_1()
+                            .child(
+                                Icon::new(IconName::Warning)
+                                    .size(IconSize::Small)
+                                    .color(Color::Warning),
+                            )
+                            .child(
+                                Label::new(warning_count.to_string())
+                                    .size(LabelSize::Small)
+                                    .buffer_font(cx),
+                            ),
                     )
-                    .child(Label::new(warning_count.to_string()).size(LabelSize::Small))
                 }),
         };
 
@@ -74,6 +93,7 @@ impl Render for DiagnosticIndicator {
             Some(
                 Button::new("diagnostic_message", SharedString::new(message))
                     .label_size(LabelSize::Small)
+                    .status_bar_size(cx)
                     .truncate(true)
                     .tab_index(0isize)
                     .tooltip(move |_window, cx| {
@@ -114,6 +134,7 @@ impl Render for DiagnosticIndicator {
         indicator
             .child(
                 ButtonLike::new("diagnostic-indicator")
+                    .status_bar_size(cx)
                     .child(diagnostic_indicator)
                     .tab_index(0isize)
                     .aria_label(diagnostics_label)

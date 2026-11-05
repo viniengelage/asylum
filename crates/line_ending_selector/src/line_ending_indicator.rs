@@ -2,6 +2,7 @@ use editor::Editor;
 use gpui::{App, Entity, Subscription, WeakEntity};
 use language::LineEnding;
 use ui::{Tooltip, prelude::*};
+use workspace::StatusBarItemSize as _;
 use workspace::{
     HideStatusItem, StatusBarSettings, StatusItemView, item::ItemHandle, item::Settings,
 };
@@ -40,6 +41,7 @@ impl Render for LineEndingIndicator {
             el.child(
                 Button::new("change-line-ending", line_ending.label())
                     .label_size(LabelSize::Small)
+                    .status_bar_size(cx)
                     .tab_index(0isize)
                     .on_click(cx.listener(|this, _, window, cx| {
                         if let Some(editor) = this.active_editor.as_ref() {

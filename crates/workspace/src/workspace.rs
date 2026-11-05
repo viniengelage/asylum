@@ -127,7 +127,10 @@ use sqlez::{
     statement::Statement,
 };
 use status_bar::StatusBar;
-pub use status_bar::{HideStatusItem, StatusItemView, ToolkitEntry, add_hide_button_entry};
+pub use status_bar::{
+    HideStatusItem, StatusBarItemSize, StatusItemView, ToolkitEntry, add_hide_button_entry,
+    status_bar_item_height,
+};
 use std::{
     any::TypeId,
     borrow::Cow,

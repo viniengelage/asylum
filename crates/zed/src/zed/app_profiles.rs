@@ -1413,7 +1413,7 @@ fn workspace_folders(workspace: &Workspace, cx: &App) -> Vec<String> {
         .collect()
 }
 
-/// The chip at the start of the status bar naming the active profile.
+/// The segment at the start of the status bar naming the active profile.
 pub struct ProfileIndicator {
     store: Entity<ProfileStore>,
     workspace: WeakEntity<Workspace>,
@@ -1435,46 +1435,83 @@ impl ProfileIndicator {
 }
 
 impl Render for ProfileIndicator {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let profile = self.store.read(cx).active_profile();
         let color = profile.color.hsla();
+        let is_open = self.menu_handle.is_deployed();
         let store = self.store.clone();
         let workspace = self.workspace.clone();
+        let indicator = cx.weak_entity();
+        // The segment is the status bar's left edge, so its corners follow the bar's, inside
+        // the bar's 1px border.
+        let corner_radius = pane_corner_radius_px(window) - px(1.);
 
-        PopoverMenu::new("profile-picker")
-            .with_handle(self.menu_handle.clone())
-            .anchor(Anchor::BottomLeft)
-            .menu(move |window, cx| {
-                let store = store.clone();
-                let workspace = workspace.clone();
-                Some(cx.new(|cx| ProfilePicker::new(store, workspace, window, cx)))
-            })
-            .trigger_with_tooltip(
-                ButtonLike::new("profile-chip")
-                    .tab_index(0isize)
-                    .aria_label(t!("zed.indicator.aria_label", name = profile.name))
-                    .child(
-                        h_flex()
-                            .gap_1()
-                            .px_1()
-                            .rounded_sm()
-                            .border_1()
-                            .border_color(color.opacity(0.35))
-                            .bg(color.opacity(0.14))
-                            .child(div().size_1p5().rounded_full().bg(color))
+        h_flex()
+            .id("profile-segment")
+            .h_full()
+            .rounded_tl(corner_radius)
+            .rounded_bl(corner_radius)
+            .bg(color.opacity(if is_open { 0.22 } else { 0.14 }))
+            .hover(|style| style.bg(color.opacity(0.22)))
+            .child(
+                PopoverMenu::new("profile-picker")
+                    .with_handle(self.menu_handle.clone())
+                    .anchor(Anchor::BottomLeft)
+                    .offset(gpui::Point {
+                        x: px(0.),
+                        y: -px(6.),
+                    })
+                    .menu(move |window, cx| {
+                        let store = store.clone();
+                        let workspace = workspace.clone();
+                        let picker = cx.new(|cx| ProfilePicker::new(store, workspace, window, cx));
+                        // The segment stays lit while its menu is open, so it redraws when the
+                        // menu opens and again when it is dismissed.
+                        indicator.update(cx, |_, cx| cx.notify()).log_err();
+                        let indicator = indicator.clone();
+                        cx.subscribe(&picker, move |_, _: &DismissEvent, cx| {
+                            indicator.update(cx, |_, cx| cx.notify()).log_err();
+                        })
+                        .detach();
+                        Some(picker)
+                    })
+                    .trigger_with_tooltip(
+                        // Transparent, so the hover is the segment's own fill rather than a
+                        // smaller rectangle drawn inside it.
+                        ButtonLike::new("profile-chip")
+                            .style(ButtonStyle::Transparent)
+                            .size(ButtonSize::None)
+                            .height(relative(1.))
+                            .tab_index(0isize)
+                            .aria_label(t!("zed.indicator.aria_label", name = profile.name))
                             .child(
-                                Label::new(profile.name)
-                                    .size(LabelSize::Small)
-                                    .weight(gpui::FontWeight::SEMIBOLD)
-                                    .color(Color::Custom(color)),
-                            )
-                            .child(
-                                Icon::new(IconName::ChevronUpDown)
-                                    .size(IconSize::XSmall)
-                                    .color(Color::Custom(color)),
+                                h_flex()
+                                    .h_full()
+                                    .px_3()
+                                    .gap_1p5()
+                                    .child(div().size_1p5().rounded_full().bg(color))
+                                    .child(
+                                        Label::new(profile.name)
+                                            .size(LabelSize::Small)
+                                            .weight(if is_open {
+                                                gpui::FontWeight::BOLD
+                                            } else {
+                                                gpui::FontWeight::MEDIUM
+                                            })
+                                            .color(Color::Custom(color)),
+                                    )
+                                    .child(
+                                        Icon::new(IconName::ChevronUpDown)
+                                            .size(IconSize::XSmall)
+                                            .color(Color::Custom(color.opacity(if is_open {
+                                                1.
+                                            } else {
+                                                0.7
+                                            }))),
+                                    ),
                             ),
+                        Tooltip::text(t!("zed.indicator.tooltip")),
                     ),
-                Tooltip::text(t!("zed.indicator.tooltip")),
             )
     }
 }

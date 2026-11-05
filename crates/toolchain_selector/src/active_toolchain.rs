@@ -9,6 +9,7 @@ use language::{Buffer, BufferEvent, LanguageName, Toolchain, ToolchainScope};
 use project::{Project, ProjectPath, Toolchains, WorktreeId, toolchain_store::ToolchainStoreEvent};
 use ui::{Button, ButtonCommon, Clickable, LabelSize, SharedString, Tooltip};
 use util::{maybe, rel_path::RelPath};
+use workspace::StatusBarItemSize as _;
 use workspace::{HideStatusItem, StatusItemView, Workspace, item::ItemHandle};
 
 use crate::ToolchainSelector;
@@ -240,6 +241,7 @@ impl Render for ActiveToolchain {
         div().child(
             Button::new("change-toolchain", active_toolchain.name.clone())
                 .label_size(LabelSize::Small)
+                .status_bar_size(cx)
                 .tab_index(0isize)
                 .on_click(cx.listener(|this, _, window, cx| {
                     if let Some(workspace) = this.workspace.upgrade() {

@@ -8,6 +8,7 @@ use ui::{
     Render, Tooltip, Window, div,
 };
 use util::paths::FILE_ROW_COLUMN_DELIMITER;
+use workspace::StatusBarItemSize as _;
 use workspace::{HideStatusItem, StatusBarSettings, StatusItemView, Workspace, item::ItemHandle};
 
 #[derive(Copy, Clone, Debug, Default, PartialOrd, PartialEq)]
@@ -225,6 +226,7 @@ impl Render for CursorPosition {
             el.child(
                 Button::new("go-to-line-column", text)
                     .label_size(LabelSize::Small)
+                    .status_bar_size(cx)
                     .tab_index(0isize)
                     .aria_label(format!(
                         "Line {}, column {}",

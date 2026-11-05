@@ -1,8 +1,8 @@
 use editor::EditorSettings;
 use gpui::{App, FocusHandle};
 use settings::Settings as _;
-use ui::{ButtonCommon, Clickable, Context, Render, Tooltip, Window, prelude::*};
-use workspace::{HideStatusItem, ItemHandle, StatusItemView};
+use ui::{Context, Render, Tooltip, Window, prelude::*};
+use workspace::{HideStatusItem, ItemHandle, StatusItemView, dock::StatusBarButton};
 
 pub const SEARCH_ICON: IconName = IconName::MagnifyingGlass;
 
@@ -28,8 +28,7 @@ impl Render for SearchButton {
 
         let focus_handle = self.pane_item_focus_handle.clone();
         button.child(
-            IconButton::new("project-search-indicator", SEARCH_ICON)
-                .icon_size(IconSize::Small)
+            StatusBarButton::new("project-search-indicator", SEARCH_ICON, false)
                 .tab_index(0isize)
                 .aria_label("Project Search")
                 .tooltip(move |_window, cx| {

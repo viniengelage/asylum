@@ -10,8 +10,8 @@ use db::kvp::KeyValueStore;
 use gpui::{
     Action, Anchor, AnyView, App, Axis, ClickEvent, Context, ElementId, Entity, EntityId,
     EventEmitter, FocusHandle, Focusable, IntoElement, KeyContext, MouseButton, MouseDownEvent,
-    MouseUpEvent, ParentElement, Radians, Render, SharedString, StyleRefinement, Styled,
-    Subscription, Transformation, WeakEntity, Window, deferred, div, percentage, px, svg,
+    MouseUpEvent, ParentElement, Render, SharedString, StyleRefinement, Styled, Subscription,
+    WeakEntity, Window, deferred, div, px,
 };
 use serde::{Deserialize, Serialize};
 use settings::{Settings, SettingsStore, TerminalDockPosition};
@@ -1780,7 +1780,7 @@ impl PanelButtons {
     /// developer tools rather than with the panels beside the editor.
     pub(crate) fn status_bar_zone(&self, cx: &App) -> StatusItemZone {
         match self.dock.read(cx).position() {
-            DockPosition::Left => StatusItemZone::Docks,
+            DockPosition::Left => StatusItemZone::Navigation,
             DockPosition::Bottom => StatusItemZone::Toolkit,
             DockPosition::Devices | DockPosition::Right => StatusItemZone::Panels,
         }
@@ -1794,7 +1794,6 @@ impl PanelButtons {
 pub struct StatusBarButton {
     button: ButtonLike,
     icon: IconName,
-    icon_rotation: Option<Radians>,
     active: bool,
 }
 
@@ -1803,15 +1802,8 @@ impl StatusBarButton {
         Self {
             button: ButtonLike::new(id),
             icon,
-            icon_rotation: None,
             active,
         }
-    }
-
-    /// Rotates the icon clockwise, for a glyph that only exists facing another way.
-    pub fn icon_rotation(mut self, rotation: impl Into<Radians>) -> Self {
-        self.icon_rotation = Some(rotation.into());
-        self
     }
 
     pub fn aria_label(mut self, label: impl Into<SharedString>) -> Self {
@@ -1858,27 +1850,13 @@ impl Toggleable for StatusBarButton {
 
 impl RenderOnce for StatusBarButton {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let size = DynamicSpacing::Base24.rems(cx);
+        let size = crate::status_bar::status_bar_item_height(cx);
         let icon_color = if self.active {
             Color::Accent
         } else {
             Color::Muted
         };
-        let icon = match self.icon_rotation {
-            // `Icon` keeps its transform to the `ui` crate, so a rotated glyph is drawn as
-            // the same svg `Icon` would produce.
-            Some(rotation) => svg()
-                .path(self.icon.path())
-                .size(IconSize::Small.rems())
-                .flex_none()
-                .text_color(icon_color.color(cx))
-                .with_transformation(Transformation::rotate(rotation))
-                .into_any_element(),
-            None => Icon::new(self.icon)
-                .size(IconSize::Small)
-                .color(icon_color)
-                .into_any_element(),
-        };
+        let icon = Icon::new(self.icon).size(IconSize::Small).color(icon_color);
         let accent_soft = cx.theme().colors().text_accent.opacity(0.2);
 
         // `ButtonStyle` has no accent-tinted selection, so the fill sits behind a subtle
@@ -1943,18 +1921,10 @@ impl Render for DockToggleButtons {
                 DockPosition::Devices => i18n::t!("workspace.dock.toggle_devices"),
                 DockPosition::Right => i18n::t!("workspace.dock.toggle_right"),
             };
-            // The `Closed` glyphs are the plain outlines; whether the dock is open is shown
-            // by the button's fill instead.
-            let (icon, rotation) = match position {
-                DockPosition::Left => (IconName::ThreadsSidebarLeftClosed, None),
-                // There is no bottom-panel glyph; the left one turned a quarter
-                // counterclockwise puts its bar along the bottom edge.
-                DockPosition::Bottom => {
-                    (IconName::ThreadsSidebarLeftClosed, Some(percentage(0.75)))
-                }
-                DockPosition::Devices | DockPosition::Right => {
-                    (IconName::ThreadsSidebarRightClosed, None)
-                }
+            let icon = match position {
+                DockPosition::Left => IconName::PanelLeft,
+                DockPosition::Bottom => IconName::PanelBottom,
+                DockPosition::Devices | DockPosition::Right => IconName::PanelRight,
             };
             let workspace = self.workspace.clone();
 
@@ -1964,7 +1934,6 @@ impl Render for DockToggleButtons {
                     icon,
                     dock.is_open(),
                 )
-                .when_some(rotation, |button, rotation| button.icon_rotation(rotation))
                 .tab_index(0isize)
                 .aria_label(label.clone())
                 .tooltip(move |_window, cx| Tooltip::for_action(label.clone(), &*action, cx))

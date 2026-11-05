@@ -25,6 +25,7 @@ use theme_settings::ThemeSettings;
 use time::OffsetDateTime;
 use ui::{ContextMenu, CopyButton, Divider, prelude::*, tooltip_container};
 use util::paths::PathStyle;
+use workspace::StatusBarItemSize as _;
 use workspace::{Workspace, notifications::NotifyTaskExt as _};
 
 const GIT_BLAME_MAX_AUTHOR_CHARS_DISPLAYED: usize = 20;
@@ -87,6 +88,7 @@ impl Render for GitBlameStatus {
             el.child(
                 Button::new("git-blame-status", text.clone())
                     .label_size(LabelSize::Small)
+                    .status_bar_size(cx)
                     .start_icon(
                         Icon::new(IconName::FileGit)
                             .size(IconSize::Small)

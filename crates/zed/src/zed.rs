@@ -659,7 +659,7 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
             status_bar.add_left_item(merge_conflict_indicator, window, cx);
             status_bar.add_left_item(lsp_button, window, cx);
             status_bar.add_left_item(activity_indicator, window, cx);
-            status_bar.add_left_item(search_button, window, cx);
+            status_bar.add_navigation_item(search_button, window, cx);
             status_bar.add_left_item(active_file_name, window, cx);
             status_bar.add_left_item(flow_run_chip, window, cx);
             status_bar.add_toolkit_item(toolbox_button, window, cx);
