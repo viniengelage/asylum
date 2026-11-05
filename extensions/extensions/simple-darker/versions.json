@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "David Pait <davidjpait@gmail.com>"
+   ],
+   "description": "Simple Darker Theme for zed",
+   "download_count": 0,
+   "id": "simple-darker",
+   "name": "Simple Darker Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:35Z",
+   "repository": "https://github.com/DP19/zed-theme-simple-darker",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

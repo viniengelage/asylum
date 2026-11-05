@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Taha YVR <taha@noiserandom.com>"
+   ],
+   "description": "A Synthwave dark theme with neon colors.",
+   "download_count": 0,
+   "id": "sunset-drive",
+   "name": "Sunset Drive",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:15Z",
+   "repository": "https://github.com/tahayvr/sunset-drive-zed",
+   "schema_version": 1,
+   "version": "1.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

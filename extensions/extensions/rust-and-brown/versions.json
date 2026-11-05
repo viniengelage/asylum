@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "LukianovII"
+   ],
+   "description": "A warm dark theme with brown tones and orange accents",
+   "download_count": 0,
+   "id": "rust-and-brown",
+   "name": "Rust & Brown",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:14:10Z",
+   "repository": "https://github.com/LukianovII/rust-and-brown-zed",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

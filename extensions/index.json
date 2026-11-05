@@ -1335,10 +1335,10 @@
     "languages",
     "grammars"
    ],
-   "published_at": "2026-10-31T23:14:36Z",
+   "published_at": "2026-11-05T12:12:52Z",
    "repository": "https://github.com/nertzy/zed-bats",
    "schema_version": 1,
-   "version": "0.1.0",
+   "version": "0.1.1",
    "wasm_api_version": null
   },
   {
@@ -12928,6 +12928,2579 @@
    "schema_version": 1,
    "version": "0.0.1",
    "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "oxnan",
+    "RegEx The Cat"
+   ],
+   "description": "A high-contrast black theme with muted gray text and restrained blue, cyan, orange, and magenta accents designed for clarity and long coding sessions.",
+   "download_count": 0,
+   "id": "regex-theme",
+   "name": "RegEx Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:12:52Z",
+   "repository": "https://github.com/oxnan/RegEx-theme",
+   "schema_version": 1,
+   "version": "0.11.11",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Stefan Cosma <hi@stefancosma.xyz>",
+    "Michael K\u00fchnel <mail@michael-kuehnel.de>"
+   ],
+   "description": "\ud83d\udd76\ufe0f A relaxed Zed theme to take a more relaxed view of things.",
+   "download_count": 0,
+   "id": "relaxed-theme",
+   "name": "Relaxed",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:12:53Z",
+   "repository": "https://github.com/Relaxed-Theme/zed-theme-relaxed",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Eduardo Flores <edfloreshz@gmail.com>"
+   ],
+   "description": "Relm4 code snippets",
+   "download_count": 0,
+   "id": "relm4-snippets",
+   "name": "Relm4 Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-05T12:12:55Z",
+   "repository": "https://github.com/Relm4/zed-relm4",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Andrew Creekmore <andrew.creekmore@me.com>"
+   ],
+   "description": "A port of the Remedy color scheme for Zed \u2014 warm and comfortable with orange accents. Includes dark and bright variants, plus adapted, blur, blur [light], and transparent UI styles.",
+   "download_count": 0,
+   "id": "remedy-theme",
+   "name": "Remedy Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:12:56Z",
+   "repository": "https://github.com/andrewRCr/zed-remedy-theme",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "FernaandoJr <fernaando.divino@gmail.com>"
+   ],
+   "description": "Remix Min Darker Theme \u2014 dark UI theme for Zed with a minimal, high-contrast palette.",
+   "download_count": 0,
+   "id": "remix-min-darker-theme",
+   "name": "Remix Min Darker Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:12:57Z",
+   "repository": "https://github.com/FernaandoJr/remix-min-darker-zed",
+   "schema_version": 1,
+   "version": "0.0.4",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Pierre Nel <hello@pierre.io>"
+   ],
+   "description": "A port of Kenzie Bottoms' Replicant theme, based on a palette from Bladerunner.",
+   "download_count": 0,
+   "id": "replicant",
+   "name": "Replicant",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:12:58Z",
+   "repository": "https://github.com/pierrenel/replicant",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "yuzu"
+   ],
+   "description": "Resonance with Hatsune Miku - A Zed theme inspired by Hatsune Miku's color palette, with dark and light variants.",
+   "download_count": 0,
+   "id": "resonance-with-hatsune-miku-theme",
+   "name": "Resonance with Hatsune Miku",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:13:01Z",
+   "repository": "https://github.com/yuzukq/zed-theme-Resonance-with-HatsuneMiku",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Jonah M\u00f6ller <jonah.moeller@googlemail.com>"
+   ],
+   "description": "A carefully crafted Zed theme with muted accent colors optimized for readability on dark backgrounds.",
+   "download_count": 0,
+   "id": "retrofit-theme",
+   "name": "Retrofit Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:13:03Z",
+   "repository": "https://github.com/snapsnapturtle/retrofit-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Abhishek Bhatkar <bhatkar.abhishek80@gmail.com>"
+   ],
+   "description": "Amber CRT RetroPC theme for Zed",
+   "download_count": 0,
+   "id": "retropc-theme",
+   "name": "RetroPC",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:13:03Z",
+   "repository": "https://github.com/abhishek-bhatkar/retroPC-zed-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Rewrite Team"
+   ],
+   "description": "A dark Zed theme based on the Rewrite landing page code palette.",
+   "download_count": 0,
+   "id": "rewrite-theme",
+   "name": "Rewrite Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:13:05Z",
+   "repository": "https://github.com/RewriteToday/theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Sergey Ukolov <zezic51@yandex.ru>",
+    "bdsqqq <igorbedesqui@gmail.com>"
+   ],
+   "description": "Modified peppermint and orange flavored dark theme.",
+   "download_count": 0,
+   "id": "rich-vesper",
+   "name": "Rich Vesper",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:13:07Z",
+   "repository": "https://github.com/zezic/rich-vesper-zed",
+   "schema_version": 1,
+   "version": "0.0.5",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Steeven Lopez <stee-ven_94@outlook.com>"
+   ],
+   "description": "Collection of Riverpod snippets for Flutter/Dart development on the Zed editor.",
+   "download_count": 0,
+   "id": "riverpod-dart-flutter-snippets",
+   "name": "Riverpod Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-05T12:13:12Z",
+   "repository": "https://github.com/OppositeDragon/riverpod-snippets",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Christoph Dalski",
+    "Kirill Semenov"
+   ],
+   "description": "YAML language server powered by rlsp-yaml",
+   "download_count": 0,
+   "id": "rlsp-yaml",
+   "name": "rlsp-yaml",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-11-05T12:13:38Z",
+   "repository": "https://github.com/chdalski/rlsp",
+   "schema_version": 1,
+   "version": "0.1.5",
+   "wasm_api_version": "0.7.0"
+  },
+  {
+   "authors": [
+    "PleahMaCaka <pleahmacaka@gmail.com>"
+   ],
+   "description": "robots.txt syntax support",
+   "download_count": 0,
+   "id": "robots-txt",
+   "name": "robots.txt",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:13:42Z",
+   "repository": "https://github.com/PleahMaCaka/zed-robots-txt",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "onbjerg <hi@notbjerg.me>"
+   ],
+   "description": "Provides RON Syntax Highlighting",
+   "download_count": 0,
+   "id": "ron",
+   "name": "RON",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:13:47Z",
+   "repository": "https://github.com/onbjerg/zed-ron",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Hai Nguyen <nghai.dev@gmail.com>"
+   ],
+   "description": "The VSCode Ros\u00e9 Pine syntax mapping, recast for Zed \u2014 canonical palette, reworked token scopes, italics removed.",
+   "download_count": 0,
+   "id": "rose-pine-recast-theme",
+   "name": "Ros\u00e9 Pine Recast",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:13:48Z",
+   "repository": "https://github.com/ng-hai/zed-rose-pine-recast",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Kainoa Kanter <kainoa@t1c.dev>"
+   ],
+   "description": "All natural pine, faux fur, and a bit of soho vibes \u2013 a classy minimalist theme for Zed.",
+   "download_count": 0,
+   "id": "rose-pine-theme",
+   "name": "Ros\u00e9 Pine",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:13:49Z",
+   "repository": "https://github.com/rose-pine/zed",
+   "schema_version": 1,
+   "version": "2.0.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Anson Ng <hej@an5on.com>"
+   ],
+   "description": "\ud83c\udf77 Tipsy warm theme for Zed, inspired by PinkCatBoo",
+   "download_count": 0,
+   "id": "rosevin",
+   "name": "Ros\u00e9vin",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:13:50Z",
+   "repository": "https://github.com/anson-ryea/rosevin-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Ayush Porwal"
+   ],
+   "description": "A warm transparent theme.",
+   "download_count": 0,
+   "id": "rosewood-theme",
+   "name": "Rosewood",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:13:51Z",
+   "repository": "https://github.com/ayush-porwal/zed-rosewood-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Stathis Gennatas"
+   ],
+   "description": "Dark and light rtemis themes with neutral gray interfaces and paired syntax colors.",
+   "download_count": 0,
+   "id": "rtemis-theme",
+   "name": "rtemis theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:14:04Z",
+   "repository": "https://github.com/rtemis-org/rtemis-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Andy Waite <github.aw@andywaite.com>",
+    "Vitaly Slobodin <vitaly_slobodin@fastmail.com>"
+   ],
+   "description": "Ruby code snippets for common classes, modules, blocks, and testing workflows.",
+   "download_count": 0,
+   "id": "ruby-snippets",
+   "name": "Ruby Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-05T12:14:06Z",
+   "repository": "https://github.com/vitallium/zed-ruby-snippets-extension",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Ronas Lencevi\u010dius <contact@ronaldas.dev>"
+   ],
+   "description": "\ud83c\udff0 Old School RuneScape icon theme for Zed",
+   "download_count": 0,
+   "id": "runescape-icon-theme",
+   "name": "RuneScape Icon Theme",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-11-05T12:14:08Z",
+   "repository": "https://github.com/runescape-themes/zed-icons",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "LukianovII"
+   ],
+   "description": "A warm dark theme with brown tones and orange accents",
+   "download_count": 0,
+   "id": "rust-and-brown",
+   "name": "Rust & Brown",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:14:10Z",
+   "repository": "https://github.com/LukianovII/rust-and-brown-zed",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Islam Bekbuzarov <blkmlkss@gmail.com>"
+   ],
+   "description": "A dark theme inspired by RustRover's default dark theme",
+   "download_count": 0,
+   "id": "rust-rover-dark-theme",
+   "name": "RustRover Dark Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:14:41Z",
+   "repository": "https://github.com/blkmlk/RustRover-Zed-Theme",
+   "schema_version": 1,
+   "version": "1.0.3",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Bobby Mannino <manninobobby@icloud.com>"
+   ],
+   "description": "Rust snippets for the Zed IDE. A collection of Rust snippets to improve your development speed.",
+   "download_count": 0,
+   "id": "rust-snippets",
+   "name": "Rust Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-05T12:14:43Z",
+   "repository": "https://github.com/bobbymannino/rust-snippets-for-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Teamofeyy <timarnd06@gmail.com>"
+   ],
+   "description": "Practical Rust snippets for async development, error handling, serialization, tracing, testing, and common production workflows.",
+   "download_count": 0,
+   "id": "rust-workflow-snippets",
+   "name": "Rust Workflow Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-05T12:14:43Z",
+   "repository": "https://github.com/Teamofeyy/rust-snippets",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Ivan Muzyka"
+   ],
+   "description": "Rux language support",
+   "download_count": 0,
+   "id": "rux",
+   "name": "Rux",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:14:45Z",
+   "repository": "https://github.com/rux-lang/Zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Sina Mombeiny"
+   ],
+   "description": "A premium, clean, and easy-on-the-eyes dark theme.",
+   "download_count": 0,
+   "id": "s-dark-theme",
+   "name": "S-Dark Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:14:47Z",
+   "repository": "https://github.com/SinaMombeiny/S-DarkTheme.zed",
+   "schema_version": 1,
+   "version": "3.0.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Jonathan Leroy <jonathan@relkian.com>"
+   ],
+   "description": "Salt (AKA SaltStack) files syntax highlighting for Zed editor.",
+   "download_count": 0,
+   "id": "salt",
+   "name": "Salt",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:14:53Z",
+   "repository": "https://github.com/relkian/zed-extension-salt",
+   "schema_version": 1,
+   "version": "1.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Santiago Molina <hi@santi020k.com>"
+   ],
+   "description": "A calm violet dark and light theme family for Zed, generated from the Santi020k palette.",
+   "download_count": 0,
+   "id": "santi020k-theme",
+   "name": "Santi020k Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:15:01Z",
+   "repository": "https://github.com/santi020k/santi020k-theme",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "tjirsch"
+   ],
+   "description": "Syntax highlighting, outline, brackets and indentation for Satz estates and packs",
+   "download_count": 0,
+   "id": "satz",
+   "name": "Satz",
+   "provides": [
+    "languages",
+    "grammars",
+    "language-servers"
+   ],
+   "published_at": "2026-11-05T12:15:27Z",
+   "repository": "https://github.com/tjirsch/satz",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": "0.7.0"
+  },
+  {
+   "authors": [
+    "Perelyn-sama"
+   ],
+   "description": "Syntax highlighting for Solana sBPF Assembly.",
+   "download_count": 0,
+   "id": "sbpf-assembly",
+   "name": "sBPF Assembly",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:15:28Z",
+   "repository": "https://github.com/Perelyn-sama/sbpf-assembly",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "SchemaLock <hello@schemalock.dev>"
+   ],
+   "description": "Schema-pinned validation, completion, and hover for Kubernetes-style YAML.",
+   "download_count": 0,
+   "id": "schemalock-lsp",
+   "name": "SchemaLock",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-11-05T12:15:57Z",
+   "repository": "https://github.com/schemalock/zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": "0.7.0"
+  },
+  {
+   "authors": [
+    "Mikayla Maki <mikayla@zed.dev>"
+   ],
+   "description": "Scheme support.",
+   "download_count": 0,
+   "id": "scheme",
+   "name": "Scheme",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:15:59Z",
+   "repository": "https://github.com/zed-extensions/scheme",
+   "schema_version": 1,
+   "version": "0.0.6",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "MrCoolBay <mrcoolbayshare@gmail.com>"
+   ],
+   "description": "A soft-pastel frosted glass theme for Zed",
+   "download_count": 0,
+   "id": "seaglass-theme",
+   "name": "Seaglass",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:02Z",
+   "repository": "https://github.com/mrcoolbay/seaglass-theme",
+   "schema_version": 1,
+   "version": "0.2.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "envoidia"
+   ],
+   "description": "A blue and purple-focused dark theme",
+   "download_count": 0,
+   "id": "selene-abyss-theme",
+   "name": "Selene Abyss",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:03Z",
+   "repository": "https://github.com/envoidia/zed-selene-abyss",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Andrew Sen <platformer@github.com>"
+   ],
+   "description": "A dark theme with perceptually uniform syntax colors. Inspired by Seti Monokai and Penumbra from VS Code.",
+   "download_count": 0,
+   "id": "senkai-theme",
+   "name": "Senkai",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:06Z",
+   "repository": "https://github.com/platformer/zed-senkai",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Josh Morrow <josh@jcmorrow.com>"
+   ],
+   "description": "A port of the seoul256 color scheme",
+   "download_count": 0,
+   "id": "seoul256",
+   "name": "seoul256 theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:08Z",
+   "repository": "https://github.com/jcmorrow/seoul256-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Sequel"
+   ],
+   "description": "Two quiet dark themes: Sequel Ink (ink and gold) and Sequel Void (void and emerald).",
+   "download_count": 0,
+   "id": "sequel-theme",
+   "name": "Sequel",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:08Z",
+   "repository": "https://github.com/sequelcore/zed-theme",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "HarshNarayanJha <harshnj@proton.me>",
+    "Micheal Andreuzza <michael@andreuzza.com>"
+   ],
+   "description": "Black, elegant, modern theme for Zed \u2014 Moonlight, Monochrome, and Retro in dark and light.",
+   "download_count": 0,
+   "id": "sequoia",
+   "name": "Sequoia",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:10Z",
+   "repository": "https://github.com/HarshNarayanJha/zed-sequoia-theme",
+   "schema_version": 1,
+   "version": "1.32.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Bilal <bilal.ali.irp.dev@gmail.com"
+   ],
+   "description": "A Sercali theme family with Blur and Opaque variants.",
+   "download_count": 0,
+   "id": "sercali",
+   "name": "Sercali",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:12Z",
+   "repository": "https://github.com/Bilal-AKAG/Zed-sercali-Theme",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Nguyen Dang Vinh <meocoder@gmail.com>",
+    "Micheal Andreuzza <michael@andreuzza.com>"
+   ],
+   "description": "Relaxed, gentle and modern | Serendipity theme for Zed",
+   "download_count": 0,
+   "id": "serendipity",
+   "name": "Serendipity Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:13Z",
+   "repository": "https://github.com/meocoder31099/Serendipity-Theme-Zed",
+   "schema_version": 1,
+   "version": "1.1.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Nguyen Dang Vinh <meocoder@gmail.com>"
+   ],
+   "description": "Serendipity icon theme for Zed",
+   "download_count": 0,
+   "id": "serendipity-icons",
+   "name": "Serendipity Icons",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-11-05T12:16:14Z",
+   "repository": "https://github.com/meocoder31099/Serendipity-Icon-Theme-Zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Sergio Jovanotti <sergios-tech>"
+   ],
+   "description": "OLED-friendly dark theme for Zed, designed by Sergio Jovanotti. Pure black backgrounds with red accents.",
+   "download_count": 0,
+   "id": "sergio-tech-code-black-theme",
+   "name": "Sergio's Tech Code in Black",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:15Z",
+   "repository": "https://github.com/sergios-tech/sergio-tech-code-black-theme",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "d1y <chenhonzhou@gmail.com>"
+   ],
+   "description": "Seti Icons Theme for zed",
+   "download_count": 0,
+   "id": "seti-icons",
+   "name": "Seti Icons Theme",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-11-05T12:16:17Z",
+   "repository": "https://github.com/d1y/zed-seti-icons",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "https://github.com/infectiious"
+   ],
+   "description": "A Zed theme based on the Seti UI color palette.",
+   "download_count": 0,
+   "id": "setinox-theme",
+   "name": "Setinox",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:18Z",
+   "repository": "https://github.com/infectiious/setinox.zed",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Zev Ross <zevross@gmail.com>"
+   ],
+   "description": "A theme for the Zed text editor based on the computer interface from the tv show Severance.",
+   "download_count": 0,
+   "id": "severance-theme",
+   "name": "Severance Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:19Z",
+   "repository": "https://github.com/Zev18/severance-zed",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Isheunopa Ralph Mhonde <irmhonde@gmail.com>"
+   ],
+   "description": "Shades of purple theme for Zed",
+   "download_count": 0,
+   "id": "shades-of-purple-theme",
+   "name": "Shades of Purple Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:22Z",
+   "repository": "https://github.com/irmhonde/shades-of-purple-theme",
+   "schema_version": 1,
+   "version": "0.0.7",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Dharam Dhurandhar <ddh4r4m@gmail.com>"
+   ],
+   "description": "Ten themes from one palette system, eight dark and two light. Every syntax colour sits at the same perceptual lightness and every token is contrast-audited at build time.",
+   "download_count": 0,
+   "id": "shades-of-stoicism-theme",
+   "name": "Shades of Stoicism",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:23Z",
+   "repository": "https://github.com/ddh4r4m/zed-shades-of-stoicism",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Smit Patil <smit@smit.codes>"
+   ],
+   "description": "Shale theme for Zed",
+   "download_count": 0,
+   "id": "shale-theme",
+   "name": "Shale Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:24Z",
+   "repository": "https://github.com/smit4k/zed-shale",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Leo Diegues <leo@diegues.dev>"
+   ],
+   "description": "A sepia-toned, high-contrast light theme family based on tinytinytinytiny and Josh Spicer's VSCode themes",
+   "download_count": 0,
+   "id": "sharp-solarized-theme",
+   "name": "Sharp Solarized Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:25Z",
+   "repository": "https://github.com/leodiegues/sharp-solarized-zed-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "mkhamat"
+   ],
+   "description": "\ud83e\udd2b Theme that dims the scaffolding and colors what matters. Dark and light.",
+   "download_count": 0,
+   "id": "shhhed-theme",
+   "name": "shhhed",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:26Z",
+   "repository": "https://github.com/mkhamat/shhhed",
+   "schema_version": 1,
+   "version": "1.52.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "BinaryLeo <binarycode@fastmail.com>"
+   ],
+   "description": "A serene Zed IDE theme inspired by the tranquility of Japanese aesthetics. Includes: Shizuka Japan (dark), Light - Countryside, and Light - Morning Mist.",
+   "download_count": 0,
+   "id": "shizukajapan-theme",
+   "name": "Shizuka Japan",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:28Z",
+   "repository": "https://github.com/BinaryLeo/Shizuka_japan",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "kumamaki <8641684+kumamaki@users.noreply.github.com>"
+   ],
+   "description": "A dark theme with carefully picked colors",
+   "download_count": 0,
+   "id": "short-giraffe-theme",
+   "name": "Short Giraffe Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:29Z",
+   "repository": "https://github.com/kumamaki/Short-Giraffe",
+   "schema_version": 1,
+   "version": "2.5.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "David Pait <davidjpait@gmail.com>"
+   ],
+   "description": "Simple Darker Theme for zed",
+   "download_count": 0,
+   "id": "simple-darker",
+   "name": "Simple Darker Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:35Z",
+   "repository": "https://github.com/DP19/zed-theme-simple-darker",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Filip Seman <filip.seman@pm.me>"
+   ],
+   "description": "Simple light theme",
+   "download_count": 0,
+   "id": "simple-light-theme",
+   "name": "Simple Light",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:36Z",
+   "repository": "https://github.com/xseman/simple-light",
+   "schema_version": 1,
+   "version": "0.5.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Per Ragnar Edin <perragnar@gmail.com>"
+   ],
+   "description": "\ud83d\udc36 A couple of dark themes based on One Dark and Visual Studio Code dark theme. Also a light theme for bright light coding.",
+   "download_count": 0,
+   "id": "siri",
+   "name": "Siri Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:38Z",
+   "repository": "https://github.com/perragnar/zed-theme-siri",
+   "schema_version": 1,
+   "version": "0.0.12",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "menduz <github@menduz.com>"
+   ],
+   "description": "A fresh lemon inspired colorscheme",
+   "download_count": 0,
+   "id": "sitruuna",
+   "name": "Sitruuna Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:40Z",
+   "repository": "https://github.com/menduz/sitruuna-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Sebastian Porto <sebastian@sporto.cc>"
+   ],
+   "description": "Syntax highlighting for the Skir schema language (.skir files)",
+   "download_count": 0,
+   "id": "skir",
+   "name": "Skir",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:16:42Z",
+   "repository": "https://github.com/sporto/zed-skir",
+   "schema_version": 1,
+   "version": "0.3.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Saif Basheer Mohammed Al-Khoja"
+   ],
+   "description": "A beautiful minimalistic custom theme for the Zed Editor.",
+   "download_count": 0,
+   "id": "skys-theme",
+   "name": "Sky's Sea",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:45Z",
+   "repository": "https://github.com/saifbasheeralkhoja/skys-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Berkant Ay <berkantay.5@gmail.com>"
+   ],
+   "description": "A vomit like high contrast theme for Zed",
+   "download_count": 0,
+   "id": "sl4y-theme",
+   "name": "Sl4y Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:45Z",
+   "repository": "https://github.com/berkantay/zed-theme-sl4y",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Owen Law <owenlaw222@gmail.com>"
+   ],
+   "description": "A clean light and dark theme.",
+   "download_count": 0,
+   "id": "slate",
+   "name": "Slate",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:47Z",
+   "repository": "https://github.com/someone13574/zed-slate-theme",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Giossue"
+   ],
+   "description": "A minimal slate UI theme family with dark, light and mono dark variants.",
+   "download_count": 0,
+   "id": "slate-ui-theme",
+   "name": "Slate UI Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:48Z",
+   "repository": "https://github.com/giossue/slate-ui-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "calmyournerves"
+   ],
+   "description": "Slim template support.",
+   "download_count": 0,
+   "id": "slim",
+   "name": "Slim",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:16:50Z",
+   "repository": "https://github.com/calmyournerves/zed-slim",
+   "schema_version": 1,
+   "version": "1.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Kyle McDonald <hello@kylemcd.com>"
+   ],
+   "description": "A dark and fast theme.",
+   "download_count": 0,
+   "id": "slipstream-theme",
+   "name": "Slipstream",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:17:19Z",
+   "repository": "https://github.com/kylemcd/zed-slipstream",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Josh Rutkowski <joshrutk@amazon.com>"
+   ],
+   "description": "Smithy language support for Zed",
+   "download_count": 0,
+   "id": "smithy",
+   "name": "Smithy",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:17:23Z",
+   "repository": "https://github.com/joshrutkowski/zed-smithy",
+   "schema_version": 0,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Niels Segers <github@niels.foo>"
+   ],
+   "description": "Aesthetically pleasing dark and light theme with soft pastel colors aiming to be very easy on the eyes.",
+   "download_count": 0,
+   "id": "smooth",
+   "name": "Smooth Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:17:25Z",
+   "repository": "https://github.com/segersniels/zed-smooth",
+   "schema_version": 1,
+   "version": "1.1.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "eivs <eivs@live.com>"
+   ],
+   "description": "A port of the popular Snazzy color scheme for the Zed editor.",
+   "download_count": 0,
+   "id": "snazzy",
+   "name": "Snazzy",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:17:33Z",
+   "repository": "https://github.com/Eivs/zed-snazzy",
+   "schema_version": 1,
+   "version": "0.1.3",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "seyha"
+   ],
+   "description": "A Snazzy Light theme for Zed",
+   "download_count": 0,
+   "id": "snazzy-light",
+   "name": "Snazzy Light",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:17:34Z",
+   "repository": "https://github.com/seyhajin/zed-snazzy-light",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "ityme <ityme@outlook.com>"
+   ],
+   "description": "Code snippets for Zed. Currently supports [ python, ... ]",
+   "download_count": 0,
+   "id": "snippet-iwonder",
+   "name": "Code Snippets iWonder",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-05T12:17:35Z",
+   "repository": "https://github.com/ityme/snippet-iwonder",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Prakash Kumar Jha <prakashiit1@gmail.com>"
+   ],
+   "description": "SnowFox is a cool and warm theme for Zed Editor inspired by the serene beauty of snow and the vibrant energy of foxes.",
+   "download_count": 0,
+   "id": "snow-fox-theme",
+   "name": "SnowFox Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:17:37Z",
+   "repository": "https://github.com/ProPrak01/zed-SnowFox-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Freethinkel <freethinkel@gmail.com>"
+   ],
+   "description": "\u2744\ufe0f Winter theme for Zed",
+   "download_count": 0,
+   "id": "snowfall",
+   "name": "Snowfall Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:17:38Z",
+   "repository": "https://github.com/freethinkel/snowfall-zed",
+   "schema_version": 1,
+   "version": "0.2.2",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Bhavya Dang (bhavyadang.in)"
+   ],
+   "description": "A minimal Zed theme with violet undertones and pastel syntax.",
+   "download_count": 0,
+   "id": "solace-theme",
+   "name": "Solace",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:17:41Z",
+   "repository": "https://github.com/bhavya-dang/Solace",
+   "schema_version": 1,
+   "version": "0.1.2",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "harmtemolder"
+   ],
+   "description": "\u262f\ufe0f Precision colors for machines and people",
+   "download_count": 0,
+   "id": "solarized",
+   "name": "Solarized",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:17:42Z",
+   "repository": "https://github.com/harmtemolder/Solarized.zed",
+   "schema_version": 1,
+   "version": "0.4.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "JayTr <netlambda@gmail.com>"
+   ],
+   "description": "JayTr's solarized-fp Themes",
+   "download_count": 0,
+   "id": "solarized-fp",
+   "name": "solarized-fp",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:17:43Z",
+   "repository": "https://github.com/lohazo/solarized-fp",
+   "schema_version": 0,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Carlos L\u00f3pez <celb25@gmail.com>"
+   ],
+   "description": "Solarized Osaka color schemes for Zed.",
+   "download_count": 0,
+   "id": "solarized-osaka-theme",
+   "name": "Solarized Osaka",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:17:44Z",
+   "repository": "https://github.com/clouby/solarized-osaka-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Harry Yu <harryyu02@gmail.com>"
+   ],
+   "description": "Zed extension with helpful code snippets for SolidJS.",
+   "download_count": 0,
+   "id": "solid-typescript-snippets",
+   "name": "Solid Typescript Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-05T12:17:45Z",
+   "repository": "https://github.com/HarryYu02/zed-solid-ts-snippets",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Andres <andres@vineskills.com>"
+   ],
+   "description": "Dark theme ported from the Omarchy Solitude theme: near-monochrome slate UI with warm ember syntax highlighting.",
+   "download_count": 0,
+   "id": "solitude-theme",
+   "name": "Solitude",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:17:48Z",
+   "repository": "https://github.com/SomeoneWithOptions/zed-solitude",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Jos\u00e9 Duarte <duarte.gmj@gmail.com>"
+   ],
+   "description": "A dark theme focused on the essentials",
+   "download_count": 0,
+   "id": "sonder-theme",
+   "name": "Sonder",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:17:51Z",
+   "repository": "https://github.com/jmg-duarte/sonder-zed",
+   "schema_version": 1,
+   "version": "0.1.4",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "ciathefed <ciathefed@protonmail.com>"
+   ],
+   "description": "Sonokai Color Scheme for Zed",
+   "download_count": 0,
+   "id": "sonokai",
+   "name": "Sonokai",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:17:51Z",
+   "repository": "https://github.com/ciathefed/zed-sonokai",
+   "schema_version": 1,
+   "version": "0.0.7",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "aejkatappaja"
+   ],
+   "description": "A dark theme inspired by the sky above. Ethereal cyan, cool silver, deep OLED blacks.",
+   "download_count": 0,
+   "id": "sora-theme",
+   "name": "Sora",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:17:53Z",
+   "repository": "https://github.com/Aejkatappaja/sora",
+   "schema_version": 1,
+   "version": "0.1.2",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Tommy D. Rossi <tommy@notaku.so>",
+    "Pyae Sone Aung <pyaesoneaungrgn@gmail.com>",
+    "Clay Tercek"
+   ],
+   "description": "Spiceflow themes for Zed",
+   "download_count": 0,
+   "id": "spiceflow-theme",
+   "name": "Spiceflow Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:17:59Z",
+   "repository": "https://github.com/remorses/spiceflow-zed-theme",
+   "schema_version": 1,
+   "version": "0.0.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Jamie Carambat"
+   ],
+   "description": "Provides Spicy Syntax Highlighting",
+   "download_count": 0,
+   "id": "spicy",
+   "name": "Spicy",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:18:03Z",
+   "repository": "https://github.com/0xORB/spicy-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Aidan Lavis"
+   ],
+   "description": "Theme for Zed, inspired by Shopify's Spinel theme for VSCode",
+   "download_count": 0,
+   "id": "spinel-theme",
+   "name": "Spinel Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:18:05Z",
+   "repository": "https://github.com/a-lavis/zed-spinel",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "nervenes",
+    "notpeter",
+    "phileix",
+    "tammyxiong"
+   ],
+   "description": "SQL language support.",
+   "download_count": 0,
+   "id": "sql",
+   "name": "SQL",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:18:17Z",
+   "repository": "https://github.com/zed-extensions/sql",
+   "schema_version": 1,
+   "version": "1.1.8",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "mnshdw"
+   ],
+   "description": "\ud83d\udc3f\ufe0f Squirrel language support",
+   "download_count": 0,
+   "id": "squirrel",
+   "name": "Squirrel",
+   "provides": [
+    "languages",
+    "grammars",
+    "language-servers"
+   ],
+   "published_at": "2026-11-05T12:18:47Z",
+   "repository": "https://github.com/mnshdw/squirrel-lsp-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": "0.7.0"
+  },
+  {
+   "authors": [
+    "Ivan Zuzak <izuzak@gmail.com>"
+   ],
+   "description": "Dark theme based on the Srcery color scheme",
+   "download_count": 0,
+   "id": "srcery",
+   "name": "Srcery theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:18:47Z",
+   "repository": "https://github.com/srcery-colors/srcery-zed",
+   "schema_version": 1,
+   "version": "0.0.4",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Pranav Mangal <pranav.mangal.7@gmail.com>"
+   ],
+   "description": "Provides syntax highlighting for SSH config files",
+   "download_count": 0,
+   "id": "ssh-config",
+   "name": "SSH Config",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:18:50Z",
+   "repository": "https://github.com/pranavmangal/zed-ssh-config",
+   "schema_version": 1,
+   "version": "0.4.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Ghostvox"
+   ],
+   "description": "Stix is a elegant theme using pastel colors ",
+   "download_count": 0,
+   "id": "stix-theme",
+   "name": "Stix",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:18:57Z",
+   "repository": "https://github.com/Ghostvox/Stix",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Bedis Nbiba"
+   ],
+   "description": "Strace log file support for Zed",
+   "download_count": 0,
+   "id": "strace",
+   "name": "Strace",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:18:58Z",
+   "repository": "https://github.com/sigmasd/zed-strace",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Struct <self@destruct.dev>"
+   ],
+   "description": "High contrast dark theme to match https://destruct.dev",
+   "download_count": 0,
+   "id": "struct-theme",
+   "name": "Struct Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:18:59Z",
+   "repository": "https://github.com/Fake-User/Struct-Zed-Theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Blake Haydon <blake.a.haydon@gmail.com>"
+   ],
+   "description": "Structured Text Zed extension",
+   "download_count": 0,
+   "id": "structured-text",
+   "name": "Structured Text",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:19:00Z",
+   "repository": "https://github.com/Blake-Haydon/zed-structured-text",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "WeitingChen <72130405+WeiTing1991@users.noreply.github.com>"
+   ],
+   "description": "8 themes built from traditional Formosa and Nippon colors -- 5 darks, 3 lights, with distinct accent palettes for each variant",
+   "download_count": 0,
+   "id": "suannhai-theme",
+   "name": "Suannhai",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:07Z",
+   "repository": "https://github.com/WeiTing1991/suannhai-theme",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Roman Hnatiuk<roman@hnatiuk.cc>"
+   ],
+   "description": "Theme for Zed Editor that imitates Sublime Text 4's Mariana colour scheme.",
+   "download_count": 0,
+   "id": "sublime-mariana-theme",
+   "name": "Sublime Mariana Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:08Z",
+   "repository": "https://github.com/hnatiukr/zed-mariana-theme",
+   "schema_version": 1,
+   "version": "1.1.4",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Fan4_Metal <fan4_metal@mail.ru>"
+   ],
+   "description": "Dark theme ported from the Sublime Text 4 Colorful VS Code theme by Enubia",
+   "download_count": 0,
+   "id": "sublime-text-4-colorful-theme",
+   "name": "Sublime Text 4 Colorful",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:09Z",
+   "repository": "https://github.com/Fan4Metal/sublime-text-4-colorful-zed",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Mike Hamrah"
+   ],
+   "description": "Dark Subliminal-based theme with Ros\u00e9 Pine-inspired accents for Rust, TypeScript, Go, Swift, and Python.",
+   "download_count": 0,
+   "id": "subliminal-nightfall",
+   "name": "Subliminal Nightfall",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:11Z",
+   "repository": "https://github.com/mhamrah/subliminal-nightfall",
+   "schema_version": 1,
+   "version": "0.1.16",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Ahmed Ash"
+   ],
+   "description": "Sukun \u2014 a calm, warm theme for Zed with light, soft, and dark variants.",
+   "download_count": 0,
+   "id": "sukun-theme",
+   "name": "Sukun",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:12Z",
+   "repository": "https://github.com/ahmedash95/sukun",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Calvin Jackson <mailme.calvin@gmail.com>"
+   ],
+   "description": "Monochrome theme based on Sumi-e originating from Github light mode syntax highlighting.",
+   "download_count": 0,
+   "id": "sumi-light",
+   "name": "Sumi Light Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:12Z",
+   "repository": "https://github.com/LogicSatinn/sumi-light-zed.git",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Cristiano Almeida <cristiano@ongandu.com>"
+   ],
+   "description": "A dark theme. Recreated from the Summercamp VS Code theme, itself based on the earliest versions of Zed.",
+   "download_count": 0,
+   "id": "summercamp-theme",
+   "name": "Summercamp",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:13Z",
+   "repository": "https://github.com/csalmeida/summercamp-zed-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Tejas Shinde"
+   ],
+   "description": "A cheerful sunrise-inspired theme with warm sunlight yellows, oranges, and balanced cool tones for a fresh, morning coding experience.",
+   "download_count": 0,
+   "id": "sunrise-bloom-theme",
+   "name": "Sunrise Bloom",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:14Z",
+   "repository": "https://github.com/tejasashinde/sunrise-bloom-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Taha YVR <taha@noiserandom.com>"
+   ],
+   "description": "A Synthwave dark theme with neon colors.",
+   "download_count": 0,
+   "id": "sunset-drive",
+   "name": "Sunset Drive",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:15Z",
+   "repository": "https://github.com/tahayvr/sunset-drive-zed",
+   "schema_version": 1,
+   "version": "1.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Piyush Kacha <piyushkacha75@gmail.com>"
+   ],
+   "description": "SupaGlass is a theme for Zed text editor.",
+   "download_count": 0,
+   "id": "supaglass",
+   "name": "supaglass",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:16Z",
+   "repository": "https://github.com/piyush-kacha/zed-supaglass",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "SuperGregM"
+   ],
+   "description": "Great Zed theme based off sublime text's monokai mixed with VSCode's monokai.",
+   "download_count": 0,
+   "id": "supergreatmonokai",
+   "name": "SuperGreatMonokai",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:18Z",
+   "repository": "https://github.com/SuperGregM/SuperGreatMonokai-Zed",
+   "schema_version": 1,
+   "version": "0.0.4",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "rm_reins"
+   ],
+   "description": "Everyone knows that green is the best color.",
+   "download_count": 0,
+   "id": "superior-green-theme",
+   "name": "Superior Green",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:20Z",
+   "repository": "https://github.com/rm-reins/Superior-Green",
+   "schema_version": 1,
+   "version": "0.0.20",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Superset Theme Contributors"
+   ],
+   "description": "A Superset-inspired dark and light theme for Zed.",
+   "download_count": 0,
+   "id": "superset-theme",
+   "name": "Superset Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:21Z",
+   "repository": "https://github.com/juwain/superset-zed-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "superkacper4 <kucza06@wp.pl>"
+   ],
+   "description": "Theme inspired with Sublime Mariana for web dev.",
+   "download_count": 0,
+   "id": "supertheme4",
+   "name": "supertheme4",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:22Z",
+   "repository": "https://github.com/superkacper4/supertheme4",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "UNO Leo <leo.uno@surpassone.com>"
+   ],
+   "description": "A flat, monochrome color theme built on coral tonal hierarchy and grayscale.",
+   "download_count": 0,
+   "id": "surpassone-theme",
+   "name": "SurpassOne",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:22Z",
+   "repository": "https://github.com/aitit-inc/zed-surpassone-theme",
+   "schema_version": 1,
+   "version": "0.3.5",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "tomopumipumi <tomo.pumi.pumi@gmail.com>"
+   ],
+   "description": "A fresh theme inspired by Sushi.",
+   "download_count": 0,
+   "id": "sushi-theme",
+   "name": "SUSHI",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:25Z",
+   "repository": "https://github.com/tomopumipumi/sushi-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Bobby Mannino <manninobobby@icloud.com>"
+   ],
+   "description": "Svelte snippets for the Zed IDE. A collection of Svelte snippets to improve your development speed.",
+   "download_count": 0,
+   "id": "svelte-snippets",
+   "name": "Svelte Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-05T12:19:31Z",
+   "repository": "https://github.com/bobbymannino/svelte-snippets-for-zed",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Armin Chanchian"
+   ],
+   "description": "A cheerful dark blue theme with vibrant, contrasting syntax highlighting.",
+   "download_count": 0,
+   "id": "sweet-dracula",
+   "name": "Sweet Dracula",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:33Z",
+   "repository": "https://github.com/armync/ArminC-Sweet-Dracula-Zed/",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Joan Garcia <joangarcia.dev@gmail.com>"
+   ],
+   "description": "A simple file icon theme",
+   "download_count": 0,
+   "id": "symbols",
+   "name": "Symbols",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-11-05T12:19:35Z",
+   "repository": "https://github.com/joangarciaa-dev/zed-symbols",
+   "schema_version": 1,
+   "version": "1.2.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Scott Tolinski"
+   ],
+   "description": "A new take on a Syntax.fm theme. Yellows/Teals/Reds",
+   "download_count": 0,
+   "id": "syntax",
+   "name": "Syntax",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:39Z",
+   "repository": "https://github.com/syntaxfm/syntax-zed-theme",
+   "schema_version": 0,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Daniel Schmidt <danielmschmidt92@gmail.com>"
+   ],
+   "description": "A port of the Synthwave '84 extension in VS Code",
+   "download_count": 0,
+   "id": "synthwave",
+   "name": "Synthwave '84 Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:39Z",
+   "repository": "https://github.com/DanielMSchmidt/zed-synthwave",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Viktor Persson"
+   ],
+   "description": "A Synthwave inspired dark theme",
+   "download_count": 0,
+   "id": "synthwave-alpha-theme",
+   "name": "Synthwave Alpha Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:40Z",
+   "repository": "https://github.com/vikpe/synthwave-alpha-zed",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "DROO <drew@axol.io>"
+   ],
+   "description": "A vibrant, retro-inspired theme based on the synthwave aesthetic of the 1980s. Includes Classic, Soft, High Contrast, and Delta variants.",
+   "download_count": 0,
+   "id": "synthwave84",
+   "name": "Synthwave84",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:41Z",
+   "repository": "https://github.com/DROOdotFOO/synthwave84-zed",
+   "schema_version": 1,
+   "version": "0.3.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "\u00c0lex Torregrosa <alex@torregrosa.cc>"
+   ],
+   "description": "Support for the SystemRDL language",
+   "download_count": 0,
+   "id": "systemrdl",
+   "name": "SystemRDL",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:20:16Z",
+   "repository": "https://github.com/alex-torregrosa/zed-systemrdl-extension",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "stpn48 <stepanbroz789@gmail.com>"
+   ],
+   "description": "Unofficial t3 theme based on T3 Chat for Zed editor.",
+   "download_count": 0,
+   "id": "t3-theme",
+   "name": "T3 Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:20:17Z",
+   "repository": "https://github.com/stpn48/t3-zed-theme",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Josh Dales"
+   ],
+   "description": "A theme for Zed - with light and dark modes",
+   "download_count": 0,
+   "id": "taiga-theme",
+   "name": "Taiga Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:20:19Z",
+   "repository": "https://github.com/joshdales/taiga-theme",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "blaqat <blaqat.ag@gmail.com>"
+   ],
+   "description": "Tailwind theme for Zed",
+   "download_count": 0,
+   "id": "tailwind-theme",
+   "name": "Tailwind Syntax",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:20:19Z",
+   "repository": "https://github.com/biaqat/tailwind-theme-zed",
+   "schema_version": 1,
+   "version": "0.6.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Ma\u00ebl Colom\u00e9 <https://github.com/Zer0absolute>"
+   ],
+   "description": "Tako color schemes for Zed with red, purple, blue, and smoothie families in dark, light, and blur variants.",
+   "download_count": 0,
+   "id": "tako-theme",
+   "name": "Tako Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:20:20Z",
+   "repository": "https://github.com/Zer0absolute/zed-tako-theme",
+   "schema_version": 1,
+   "version": "0.1.4",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "lh104729"
+   ],
+   "description": "Syntax highlighting for Tamarin.",
+   "download_count": 0,
+   "id": "tamarin",
+   "name": "Tamarin",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:20:25Z",
+   "repository": "https://github.com/LH104729/zed-tamarin",
+   "schema_version": 1,
+   "version": "1.12.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Dylan Fontaine <me@dylf.dev>"
+   ],
+   "description": "\ud83e\udd9d A Zed theme inspired by the GitLab Web IDE theme",
+   "download_count": 0,
+   "id": "tanuki",
+   "name": "Tanuki Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:20:26Z",
+   "repository": "https://github.com/dylf/zed-tanuki",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Nick Glu <nick@nickalie.com>"
+   ],
+   "description": "Taskfile syntax highlighting and task runner support",
+   "download_count": 0,
+   "id": "taskfile",
+   "name": "Taskfile",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:20:29Z",
+   "repository": "https://github.com/nickalie/zed-taskfile",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Ioseb Koplatadze"
+   ],
+   "description": "A beautiful dark, light, and storm theme inspired by the warm nights of Tbilisi",
+   "download_count": 0,
+   "id": "tbilisi-night",
+   "name": "Tbilisi Night",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:20:29Z",
+   "repository": "https://github.com/IosebKoplatadze/tbilisi-night-zed",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Richnou <leys.richard@gmail.com>"
+   ],
+   "description": "An Extension providing TCL Language highlighting",
+   "download_count": 0,
+   "id": "tcl",
+   "name": "TCL Language",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:20:31Z",
+   "repository": "https://github.com/richnou/kissb-zed-tcl",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Tim Dang"
+   ],
+   "description": "Dark color theme inspired by the movie Oblivion.",
+   "download_count": 0,
+   "id": "tech49-theme",
+   "name": "Tech49 Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:20:32Z",
+   "repository": "https://github.com/timdang/tech49_theme",
+   "schema_version": 1,
+   "version": "0.3.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Phaux"
+   ],
+   "description": "Dark and colorful theme",
+   "download_count": 0,
+   "id": "technicolor-theme",
+   "name": "Technicolor Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:20:33Z",
+   "repository": "https://github.com/phaux/technicolor",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "b6k"
+   ],
+   "description": "A theme inspired by the TempleOS color palette",
+   "download_count": 0,
+   "id": "templeos-theme",
+   "name": "TempleOS",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:20:36Z",
+   "repository": "https://github.com/b6k-dev/zed-templeos-theme",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "TensorFoundry",
+    "tensorfoundrylabs"
+   ],
+   "description": "Soothing dark Zed themes with TensorFoundry orange, violet, and cyan accents.",
+   "download_count": 0,
+   "id": "tensorfoundry-theme",
+   "name": "TensorFoundry",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:20:38Z",
+   "repository": "https://github.com/tensorfoundrylabs/theme-zed",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "uncenter"
+   ],
+   "description": "Support for the Tera templating language.",
+   "download_count": 0,
+   "id": "tera",
+   "name": "Tera",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:20:41Z",
+   "repository": "https://github.com/uncenter/zed-tera",
+   "schema_version": 1,
+   "version": "1.3.3",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Nooooaaaaah <nspielman96@gmail.com>"
+   ],
+   "description": "A terrible theme for zed",
+   "download_count": 0,
+   "id": "terrible-theme",
+   "name": "Terrible Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:20:46Z",
+   "repository": "https://github.com/nooooaaaaah/terrible-zed",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Nidal Bakir <nidal.bakir.edu@gmail.com>"
+   ],
+   "description": "A port of VSCode The Best Theme with some tweaks",
+   "download_count": 0,
+   "id": "the-best-theme",
+   "name": "The Best Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:20:53Z",
+   "repository": "https://github.com/Nidal-Bakir/zed-the-best-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Sai Gokula Krishnan <hi@gokula.dev>"
+   ],
+   "description": "Join the dark side.",
+   "download_count": 0,
+   "id": "the-dark-side",
+   "name": "The Dark Side",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:20:55Z",
+   "repository": "https://github.com/Imgkl/the-dark-side",
+   "schema_version": 1,
+   "version": "0.3.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Kyoka-Suigetsu"
+   ],
+   "description": "The Forbidden One, a dark-only theme for Zed.",
+   "download_count": 0,
+   "id": "the-forbidden-one-theme",
+   "name": "The Forbidden One",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:20:55Z",
+   "repository": "https://github.com/Kyoka-Suigetsu/the-forbidden-one",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Hupeh <meiligo@gmail.com>"
+   ],
+   "description": "The pure tone theme for zed",
+   "download_count": 0,
+   "id": "the-pure-tone",
+   "name": "The Pure Tone",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:20:57Z",
+   "repository": "https://github.com/hupeh/the-pure-tone",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Eduardo de Melo Xavier <xaviduds@gmail.com>"
+   ],
+   "description": "Lince theme, black or white",
+   "download_count": 0,
+   "id": "theme-lince",
+   "name": "Lince Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:20:57Z",
+   "repository": "https://github.com/xaviduds/theme-lince",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Celio Reyes <celioreyes@posteo.com>"
+   ],
+   "description": "A dark and light minimal green theme for Zed, ported from thorn.nvim by jpwol",
+   "download_count": 0,
+   "id": "thorn-theme",
+   "name": "Thorn Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:20:58Z",
+   "repository": "https://github.com/celiroeyes/thorn-zed-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Vlad Gerasimov <vlad@vlad.studio>"
+   ],
+   "description": "Calm and cozy color themes with warm, desaturated colors in light and dark variants",
+   "download_count": 0,
+   "id": "tiniri",
+   "name": "Tiniri",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:21:00Z",
+   "repository": "https://github.com/vladstudio/tiniri-zed",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Noa <dev@guern.eu>"
+   ],
+   "description": "TLA+ and PlusCal syntax support for Zed.",
+   "download_count": 0,
+   "id": "tla-plus",
+   "name": "TLA+",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:21:09Z",
+   "repository": "https://github.com/Akanoa/Zed-editor-TLA-syntax",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "ackzell"
+   ],
+   "description": "Tlah-PAH-lee means color in N\u00e1huatl. Monochromatic theme with dark and light colored variations. Inspired by minerals found in Mexico",
+   "download_count": 0,
+   "id": "tlapalli-theme",
+   "name": "Tlapalli",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:21:11Z",
+   "repository": "https://github.com/ackzell/tlapalli-zed-theme",
+   "schema_version": 1,
+   "version": "1.2.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "waldirbertazzijr"
+   ],
+   "description": "TextMate's Twilight theme for Zed: a readable default, a darker-gutter variant, and the classic port",
+   "download_count": 0,
+   "id": "tm-twilight",
+   "name": "Twilight",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:21:11Z",
+   "repository": "https://github.com/waldirbertazzijr/zed-twilight",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Dang Huynh <huynhminhdang@gmail.com>"
+   ],
+   "description": "Syntax highlighting for tmux configuration files",
+   "download_count": 0,
+   "id": "tmux",
+   "name": "tmux",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:21:16Z",
+   "repository": "https://github.com/dangh/zed-tmux",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Shion Ito <frontier.engine+github@gmail.com>"
+   ],
+   "description": "Highlights TODO, FIXME, HACK, NOTE, WARN, BUG and other keywords across all file types",
+   "download_count": 0,
+   "id": "todo-highlight-language-server",
+   "name": "TODO Highlight",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-11-05T12:21:38Z",
+   "repository": "https://github.com/shionit/zed-todo-highlight",
+   "schema_version": 1,
+   "version": "0.3.0",
+   "wasm_api_version": "0.7.0"
+  },
+  {
+   "authors": [
+    "pursvir"
+   ],
+   "description": "Todo.txt support.",
+   "download_count": 0,
+   "id": "todotxt",
+   "name": "Todotxt",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:21:40Z",
+   "repository": "https://github.com/pursvir/zed-todotxt",
+   "schema_version": 1,
+   "version": "0.2.3",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Thorsten Rhau",
+    "Mrzz <runze.ma@outlook.com>"
+   ],
+   "description": "A warm, muted Token theme family for Zed with light and dark variants.",
+   "download_count": 0,
+   "id": "token-themes",
+   "name": "Token-themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:21:40Z",
+   "repository": "https://github.com/mrzzmrzz/token-themes.git",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Cateds <this.id.was.used@outlook.com>"
+   ],
+   "description": "A collection of refined dark themes for VSCode and Zed, featuring Tokyo Maple, One Dark Maple, and Cursor Dark Maple with enhanced readability and Maple-style syntax highlighting.",
+   "download_count": 0,
+   "id": "tokyo-maple-theme",
+   "name": "Maple Fusion Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:21:42Z",
+   "repository": "https://github.com/Cateds/tokyo-maple-theme",
+   "schema_version": 1,
+   "version": "1.3.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "pyncz <https://github.com/pyncz>"
+   ],
+   "description": "A contrast modification of the Tokyo Night theme",
+   "download_count": 0,
+   "id": "tokyo-night-dark",
+   "name": "Tokyo Night Dark theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:21:44Z",
+   "repository": "https://github.com/pyncz/zed-tokyo-night-dark-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Emmanuel Vernet"
+   ],
+   "description": "Tokyoppuccin Themes - inspired by Tokyo Night and Catppuccin",
+   "download_count": 0,
+   "id": "tokyoppuccin-theme",
+   "name": "Tokyoppuccin Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:21:45Z",
+   "repository": "https://github.com/EmmanuelVernet/zed-tokyoppuccin",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "tombi-toml <tombi-toml@outlook.com>"
+   ],
+   "description": "\ud83e\udd85  TOML Language Server  \ud83e\udd85",
+   "download_count": 0,
+   "id": "tombi",
+   "name": "Tombi | TOML Toolkit",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-11-05T12:22:11Z",
+   "repository": "https://github.com/tombi-toml/tombi",
+   "schema_version": 1,
+   "version": "0.2.4",
+   "wasm_api_version": "0.7.0"
   }
  ]
 }

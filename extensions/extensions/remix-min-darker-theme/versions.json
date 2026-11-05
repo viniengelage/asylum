@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "FernaandoJr <fernaando.divino@gmail.com>"
+   ],
+   "description": "Remix Min Darker Theme \u2014 dark UI theme for Zed with a minimal, high-contrast palette.",
+   "download_count": 0,
+   "id": "remix-min-darker-theme",
+   "name": "Remix Min Darker Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:12:57Z",
+   "repository": "https://github.com/FernaandoJr/remix-min-darker-zed",
+   "schema_version": 1,
+   "version": "0.0.4",
+   "wasm_api_version": null
+  }
+ ]
+}

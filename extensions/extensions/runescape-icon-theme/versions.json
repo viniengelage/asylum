@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ronas Lencevi\u010dius <contact@ronaldas.dev>"
+   ],
+   "description": "\ud83c\udff0 Old School RuneScape icon theme for Zed",
+   "download_count": 0,
+   "id": "runescape-icon-theme",
+   "name": "RuneScape Icon Theme",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-11-05T12:14:08Z",
+   "repository": "https://github.com/runescape-themes/zed-icons",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

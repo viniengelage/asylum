@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "stpn48 <stepanbroz789@gmail.com>"
+   ],
+   "description": "Unofficial t3 theme based on T3 Chat for Zed editor.",
+   "download_count": 0,
+   "id": "t3-theme",
+   "name": "T3 Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:20:17Z",
+   "repository": "https://github.com/stpn48/t3-zed-theme",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,23 @@
+{
+ "data": [
+  {
+   "authors": [
+    "mnshdw"
+   ],
+   "description": "\ud83d\udc3f\ufe0f Squirrel language support",
+   "download_count": 0,
+   "id": "squirrel",
+   "name": "Squirrel",
+   "provides": [
+    "languages",
+    "grammars",
+    "language-servers"
+   ],
+   "published_at": "2026-11-05T12:18:47Z",
+   "repository": "https://github.com/mnshdw/squirrel-lsp-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": "0.7.0"
+  }
+ ]
+}

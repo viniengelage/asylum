@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Noa <dev@guern.eu>"
+   ],
+   "description": "TLA+ and PlusCal syntax support for Zed.",
+   "download_count": 0,
+   "id": "tla-plus",
+   "name": "TLA+",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:21:09Z",
+   "repository": "https://github.com/Akanoa/Zed-editor-TLA-syntax",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

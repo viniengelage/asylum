@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Isheunopa Ralph Mhonde <irmhonde@gmail.com>"
+   ],
+   "description": "Shades of purple theme for Zed",
+   "download_count": 0,
+   "id": "shades-of-purple-theme",
+   "name": "Shades of Purple Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:22Z",
+   "repository": "https://github.com/irmhonde/shades-of-purple-theme",
+   "schema_version": 1,
+   "version": "0.0.7",
+   "wasm_api_version": null
+  }
+ ]
+}

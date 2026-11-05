@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Abhishek Bhatkar <bhatkar.abhishek80@gmail.com>"
+   ],
+   "description": "Amber CRT RetroPC theme for Zed",
+   "download_count": 0,
+   "id": "retropc-theme",
+   "name": "RetroPC",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:13:03Z",
+   "repository": "https://github.com/abhishek-bhatkar/retroPC-zed-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

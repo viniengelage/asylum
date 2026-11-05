@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Islam Bekbuzarov <blkmlkss@gmail.com>"
+   ],
+   "description": "A dark theme inspired by RustRover's default dark theme",
+   "download_count": 0,
+   "id": "rust-rover-dark-theme",
+   "name": "RustRover Dark Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:14:41Z",
+   "repository": "https://github.com/blkmlk/RustRover-Zed-Theme",
+   "schema_version": 1,
+   "version": "1.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

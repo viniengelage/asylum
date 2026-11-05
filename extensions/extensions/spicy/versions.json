@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Jamie Carambat"
+   ],
+   "description": "Provides Spicy Syntax Highlighting",
+   "download_count": 0,
+   "id": "spicy",
+   "name": "Spicy",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:18:03Z",
+   "repository": "https://github.com/0xORB/spicy-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

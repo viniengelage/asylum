@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "kumamaki <8641684+kumamaki@users.noreply.github.com>"
+   ],
+   "description": "A dark theme with carefully picked colors",
+   "download_count": 0,
+   "id": "short-giraffe-theme",
+   "name": "Short Giraffe Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:29Z",
+   "repository": "https://github.com/kumamaki/Short-Giraffe",
+   "schema_version": 1,
+   "version": "2.5.1",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Steeven Lopez <stee-ven_94@outlook.com>"
+   ],
+   "description": "Collection of Riverpod snippets for Flutter/Dart development on the Zed editor.",
+   "download_count": 0,
+   "id": "riverpod-dart-flutter-snippets",
+   "name": "Riverpod Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-05T12:13:12Z",
+   "repository": "https://github.com/OppositeDragon/riverpod-snippets",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

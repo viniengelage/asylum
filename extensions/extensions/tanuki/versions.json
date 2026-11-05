@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Dylan Fontaine <me@dylf.dev>"
+   ],
+   "description": "\ud83e\udd9d A Zed theme inspired by the GitLab Web IDE theme",
+   "download_count": 0,
+   "id": "tanuki",
+   "name": "Tanuki Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:20:26Z",
+   "repository": "https://github.com/dylf/zed-tanuki",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

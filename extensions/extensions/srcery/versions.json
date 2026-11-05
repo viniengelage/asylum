@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ivan Zuzak <izuzak@gmail.com>"
+   ],
+   "description": "Dark theme based on the Srcery color scheme",
+   "download_count": 0,
+   "id": "srcery",
+   "name": "Srcery theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:18:47Z",
+   "repository": "https://github.com/srcery-colors/srcery-zed",
+   "schema_version": 1,
+   "version": "0.0.4",
+   "wasm_api_version": null
+  }
+ ]
+}

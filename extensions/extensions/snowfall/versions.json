@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Freethinkel <freethinkel@gmail.com>"
+   ],
+   "description": "\u2744\ufe0f Winter theme for Zed",
+   "download_count": 0,
+   "id": "snowfall",
+   "name": "Snowfall Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:17:38Z",
+   "repository": "https://github.com/freethinkel/snowfall-zed",
+   "schema_version": 1,
+   "version": "0.2.2",
+   "wasm_api_version": null
+  }
+ ]
+}

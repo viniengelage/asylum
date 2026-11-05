@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Scott Tolinski"
+   ],
+   "description": "A new take on a Syntax.fm theme. Yellows/Teals/Reds",
+   "download_count": 0,
+   "id": "syntax",
+   "name": "Syntax",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:39Z",
+   "repository": "https://github.com/syntaxfm/syntax-zed-theme",
+   "schema_version": 0,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "harmtemolder"
+   ],
+   "description": "\u262f\ufe0f Precision colors for machines and people",
+   "download_count": 0,
+   "id": "solarized",
+   "name": "Solarized",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:17:42Z",
+   "repository": "https://github.com/harmtemolder/Solarized.zed",
+   "schema_version": 1,
+   "version": "0.4.0",
+   "wasm_api_version": null
+  }
+ ]
+}

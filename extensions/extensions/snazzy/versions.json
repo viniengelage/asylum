@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "eivs <eivs@live.com>"
+   ],
+   "description": "A port of the popular Snazzy color scheme for the Zed editor.",
+   "download_count": 0,
+   "id": "snazzy",
+   "name": "Snazzy",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:17:33Z",
+   "repository": "https://github.com/Eivs/zed-snazzy",
+   "schema_version": 1,
+   "version": "0.1.3",
+   "wasm_api_version": null
+  }
+ ]
+}

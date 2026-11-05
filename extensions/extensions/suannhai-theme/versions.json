@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "WeitingChen <72130405+WeiTing1991@users.noreply.github.com>"
+   ],
+   "description": "8 themes built from traditional Formosa and Nippon colors -- 5 darks, 3 lights, with distinct accent palettes for each variant",
+   "download_count": 0,
+   "id": "suannhai-theme",
+   "name": "Suannhai",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:07Z",
+   "repository": "https://github.com/WeiTing1991/suannhai-theme",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Sebastian Porto <sebastian@sporto.cc>"
+   ],
+   "description": "Syntax highlighting for the Skir schema language (.skir files)",
+   "download_count": 0,
+   "id": "skir",
+   "name": "Skir",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:16:42Z",
+   "repository": "https://github.com/sporto/zed-skir",
+   "schema_version": 1,
+   "version": "0.3.0",
+   "wasm_api_version": null
+  }
+ ]
+}

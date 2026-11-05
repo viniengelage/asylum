@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ahmed Ash"
+   ],
+   "description": "Sukun \u2014 a calm, warm theme for Zed with light, soft, and dark variants.",
+   "download_count": 0,
+   "id": "sukun-theme",
+   "name": "Sukun",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:12Z",
+   "repository": "https://github.com/ahmedash95/sukun",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

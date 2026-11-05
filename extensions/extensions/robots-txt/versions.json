@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "PleahMaCaka <pleahmacaka@gmail.com>"
+   ],
+   "description": "robots.txt syntax support",
+   "download_count": 0,
+   "id": "robots-txt",
+   "name": "robots.txt",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:13:42Z",
+   "repository": "https://github.com/PleahMaCaka/zed-robots-txt",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

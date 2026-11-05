@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ioseb Koplatadze"
+   ],
+   "description": "A beautiful dark, light, and storm theme inspired by the warm nights of Tbilisi",
+   "download_count": 0,
+   "id": "tbilisi-night",
+   "name": "Tbilisi Night",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:20:29Z",
+   "repository": "https://github.com/IosebKoplatadze/tbilisi-night-zed",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

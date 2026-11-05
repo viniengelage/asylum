@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "aejkatappaja"
+   ],
+   "description": "A dark theme inspired by the sky above. Ethereal cyan, cool silver, deep OLED blacks.",
+   "download_count": 0,
+   "id": "sora-theme",
+   "name": "Sora",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:17:53Z",
+   "repository": "https://github.com/Aejkatappaja/sora",
+   "schema_version": 1,
+   "version": "0.1.2",
+   "wasm_api_version": null
+  }
+ ]
+}

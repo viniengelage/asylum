@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "JayTr <netlambda@gmail.com>"
+   ],
+   "description": "JayTr's solarized-fp Themes",
+   "download_count": 0,
+   "id": "solarized-fp",
+   "name": "solarized-fp",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:17:43Z",
+   "repository": "https://github.com/lohazo/solarized-fp",
+   "schema_version": 0,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

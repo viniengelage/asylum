@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "superkacper4 <kucza06@wp.pl>"
+   ],
+   "description": "Theme inspired with Sublime Mariana for web dev.",
+   "download_count": 0,
+   "id": "supertheme4",
+   "name": "supertheme4",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:22Z",
+   "repository": "https://github.com/superkacper4/supertheme4",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

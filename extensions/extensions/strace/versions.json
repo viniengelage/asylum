@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Bedis Nbiba"
+   ],
+   "description": "Strace log file support for Zed",
+   "download_count": 0,
+   "id": "strace",
+   "name": "Strace",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:18:58Z",
+   "repository": "https://github.com/sigmasd/zed-strace",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

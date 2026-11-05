@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Aidan Lavis"
+   ],
+   "description": "Theme for Zed, inspired by Shopify's Spinel theme for VSCode",
+   "download_count": 0,
+   "id": "spinel-theme",
+   "name": "Spinel Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:18:05Z",
+   "repository": "https://github.com/a-lavis/zed-spinel",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

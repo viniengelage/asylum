@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "ityme <ityme@outlook.com>"
+   ],
+   "description": "Code snippets for Zed. Currently supports [ python, ... ]",
+   "download_count": 0,
+   "id": "snippet-iwonder",
+   "name": "Code Snippets iWonder",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-05T12:17:35Z",
+   "repository": "https://github.com/ityme/snippet-iwonder",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

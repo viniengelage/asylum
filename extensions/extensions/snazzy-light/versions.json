@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "seyha"
+   ],
+   "description": "A Snazzy Light theme for Zed",
+   "download_count": 0,
+   "id": "snazzy-light",
+   "name": "Snazzy Light",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:17:34Z",
+   "repository": "https://github.com/seyhajin/zed-snazzy-light",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

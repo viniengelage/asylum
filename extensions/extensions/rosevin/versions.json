@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Anson Ng <hej@an5on.com>"
+   ],
+   "description": "\ud83c\udf77 Tipsy warm theme for Zed, inspired by PinkCatBoo",
+   "download_count": 0,
+   "id": "rosevin",
+   "name": "Ros\u00e9vin",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:13:50Z",
+   "repository": "https://github.com/anson-ryea/rosevin-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

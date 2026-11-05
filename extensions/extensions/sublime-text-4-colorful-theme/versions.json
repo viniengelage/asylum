@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Fan4_Metal <fan4_metal@mail.ru>"
+   ],
+   "description": "Dark theme ported from the Sublime Text 4 Colorful VS Code theme by Enubia",
+   "download_count": 0,
+   "id": "sublime-text-4-colorful-theme",
+   "name": "Sublime Text 4 Colorful",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:09Z",
+   "repository": "https://github.com/Fan4Metal/sublime-text-4-colorful-zed",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

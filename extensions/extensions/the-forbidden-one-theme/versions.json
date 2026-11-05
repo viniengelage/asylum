@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Kyoka-Suigetsu"
+   ],
+   "description": "The Forbidden One, a dark-only theme for Zed.",
+   "download_count": 0,
+   "id": "the-forbidden-one-theme",
+   "name": "The Forbidden One",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:20:55Z",
+   "repository": "https://github.com/Kyoka-Suigetsu/the-forbidden-one",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

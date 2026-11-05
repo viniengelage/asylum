@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "ciathefed <ciathefed@protonmail.com>"
+   ],
+   "description": "Sonokai Color Scheme for Zed",
+   "download_count": 0,
+   "id": "sonokai",
+   "name": "Sonokai",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:17:51Z",
+   "repository": "https://github.com/ciathefed/zed-sonokai",
+   "schema_version": 1,
+   "version": "0.0.7",
+   "wasm_api_version": null
+  }
+ ]
+}

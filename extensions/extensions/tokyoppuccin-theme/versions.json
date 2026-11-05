@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Emmanuel Vernet"
+   ],
+   "description": "Tokyoppuccin Themes - inspired by Tokyo Night and Catppuccin",
+   "download_count": 0,
+   "id": "tokyoppuccin-theme",
+   "name": "Tokyoppuccin Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:21:45Z",
+   "repository": "https://github.com/EmmanuelVernet/zed-tokyoppuccin",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

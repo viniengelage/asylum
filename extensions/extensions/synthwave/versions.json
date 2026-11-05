@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Daniel Schmidt <danielmschmidt92@gmail.com>"
+   ],
+   "description": "A port of the Synthwave '84 extension in VS Code",
+   "download_count": 0,
+   "id": "synthwave",
+   "name": "Synthwave '84 Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:39Z",
+   "repository": "https://github.com/DanielMSchmidt/zed-synthwave",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

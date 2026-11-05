@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Hupeh <meiligo@gmail.com>"
+   ],
+   "description": "The pure tone theme for zed",
+   "download_count": 0,
+   "id": "the-pure-tone",
+   "name": "The Pure Tone",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:20:57Z",
+   "repository": "https://github.com/hupeh/the-pure-tone",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

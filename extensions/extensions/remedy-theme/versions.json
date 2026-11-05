@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Andrew Creekmore <andrew.creekmore@me.com>"
+   ],
+   "description": "A port of the Remedy color scheme for Zed \u2014 warm and comfortable with orange accents. Includes dark and bright variants, plus adapted, blur, blur [light], and transparent UI styles.",
+   "download_count": 0,
+   "id": "remedy-theme",
+   "name": "Remedy Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:12:56Z",
+   "repository": "https://github.com/andrewRCr/zed-remedy-theme",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

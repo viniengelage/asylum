@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Jonah M\u00f6ller <jonah.moeller@googlemail.com>"
+   ],
+   "description": "A carefully crafted Zed theme with muted accent colors optimized for readability on dark backgrounds.",
+   "download_count": 0,
+   "id": "retrofit-theme",
+   "name": "Retrofit Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:13:03Z",
+   "repository": "https://github.com/snapsnapturtle/retrofit-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

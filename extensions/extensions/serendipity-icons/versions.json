@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Nguyen Dang Vinh <meocoder@gmail.com>"
+   ],
+   "description": "Serendipity icon theme for Zed",
+   "download_count": 0,
+   "id": "serendipity-icons",
+   "name": "Serendipity Icons",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-11-05T12:16:14Z",
+   "repository": "https://github.com/meocoder31099/Serendipity-Icon-Theme-Zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

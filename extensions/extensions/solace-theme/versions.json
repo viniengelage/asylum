@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Bhavya Dang (bhavyadang.in)"
+   ],
+   "description": "A minimal Zed theme with violet undertones and pastel syntax.",
+   "download_count": 0,
+   "id": "solace-theme",
+   "name": "Solace",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:17:41Z",
+   "repository": "https://github.com/bhavya-dang/Solace",
+   "schema_version": 1,
+   "version": "0.1.2",
+   "wasm_api_version": null
+  }
+ ]
+}

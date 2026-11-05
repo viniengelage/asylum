@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "\u00c0lex Torregrosa <alex@torregrosa.cc>"
+   ],
+   "description": "Support for the SystemRDL language",
+   "download_count": 0,
+   "id": "systemrdl",
+   "name": "SystemRDL",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:20:16Z",
+   "repository": "https://github.com/alex-torregrosa/zed-systemrdl-extension",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

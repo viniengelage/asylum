@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "rm_reins"
+   ],
+   "description": "Everyone knows that green is the best color.",
+   "download_count": 0,
+   "id": "superior-green-theme",
+   "name": "Superior Green",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:20Z",
+   "repository": "https://github.com/rm-reins/Superior-Green",
+   "schema_version": 1,
+   "version": "0.0.20",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "UNO Leo <leo.uno@surpassone.com>"
+   ],
+   "description": "A flat, monochrome color theme built on coral tonal hierarchy and grayscale.",
+   "download_count": 0,
+   "id": "surpassone-theme",
+   "name": "SurpassOne",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:22Z",
+   "repository": "https://github.com/aitit-inc/zed-surpassone-theme",
+   "schema_version": 1,
+   "version": "0.3.5",
+   "wasm_api_version": null
+  }
+ ]
+}

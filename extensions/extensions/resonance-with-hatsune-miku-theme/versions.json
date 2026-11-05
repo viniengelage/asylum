@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "yuzu"
+   ],
+   "description": "Resonance with Hatsune Miku - A Zed theme inspired by Hatsune Miku's color palette, with dark and light variants.",
+   "download_count": 0,
+   "id": "resonance-with-hatsune-miku-theme",
+   "name": "Resonance with Hatsune Miku",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:13:01Z",
+   "repository": "https://github.com/yuzukq/zed-theme-Resonance-with-HatsuneMiku",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

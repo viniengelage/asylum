@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Rewrite Team"
+   ],
+   "description": "A dark Zed theme based on the Rewrite landing page code palette.",
+   "download_count": 0,
+   "id": "rewrite-theme",
+   "name": "Rewrite Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:13:05Z",
+   "repository": "https://github.com/RewriteToday/theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

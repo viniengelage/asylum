@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Harry Yu <harryyu02@gmail.com>"
+   ],
+   "description": "Zed extension with helpful code snippets for SolidJS.",
+   "download_count": 0,
+   "id": "solid-typescript-snippets",
+   "name": "Solid Typescript Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-05T12:17:45Z",
+   "repository": "https://github.com/HarryYu02/zed-solid-ts-snippets",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

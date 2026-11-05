@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "uncenter"
+   ],
+   "description": "Support for the Tera templating language.",
+   "download_count": 0,
+   "id": "tera",
+   "name": "Tera",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:20:41Z",
+   "repository": "https://github.com/uncenter/zed-tera",
+   "schema_version": 1,
+   "version": "1.3.3",
+   "wasm_api_version": null
+  }
+ ]
+}

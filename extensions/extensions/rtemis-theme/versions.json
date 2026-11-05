@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Stathis Gennatas"
+   ],
+   "description": "Dark and light rtemis themes with neutral gray interfaces and paired syntax colors.",
+   "download_count": 0,
+   "id": "rtemis-theme",
+   "name": "rtemis theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:14:04Z",
+   "repository": "https://github.com/rtemis-org/rtemis-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

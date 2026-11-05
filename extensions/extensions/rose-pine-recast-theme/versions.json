@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Hai Nguyen <nghai.dev@gmail.com>"
+   ],
+   "description": "The VSCode Ros\u00e9 Pine syntax mapping, recast for Zed \u2014 canonical palette, reworked token scopes, italics removed.",
+   "download_count": 0,
+   "id": "rose-pine-recast-theme",
+   "name": "Ros\u00e9 Pine Recast",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:13:48Z",
+   "repository": "https://github.com/ng-hai/zed-rose-pine-recast",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

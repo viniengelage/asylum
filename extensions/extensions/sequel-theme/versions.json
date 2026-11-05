@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Sequel"
+   ],
+   "description": "Two quiet dark themes: Sequel Ink (ink and gold) and Sequel Void (void and emerald).",
+   "download_count": 0,
+   "id": "sequel-theme",
+   "name": "Sequel",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:08Z",
+   "repository": "https://github.com/sequelcore/zed-theme",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Eduardo de Melo Xavier <xaviduds@gmail.com>"
+   ],
+   "description": "Lince theme, black or white",
+   "download_count": 0,
+   "id": "theme-lince",
+   "name": "Lince Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:20:57Z",
+   "repository": "https://github.com/xaviduds/theme-lince",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

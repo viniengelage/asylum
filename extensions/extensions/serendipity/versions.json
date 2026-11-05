@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Nguyen Dang Vinh <meocoder@gmail.com>",
+    "Micheal Andreuzza <michael@andreuzza.com>"
+   ],
+   "description": "Relaxed, gentle and modern | Serendipity theme for Zed",
+   "download_count": 0,
+   "id": "serendipity",
+   "name": "Serendipity Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:13Z",
+   "repository": "https://github.com/meocoder31099/Serendipity-Theme-Zed",
+   "schema_version": 1,
+   "version": "1.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

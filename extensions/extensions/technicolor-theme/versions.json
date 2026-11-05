@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Phaux"
+   ],
+   "description": "Dark and colorful theme",
+   "download_count": 0,
+   "id": "technicolor-theme",
+   "name": "Technicolor Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:20:33Z",
+   "repository": "https://github.com/phaux/technicolor",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

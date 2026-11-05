@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Teamofeyy <timarnd06@gmail.com>"
+   ],
+   "description": "Practical Rust snippets for async development, error handling, serialization, tracing, testing, and common production workflows.",
+   "download_count": 0,
+   "id": "rust-workflow-snippets",
+   "name": "Rust Workflow Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-05T12:14:43Z",
+   "repository": "https://github.com/Teamofeyy/rust-snippets",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

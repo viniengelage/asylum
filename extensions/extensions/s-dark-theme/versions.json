@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Sina Mombeiny"
+   ],
+   "description": "A premium, clean, and easy-on-the-eyes dark theme.",
+   "download_count": 0,
+   "id": "s-dark-theme",
+   "name": "S-Dark Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:14:47Z",
+   "repository": "https://github.com/SinaMombeiny/S-DarkTheme.zed",
+   "schema_version": 1,
+   "version": "3.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

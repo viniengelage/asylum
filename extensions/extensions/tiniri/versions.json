@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Vlad Gerasimov <vlad@vlad.studio>"
+   ],
+   "description": "Calm and cozy color themes with warm, desaturated colors in light and dark variants",
+   "download_count": 0,
+   "id": "tiniri",
+   "name": "Tiniri",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:21:00Z",
+   "repository": "https://github.com/vladstudio/tiniri-zed",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Jos\u00e9 Duarte <duarte.gmj@gmail.com>"
+   ],
+   "description": "A dark theme focused on the essentials",
+   "download_count": 0,
+   "id": "sonder-theme",
+   "name": "Sonder",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:17:51Z",
+   "repository": "https://github.com/jmg-duarte/sonder-zed",
+   "schema_version": 1,
+   "version": "0.1.4",
+   "wasm_api_version": null
+  }
+ ]
+}

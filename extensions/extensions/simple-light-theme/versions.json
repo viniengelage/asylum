@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Filip Seman <filip.seman@pm.me>"
+   ],
+   "description": "Simple light theme",
+   "download_count": 0,
+   "id": "simple-light-theme",
+   "name": "Simple Light",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:36Z",
+   "repository": "https://github.com/xseman/simple-light",
+   "schema_version": 1,
+   "version": "0.5.0",
+   "wasm_api_version": null
+  }
+ ]
+}

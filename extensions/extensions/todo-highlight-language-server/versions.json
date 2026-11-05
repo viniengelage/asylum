@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Shion Ito <frontier.engine+github@gmail.com>"
+   ],
+   "description": "Highlights TODO, FIXME, HACK, NOTE, WARN, BUG and other keywords across all file types",
+   "download_count": 0,
+   "id": "todo-highlight-language-server",
+   "name": "TODO Highlight",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-11-05T12:21:38Z",
+   "repository": "https://github.com/shionit/zed-todo-highlight",
+   "schema_version": 1,
+   "version": "0.3.0",
+   "wasm_api_version": "0.7.0"
+  }
+ ]
+}

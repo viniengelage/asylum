@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "pursvir"
+   ],
+   "description": "Todo.txt support.",
+   "download_count": 0,
+   "id": "todotxt",
+   "name": "Todotxt",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:21:40Z",
+   "repository": "https://github.com/pursvir/zed-todotxt",
+   "schema_version": 1,
+   "version": "0.2.3",
+   "wasm_api_version": null
+  }
+ ]
+}

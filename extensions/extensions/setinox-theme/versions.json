@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "https://github.com/infectiious"
+   ],
+   "description": "A Zed theme based on the Seti UI color palette.",
+   "download_count": 0,
+   "id": "setinox-theme",
+   "name": "Setinox",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:18Z",
+   "repository": "https://github.com/infectiious/setinox.zed",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ma\u00ebl Colom\u00e9 <https://github.com/Zer0absolute>"
+   ],
+   "description": "Tako color schemes for Zed with red, purple, blue, and smoothie families in dark, light, and blur variants.",
+   "download_count": 0,
+   "id": "tako-theme",
+   "name": "Tako Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:20:20Z",
+   "repository": "https://github.com/Zer0absolute/zed-tako-theme",
+   "schema_version": 1,
+   "version": "0.1.4",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Jonathan Leroy <jonathan@relkian.com>"
+   ],
+   "description": "Salt (AKA SaltStack) files syntax highlighting for Zed editor.",
+   "download_count": 0,
+   "id": "salt",
+   "name": "Salt",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:14:53Z",
+   "repository": "https://github.com/relkian/zed-extension-salt",
+   "schema_version": 1,
+   "version": "1.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

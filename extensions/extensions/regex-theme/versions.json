@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "oxnan",
+    "RegEx The Cat"
+   ],
+   "description": "A high-contrast black theme with muted gray text and restrained blue, cyan, orange, and magenta accents designed for clarity and long coding sessions.",
+   "download_count": 0,
+   "id": "regex-theme",
+   "name": "RegEx Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:12:52Z",
+   "repository": "https://github.com/oxnan/RegEx-theme",
+   "schema_version": 1,
+   "version": "0.11.11",
+   "wasm_api_version": null
+  }
+ ]
+}

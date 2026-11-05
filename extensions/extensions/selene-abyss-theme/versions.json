@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "envoidia"
+   ],
+   "description": "A blue and purple-focused dark theme",
+   "download_count": 0,
+   "id": "selene-abyss-theme",
+   "name": "Selene Abyss",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:03Z",
+   "repository": "https://github.com/envoidia/zed-selene-abyss",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

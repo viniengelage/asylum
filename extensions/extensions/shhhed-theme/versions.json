@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "mkhamat"
+   ],
+   "description": "\ud83e\udd2b Theme that dims the scaffolding and colors what matters. Dark and light.",
+   "download_count": 0,
+   "id": "shhhed-theme",
+   "name": "shhhed",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:26Z",
+   "repository": "https://github.com/mkhamat/shhhed",
+   "schema_version": 1,
+   "version": "1.52.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "waldirbertazzijr"
+   ],
+   "description": "TextMate's Twilight theme for Zed: a readable default, a darker-gutter variant, and the classic port",
+   "download_count": 0,
+   "id": "tm-twilight",
+   "name": "Twilight",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:21:11Z",
+   "repository": "https://github.com/waldirbertazzijr/zed-twilight",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

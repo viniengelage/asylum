@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Stefan Cosma <hi@stefancosma.xyz>",
+    "Michael K\u00fchnel <mail@michael-kuehnel.de>"
+   ],
+   "description": "\ud83d\udd76\ufe0f A relaxed Zed theme to take a more relaxed view of things.",
+   "download_count": 0,
+   "id": "relaxed-theme",
+   "name": "Relaxed",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:12:53Z",
+   "repository": "https://github.com/Relaxed-Theme/zed-theme-relaxed",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

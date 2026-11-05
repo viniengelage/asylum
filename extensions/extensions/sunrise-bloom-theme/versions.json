@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Tejas Shinde"
+   ],
+   "description": "A cheerful sunrise-inspired theme with warm sunlight yellows, oranges, and balanced cool tones for a fresh, morning coding experience.",
+   "download_count": 0,
+   "id": "sunrise-bloom-theme",
+   "name": "Sunrise Bloom",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:14Z",
+   "repository": "https://github.com/tejasashinde/sunrise-bloom-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

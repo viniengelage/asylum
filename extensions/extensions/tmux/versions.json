@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Dang Huynh <huynhminhdang@gmail.com>"
+   ],
+   "description": "Syntax highlighting for tmux configuration files",
+   "download_count": 0,
+   "id": "tmux",
+   "name": "tmux",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:21:16Z",
+   "repository": "https://github.com/dangh/zed-tmux",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Richnou <leys.richard@gmail.com>"
+   ],
+   "description": "An Extension providing TCL Language highlighting",
+   "download_count": 0,
+   "id": "tcl",
+   "name": "TCL Language",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:20:31Z",
+   "repository": "https://github.com/richnou/kissb-zed-tcl",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

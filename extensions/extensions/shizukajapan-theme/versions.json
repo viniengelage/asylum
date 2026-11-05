@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "BinaryLeo <binarycode@fastmail.com>"
+   ],
+   "description": "A serene Zed IDE theme inspired by the tranquility of Japanese aesthetics. Includes: Shizuka Japan (dark), Light - Countryside, and Light - Morning Mist.",
+   "download_count": 0,
+   "id": "shizukajapan-theme",
+   "name": "Shizuka Japan",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:28Z",
+   "repository": "https://github.com/BinaryLeo/Shizuka_japan",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

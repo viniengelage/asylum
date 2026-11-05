@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "pyncz <https://github.com/pyncz>"
+   ],
+   "description": "A contrast modification of the Tokyo Night theme",
+   "download_count": 0,
+   "id": "tokyo-night-dark",
+   "name": "Tokyo Night Dark theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:21:44Z",
+   "repository": "https://github.com/pyncz/zed-tokyo-night-dark-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Santiago Molina <hi@santi020k.com>"
+   ],
+   "description": "A calm violet dark and light theme family for Zed, generated from the Santi020k palette.",
+   "download_count": 0,
+   "id": "santi020k-theme",
+   "name": "Santi020k Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:15:01Z",
+   "repository": "https://github.com/santi020k/santi020k-theme",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

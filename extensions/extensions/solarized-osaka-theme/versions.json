@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Carlos L\u00f3pez <celb25@gmail.com>"
+   ],
+   "description": "Solarized Osaka color schemes for Zed.",
+   "download_count": 0,
+   "id": "solarized-osaka-theme",
+   "name": "Solarized Osaka",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:17:44Z",
+   "repository": "https://github.com/clouby/solarized-osaka-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Calvin Jackson <mailme.calvin@gmail.com>"
+   ],
+   "description": "Monochrome theme based on Sumi-e originating from Github light mode syntax highlighting.",
+   "download_count": 0,
+   "id": "sumi-light",
+   "name": "Sumi Light Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:12Z",
+   "repository": "https://github.com/LogicSatinn/sumi-light-zed.git",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

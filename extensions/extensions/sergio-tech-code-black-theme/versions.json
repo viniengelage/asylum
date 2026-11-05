@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Sergio Jovanotti <sergios-tech>"
+   ],
+   "description": "OLED-friendly dark theme for Zed, designed by Sergio Jovanotti. Pure black backgrounds with red accents.",
+   "download_count": 0,
+   "id": "sergio-tech-code-black-theme",
+   "name": "Sergio's Tech Code in Black",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:15Z",
+   "repository": "https://github.com/sergios-tech/sergio-tech-code-black-theme",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

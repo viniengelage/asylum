@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "b6k"
+   ],
+   "description": "A theme inspired by the TempleOS color palette",
+   "download_count": 0,
+   "id": "templeos-theme",
+   "name": "TempleOS",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:20:36Z",
+   "repository": "https://github.com/b6k-dev/zed-templeos-theme",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

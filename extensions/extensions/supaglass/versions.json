@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Piyush Kacha <piyushkacha75@gmail.com>"
+   ],
+   "description": "SupaGlass is a theme for Zed text editor.",
+   "download_count": 0,
+   "id": "supaglass",
+   "name": "supaglass",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:16Z",
+   "repository": "https://github.com/piyush-kacha/zed-supaglass",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

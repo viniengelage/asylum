@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Andy Waite <github.aw@andywaite.com>",
+    "Vitaly Slobodin <vitaly_slobodin@fastmail.com>"
+   ],
+   "description": "Ruby code snippets for common classes, modules, blocks, and testing workflows.",
+   "download_count": 0,
+   "id": "ruby-snippets",
+   "name": "Ruby Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-05T12:14:06Z",
+   "repository": "https://github.com/vitallium/zed-ruby-snippets-extension",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

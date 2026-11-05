@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Pierre Nel <hello@pierre.io>"
+   ],
+   "description": "A port of Kenzie Bottoms' Replicant theme, based on a palette from Bladerunner.",
+   "download_count": 0,
+   "id": "replicant",
+   "name": "Replicant",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:12:58Z",
+   "repository": "https://github.com/pierrenel/replicant",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

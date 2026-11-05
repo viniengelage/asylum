@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Eduardo Flores <edfloreshz@gmail.com>"
+   ],
+   "description": "Relm4 code snippets",
+   "download_count": 0,
+   "id": "relm4-snippets",
+   "name": "Relm4 Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-05T12:12:55Z",
+   "repository": "https://github.com/Relm4/zed-relm4",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

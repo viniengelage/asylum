@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Tim Dang"
+   ],
+   "description": "Dark color theme inspired by the movie Oblivion.",
+   "download_count": 0,
+   "id": "tech49-theme",
+   "name": "Tech49 Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:20:32Z",
+   "repository": "https://github.com/timdang/tech49_theme",
+   "schema_version": 1,
+   "version": "0.3.0",
+   "wasm_api_version": null
+  }
+ ]
+}

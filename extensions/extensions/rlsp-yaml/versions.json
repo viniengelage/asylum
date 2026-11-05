@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Christoph Dalski",
+    "Kirill Semenov"
+   ],
+   "description": "YAML language server powered by rlsp-yaml",
+   "download_count": 0,
+   "id": "rlsp-yaml",
+   "name": "rlsp-yaml",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-11-05T12:13:38Z",
+   "repository": "https://github.com/chdalski/rlsp",
+   "schema_version": 1,
+   "version": "0.1.5",
+   "wasm_api_version": "0.7.0"
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Bobby Mannino <manninobobby@icloud.com>"
+   ],
+   "description": "Rust snippets for the Zed IDE. A collection of Rust snippets to improve your development speed.",
+   "download_count": 0,
+   "id": "rust-snippets",
+   "name": "Rust Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-05T12:14:43Z",
+   "repository": "https://github.com/bobbymannino/rust-snippets-for-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

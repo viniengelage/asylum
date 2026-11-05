@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Thorsten Rhau",
+    "Mrzz <runze.ma@outlook.com>"
+   ],
+   "description": "A warm, muted Token theme family for Zed with light and dark variants.",
+   "download_count": 0,
+   "id": "token-themes",
+   "name": "Token-themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:21:40Z",
+   "repository": "https://github.com/mrzzmrzz/token-themes.git",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

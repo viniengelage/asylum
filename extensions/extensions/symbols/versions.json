@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Joan Garcia <joangarcia.dev@gmail.com>"
+   ],
+   "description": "A simple file icon theme",
+   "download_count": 0,
+   "id": "symbols",
+   "name": "Symbols",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-11-05T12:19:35Z",
+   "repository": "https://github.com/joangarciaa-dev/zed-symbols",
+   "schema_version": 1,
+   "version": "1.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Roman Hnatiuk<roman@hnatiuk.cc>"
+   ],
+   "description": "Theme for Zed Editor that imitates Sublime Text 4's Mariana colour scheme.",
+   "download_count": 0,
+   "id": "sublime-mariana-theme",
+   "name": "Sublime Mariana Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:08Z",
+   "repository": "https://github.com/hnatiukr/zed-mariana-theme",
+   "schema_version": 1,
+   "version": "1.1.4",
+   "wasm_api_version": null
+  }
+ ]
+}

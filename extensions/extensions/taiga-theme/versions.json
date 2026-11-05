@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Josh Dales"
+   ],
+   "description": "A theme for Zed - with light and dark modes",
+   "download_count": 0,
+   "id": "taiga-theme",
+   "name": "Taiga Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:20:19Z",
+   "repository": "https://github.com/joshdales/taiga-theme",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

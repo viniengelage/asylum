@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Perelyn-sama"
+   ],
+   "description": "Syntax highlighting for Solana sBPF Assembly.",
+   "download_count": 0,
+   "id": "sbpf-assembly",
+   "name": "sBPF Assembly",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:15:28Z",
+   "repository": "https://github.com/Perelyn-sama/sbpf-assembly",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

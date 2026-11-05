@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "lh104729"
+   ],
+   "description": "Syntax highlighting for Tamarin.",
+   "download_count": 0,
+   "id": "tamarin",
+   "name": "Tamarin",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:20:25Z",
+   "repository": "https://github.com/LH104729/zed-tamarin",
+   "schema_version": 1,
+   "version": "1.12.0",
+   "wasm_api_version": null
+  }
+ ]
+}

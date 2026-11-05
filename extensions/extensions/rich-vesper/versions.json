@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Sergey Ukolov <zezic51@yandex.ru>",
+    "bdsqqq <igorbedesqui@gmail.com>"
+   ],
+   "description": "Modified peppermint and orange flavored dark theme.",
+   "download_count": 0,
+   "id": "rich-vesper",
+   "name": "Rich Vesper",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:13:07Z",
+   "repository": "https://github.com/zezic/rich-vesper-zed",
+   "schema_version": 1,
+   "version": "0.0.5",
+   "wasm_api_version": null
+  }
+ ]
+}

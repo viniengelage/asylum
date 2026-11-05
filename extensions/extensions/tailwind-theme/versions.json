@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "blaqat <blaqat.ag@gmail.com>"
+   ],
+   "description": "Tailwind theme for Zed",
+   "download_count": 0,
+   "id": "tailwind-theme",
+   "name": "Tailwind Syntax",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:20:19Z",
+   "repository": "https://github.com/biaqat/tailwind-theme-zed",
+   "schema_version": 1,
+   "version": "0.6.0",
+   "wasm_api_version": null
+  }
+ ]
+}

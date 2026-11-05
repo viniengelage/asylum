@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Josh Rutkowski <joshrutk@amazon.com>"
+   ],
+   "description": "Smithy language support for Zed",
+   "download_count": 0,
+   "id": "smithy",
+   "name": "Smithy",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:17:23Z",
+   "repository": "https://github.com/joshrutkowski/zed-smithy",
+   "schema_version": 0,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

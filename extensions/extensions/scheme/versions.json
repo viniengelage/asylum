@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Mikayla Maki <mikayla@zed.dev>"
+   ],
+   "description": "Scheme support.",
+   "download_count": 0,
+   "id": "scheme",
+   "name": "Scheme",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:15:59Z",
+   "repository": "https://github.com/zed-extensions/scheme",
+   "schema_version": 1,
+   "version": "0.0.6",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Bilal <bilal.ali.irp.dev@gmail.com"
+   ],
+   "description": "A Sercali theme family with Blur and Opaque variants.",
+   "download_count": 0,
+   "id": "sercali",
+   "name": "Sercali",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:12Z",
+   "repository": "https://github.com/Bilal-AKAG/Zed-sercali-Theme",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

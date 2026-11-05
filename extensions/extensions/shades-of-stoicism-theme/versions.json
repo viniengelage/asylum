@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Dharam Dhurandhar <ddh4r4m@gmail.com>"
+   ],
+   "description": "Ten themes from one palette system, eight dark and two light. Every syntax colour sits at the same perceptual lightness and every token is contrast-audited at build time.",
+   "download_count": 0,
+   "id": "shades-of-stoicism-theme",
+   "name": "Shades of Stoicism",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:23Z",
+   "repository": "https://github.com/ddh4r4m/zed-shades-of-stoicism",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

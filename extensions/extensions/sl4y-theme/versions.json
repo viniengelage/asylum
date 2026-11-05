@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Berkant Ay <berkantay.5@gmail.com>"
+   ],
+   "description": "A vomit like high contrast theme for Zed",
+   "download_count": 0,
+   "id": "sl4y-theme",
+   "name": "Sl4y Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:45Z",
+   "repository": "https://github.com/berkantay/zed-theme-sl4y",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

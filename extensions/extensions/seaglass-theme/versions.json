@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "MrCoolBay <mrcoolbayshare@gmail.com>"
+   ],
+   "description": "A soft-pastel frosted glass theme for Zed",
+   "download_count": 0,
+   "id": "seaglass-theme",
+   "name": "Seaglass",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:02Z",
+   "repository": "https://github.com/mrcoolbay/seaglass-theme",
+   "schema_version": 1,
+   "version": "0.2.1",
+   "wasm_api_version": null
+  }
+ ]
+}

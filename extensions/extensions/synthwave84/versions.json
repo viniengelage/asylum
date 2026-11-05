@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "DROO <drew@axol.io>"
+   ],
+   "description": "A vibrant, retro-inspired theme based on the synthwave aesthetic of the 1980s. Includes Classic, Soft, High Contrast, and Delta variants.",
+   "download_count": 0,
+   "id": "synthwave84",
+   "name": "Synthwave84",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:41Z",
+   "repository": "https://github.com/DROOdotFOO/synthwave84-zed",
+   "schema_version": 1,
+   "version": "0.3.0",
+   "wasm_api_version": null
+  }
+ ]
+}

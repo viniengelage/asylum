@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "HarshNarayanJha <harshnj@proton.me>",
+    "Micheal Andreuzza <michael@andreuzza.com>"
+   ],
+   "description": "Black, elegant, modern theme for Zed \u2014 Moonlight, Monochrome, and Retro in dark and light.",
+   "download_count": 0,
+   "id": "sequoia",
+   "name": "Sequoia",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:10Z",
+   "repository": "https://github.com/HarshNarayanJha/zed-sequoia-theme",
+   "schema_version": 1,
+   "version": "1.32.0",
+   "wasm_api_version": null
+  }
+ ]
+}

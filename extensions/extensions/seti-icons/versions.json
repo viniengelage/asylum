@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "d1y <chenhonzhou@gmail.com>"
+   ],
+   "description": "Seti Icons Theme for zed",
+   "download_count": 0,
+   "id": "seti-icons",
+   "name": "Seti Icons Theme",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-11-05T12:16:17Z",
+   "repository": "https://github.com/d1y/zed-seti-icons",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

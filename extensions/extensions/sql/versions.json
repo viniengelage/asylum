@@ -1,0 +1,25 @@
+{
+ "data": [
+  {
+   "authors": [
+    "nervenes",
+    "notpeter",
+    "phileix",
+    "tammyxiong"
+   ],
+   "description": "SQL language support.",
+   "download_count": 0,
+   "id": "sql",
+   "name": "SQL",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-05T12:18:17Z",
+   "repository": "https://github.com/zed-extensions/sql",
+   "schema_version": 1,
+   "version": "1.1.8",
+   "wasm_api_version": null
+  }
+ ]
+}

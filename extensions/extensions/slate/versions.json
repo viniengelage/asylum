@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Owen Law <owenlaw222@gmail.com>"
+   ],
+   "description": "A clean light and dark theme.",
+   "download_count": 0,
+   "id": "slate",
+   "name": "Slate",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:47Z",
+   "repository": "https://github.com/someone13574/zed-slate-theme",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

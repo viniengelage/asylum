@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Andrew Sen <platformer@github.com>"
+   ],
+   "description": "A dark theme with perceptually uniform syntax colors. Inspired by Seti Monokai and Penumbra from VS Code.",
+   "download_count": 0,
+   "id": "senkai-theme",
+   "name": "Senkai",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:16:06Z",
+   "repository": "https://github.com/platformer/zed-senkai",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

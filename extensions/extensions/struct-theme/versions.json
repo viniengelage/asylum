@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Struct <self@destruct.dev>"
+   ],
+   "description": "High contrast dark theme to match https://destruct.dev",
+   "download_count": 0,
+   "id": "struct-theme",
+   "name": "Struct Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:18:59Z",
+   "repository": "https://github.com/Fake-User/Struct-Zed-Theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

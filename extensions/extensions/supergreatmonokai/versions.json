@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "SuperGregM"
+   ],
+   "description": "Great Zed theme based off sublime text's monokai mixed with VSCode's monokai.",
+   "download_count": 0,
+   "id": "supergreatmonokai",
+   "name": "SuperGreatMonokai",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:19:18Z",
+   "repository": "https://github.com/SuperGregM/SuperGreatMonokai-Zed",
+   "schema_version": 1,
+   "version": "0.0.4",
+   "wasm_api_version": null
+  }
+ ]
+}

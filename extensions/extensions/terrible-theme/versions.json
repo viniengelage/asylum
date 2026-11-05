@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Nooooaaaaah <nspielman96@gmail.com>"
+   ],
+   "description": "A terrible theme for zed",
+   "download_count": 0,
+   "id": "terrible-theme",
+   "name": "Terrible Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-05T12:20:46Z",
+   "repository": "https://github.com/nooooaaaaah/terrible-zed",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}
