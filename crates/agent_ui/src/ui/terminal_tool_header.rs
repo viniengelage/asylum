@@ -1,10 +1,9 @@
 use std::time::Duration;
 
-use gpui::{AnyElement, ClickEvent, CursorStyle, Window};
-use ui::{CommonAnimationExt, Disclosure, Divider, DividerColor, Tooltip, prelude::*};
+use gpui::{AnyElement, ClickEvent, FontWeight, Window};
+use i18n::t;
+use ui::{CommonAnimationExt, Disclosure, Tooltip, prelude::*, status_chip};
 use util::time::duration_alt_display;
-
-const ELAPSED_DISPLAY_THRESHOLD: Duration = Duration::from_secs(10);
 
 type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
@@ -14,15 +13,26 @@ pub struct TerminalSandboxWarning {
     pub docs_url: SharedString,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TerminalCardState {
+    AwaitingApproval,
+    Running,
+    Stopped,
+    Failed,
+    Succeeded,
+}
+
 #[derive(IntoElement, RegisterComponent)]
 pub struct TerminalToolHeader {
     id: SharedString,
     hover_group: SharedString,
     working_dir: SharedString,
+    command_text: Option<SharedString>,
     is_expanded: bool,
     elapsed: Option<Duration>,
     running: bool,
-    truncated_tooltip: Option<SharedString>,
+    awaiting_approval: bool,
+    canceled: bool,
     failed: bool,
     exit_code: Option<i64>,
     sandbox_warning: Option<TerminalSandboxWarning>,
@@ -42,10 +52,12 @@ impl TerminalToolHeader {
             id: id.into(),
             hover_group: hover_group.into(),
             working_dir: working_dir.into(),
+            command_text: None,
             is_expanded,
             elapsed: None,
             running: false,
-            truncated_tooltip: None,
+            awaiting_approval: false,
+            canceled: false,
             failed: false,
             exit_code: None,
             sandbox_warning: None,
@@ -53,6 +65,11 @@ impl TerminalToolHeader {
             on_stop: None,
             command_slot: None,
         }
+    }
+
+    pub fn command_text(mut self, command_text: impl Into<SharedString>) -> Self {
+        self.command_text = Some(command_text.into());
+        self
     }
 
     pub fn elapsed(mut self, elapsed: Duration) -> Self {
@@ -65,13 +82,23 @@ impl TerminalToolHeader {
         self
     }
 
-    pub fn truncated(mut self, tooltip: impl Into<SharedString>) -> Self {
-        self.truncated_tooltip = Some(tooltip.into());
+    pub fn awaiting_approval(mut self, awaiting_approval: bool) -> Self {
+        self.awaiting_approval = awaiting_approval;
+        self
+    }
+
+    pub fn canceled(mut self, canceled: bool) -> Self {
+        self.canceled = canceled;
         self
     }
 
     pub fn failed(mut self, exit_code: Option<i64>) -> Self {
         self.failed = true;
+        self.exit_code = exit_code;
+        self
+    }
+
+    pub fn exit_code(mut self, exit_code: Option<i64>) -> Self {
         self.exit_code = exit_code;
         self
     }
@@ -101,126 +128,100 @@ impl TerminalToolHeader {
         self.command_slot = Some(element.into_any_element());
         self
     }
+
+    fn state(&self) -> TerminalCardState {
+        if self.awaiting_approval {
+            TerminalCardState::AwaitingApproval
+        } else if self.running {
+            TerminalCardState::Running
+        } else if self.canceled {
+            TerminalCardState::Stopped
+        } else if self.failed {
+            TerminalCardState::Failed
+        } else {
+            TerminalCardState::Succeeded
+        }
+    }
 }
 
 impl RenderOnce for TerminalToolHeader {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let show_elapsed = self
-            .elapsed
-            .is_some_and(|elapsed| elapsed > ELAPSED_DISPLAY_THRESHOLD);
-
+        let state = self.state();
         let Self {
             id,
             hover_group,
             working_dir,
+            command_text,
             is_expanded,
             elapsed,
             running,
-            truncated_tooltip,
-            failed,
             exit_code,
             sandbox_warning,
             on_toggle_expand,
             on_stop,
             command_slot,
+            ..
         } = self;
 
         let child_id = |name: &str| format!("terminal-tool-{name}-{id}");
+        let colors = cx.theme().colors();
 
-        let header_bg = cx
-            .theme()
-            .colors()
-            .element_background
-            .blend(cx.theme().colors().editor_foreground.opacity(0.025));
+        let (icon_color, state_label) = match state {
+            TerminalCardState::AwaitingApproval => (
+                Color::Warning,
+                t!("agent_ui.terminal_card.awaiting_approval"),
+            ),
+            TerminalCardState::Running => (Color::Accent, t!("agent_ui.terminal_card.running")),
+            TerminalCardState::Stopped => (Color::Muted, t!("agent_ui.terminal_card.stopped")),
+            TerminalCardState::Failed => (Color::Error, t!("agent_ui.terminal_card.failed")),
+            TerminalCardState::Succeeded => (Color::Muted, t!("agent_ui.terminal_card.succeeded")),
+        };
+        let finished = matches!(
+            state,
+            TerminalCardState::Failed | TerminalCardState::Succeeded | TerminalCardState::Stopped
+        );
 
         let header_row = h_flex()
             .id(child_id("header"))
-            .pt_1()
-            .pl_1p5()
-            .pr_1()
+            .h(px(36.))
+            .px_3()
+            .gap_2()
             .flex_none()
-            .gap_1()
-            .justify_between()
-            .rounded_t_md()
+            .when(state == TerminalCardState::Failed, |this| {
+                this.debug_selector(|| format!("terminal-tool-failed-{exit_code:?}"))
+            })
             .child(
-                div().w_full().min_w_0().overflow_hidden().child(
-                    Label::new(working_dir)
-                        .buffer_font(cx)
-                        .size(LabelSize::XSmall)
-                        .color(Color::Muted)
-                        .truncate_start(),
+                Icon::new(IconName::ToolTerminal)
+                    .size(IconSize::Small)
+                    .color(icon_color),
+            )
+            .map(|header| match command_text.clone().filter(|_| finished) {
+                Some(command_text) => header.child(
+                    div().flex_1().min_w_0().overflow_hidden().child(
+                        Label::new(command_text)
+                            .buffer_font(cx)
+                            .size(LabelSize::Small)
+                            .single_line()
+                            .truncate(),
+                    ),
                 ),
-            )
-            .child(
-                Disclosure::new(child_id("disclosure"), is_expanded)
-                    .opened_icon(IconName::ChevronUp)
-                    .closed_icon(IconName::ChevronDown)
-                    .visible_on_hover(&hover_group)
-                    .when_some(on_toggle_expand, |this, handler| this.on_click(handler)),
-            )
-            .when(show_elapsed, |header| {
-                let elapsed = elapsed.unwrap_or_default();
+                None => header.child(
+                    Label::new(state_label.clone())
+                        .size(LabelSize::Small)
+                        .weight(FontWeight::MEDIUM)
+                        .single_line(),
+                ),
+            })
+            .when_some(elapsed, |header, elapsed| {
                 header.child(
-                    Label::new(format!("({})", duration_alt_display(elapsed)))
+                    Label::new(duration_alt_display(elapsed))
                         .buffer_font(cx)
-                        .color(Color::Muted)
                         .size(LabelSize::XSmall)
-                        .mr_0p5()
-                        .when(truncated_tooltip.is_some(), |s| s.mr_0()),
+                        .color(Color::Placeholder),
                 )
             })
-            .when(running, |header| {
-                header
-                    .gap_1p5()
-                    .child(
-                        Icon::new(IconName::LoadCircle)
-                            .size(IconSize::Small)
-                            .color(Color::Muted)
-                            .with_rotate_animation(2),
-                    )
-                    .when_some(on_stop, |header, handler| {
-                        header
-                            .child(Divider::vertical().color(DividerColor::Border).ml_1())
-                            .child(
-                                IconButton::new(child_id("stop"), IconName::Stop)
-                                    .icon_size(IconSize::Small)
-                                    .icon_color(Color::Error)
-                                    .tooltip(move |_window, cx| {
-                                        Tooltip::with_meta(
-                                            "Stop This Command",
-                                            None,
-                                            "Also possible by placing your cursor inside the \
-                                             terminal and using regular terminal bindings.",
-                                            cx,
-                                        )
-                                    })
-                                    .on_click(handler),
-                            )
-                    })
-            })
-            .when_some(truncated_tooltip, |header, tooltip| {
-                header.child(
-                    IconButton::new(child_id("truncated"), IconName::Info)
-                        .cursor_style(CursorStyle::Arrow)
-                        .style(ButtonStyle::Transparent)
-                        .icon_size(IconSize::Small)
-                        .icon_color(Color::Muted)
-                        .tooltip(Tooltip::text(tooltip)),
-                )
-            })
-            .when(failed, |header| {
-                header
-                    .debug_selector(|| format!("terminal-tool-failed-{exit_code:?}"))
-                    .child(
-                        IconButton::new(child_id("failed"), IconName::Close)
-                            .cursor_style(CursorStyle::Arrow)
-                            .style(ButtonStyle::Transparent)
-                            .icon_size(IconSize::Small)
-                            .icon_color(Color::Error)
-                            .when_some(exit_code, |this, code| {
-                                this.tooltip(Tooltip::text(format!("Exited with code {code}")))
-                            }),
-                    )
+            .when(!finished || command_text.is_none(), |header| {
+                header.child(div().flex_1())
             })
             .when_some(sandbox_warning, |header, warning| {
                 let TerminalSandboxWarning {
@@ -229,26 +230,140 @@ impl RenderOnce for TerminalToolHeader {
                     docs_url,
                 } = warning;
                 header.child(
-                    IconButton::new(child_id("sandbox-not-applied"), IconName::LockOff)
-                        .icon_size(IconSize::Small)
-                        .tooltip(move |_window, cx| {
-                            Tooltip::with_meta(
-                                title.clone(),
-                                None,
-                                format!("{detail} Click to learn more about sandboxing."),
-                                cx,
-                            )
-                        })
-                        .on_click(move |_, _, cx| cx.open_url(&docs_url)),
+                    status_chip(
+                        Some(IconName::LockOff),
+                        t!("agent_ui.sandbox.chip_off"),
+                        Color::Warning,
+                        cx,
+                    )
+                    .id(child_id("sandbox-not-applied"))
+                    .cursor_pointer()
+                    .tooltip(move |_window, cx| {
+                        Tooltip::with_meta(
+                            title.clone(),
+                            None,
+                            format!("{detail} {}", t!("agent_ui.terminal_card.sandbox_docs")),
+                            cx,
+                        )
+                    })
+                    .on_click(move |_, _, cx| cx.open_url(&docs_url)),
                 )
-            });
+            })
+            .when(state == TerminalCardState::Stopped, |header| {
+                header.child(status_chip(None, state_label.clone(), Color::Muted, cx))
+            })
+            .when(finished && state != TerminalCardState::Stopped, |header| {
+                header.when_some(exit_code, |header, code| {
+                    header.child(status_chip(
+                        None,
+                        format!("exit {code}"),
+                        if code == 0 {
+                            Color::Success
+                        } else {
+                            Color::Error
+                        },
+                        cx,
+                    ))
+                })
+            })
+            .when(running, |header| {
+                header
+                    .child(
+                        Icon::new(IconName::LoadCircle)
+                            .size(IconSize::Small)
+                            .color(Color::Accent)
+                            .with_rotate_animation(2),
+                    )
+                    .when_some(on_stop, |header, handler| {
+                        header.child(
+                            h_flex()
+                                .id(child_id("stop"))
+                                .debug_selector(|| "ICON-Stop".into())
+                                .h(px(24.))
+                                .px_2()
+                                .gap_1p5()
+                                .rounded_sm()
+                                .border_1()
+                                .border_color(colors.border_selected)
+                                .cursor_pointer()
+                                .hover(|this| this.bg(colors.element_hover))
+                                .child(
+                                    Icon::new(IconName::Stop)
+                                        .size(IconSize::XSmall)
+                                        .color(Color::Error),
+                                )
+                                .child(
+                                    Label::new(t!("agent_ui.terminal_card.stop"))
+                                        .size(LabelSize::Small)
+                                        .weight(FontWeight::MEDIUM),
+                                )
+                                .tooltip(move |_window, cx| {
+                                    Tooltip::with_meta(
+                                        t!("agent_ui.terminal_card.stop_tooltip"),
+                                        None,
+                                        t!("agent_ui.terminal_card.stop_tooltip_meta"),
+                                        cx,
+                                    )
+                                })
+                                .on_click(handler),
+                        )
+                    })
+            })
+            .child(
+                Disclosure::new(child_id("disclosure"), is_expanded)
+                    .opened_icon(IconName::ChevronUp)
+                    .closed_icon(IconName::ChevronDown)
+                    .visible_on_hover(&hover_group)
+                    .when_some(on_toggle_expand, |this, handler| this.on_click(handler)),
+            );
+
+        let command_block = v_flex()
+            .py_2()
+            .px_3()
+            .gap_1p5()
+            .bg(colors.editor_background)
+            .border_t_1()
+            .border_color(colors.border_variant)
+            .child(
+                h_flex()
+                    .items_start()
+                    .gap_2()
+                    .child(
+                        Label::new("$")
+                            .buffer_font(cx)
+                            .size(LabelSize::Small)
+                            .color(Color::Accent),
+                    )
+                    .child(div().flex_1().min_w_0().children(command_slot)),
+            )
+            .child(
+                h_flex()
+                    .min_w_0()
+                    .gap_1p5()
+                    .child(
+                        Icon::new(IconName::Folder)
+                            .size(IconSize::XSmall)
+                            .color(Color::Placeholder),
+                    )
+                    .child(
+                        div().flex_1().min_w_0().overflow_hidden().child(
+                            Label::new(working_dir)
+                                .buffer_font(cx)
+                                .size(LabelSize::XSmall)
+                                .color(Color::Placeholder)
+                                .truncate_start(),
+                        ),
+                    ),
+            );
 
         v_flex()
             .group(hover_group)
             .text_xs()
-            .bg(header_bg)
+            .bg(colors.elevated_surface_background)
             .child(header_row)
-            .children(command_slot)
+            .when(!finished || is_expanded || command_text.is_none(), |this| {
+                this.child(command_block)
+            })
     }
 }
 
@@ -366,7 +481,7 @@ impl Component for TerminalToolHeader {
                     ),
                 ),
                 single_example(
-                    "Truncated output",
+                    "Finished with exit 0",
                     card(
                         "truncated",
                         TerminalToolHeader::new(
@@ -375,10 +490,7 @@ impl Component for TerminalToolHeader {
                             working_dir,
                             true,
                         )
-                        .truncated(
-                            "Output is 2.5 MB long, and to avoid unexpected token \
-                                     usage, only 16 KB was sent back to the agent.",
-                        ),
+                        .exit_code(Some(0)),
                     ),
                 ),
                 single_example(
@@ -433,7 +545,6 @@ impl Component for TerminalToolHeader {
                             true,
                         )
                         .elapsed(Duration::from_secs(3671))
-                        .truncated("Output was truncated")
                         .failed(Some(1))
                         .sandbox_warning(sandbox_warning()),
                     ),

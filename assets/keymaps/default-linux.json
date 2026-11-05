@@ -233,6 +233,7 @@
   {
     "context": "AgentPanel",
     "bindings": {
+      "f2": "agent::RenameSelectedThread",
       "ctrl-n": "agent::NewThread",
       "ctrl-alt-c": "agent::OpenSettings",
       "shift-alt-i": "agent::ToggleOptionsMenu",
@@ -614,6 +615,12 @@
       "ctrl-alt-shift-c": "editor::DisplayCursorNames",
       "alt-.": "editor::GoToHunk",
       "alt-,": "editor::GoToPreviousHunk",
+    },
+  },
+  {
+    "context": "MessageEditor > Editor",
+    "bindings": {
+      "f2": "agent::RenameSelectedThread",
     },
   },
   {

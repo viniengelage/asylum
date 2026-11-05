@@ -47,7 +47,7 @@ use project::ResolvedPath;
 use settings::{update_settings_file, update_settings_file_with_completion};
 use ui::{
     ButtonLike, CalloutBorderPosition, Checkbox, SpinnerLabel, SpinnerVariant, SplitButton,
-    SplitButtonStyle, Tab, ToggleState,
+    SplitButtonStyle, ToggleState,
 };
 use url::Url;
 use util::markdown::source_position_from_fragment;
@@ -1005,8 +1005,11 @@ pub struct ThreadView {
     pub expanded_tool_call_raw_inputs: HashSet<acp_v2::ToolCallId>,
     expanded_database_sql: HashSet<acp_v2::ToolCallId>,
     expanded_elastic_queries: HashSet<acp_v2::ToolCallId>,
-    collapsed_sandbox_authorization_details: HashSet<acp_v2::ToolCallId>,
-    collapsed_sandbox_network_details: HashSet<acp_v2::ToolCallId>,
+    /// Terminal cards already folded once when their command succeeded, so opening one again
+    /// keeps it open.
+    collapsed_finished_terminals: HashSet<acp_v2::ToolCallId>,
+    /// Runs of reads and searches the user opened, by their first tool call.
+    expanded_exploration_runs: HashSet<acp_v2::ToolCallId>,
     /// Sandbox escalation prompts whose "surprising Unicode" warning the user
     /// has explicitly acknowledged. Until a prompt's tool call is in this set,
     /// its allow buttons stay disabled. See [`Self::sandbox_confusable_findings`].
@@ -1538,8 +1541,8 @@ impl ThreadView {
             expanded_tool_call_raw_inputs: HashSet::default(),
             expanded_database_sql: HashSet::default(),
             expanded_elastic_queries: HashSet::default(),
-            collapsed_sandbox_authorization_details: HashSet::default(),
-            collapsed_sandbox_network_details: HashSet::default(),
+            collapsed_finished_terminals: HashSet::default(),
+            expanded_exploration_runs: HashSet::default(),
             acknowledged_confusable_warnings: HashSet::default(),
             discarded_plans: HashSet::default(),
             edited_plans: HashMap::default(),
@@ -6581,6 +6584,12 @@ impl ThreadView {
         let thread = self.thread.clone();
         let is_done = thread.read(cx).status() == ThreadStatus::Idle;
         let is_canceled_or_failed = self.is_subagent_canceled_or_failed(cx);
+        let is_awaiting = !is_done
+            && thread
+                .read(cx)
+                .pending_permission_requests()
+                .next()
+                .is_some();
         // An ACP subagent can only be cancelled when its parent advertises `cancel` for it.
         let can_stop = !is_done
             && thread
@@ -6588,79 +6597,137 @@ impl ThreadView {
                 .subagent_association()
                 .is_none_or(|association| association.can_cancel);
 
+        let parent_title = server_view
+            .upgrade()
+            .and_then(|server_view| server_view.read(cx).thread_view(&parent_session_id))
+            .and_then(|parent| parent.read(cx).thread.read(cx).title())
+            .unwrap_or_else(|| crate::DEFAULT_THREAD_TITLE.into());
+
+        let (state_icon, state_label, state_color) = if is_done && is_canceled_or_failed {
+            (
+                IconName::XCircle,
+                t!("agent_ui.subagent.state_failed"),
+                Color::Error,
+            )
+        } else if is_done {
+            (
+                IconName::Check,
+                t!("agent_ui.subagent.state_done"),
+                Color::Success,
+            )
+        } else if is_awaiting {
+            (
+                IconName::Circle,
+                t!("agent_ui.subagent.state_awaiting"),
+                Color::Warning,
+            )
+        } else {
+            (
+                IconName::LoadCircle,
+                t!("agent_ui.subagent.state_running"),
+                Color::Accent,
+            )
+        };
+
         let max_content_width = AgentSettings::get_global(cx).max_content_width;
+        let colors = cx.theme().colors();
+
+        let back_to_parent = {
+            move |_: &gpui::ClickEvent, window: &mut Window, cx: &mut App| {
+                server_view
+                    .update(cx, |server_view, cx| {
+                        server_view.navigate_to_thread(parent_session_id.clone(), window, cx);
+                    })
+                    .log_err();
+            }
+        };
 
         Some(
-            h_flex()
+            v_flex()
                 .w_full()
-                .h(Tab::container_height(cx))
                 .border_b_1()
-                .when(is_done && is_canceled_or_failed, |this| {
-                    this.border_dashed()
-                })
-                .border_color(cx.theme().colors().border)
-                .bg(cx.theme().colors().editor_background.opacity(0.2))
+                .border_color(colors.border)
                 .child(
-                    h_flex()
-                        .size_full()
+                    v_flex()
+                        .w_full()
                         .when_some(max_content_width, |this, max_w| this.max_w(max_w).mx_auto())
-                        .pl_2()
-                        .pr_1()
-                        .flex_shrink_0()
-                        .justify_between()
+                        .py_2()
+                        .px(px(10.))
                         .gap_1()
                         .child(
                             h_flex()
-                                .flex_1()
-                                .gap_2()
+                                .min_w_0()
+                                .gap_1p5()
                                 .child(
-                                    Icon::new(IconName::ForwardArrowUp)
-                                        .size(IconSize::Small)
-                                        .color(Color::Muted),
+                                    IconButton::new("back_to_parent_thread", IconName::ArrowLeft)
+                                        .icon_size(IconSize::Small)
+                                        .tooltip(Tooltip::text(t!("agent_ui.subagent.back")))
+                                        .on_click(back_to_parent),
                                 )
-                                .child(self.title_editor.clone())
-                                .when(is_done && is_canceled_or_failed, |this| {
-                                    this.child(Icon::new(IconName::Close).color(Color::Error))
-                                })
-                                .when(is_done && !is_canceled_or_failed, |this| {
-                                    this.child(Icon::new(IconName::Check).color(Color::Success))
-                                }),
+                                .child(
+                                    Icon::new(IconName::ZedAgent)
+                                        .size(IconSize::XSmall)
+                                        .color(Color::Placeholder),
+                                )
+                                .child(
+                                    div().min_w_0().overflow_hidden().child(
+                                        Label::new(parent_title)
+                                            .size(LabelSize::XSmall)
+                                            .color(Color::Placeholder)
+                                            .single_line()
+                                            .truncate(),
+                                    ),
+                                )
+                                .child(
+                                    Icon::new(IconName::ChevronRight)
+                                        .size(IconSize::XSmall)
+                                        .color(Color::Placeholder),
+                                )
+                                .child(
+                                    Label::new(t!("agent_ui.subagent.label"))
+                                        .size(LabelSize::XSmall)
+                                        .color(Color::Placeholder)
+                                        .single_line(),
+                                ),
                         )
                         .child(
                             h_flex()
-                                .gap_0p5()
+                                .w_full()
+                                .pl_1()
+                                .gap(px(10.))
+                                .child(
+                                    Icon::new(IconName::UserGroup)
+                                        .size(IconSize::Medium)
+                                        .color(Color::Accent),
+                                )
+                                .child(div().flex_1().min_w_0().child(self.title_editor.clone()))
+                                .child(
+                                    ui::status_chip(Some(state_icon), state_label, state_color, cx)
+                                        .debug_selector(|| "subagent-titlebar-state".into()),
+                                )
                                 .when(can_stop, |this| {
                                     this.child(
                                         div()
                                             .debug_selector(|| "subagent-titlebar-stop".into())
                                             .child(
-                                                IconButton::new("stop_subagent", IconName::Stop)
-                                                    .icon_size(IconSize::Small)
-                                                    .icon_color(Color::Error)
-                                                    .tooltip(Tooltip::text("Stop Subagent"))
-                                                    .on_click(cx.listener(
-                                                        move |this, _, _, cx| {
-                                                            this.cancel_thread(&thread, cx)
-                                                                .detach();
-                                                        },
-                                                    )),
+                                                ui::secondary_button(
+                                                    "stop_subagent",
+                                                    Some((IconName::Stop, Color::Error)),
+                                                    t!("agent_ui.terminal_card.stop"),
+                                                    true,
+                                                    cx,
+                                                )
+                                                .h(px(24.))
+                                                .px_2()
+                                                .tooltip(Tooltip::text(t!(
+                                                    "agent_ui.subagent.stop_tooltip"
+                                                )))
+                                                .on_click(cx.listener(move |this, _, _, cx| {
+                                                    this.cancel_thread(&thread, cx).detach();
+                                                })),
                                             ),
                                     )
-                                })
-                                .child(
-                                    IconButton::new("minimize_subagent", IconName::Dash)
-                                        .icon_size(IconSize::Small)
-                                        .tooltip(Tooltip::text("Minimize Subagent"))
-                                        .on_click(move |_, window, cx| {
-                                            let _ = server_view.update(cx, |server_view, cx| {
-                                                server_view.navigate_to_thread(
-                                                    parent_session_id.clone(),
-                                                    window,
-                                                    cx,
-                                                );
-                                            });
-                                        }),
-                                ),
+                                }),
                         ),
                 ),
         )
@@ -6673,14 +6740,37 @@ impl ThreadView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         if self.is_subagent() {
+            let back_to_parent = self.parent_session_id.clone().map(|parent_session_id| {
+                let server_view = self.server_view.clone();
+                ui::secondary_button(
+                    "subagent-back-to-thread",
+                    Some((IconName::ArrowLeft, Color::Muted)),
+                    t!("agent_ui.subagent.back"),
+                    true,
+                    cx,
+                )
+                .h(px(26.))
+                .on_click(move |_, window, cx| {
+                    server_view
+                        .update(cx, |server_view, cx| {
+                            server_view.navigate_to_thread(parent_session_id.clone(), window, cx);
+                        })
+                        .log_err();
+                })
+            });
             return h_flex()
                 .px_2()
                 .py_1()
-                .children(
-                    self.config_options_view
-                        .clone()
-                        .filter(|view| view.read(cx).is_read_only()),
+                .gap_2()
+                .justify_between()
+                .child(
+                    h_flex().min_w_0().children(
+                        self.config_options_view
+                            .clone()
+                            .filter(|view| view.read(cx).is_read_only()),
+                    ),
                 )
+                .children(back_to_parent)
                 .into_any_element();
         }
 
@@ -7344,14 +7434,22 @@ impl ThreadView {
         // The lock is struck only when the *merged* result is unsandboxed (the
         // agent runs with ambient permissions). A layer that is merely wide open
         // but still sandboxed keeps the closed lock.
-        let (icon, icon_color) = if settings_sandbox
+        let (icon, icon_color, label) = if settings_sandbox
             .clone()
             .merge(thread_sandbox.clone())
             .is_unsandboxed()
         {
-            (IconName::LockOff, Color::Muted)
+            (
+                IconName::LockOff,
+                Color::Warning,
+                t!("agent_ui.sandbox.chip_off"),
+            )
         } else {
-            (IconName::Lock, Color::Default)
+            (
+                IconName::Lock,
+                Color::Success,
+                t!("agent_ui.sandbox.chip_on"),
+            )
         };
 
         let tooltip = match (settings_sandbox, thread_sandbox) {
@@ -7363,7 +7461,7 @@ impl ThreadView {
             (ThreadSandbox::Sandboxed(settings_policy), ThreadSandbox::Unsandboxed) => {
                 let settings = augment_settings_sandbox_policy(&settings_policy, baseline);
                 SandboxStatusTooltip::disabled_for_thread(sandbox_section(
-                    "Defined in your settings:",
+                    &t!("agent_ui.sandbox.from_settings"),
                     &settings,
                     true,
                 ))
@@ -7375,36 +7473,56 @@ impl ThreadView {
                 let settings = augment_settings_sandbox_policy(&settings_policy, baseline);
                 let thread = SandboxPolicyDisplay::from_policy(&thread_policy);
                 // Omit the per-thread section when it grants nothing extra.
-                let thread = (!sandbox_policy_grants_nothing(&thread))
-                    .then(|| sandbox_section("Allowed for this thread:", &thread, false));
+                let thread = (!sandbox_policy_grants_nothing(&thread)).then(|| {
+                    sandbox_section(&t!("agent_ui.sandbox.for_this_thread"), &thread, false)
+                });
                 SandboxStatusTooltip::enabled(
-                    sandbox_section("Defined in your settings:", &settings, true),
+                    sandbox_section(&t!("agent_ui.sandbox.from_settings"), &settings, true),
                     thread,
                 )
             }
         };
 
         Some(
-            h_flex()
-                .gap_1()
-                .child(
-                    IconButton::new("sandbox-status", icon)
-                        .icon_size(IconSize::Small)
-                        .icon_color(icon_color)
-                        .tooltip(Tooltip::element(move |_window, _cx| {
-                            tooltip.clone().into_any_element()
-                        }))
-                        .on_click(|_, window, cx| {
-                            window.dispatch_action(
-                                Box::new(zed_actions::OpenSettingsAt {
-                                    path: zed_actions::AGENT_SANDBOX_SETTINGS_PATH.to_string(),
-                                    target: None,
-                                }),
-                                cx,
-                            );
-                        }),
-                )
-                .child(Divider::vertical())
+            PopoverMenu::new("sandbox-status-menu")
+                .trigger(ui::PopoverTriggerArea::new(
+                    ui::status_chip(Some(icon), label, icon_color, cx)
+                        .id("sandbox-status")
+                        .hover(|this| this.bg(cx.theme().colors().element_hover))
+                        .tooltip(Tooltip::text(t!("agent_ui.sandbox.chip_tooltip"))),
+                ))
+                .anchor(gpui::Anchor::TopRight)
+                .menu(move |window, cx| {
+                    let tooltip = tooltip.clone();
+                    Some(ContextMenu::build(window, cx, move |menu, _window, _cx| {
+                        menu.sectioned()
+                            .fixed_width(px(300.).into())
+                            .custom_row(|_window, cx| render_sandbox_toggle_row(cx))
+                            .custom_row(move |_window, _cx| {
+                                div()
+                                    .px_2()
+                                    .py_1p5()
+                                    .child(tooltip.clone())
+                                    .into_any_element()
+                            })
+                            .separator()
+                            .item(
+                                ContextMenuEntry::new(t!("agent_ui.sandbox.configure"))
+                                    .icon(IconName::Settings)
+                                    .icon_color(Color::Muted)
+                                    .handler(|window, cx| {
+                                        window.dispatch_action(
+                                            Box::new(zed_actions::OpenSettingsAt {
+                                                path: zed_actions::AGENT_SANDBOX_SETTINGS_PATH
+                                                    .to_string(),
+                                                target: None,
+                                            }),
+                                            cx,
+                                        );
+                                    }),
+                            )
+                    }))
+                })
                 .into_any_element(),
         )
     }
@@ -8541,6 +8659,58 @@ impl SandboxPolicyDisplay {
 /// persistent-settings entries, so they're shown in the "from your settings"
 /// section rather than stored. A no-op when the fs is unrestricted (rendered as
 /// "All paths"), since there's nothing to scope.
+fn render_sandbox_toggle_row(cx: &App) -> AnyElement {
+    // Read live so the switch flips while the popover stays open.
+    let sandbox_on = !AgentSettings::get_global(cx)
+        .sandbox_permissions
+        .allow_unsandboxed;
+    let (icon, icon_color, title) = if sandbox_on {
+        (
+            IconName::Lock,
+            Color::Success,
+            t!("agent_ui.sandbox.toggle_on"),
+        )
+    } else {
+        (
+            IconName::LockOff,
+            Color::Warning,
+            t!("agent_ui.sandbox.toggle_off"),
+        )
+    };
+    v_flex()
+        .px_2()
+        .pt_2()
+        .pb_1p5()
+        .gap_1()
+        .child(
+            h_flex()
+                .gap_2()
+                .child(Icon::new(icon).size(IconSize::Small).color(icon_color))
+                .child(Label::new(title).weight(gpui::FontWeight::BOLD).flex_1())
+                .child(
+                    ui::toggle_switch("sandbox-toggle", sandbox_on, true, cx).on_click(
+                        move |_, _window, cx| {
+                            let fs = <dyn Fs>::global(cx);
+                            update_settings_file(fs, cx, move |settings, _| {
+                                settings
+                                    .agent
+                                    .get_or_insert_default()
+                                    .sandbox_permissions
+                                    .get_or_insert_default()
+                                    .allow_unsandboxed = Some(sandbox_on);
+                            });
+                        },
+                    ),
+                ),
+        )
+        .child(
+            Label::new(t!("agent_ui.sandbox.toggle_description"))
+                .size(LabelSize::Small)
+                .color(Color::Muted),
+        )
+        .into_any_element()
+}
+
 fn augment_settings_sandbox_policy(
     policy: &SandboxPolicy,
     baseline: Vec<PathBuf>,
@@ -8591,13 +8761,17 @@ fn sandbox_section(title: &str, policy: &SandboxPolicyDisplay, show_empty: bool)
     let mut section = SandboxSection::new(title.to_string());
 
     if show_empty || !write_empty {
-        section =
-            section.group(SandboxGroup::new("Write Access").rows(sandbox_fs_rows(&policy.fs)));
+        section = section.group(
+            SandboxGroup::new(t!("agent_ui.sandbox.write_access"))
+                .rows(sandbox_fs_rows(&policy.fs)),
+        );
     }
 
     if show_empty || !network_empty {
-        section = section
-            .group(SandboxGroup::new("Network Access").rows(sandbox_network_rows(&policy.network)));
+        section = section.group(
+            SandboxGroup::new(t!("agent_ui.sandbox.network_access"))
+                .rows(sandbox_network_rows(&policy.network)),
+        );
     }
 
     section
@@ -8625,11 +8799,11 @@ fn network_grants_nothing(network: &SandboxNetPolicy) -> bool {
 /// row per granted path.
 fn sandbox_fs_rows(fs: &SandboxFsDisplay) -> Vec<SandboxRow> {
     match fs {
-        SandboxFsDisplay::Unrestricted => vec![SandboxRow::message(
-            "All paths except protected Git metadata",
-        )],
+        SandboxFsDisplay::Unrestricted => {
+            vec![SandboxRow::message(t!("agent_ui.sandbox.all_paths"))]
+        }
         SandboxFsDisplay::Restricted(entries) if entries.is_empty() => {
-            vec![SandboxRow::message("None")]
+            vec![SandboxRow::message(t!("agent_ui.sandbox.none"))]
         }
         SandboxFsDisplay::Restricted(entries) => entries
             .iter()
@@ -8649,10 +8823,12 @@ fn sandbox_fs_rows(fs: &SandboxFsDisplay) -> Vec<SandboxRow> {
 /// one row per allowed domain.
 fn sandbox_network_rows(network: &SandboxNetPolicy) -> Vec<SandboxRow> {
     match network {
-        SandboxNetPolicy::Unrestricted => vec![SandboxRow::message("All domains (unrestricted)")],
-        SandboxNetPolicy::Blocked => vec![SandboxRow::message("None")],
+        SandboxNetPolicy::Unrestricted => {
+            vec![SandboxRow::message(t!("agent_ui.sandbox.all_domains"))]
+        }
+        SandboxNetPolicy::Blocked => vec![SandboxRow::message(t!("agent_ui.sandbox.none"))],
         SandboxNetPolicy::Restricted { allowed_domains } if allowed_domains.is_empty() => {
-            vec![SandboxRow::message("None")]
+            vec![SandboxRow::message(t!("agent_ui.sandbox.none"))]
         }
         SandboxNetPolicy::Restricted { allowed_domains } => allowed_domains
             .iter()
@@ -8784,7 +8960,9 @@ impl ThreadView {
                                     .map(|this| {
                                         if !is_editable {
                                             if is_subagent {
-                                                return this.border_dashed();
+                                                return this
+                                                    .bg(cx.theme().colors().elevated_surface_background)
+                                                    .border_color(gpui::transparent_black());
                                             }
                                             return this;
                                         }
@@ -8800,6 +8978,16 @@ impl ThreadView {
                                             })
                                     })
                                     .text_xs()
+                                    .when(is_subagent && entry_ix == 0, |this| {
+                                        this.child(
+                                            div().pb_1p5().child(
+                                                Label::new(t!("agent_ui.subagent.task_header").to_uppercase())
+                                                    .size(LabelSize::XSmall)
+                                                    .weight(gpui::FontWeight::SEMIBOLD)
+                                                    .color(Color::Placeholder),
+                                            ),
+                                        )
+                                    })
                                     .child(editor.clone().into_any_element())
                             )
                             .when(editor_focus, |this| {
@@ -8976,6 +9164,14 @@ impl ThreadView {
                     }
                 }
 
+                let exploration = self.exploration_run(entry_ix, cx);
+                if let Some(run) = exploration.as_ref()
+                    && run.start != entry_ix
+                    && !run.expanded
+                {
+                    return Empty.into_any();
+                }
+
                 let tool_call = self.render_any_tool_call(
                     self.thread.read(cx).session_id(),
                     entry_ix,
@@ -8985,6 +9181,16 @@ impl ThreadView {
                     window,
                     cx,
                 );
+                let tool_call = match exploration {
+                    Some(run) if run.start == entry_ix => {
+                        let header = self.render_exploration_header(&run, cx);
+                        v_flex()
+                            .id(("exploration-entry", entry_ix))
+                            .child(header)
+                            .when(run.expanded, |this| this.child(tool_call))
+                    }
+                    _ => tool_call,
+                };
 
                 if let Some(handle) = self
                     .entry_view_state
@@ -9064,13 +9270,15 @@ impl ThreadView {
                                         .size(IconSize::Small),
                                 )
                                 .child(
-                                    Label::new("Subagent Output")
+                                    Label::new(t!("agent_ui.subagent.output_separator"))
                                         .size(LabelSize::Custom(self.tool_name_font_size()))
                                         .color(Color::Muted),
                                 ),
                         )
                         .child(Divider::horizontal())
-                        .tooltip(Tooltip::text("Everything below this line was sent as output from this subagent to the main agent.")),
+                        .tooltip(Tooltip::text(t!(
+                            "agent_ui.subagent.output_separator_tooltip"
+                        ))),
                 )
                 .child(primary)
                 .into_any_element()
@@ -9998,6 +10206,41 @@ impl ThreadView {
             .into_any_element()
     }
 
+    /// Only on exit 0: a failing command stays open, since its output is what the user needs.
+    pub(crate) fn collapse_finished_terminal(&mut self, entry_ix: usize, cx: &mut Context<Self>) {
+        let tool_call_id = {
+            let thread = self.thread.read(cx);
+            let Some(AgentThreadEntry::ToolCall(tool_call)) = thread.entries().get(entry_ix) else {
+                return;
+            };
+            if !matches!(tool_call.status(), ToolCallStatus::Completed)
+                || self.collapsed_finished_terminals.contains(&tool_call.id)
+            {
+                return;
+            }
+            let mut terminals = tool_call.terminals().peekable();
+            if terminals.peek().is_none() {
+                return;
+            }
+            let succeeded = terminals.all(|terminal| {
+                terminal
+                    .read(cx)
+                    .output()
+                    .is_some_and(|output| output.exit_status.exit_code == Some(0))
+            });
+            if !succeeded {
+                return;
+            }
+            tool_call.id.clone()
+        };
+        self.collapsed_finished_terminals
+            .insert(tool_call_id.clone());
+        self.entry_view_state.update(cx, |state, _cx| {
+            state.collapse_tool_call(&tool_call_id);
+        });
+        cx.notify();
+    }
+
     pub(crate) fn auto_expand_streaming_thought(&mut self, cx: &mut Context<Self>) {
         let thread = self.thread.clone();
         let changed = self.entry_view_state.update(cx, |state, cx| {
@@ -10490,6 +10733,7 @@ impl ThreadView {
         &self,
         group: SharedString,
         is_preview: bool,
+        plain: bool,
         command: Entity<Markdown>,
         window: &Window,
         cx: &Context<Self>,
@@ -10546,8 +10790,7 @@ impl ThreadView {
         v_flex()
             .group(group)
             .relative()
-            .p_1p5()
-            .bg(header_bg)
+            .when(!plain, |this| this.p_1p5().bg(header_bg))
             .when(is_preview, |this| this.pt_1().children(run_command_label))
             .child(markdown_element)
             .child(div().absolute().top_1().right_1().child(copy_button))
@@ -10619,6 +10862,7 @@ impl ThreadView {
         let command_element = self.render_collapsible_command(
             header_group.clone(),
             false,
+            true,
             tool_call.label.clone(),
             window,
             cx,
@@ -10629,35 +10873,51 @@ impl ThreadView {
             .read(cx)
             .is_tool_call_expanded(&tool_call.id);
 
-        let truncated_tooltip = truncated_output.then(|| {
+        let truncated_notice = truncated_output.then(|| {
             if let Some(output) = output {
                 if output_line_count + 10 > terminal::MAX_SCROLL_HISTORY_LINES {
-                    format!(
-                        "Output exceeded terminal max lines and was \
-                         truncated, the model received the first {}.",
-                        format_file_size(output.content.len() as u64, true)
+                    t!(
+                        "agent_ui.terminal_card.truncated_max_lines",
+                        size = format_file_size(output.content.len() as u64, true)
                     )
                 } else {
-                    format!(
-                        "Output is {} long, and to avoid unexpected token usage, \
-                         only {} was sent back to the agent.",
-                        format_file_size(output.original_content_len as u64, true),
-                        format_file_size(output.content.len() as u64, true)
+                    t!(
+                        "agent_ui.terminal_card.truncated_tokens",
+                        total = format_file_size(output.original_content_len as u64, true),
+                        sent = format_file_size(output.content.len() as u64, true)
                     )
                 }
             } else {
-                "Output was truncated".to_string()
+                t!("agent_ui.terminal_card.truncated")
             }
         });
 
+        let command_source = tool_call.label.read(cx).source();
+        let command_text = command_source
+            .strip_prefix("```\n")
+            .and_then(|source| source.strip_suffix("\n```"))
+            .unwrap_or(command_source)
+            .to_string();
+        let command_first_line = command_text.lines().next().unwrap_or_default().to_string();
+
+        let tool_canceled = matches!(
+            tool_call.status(),
+            ToolCallStatus::Rejected | ToolCallStatus::Canceled
+        );
+        let exit_code = output.and_then(|output| output.exit_status.exit_code);
+
         let header = TerminalToolHeader::new(
             terminal.entity_id().to_string(),
-            header_group,
+            header_group.clone(),
             working_dir,
             is_expanded,
         )
+        .command_text(command_first_line)
         .elapsed(time_elapsed)
         .running(!command_finished && !needs_confirmation)
+        .awaiting_approval(needs_confirmation && !command_finished)
+        .canceled(tool_canceled)
+        .exit_code(exit_code)
         .on_toggle_expand(cx.listener({
             let id = tool_call.id.clone();
             move |this, _event, window, cx| {
@@ -10682,11 +10942,8 @@ impl ThreadView {
                 })
             })
         })
-        .when_some(truncated_tooltip, |header, tooltip| {
-            header.truncated(tooltip)
-        })
         .when(tool_failed || command_failed, |header| {
-            header.failed(output.and_then(|output| output.exit_status.exit_code))
+            header.failed(exit_code)
         })
         .when_some(tool_call.sandbox_not_applied.as_ref(), |header, reason| {
             header.sandbox_warning(self.sandbox_not_applied_warning(reason, cx))
@@ -10699,14 +10956,133 @@ impl ThreadView {
             .entry(entry_ix)
             .and_then(|entry| entry.terminal(terminal));
 
+        let colors = cx.theme().colors();
+        let card_border = if needs_confirmation && !command_finished {
+            cx.theme().status().warning
+        } else if (tool_failed || command_failed) && !tool_canceled {
+            cx.theme().status().error.opacity(0.6)
+        } else {
+            border_color
+        };
+        let is_idle = self.thread.read(cx).status() == ThreadStatus::Idle;
+        let show_actions = !needs_confirmation && (!command_finished || is_expanded);
+
+        let action = |id: &str, icon: IconName, label: SharedString| {
+            h_flex()
+                .id(SharedString::from(format!("{header_group}-{id}")))
+                .gap_1p5()
+                .cursor_pointer()
+                .child(Icon::new(icon).size(IconSize::XSmall).color(Color::Muted))
+                .child(Label::new(label).size(LabelSize::Small).color(Color::Muted))
+        };
+
+        let actions = show_actions.then(|| {
+            let output_content = output.map(|output| output.content.clone());
+            h_flex()
+                .h(px(34.))
+                .px_3()
+                .gap_4()
+                .border_t_1()
+                .border_color(colors.border_variant)
+                .when(!command_finished, |this| {
+                    let terminal = terminal.clone();
+                    this.child(
+                        action(
+                            "open-terminal",
+                            IconName::Terminal,
+                            t!("agent_ui.terminal_card.open_in_terminal"),
+                        )
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                this.open_terminal_in_workspace(&terminal, window, cx);
+                            },
+                        )),
+                    )
+                })
+                .when(command_finished && is_idle, |this| {
+                    let command_text = command_text.clone();
+                    this.child(
+                        action(
+                            "rerun",
+                            IconName::RotateCcw,
+                            t!("agent_ui.terminal_card.rerun"),
+                        )
+                        .tooltip(Tooltip::text(t!("agent_ui.terminal_card.rerun_tooltip")))
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                this.rerun_terminal_command(command_text.clone(), window, cx);
+                            },
+                        )),
+                    )
+                })
+                .map(|this| match output_content.filter(|_| command_finished) {
+                    Some(content) => this.child(
+                        action(
+                            "copy-output",
+                            IconName::Copy,
+                            t!("agent_ui.terminal_card.copy_output"),
+                        )
+                        .on_click(move |_, _, cx| {
+                            cx.write_to_clipboard(ClipboardItem::new_string(content.clone()));
+                        }),
+                    ),
+                    None => {
+                        let command_text = command_text.clone();
+                        this.child(
+                            action(
+                                "copy-command",
+                                IconName::Copy,
+                                t!("agent_ui.terminal_card.copy_command"),
+                            )
+                            .on_click(move |_, _, cx| {
+                                cx.write_to_clipboard(ClipboardItem::new_string(
+                                    command_text.clone(),
+                                ));
+                            }),
+                        )
+                    }
+                })
+                .child(div().flex_1())
+                .when(command_finished, |this| {
+                    let terminal = terminal.clone();
+                    this.child(
+                        action(
+                            "open-terminal",
+                            IconName::Terminal,
+                            t!("agent_ui.terminal_card.open"),
+                        )
+                        .tooltip(Tooltip::text(t!("agent_ui.terminal_card.open_in_terminal")))
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                this.open_terminal_in_workspace(&terminal, window, cx);
+                            },
+                        )),
+                    )
+                })
+                .when(output_line_count > 0 && !command_finished, |this| {
+                    this.child(
+                        Label::new(if output_line_count == 1 {
+                            t!("agent_ui.terminal_card.lines.one")
+                        } else {
+                            t!(
+                                "agent_ui.terminal_card.lines.other",
+                                count = output_line_count
+                            )
+                        })
+                        .buffer_font(cx)
+                        .size(LabelSize::XSmall)
+                        .color(Color::Placeholder),
+                    )
+                })
+        });
+
         v_flex()
             .when(layout == ToolCallLayout::Standalone, |this| {
                 this.my_1p5()
                     .mx_5()
                     .border_1()
-                    .when(tool_failed || command_failed, |card| card.border_dashed())
-                    .border_color(border_color)
-                    .rounded_md()
+                    .border_color(card_border)
+                    .rounded_lg()
             })
             .overflow_hidden()
             .child(header)
@@ -10714,9 +11090,7 @@ impl ThreadView {
                 this.child(
                     div()
                         .border_t_1()
-                        .when(tool_failed || command_failed, |card| card.border_dashed())
-                        .border_color(border_color)
-                        .rounded_b_md()
+                        .border_color(colors.border_variant)
                         .text_ui_sm(cx)
                         .h_full()
                         .children(terminal_view.map(|terminal_view| {
@@ -10743,6 +11117,28 @@ impl ThreadView {
                         })),
                 )
             })
+            .when_some(truncated_notice, |this, notice| {
+                this.child(
+                    h_flex()
+                        .py_2()
+                        .px_3()
+                        .gap_2()
+                        .bg(colors.editor_background)
+                        .border_t_1()
+                        .border_color(colors.border_variant)
+                        .child(
+                            Icon::new(IconName::Info)
+                                .size(IconSize::XSmall)
+                                .color(Color::Info),
+                        )
+                        .child(
+                            Label::new(notice)
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted),
+                        ),
+                )
+            })
+            .children(actions)
             .when_some(permission_request, |this, request| {
                 let is_first = self.is_first_tool_call(active_session_id, &tool_call.id, cx);
                 let allow_disabled = self.sandbox_confusables_block_allow(tool_call, cx);
@@ -10760,6 +11156,60 @@ impl ThreadView {
                 generic_permissions.filter(|_| tool_call.terminals().next() == Some(terminal)),
             )
             .into_any()
+    }
+
+    /// Sent as a message rather than re-run directly, so the agent sees why and the thread keeps
+    /// the record.
+    /// Shows the agent's own terminal in the workspace, so the user can follow it
+    /// full size or type into it; closing that tab doesn't stop the command.
+    fn open_terminal_in_workspace(
+        &self,
+        terminal: &Entity<acp_thread::Terminal>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(workspace) = self.workspace.upgrade() else {
+            return;
+        };
+        let inner = terminal.read(cx).inner().clone();
+        workspace.update(cx, |workspace, cx| {
+            let terminal_view = cx.new(|cx| {
+                terminal_view::TerminalView::new(
+                    inner,
+                    workspace.weak_handle(),
+                    workspace.database_id(),
+                    workspace.project().downgrade(),
+                    window,
+                    cx,
+                )
+            });
+            let item = Box::new(terminal_view) as Box<dyn workspace::ItemHandle>;
+            if !workspace.add_item_to_kind_slot(
+                &workspace::ContentKind::terminal(),
+                item.boxed_clone(),
+                true,
+                window,
+                cx,
+            ) {
+                workspace.add_item_to_active_pane(item, None, true, window, cx);
+            }
+        });
+    }
+
+    fn rerun_terminal_command(
+        &mut self,
+        command: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let text = t!("agent_ui.terminal_card.rerun_prompt", command = command).to_string();
+        let blocks = vec![acp_v2::ContentBlock::Text(acp_v2::TextContent::new(text))];
+        self.send_content(
+            Task::ready(Ok(Some((blocks, Vec::new())))),
+            false,
+            window,
+            cx,
+        );
     }
 
     fn sandbox_not_applied_warning(
@@ -11252,6 +11702,7 @@ impl ThreadView {
                     this.child(self.render_collapsible_command(
                         card_header_id.clone(),
                         true,
+                        false,
                         tool_call.label.clone(),
                         window,
                         cx,
@@ -11324,6 +11775,23 @@ impl ThreadView {
                                                         })),
                                                     )
                                                 })
+                                                .when(!use_card_layout && !failed_or_canceled, |this| {
+                                                    match tool_call.status() {
+                                                        ToolCallStatus::Pending
+                                                        | ToolCallStatus::InProgress => this.child(
+                                                            Icon::new(IconName::LoadCircle)
+                                                                .size(IconSize::XSmall)
+                                                                .color(Color::Accent)
+                                                                .with_rotate_animation(2),
+                                                        ),
+                                                        ToolCallStatus::Completed => this.child(
+                                                            Icon::new(IconName::Check)
+                                                                .size(IconSize::XSmall)
+                                                                .color(Color::Success),
+                                                        ),
+                                                        _ => this,
+                                                    }
+                                                })
                                                 .when(failed_or_canceled, |this| {
                                                     if is_cancelled_edit && !has_diff_changes {
                                                         this.child(
@@ -11340,9 +11808,18 @@ impl ThreadView {
                                                         )
                                                     } else if is_cancelled_edit {
                                                         this
+                                                    } else if matches!(
+                                                        tool_call.status(),
+                                                        ToolCallStatus::Canceled
+                                                    ) {
+                                                        this.child(
+                                                            Icon::new(IconName::Circle)
+                                                                .color(Color::Disabled)
+                                                                .size(IconSize::XSmall),
+                                                        )
                                                     } else {
                                                         this.child(
-                                                            Icon::new(IconName::Close)
+                                                            Icon::new(IconName::XCircle)
                                                                 .color(Color::Error)
                                                                 .size(IconSize::Small),
                                                         )
@@ -11356,16 +11833,22 @@ impl ThreadView {
 
                                                     this.when(!is_discarded, |this| {
                                                         this.child(
-                                                            IconButton::new(
+                                                            Button::new(
                                                                 ("discard-partial-edit", entry_ix),
-                                                                IconName::Undo,
+                                                                t!("agent_ui.tool_call.discard"),
                                                             )
-                                                            .icon_size(IconSize::Small)
+                                                            .style(ButtonStyle::Outlined)
+                                                            .label_size(LabelSize::Small)
+                                                            .start_icon(
+                                                                Icon::new(IconName::Undo)
+                                                                    .size(IconSize::XSmall)
+                                                                    .color(Color::Muted),
+                                                            )
                                                             .tooltip(move |_, cx| {
                                                                 Tooltip::with_meta(
-                                                                    "Discard Interrupted Edit",
+                                                                    t!("agent_ui.tool_call.discard_tooltip"),
                                                                     None,
-                                                                    "You can discard this interrupted partial edit and restore the original file content.",
+                                                                    t!("agent_ui.tool_call.discard_tooltip_meta"),
                                                                     cx,
                                                                 )
                                                             })
@@ -11513,222 +11996,63 @@ impl ThreadView {
             Vec::new()
         };
 
-        let network_section = has_network.then(|| {
-            let summary = if details.network_all_hosts {
-                "any host".to_string()
-            } else {
-                format!(
-                    "{} {}",
-                    details.network_hosts.len(),
-                    if details.network_hosts.len() == 1 {
-                        "host"
-                    } else {
-                        "hosts"
-                    }
-                )
-            };
-            let has_host_list = !details.network_all_hosts && !details.network_hosts.is_empty();
-            let is_open = !self
-                .collapsed_sandbox_network_details
-                .contains(tool_call_id);
+        let reason_row = |icon: IconName, icon_color: Color, text: SharedString| {
+            h_flex()
+                .min_w_0()
+                .gap_2()
+                .child(Icon::new(icon).size(IconSize::XSmall).color(icon_color))
+                .child(Label::new(text).size(LabelSize::Small).color(Color::Muted))
+                .into_any_element()
+        };
+
+        let mut rows = Vec::new();
+        if details.network_all_hosts {
+            rows.push(reason_row(
+                IconName::Public,
+                Color::Muted,
+                t!("agent_ui.permission.reason_network_any"),
+            ));
+        } else {
             let mut hosts = details.network_hosts.clone();
             hosts.sort();
-
-            v_flex()
-                .child(
-                    h_flex()
-                        .id(("sandbox-network-details-header", entry_ix))
-                        // Align text with the allow/deny button icons below,
-                        // which sit at p_1 (container) + Base04 (button) ≈ px_2.
-                        .px_2()
-                        .py_1()
-                        .justify_between()
-                        .when(has_host_list, |this| {
-                            this.cursor_pointer()
-                                .hover(|style| style.bg(cx.theme().colors().element_hover))
-                                .on_click(cx.listener({
-                                    let tool_call_id = tool_call_id.clone();
-                                    move |this, _event, _window, cx| {
-                                        if this
-                                            .collapsed_sandbox_network_details
-                                            .remove(&tool_call_id)
-                                        {
-                                            cx.notify();
-                                            return;
-                                        }
-
-                                        this.collapsed_sandbox_network_details
-                                            .insert(tool_call_id.clone());
-                                        cx.notify();
-                                    }
-                                }))
-                        })
-                        .child(
-                            h_flex()
-                                .gap_1()
-                                .child(
-                                    Label::new("Network access")
-                                        .size(LabelSize::Small)
-                                        .color(Color::Muted),
-                                )
-                                .child(
-                                    Label::new("•")
-                                        .size(LabelSize::XSmall)
-                                        .color(Color::Disabled),
-                                )
-                                .child(
-                                    Label::new(summary)
-                                        .size(LabelSize::Small)
-                                        .color(Color::Muted),
-                                ),
-                        )
-                        .when(has_host_list, |this| {
-                            this.child(
-                                Disclosure::new(("sandbox-network-details", entry_ix), is_open)
-                                    .opened_icon(IconName::ChevronUp)
-                                    .closed_icon(IconName::ChevronDown),
-                            )
-                        }),
+            rows.extend(hosts.into_iter().map(|host| {
+                reason_row(
+                    IconName::Public,
+                    Color::Muted,
+                    t!("agent_ui.permission.reason_network", host = host),
                 )
-                .when(has_host_list && is_open, |this| {
-                    this.child(v_flex().children(hosts.iter().enumerate().map(
-                        |(host_ix, host)| {
-                            h_flex()
-                                .min_w_0()
-                                .px_2()
-                                .py_1p5()
-                                .bg(cx.theme().colors().editor_background)
-                                .when(host_ix < hosts.len() - 1, |this| {
-                                    this.border_b_1().border_color(cx.theme().colors().border)
-                                })
-                                .child(
-                                    Label::new(host.clone())
-                                        .size(LabelSize::XSmall)
-                                        .buffer_font(cx),
-                                )
-                        },
-                    )))
-                })
-        });
-
-        let write_section = has_write.then(|| {
-            let summary = if details.allow_fs_write_all {
-                "unrestricted except Git metadata".to_string()
-            } else {
-                format!(
-                    "{} {}",
-                    details.write_paths.len(),
-                    if details.write_paths.len() == 1 {
-                        "path"
-                    } else {
-                        "paths"
-                    }
-                )
-            };
-            let has_path_list = !details.allow_fs_write_all && !details.write_paths.is_empty();
-            let is_open = !self
-                .collapsed_sandbox_authorization_details
-                .contains(tool_call_id);
+            }));
+        }
+        if details.allow_fs_write_all {
+            rows.push(reason_row(
+                IconName::Warning,
+                Color::Warning,
+                t!("agent_ui.permission.reason_write_all"),
+            ));
+        } else {
             let mut paths = details.write_paths.clone();
             // Sort by the path that is actually granted (the resolved canonical
             // when present, else the requested path).
             paths.sort_by(|a, b| a.canonical_or_requested().cmp(b.canonical_or_requested()));
-
-            v_flex()
-                .child(
-                    h_flex()
-                        .id(("sandbox-authorization-details-header", entry_ix))
-                        .px_2()
-                        .py_1()
-                        .justify_between()
-                        .when(has_path_list, |this| {
-                            this.cursor_pointer()
-                                .hover(|style| style.bg(cx.theme().colors().element_hover))
-                                .on_click(cx.listener({
-                                    let tool_call_id = tool_call_id.clone();
-                                    move |this, _event, _window, cx| {
-                                        if this
-                                            .collapsed_sandbox_authorization_details
-                                            .remove(&tool_call_id)
-                                        {
-                                            cx.notify();
-                                            return;
-                                        }
-
-                                        this.collapsed_sandbox_authorization_details
-                                            .insert(tool_call_id.clone());
-                                        cx.notify();
-                                    }
-                                }))
-                        })
-                        .child(
-                            h_flex()
-                                .gap_1()
-                                .child(
-                                    Label::new("Write Access")
-                                        .size(LabelSize::Small)
-                                        .color(Color::Muted),
-                                )
-                                .child(
-                                    Label::new("•")
-                                        .size(LabelSize::XSmall)
-                                        .color(Color::Disabled),
-                                )
-                                .child(
-                                    Label::new(summary)
-                                        .size(LabelSize::Small)
-                                        .color(Color::Muted),
-                                ),
-                        )
-                        .when(has_path_list, |this| {
-                            this.child(
-                                Disclosure::new(
-                                    ("sandbox-authorization-details", entry_ix),
-                                    is_open,
-                                )
-                                .opened_icon(IconName::ChevronUp)
-                                .closed_icon(IconName::ChevronDown),
-                            )
-                        }),
-                )
-                .when(has_path_list && is_open, |this| {
-                    this.child(v_flex().children(paths.iter().enumerate().map(
-                        |(path_ix, path)| {
-                            self.render_sandbox_authorization_path_row(entry_ix, path_ix, path, cx)
-                        },
-                    )))
-                })
-        });
-
-        let unsandboxed_section = details.unsandboxed.then(|| {
-            h_flex()
-                .px_2()
-                .py_1()
-                .gap_1p5()
-                .child(
-                    Icon::new(IconName::Warning)
-                        .color(Color::Warning)
-                        .size(IconSize::Small),
-                )
-                .child(
-                    Label::new("Runs without the OS sandbox")
-                        .size(LabelSize::Small)
-                        .color(Color::Muted),
-                )
-        });
-
-        let reason_section = (!details.reason.is_empty()).then(|| {
-            v_flex()
-                .px_2()
-                .py_1()
-                .gap_0p5()
-                .child(
-                    Label::new("Reason")
-                        .size(LabelSize::XSmall)
-                        .color(Color::Muted),
-                )
-                .child(Label::new(details.reason.clone()).size(LabelSize::Small))
-        });
+            rows.extend(paths.iter().enumerate().map(|(path_ix, path)| {
+                self.render_sandbox_authorization_path_row(entry_ix, path_ix, path)
+                    .into_any_element()
+            }));
+        }
+        if details.unsandboxed {
+            rows.push(reason_row(
+                IconName::LockOff,
+                Color::Warning,
+                t!("agent_ui.permission.reason_unsandboxed"),
+            ));
+        }
+        if !details.reason.is_empty() {
+            rows.push(reason_row(
+                IconName::Info,
+                Color::Muted,
+                details.reason.clone().into(),
+            ));
+        }
 
         // The command stays in the tool-call title above; here we show what the
         // command is asking for (paths / domains) and the agent's reason.
@@ -11746,10 +12070,7 @@ impl ThreadView {
                     cx,
                 ))
             })
-            .children(network_section)
-            .children(write_section)
-            .children(unsandboxed_section)
-            .children(reason_section)
+            .child(v_flex().px_3().py_2p5().gap_1p5().children(rows))
             .when(!has_windows_fs_warning, |this| {
                 // The Windows-drive warning banner carries its own docs link, so
                 // skip the default one that every other sandbox prompt appends.
@@ -12082,13 +12403,11 @@ impl ThreadView {
         entry_ix: usize,
         path_ix: usize,
         granted: &settings::GrantedWritePath,
-        cx: &Context<Self>,
     ) -> Stateful<Div> {
         // The path that is actually granted is the resolved canonical target.
         // When the request went through a symlink to a *different* target, both
-        // paths are shown, each explicitly captioned, so it's unmistakable which
-        // string was requested and which location write access is really granted
-        // to.
+        // paths are shown, so it's unmistakable which string was requested and
+        // which location write access is really granted to.
         let granted_path = granted.canonical_or_requested();
         let requested_path = granted.requested.clone();
         // Grants are stored in the request's own namespace (a Windows path stays
@@ -12102,42 +12421,28 @@ impl ThreadView {
 
         let granted_display = granted_path.display().to_string();
         let requested_display = requested_path.display().to_string();
-
-        let captioned_path = |caption: SharedString, path: String, cx: &Context<Self>| {
-            v_flex()
-                .min_w_0()
-                .gap_0p5()
-                .child(
-                    Label::new(caption)
-                        .size(LabelSize::XSmall)
-                        .color(Color::Muted),
-                )
-                .child(Label::new(path).size(LabelSize::Small).buffer_font(cx))
+        let text = if is_redirected {
+            t!(
+                "agent_ui.permission.reason_write_redirected",
+                path = requested_display,
+                target = granted_display
+            )
+        } else {
+            // Not a genuine redirect: show what the user asked for (e.g. the
+            // `C:\...` path), not the internal Linux canonical.
+            t!("agent_ui.permission.reason_write", path = requested_display)
         };
 
-        v_flex()
+        h_flex()
             .id(format!("sandbox-authorization-path-{entry_ix}-{path_ix}"))
             .min_w_0()
-            .gap_1()
-            .px_2()
-            .py_1p5()
-            .bg(cx.theme().colors().editor_background)
-            .map(|this| {
-                if is_redirected {
-                    this.child(captioned_path("Source".into(), requested_display, cx))
-                        .child(
-                            Icon::new(IconName::ArrowDown)
-                                .color(Color::Muted)
-                                .size(IconSize::Small),
-                        )
-                        .child(captioned_path("Target".into(), granted_display, cx))
-                } else {
-                    // Not a genuine redirect: show what the user asked for (e.g.
-                    // the `C:\...` path), not the internal Linux canonical.
-                    this.child(captioned_path("Write Path".into(), requested_display, cx))
-                }
-            })
-            .child(Divider::horizontal())
+            .gap_2()
+            .child(
+                Icon::new(IconName::Folder)
+                    .size(IconSize::XSmall)
+                    .color(Color::Muted),
+            )
+            .child(Label::new(text).size(LabelSize::Small).color(Color::Muted))
     }
 
     fn render_permission_buttons(
@@ -12264,81 +12569,68 @@ impl ThreadView {
             )
         };
 
+        let allow_binding = (is_first && !allow_disabled).then(|| {
+            KeyBinding::for_action_in(&AllowOnce as &dyn Action, focus_handle, cx)
+                .size(rems_from_px(12_f32))
+        });
+        let deny_binding = is_first.then(|| {
+            KeyBinding::for_action_in(&RejectOnce as &dyn Action, focus_handle, cx)
+                .size(rems_from_px(12_f32))
+        });
+
+        let allow_button = ui::primary_button(
+            ("allow-btn", entry_ix),
+            Some(IconName::Check),
+            t!("agent_ui.permission.allow"),
+            allow_binding,
+            cx,
+        )
+        .h(px(28.))
+        .map(|this| {
+            if allow_disabled {
+                this.opacity(0.5).cursor_default()
+            } else {
+                this.on_click(cx.listener({
+                    let session_id = session_id.clone();
+                    move |this, _, window, cx| {
+                        this.authorize_with_granularity(
+                            session_id.clone(),
+                            request_id,
+                            true,
+                            window,
+                            cx,
+                        );
+                    }
+                }))
+            }
+        });
+
+        let deny_button = ui::secondary_button(
+            ("deny-btn", entry_ix),
+            Some((IconName::Close, Color::Error)),
+            t!("agent_ui.permission.deny"),
+            true,
+            cx,
+        )
+        .h(px(28.))
+        .children(deny_binding)
+        .on_click(cx.listener({
+            move |this, _, window, cx| {
+                this.authorize_with_granularity(session_id.clone(), request_id, false, window, cx);
+            }
+        }));
+
         h_flex()
             .w_full()
             .debug_selector(permission_buttons_selector)
-            .p_1()
+            .py_2()
+            .px_3()
             .gap_2()
             .justify_between()
             .border_t_1()
             .border_color(self.tool_card_border_color(cx))
-            .child(
-                h_flex()
-                    .gap_0p5()
-                    .child(
-                        Button::new(("allow-btn", entry_ix), "Allow")
-                            .disabled(allow_disabled)
-                            .start_icon(
-                                Icon::new(IconName::Check)
-                                    .size(IconSize::XSmall)
-                                    .color(Color::Success),
-                            )
-                            .label_size(LabelSize::Small)
-                            .when(is_first && !allow_disabled, |this| {
-                                this.key_binding(
-                                    KeyBinding::for_action_in(
-                                        &AllowOnce as &dyn Action,
-                                        focus_handle,
-                                        cx,
-                                    )
-                                    .map(|kb| kb.size(rems_from_px(12_f32))),
-                                )
-                            })
-                            .on_click(cx.listener({
-                                let session_id = session_id.clone();
-                                move |this, _, window, cx| {
-                                    this.authorize_with_granularity(
-                                        session_id.clone(),
-                                        request_id,
-                                        true,
-                                        window,
-                                        cx,
-                                    );
-                                }
-                            })),
-                    )
-                    .child(
-                        Button::new(("deny-btn", entry_ix), "Deny")
-                            .start_icon(
-                                Icon::new(IconName::Close)
-                                    .size(IconSize::XSmall)
-                                    .color(Color::Error),
-                            )
-                            .label_size(LabelSize::Small)
-                            .when(is_first, |this| {
-                                this.key_binding(
-                                    KeyBinding::for_action_in(
-                                        &RejectOnce as &dyn Action,
-                                        focus_handle,
-                                        cx,
-                                    )
-                                    .map(|kb| kb.size(rems_from_px(12_f32))),
-                                )
-                            })
-                            .on_click(cx.listener({
-                                move |this, _, window, cx| {
-                                    this.authorize_with_granularity(
-                                        session_id.clone(),
-                                        request_id,
-                                        false,
-                                        window,
-                                        cx,
-                                    );
-                                }
-                            })),
-                    ),
-            )
             .child(dropdown)
+            .child(h_flex().gap_2().child(deny_button).child(allow_button))
     }
 
     fn render_permission_granularity_dropdown(
@@ -12365,6 +12657,7 @@ impl ThreadView {
             .with_handle(permission_dropdown_handle)
             .trigger(
                 Button::new(("granularity-trigger", entry_ix), current_label)
+                    .style(ButtonStyle::Outlined)
                     .end_icon(
                         Icon::new(IconName::ChevronDown)
                             .size(IconSize::XSmall)
@@ -12459,6 +12752,7 @@ impl ThreadView {
             .attach(gpui::Anchor::BottomRight)
             .trigger(
                 Button::new(("granularity-trigger", entry_ix), current_label)
+                    .style(ButtonStyle::Outlined)
                     .end_icon(
                         Icon::new(IconName::ChevronDown)
                             .size(IconSize::XSmall)
@@ -12834,6 +13128,42 @@ impl ThreadView {
             .into_any_element()
         };
 
+        let verb_label = tool_call_verb_label(tool_call).map(|(verb, target)| {
+            let is_done = !matches!(
+                tool_call.status(),
+                ToolCallStatus::Pending
+                    | ToolCallStatus::WaitingForConfirmation
+                    | ToolCallStatus::InProgress
+            );
+            let is_dimmed = matches!(
+                tool_call.status(),
+                ToolCallStatus::Canceled | ToolCallStatus::Rejected
+            );
+            h_flex()
+                .min_w_0()
+                .gap_2()
+                .child(
+                    Label::new(verb.label(is_done))
+                        .weight(gpui::FontWeight::MEDIUM)
+                        .color(if is_dimmed {
+                            Color::Muted
+                        } else {
+                            Color::Default
+                        }),
+                )
+                .when_some(target, |this, target| {
+                    this.child(
+                        Label::new(target)
+                            .size(LabelSize::Small)
+                            .buffer_font(cx)
+                            .color(Color::Muted)
+                            .single_line()
+                            .truncate(),
+                    )
+                })
+                .into_any_element()
+        });
+
         let gradient_overlay = {
             div()
                 .absolute()
@@ -12898,17 +13228,20 @@ impl ThreadView {
                             this.text_color(cx.theme().colors().text_muted)
                         }
                     })
-                    .child(
-                        self.render_markdown(
-                            tool_call.label.clone(),
-                            MarkdownStyle {
-                                prevent_mouse_interaction: true,
-                                ..MarkdownStyle::themed(MarkdownFont::Agent, window, cx)
-                                    .with_muted_text(cx)
-                            },
-                            cx,
-                        ),
-                    )
+                    .child(match verb_label {
+                        Some(verb_label) => verb_label,
+                        None => self
+                            .render_markdown(
+                                tool_call.label.clone(),
+                                MarkdownStyle {
+                                    prevent_mouse_interaction: true,
+                                    ..MarkdownStyle::themed(MarkdownFont::Agent, window, cx)
+                                        .with_muted_text(cx)
+                                },
+                                cx,
+                            )
+                            .into_any_element(),
+                    })
                     .tooltip(Tooltip::text("Go to File"))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.open_tool_call_location(entry_ix, 0, window, cx);
@@ -12917,11 +13250,17 @@ impl ThreadView {
             } else {
                 h_flex()
                     .w_full()
-                    .child(self.render_markdown(
-                        tool_call.label.clone(),
-                        MarkdownStyle::themed(MarkdownFont::Agent, window, cx).with_muted_text(cx),
-                        cx,
-                    ))
+                    .child(match verb_label {
+                        Some(verb_label) => verb_label,
+                        None => self
+                            .render_markdown(
+                                tool_call.label.clone(),
+                                MarkdownStyle::themed(MarkdownFont::Agent, window, cx)
+                                    .with_muted_text(cx),
+                                cx,
+                            )
+                            .into_any_element(),
+                    })
                     .into_any()
             })
             .when(!is_edit, |this| this.child(gradient_overlay))
@@ -13567,96 +13906,188 @@ impl ThreadView {
 
         let error_message = state.error.clone();
 
+        let is_awaiting = is_pending_tool_call && is_running;
+        let tool_calls = thread
+            .as_ref()
+            .map(|thread| {
+                thread
+                    .read(cx)
+                    .entries()
+                    .iter()
+                    .filter_map(|entry| match entry {
+                        AgentThreadEntry::ToolCall(tool_call) => Some(tool_call),
+                        _ => None,
+                    })
+                    .map(|tool_call| {
+                        let source = tool_call.label.read(cx).source();
+                        let text = source
+                            .lines()
+                            .find(|line| !line.trim().is_empty() && !line.starts_with("```"))
+                            .unwrap_or_default()
+                            .replace('`', "");
+                        let status = match tool_call.status() {
+                            ToolCallStatus::Pending
+                            | ToolCallStatus::WaitingForConfirmation
+                            | ToolCallStatus::InProgress => SubagentStatus::Running,
+                            ToolCallStatus::Completed => SubagentStatus::Completed,
+                            ToolCallStatus::Canceled | ToolCallStatus::Rejected => {
+                                SubagentStatus::Canceled
+                            }
+                            ToolCallStatus::Failed => SubagentStatus::Failed,
+                        };
+                        (status, SharedString::from(text))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let step_count = tool_calls.len();
+        let last_steps = tool_calls
+            .into_iter()
+            .rev()
+            .take(3)
+            .rev()
+            .collect::<Vec<_>>();
+
+        let meta = {
+            let mut parts = vec![t!("agent_ui.subagent.label").to_string()];
+            if let Some(model_name) = model_name.as_ref() {
+                parts.push(model_name.to_string());
+            }
+            if step_count > 0 {
+                parts.push(t!("agent_ui.subagent.step", count = step_count).to_string());
+            }
+            parts.join(" · ")
+        };
+
+        let colors = cx.theme().colors();
+        let card_border = if is_awaiting {
+            cx.theme().status().warning
+        } else {
+            self.tool_card_border_color(cx)
+        };
+
+        let status_slot = if is_awaiting {
+            ui::status_chip(
+                Some(IconName::Circle),
+                t!("agent_ui.subagent.state_awaiting"),
+                Color::Warning,
+                cx,
+            )
+            .into_any_element()
+        } else {
+            icon.into_any_element()
+        };
+
+        let step_row = |status: SubagentStatus, text: SharedString, is_last: bool| {
+            let icon = match status {
+                SubagentStatus::Running => Icon::new(IconName::LoadCircle)
+                    .size(IconSize::XSmall)
+                    .color(Color::Accent)
+                    .with_rotate_animation(2)
+                    .into_any_element(),
+                SubagentStatus::Completed => Icon::new(IconName::Check)
+                    .size(IconSize::XSmall)
+                    .color(Color::Success)
+                    .into_any_element(),
+                SubagentStatus::Failed => Icon::new(IconName::XCircle)
+                    .size(IconSize::XSmall)
+                    .color(Color::Error)
+                    .into_any_element(),
+                SubagentStatus::Canceled | SubagentStatus::Unknown => Icon::new(IconName::Circle)
+                    .size(IconSize::XSmall)
+                    .color(Color::Disabled)
+                    .into_any_element(),
+            };
+            h_flex().min_w_0().gap_2().child(icon).child(
+                div().min_w_0().overflow_hidden().child(
+                    Label::new(text)
+                        .size(LabelSize::Small)
+                        .color(if is_last && status == SubagentStatus::Running {
+                            Color::Default
+                        } else {
+                            Color::Muted
+                        })
+                        .single_line()
+                        .truncate(),
+                ),
+            )
+        };
+
+        let trail = (!is_expanded && !is_awaiting && !last_steps.is_empty()).then(|| {
+            let count = last_steps.len();
+            h_flex().w_full().pt_0p5().pb(px(10.)).px_3().child(
+                h_flex()
+                    .w_full()
+                    .pl_1p5()
+                    .gap(px(10.))
+                    .items_stretch()
+                    .child(div().w(px(1.)).flex_none().bg(colors.border_selected))
+                    .child(
+                        v_flex().flex_1().min_w_0().gap_1p5().children(
+                            last_steps
+                                .into_iter()
+                                .enumerate()
+                                .map(|(index, (status, text))| {
+                                    step_row(status, text, index + 1 == count)
+                                }),
+                        ),
+                    ),
+            )
+        });
+
         v_flex()
             .w_full()
-            .rounded_md()
+            .rounded_lg()
             .border_1()
-            .when(has_no_title_or_canceled, |this| this.border_dashed())
-            .border_color(self.tool_card_border_color(cx))
+            .when(has_no_title_or_canceled && !is_awaiting, |this| {
+                this.border_dashed()
+            })
+            .border_color(card_border)
+            .bg(colors.elevated_surface_background)
             .overflow_hidden()
             .child(
                 h_flex()
                     .group(&card_header_id)
-                    .h_8()
-                    .p_1()
+                    .min_h(px(48.))
+                    .py_1p5()
+                    .pl_3()
+                    .pr_2()
+                    .gap(px(10.))
                     .w_full()
-                    .justify_between()
-                    .when(!has_no_title_or_canceled, |this| {
-                        this.bg(self.tool_card_header_bg(cx))
-                    })
+                    .child(Icon::new(IconName::UserGroup).size(IconSize::Medium).color(
+                        if is_failed_or_canceled {
+                            Color::Muted
+                        } else {
+                            Color::Accent
+                        },
+                    ))
                     .child(
                         h_flex()
                             .id(format!("subagent-title-{}", entry_ix))
-                            .px_1()
                             .min_w_0()
-                            .size_full()
+                            .flex_1()
                             .gap_2()
-                            .justify_between()
                             .rounded_sm()
                             .overflow_hidden()
                             .child(
-                                h_flex()
+                                v_flex()
                                     .min_w_0()
                                     .flex_1()
-                                    .gap_1p5()
-                                    .justify_between()
+                                    .gap_0p5()
                                     .child(
-                                        h_flex()
-                                            .min_w_0()
-                                            .flex_initial()
-                                            .gap_1p5()
-                                            .child(icon)
-                                            .child(
-                                                Label::new(title.to_string())
-                                                    .size(LabelSize::Custom(
-                                                        self.tool_name_font_size(),
-                                                    ))
-                                                    .flex_1()
-                                                    .truncate(),
-                                            )
-                                            .when_some(model_name, |this, model_name| {
-                                                this.child(
-                                                    Label::new(format!("· {model_name}"))
-                                                        .size(LabelSize::Custom(
-                                                            self.tool_name_font_size(),
-                                                        ))
-                                                        .color(Color::Muted)
-                                                        .truncate(),
-                                                )
-                                            }),
+                                        Label::new(title.to_string())
+                                            .size(LabelSize::Custom(self.tool_name_font_size()))
+                                            .weight(gpui::FontWeight::MEDIUM)
+                                            .single_line()
+                                            .truncate(),
                                     )
-                                    .when(files_changed > 0, |this| {
-                                        this.child(
-                                            h_flex()
-                                                .flex_none()
-                                                .gap_1p5()
-                                                .child(
-                                                    Label::new(format!(
-                                                        "— {} {} changed",
-                                                        files_changed,
-                                                        if files_changed == 1 {
-                                                            "file"
-                                                        } else {
-                                                            "files"
-                                                        }
-                                                    ))
-                                                    .size(LabelSize::Custom(
-                                                        self.tool_name_font_size(),
-                                                    ))
-                                                    .color(Color::Muted),
-                                                )
-                                                .child(
-                                                    DiffStat::new(
-                                                        diff_stat_id.clone(),
-                                                        diff_stats.lines_added as usize,
-                                                        diff_stats.lines_removed as usize,
-                                                    )
-                                                    .label_size(LabelSize::Custom(
-                                                        self.tool_name_font_size(),
-                                                    )),
-                                                ),
-                                        )
-                                    }),
+                                    .child(
+                                        Label::new(meta)
+                                            .size(LabelSize::XSmall)
+                                            .color(Color::Placeholder)
+                                            .single_line()
+                                            .truncate(),
+                                    ),
                             )
                             .when(!has_no_title_or_canceled && !is_pending_tool_call, |this| {
                                 this.tooltip(move |_, cx| {
@@ -13670,7 +14101,6 @@ impl ThreadView {
                             })
                             .when(has_expandable_content && !is_pending_tool_call, |this| {
                                 this.cursor_pointer()
-                                    .hover(|s| s.bg(cx.theme().colors().element_hover))
                                     .child(
                                         div().visible_on_hover(card_header_id).child(
                                             Icon::new(if is_expanded {
@@ -13695,6 +14125,7 @@ impl ThreadView {
                                     }))
                             }),
                     )
+                    .child(status_slot)
                     .when(state.can_stop && subagent_session_id.is_some(), |buttons| {
                         buttons.child(
                             div()
@@ -13706,7 +14137,7 @@ impl ThreadView {
                                     )
                                     .icon_size(IconSize::Small)
                                     .icon_color(Color::Error)
-                                    .tooltip(Tooltip::text("Stop Subagent"))
+                                    .tooltip(Tooltip::text(t!("agent_ui.subagent.stop_tooltip")))
                                     .when_some(
                                         thread_view
                                             .as_ref()
@@ -13724,6 +14155,7 @@ impl ThreadView {
                         )
                     }),
             )
+            .children(trail)
             .when_some(thread_view, |this, thread_view| {
                 let thread = &thread_view.read(cx).thread;
                 let tv_session_id = thread.read(cx).session_id();
@@ -13735,29 +14167,61 @@ impl ThreadView {
                 let nav_session_id = tv_session_id.clone();
 
                 let fullscreen_toggle = h_flex()
-                    .id(entry_ix)
-                    .py_1()
+                    .h(px(34.))
+                    .px_3()
                     .w_full()
-                    .justify_center()
+                    .gap_2()
                     .border_t_1()
                     .when(is_failed_or_canceled, |this| this.border_dashed())
                     .border_color(self.tool_card_border_color(cx))
-                    .cursor_pointer()
-                    .hover(|s| s.bg(cx.theme().colors().element_hover))
                     .child(
-                        Icon::new(IconName::Maximize)
-                            .color(Color::Muted)
-                            .size(IconSize::Small),
+                        h_flex()
+                            .id(entry_ix)
+                            .gap_1p5()
+                            .cursor_pointer()
+                            .child(
+                                Icon::new(IconName::Maximize)
+                                    .color(Color::Muted)
+                                    .size(IconSize::XSmall),
+                            )
+                            .child(
+                                Label::new(t!("agent_ui.subagent.open"))
+                                    .size(LabelSize::Small)
+                                    .color(Color::Muted),
+                            )
+                            .tooltip(Tooltip::text(t!("agent_ui.subagent.open_tooltip")))
+                            .on_click(cx.listener(move |this, _event, window, cx| {
+                                telemetry::event!("Subagent Maximized");
+                                this.server_view
+                                    .update(cx, |this, cx| {
+                                        this.navigate_to_thread(nav_session_id.clone(), window, cx);
+                                    })
+                                    .ok();
+                            })),
                     )
-                    .tooltip(Tooltip::text("Make Subagent Full Screen"))
-                    .on_click(cx.listener(move |this, _event, window, cx| {
-                        telemetry::event!("Subagent Maximized");
-                        this.server_view
-                            .update(cx, |this, cx| {
-                                this.navigate_to_thread(nav_session_id.clone(), window, cx);
+                    .child(div().flex_1())
+                    .when(files_changed > 0, |this| {
+                        this.child(
+                            Label::new(if files_changed == 1 {
+                                t!("agent_ui.subagent.files_changed.one")
+                            } else {
+                                t!(
+                                    "agent_ui.subagent.files_changed.other",
+                                    count = files_changed
+                                )
                             })
-                            .ok();
-                    }));
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
+                        )
+                        .child(
+                            DiffStat::new(
+                                diff_stat_id.clone(),
+                                diff_stats.lines_added as usize,
+                                diff_stats.lines_removed as usize,
+                            )
+                            .label_size(LabelSize::XSmall),
+                        )
+                    });
 
                 if is_running && let Some((_, subagent_tool_call_id, _)) = pending_tool_call {
                     if let Some((entry_ix, tool_call)) =
@@ -13777,6 +14241,8 @@ impl ThreadView {
                     } else {
                         this
                     }
+                } else if !is_expanded {
+                    this.child(fullscreen_toggle)
                 } else {
                     this.when(is_expanded, |this| {
                         this.child(self.render_subagent_expanded_content(
@@ -17114,4 +17580,262 @@ pub(crate) fn reset_fast_mode_warnings(cx: &mut App) {
             .log_err();
     })
     .detach();
+}
+
+struct ExplorationRun {
+    start: usize,
+    len: usize,
+    reads: usize,
+    searches: usize,
+    running: bool,
+    expanded: bool,
+    first_tool_call_id: acp_v2::ToolCallId,
+}
+
+fn is_exploration_tool_call(tool_call: &ToolCall) -> bool {
+    matches!(
+        tool_call.kind(),
+        acp_v2::ToolKind::Read | acp_v2::ToolKind::Search
+    ) && matches!(
+        tool_call.status(),
+        ToolCallStatus::Pending | ToolCallStatus::InProgress | ToolCallStatus::Completed
+    ) && !tool_call.is_subagent()
+        && tool_call.authorization_id().is_none()
+        && tool_call.terminals().next().is_none()
+        && tool_call.diffs().next().is_none()
+}
+
+impl ThreadView {
+    fn exploration_run(&self, entry_ix: usize, cx: &App) -> Option<ExplorationRun> {
+        let entries = self.thread.read(cx).entries();
+        let is_exploration = |ix: usize| {
+            matches!(
+                entries.get(ix),
+                Some(AgentThreadEntry::ToolCall(tool_call)) if is_exploration_tool_call(tool_call)
+            )
+        };
+        if !is_exploration(entry_ix) {
+            return None;
+        }
+        let mut start = entry_ix;
+        while start > 0 && is_exploration(start - 1) {
+            start -= 1;
+        }
+        let mut end = entry_ix + 1;
+        while is_exploration(end) {
+            end += 1;
+        }
+        if end - start < 2 {
+            return None;
+        }
+        let mut reads = 0;
+        let mut searches = 0;
+        let mut running = false;
+        let mut first_tool_call_id = None;
+        for ix in start..end {
+            let Some(AgentThreadEntry::ToolCall(tool_call)) = entries.get(ix) else {
+                continue;
+            };
+            first_tool_call_id.get_or_insert_with(|| tool_call.id.clone());
+            match tool_call.kind() {
+                acp_v2::ToolKind::Search => searches += 1,
+                _ => reads += 1,
+            }
+            running |= !matches!(tool_call.status(), ToolCallStatus::Completed);
+        }
+        let first_tool_call_id = first_tool_call_id?;
+        Some(ExplorationRun {
+            start,
+            len: end - start,
+            reads,
+            searches,
+            running,
+            expanded: self.expanded_exploration_runs.contains(&first_tool_call_id),
+            first_tool_call_id,
+        })
+    }
+
+    fn render_exploration_header(&self, run: &ExplorationRun, cx: &Context<Self>) -> AnyElement {
+        let mut counts = Vec::new();
+        if run.reads > 0 {
+            counts.push(if run.reads == 1 {
+                t!("agent_ui.tool_call.files.one").to_string()
+            } else {
+                t!("agent_ui.tool_call.files.other", count = run.reads).to_string()
+            });
+        }
+        if run.searches > 0 {
+            counts.push(if run.searches == 1 {
+                t!("agent_ui.tool_call.searches.one").to_string()
+            } else {
+                t!("agent_ui.tool_call.searches.other", count = run.searches).to_string()
+            });
+        }
+        let first_tool_call_id = run.first_tool_call_id.clone();
+        let range = run.start..run.start + run.len;
+        let group = SharedString::from(format!("exploration-{}", run.start));
+
+        h_flex()
+            .id(("exploration-run", run.start))
+            .group(group)
+            .my_1()
+            .ml_5()
+            .mr_5()
+            .px_1()
+            .gap_1p5()
+            .h(px(22.))
+            .rounded_sm()
+            .cursor_pointer()
+            .hover(|this| this.bg(cx.theme().colors().element_hover.opacity(0.5)))
+            .text_size(self.tool_name_font_size())
+            .child(
+                Icon::new(IconName::ToolSearch)
+                    .size(IconSize::Small)
+                    .color(Color::Muted),
+            )
+            .child(
+                Label::new(t!("agent_ui.tool_call.explored"))
+                    .size(LabelSize::Custom(self.tool_name_font_size()))
+                    .weight(gpui::FontWeight::MEDIUM),
+            )
+            .child(
+                div().flex_1().min_w_0().overflow_hidden().child(
+                    Label::new(counts.join(" · "))
+                        .buffer_font(cx)
+                        .size(LabelSize::XSmall)
+                        .color(Color::Placeholder)
+                        .single_line()
+                        .truncate(),
+                ),
+            )
+            .child(if run.running {
+                Icon::new(IconName::LoadCircle)
+                    .size(IconSize::XSmall)
+                    .color(Color::Accent)
+                    .with_rotate_animation(2)
+                    .into_any_element()
+            } else {
+                Icon::new(IconName::Check)
+                    .size(IconSize::XSmall)
+                    .color(Color::Success)
+                    .into_any_element()
+            })
+            .child(
+                Icon::new(if run.expanded {
+                    IconName::ChevronDown
+                } else {
+                    IconName::ChevronRight
+                })
+                .size(IconSize::XSmall)
+                .color(Color::Placeholder),
+            )
+            .on_click(cx.listener(move |this, _, _window, cx| {
+                if !this.expanded_exploration_runs.remove(&first_tool_call_id) {
+                    this.expanded_exploration_runs
+                        .insert(first_tool_call_id.clone());
+                }
+                this.list_state.remeasure_items(range.clone());
+                cx.notify();
+            }))
+            .into_any_element()
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ToolVerb {
+    Read,
+    Search,
+    FindPath,
+    ListDirectory,
+    Fetch,
+    SearchWeb,
+    Delete,
+    Move,
+    Copy,
+    CreateDirectory,
+    Diagnostics,
+}
+
+impl ToolVerb {
+    fn label(self, is_done: bool) -> SharedString {
+        match (self, is_done) {
+            (Self::Read, false) => t!("agent_ui.tool_verb.read.running"),
+            (Self::Read, true) => t!("agent_ui.tool_verb.read.done"),
+            (Self::Search, false) => t!("agent_ui.tool_verb.search.running"),
+            (Self::Search, true) => t!("agent_ui.tool_verb.search.done"),
+            (Self::FindPath, false) => t!("agent_ui.tool_verb.find_path.running"),
+            (Self::FindPath, true) => t!("agent_ui.tool_verb.find_path.done"),
+            (Self::ListDirectory, false) => t!("agent_ui.tool_verb.list_directory.running"),
+            (Self::ListDirectory, true) => t!("agent_ui.tool_verb.list_directory.done"),
+            (Self::Fetch, false) => t!("agent_ui.tool_verb.fetch.running"),
+            (Self::Fetch, true) => t!("agent_ui.tool_verb.fetch.done"),
+            (Self::SearchWeb, false) => t!("agent_ui.tool_verb.search_web.running"),
+            (Self::SearchWeb, true) => t!("agent_ui.tool_verb.search_web.done"),
+            (Self::Delete, false) => t!("agent_ui.tool_verb.delete.running"),
+            (Self::Delete, true) => t!("agent_ui.tool_verb.delete.done"),
+            (Self::Move, false) => t!("agent_ui.tool_verb.move.running"),
+            (Self::Move, true) => t!("agent_ui.tool_verb.move.done"),
+            (Self::Copy, false) => t!("agent_ui.tool_verb.copy.running"),
+            (Self::Copy, true) => t!("agent_ui.tool_verb.copy.done"),
+            (Self::CreateDirectory, false) => t!("agent_ui.tool_verb.create_directory.running"),
+            (Self::CreateDirectory, true) => t!("agent_ui.tool_verb.create_directory.done"),
+            (Self::Diagnostics, false) => t!("agent_ui.tool_verb.diagnostics.running"),
+            (Self::Diagnostics, true) => t!("agent_ui.tool_verb.diagnostics.done"),
+        }
+    }
+}
+
+/// The verb and target for the built-in tools, so their rows read "Leu
+/// src/main.rs" and switch tense when they finish. The tools' own titles are
+/// fixed when the call starts, so they can't do this themselves. Other tools
+/// (MCP, external agents) keep their title.
+fn tool_call_verb_label(tool_call: &ToolCall) -> Option<(ToolVerb, Option<SharedString>)> {
+    let input = tool_call.raw_input.as_ref()?;
+    let field = |name: &str| {
+        input
+            .get(name)
+            .and_then(|value| value.as_str())
+            .filter(|value| !value.is_empty())
+    };
+    let target = |value: Option<&str>| value.map(|value| SharedString::from(value.to_string()));
+    let (verb, target) = match tool_call.tool_name.as_deref()? {
+        "read_file" => {
+            let path = field("path")?;
+            let start = input.get("start_line").and_then(|value| value.as_u64());
+            let end = input.get("end_line").and_then(|value| value.as_u64());
+            let target = match (start, end) {
+                (Some(start), Some(end)) => format!("{path}:{start}-{end}"),
+                (Some(start), None) => format!("{path}:{start}"),
+                _ => path.to_string(),
+            };
+            (ToolVerb::Read, Some(target.into()))
+        }
+        "grep" => {
+            let regex = field("regex")?;
+            let target = match field("include_pattern") {
+                Some(include) => format!("“{regex}” · {include}"),
+                None => format!("“{regex}”"),
+            };
+            (ToolVerb::Search, Some(target.into()))
+        }
+        "find_path" => (ToolVerb::FindPath, target(Some(field("glob")?))),
+        "list_directory" => (ToolVerb::ListDirectory, target(Some(field("path")?))),
+        "fetch" => (ToolVerb::Fetch, target(Some(field("url")?))),
+        "search_web" => (ToolVerb::SearchWeb, target(Some(field("query")?))),
+        "delete_path" => (ToolVerb::Delete, target(Some(field("path")?))),
+        "create_directory" => (ToolVerb::CreateDirectory, target(Some(field("path")?))),
+        "diagnostics" => (ToolVerb::Diagnostics, target(field("path"))),
+        "move_path" | "copy_path" => {
+            let source = field("source_path")?;
+            let destination = field("destination_path")?;
+            let verb = if tool_call.tool_name.as_deref() == Some("move_path") {
+                ToolVerb::Move
+            } else {
+                ToolVerb::Copy
+            };
+            (verb, Some(format!("{source} → {destination}").into()))
+        }
+        _ => return None,
+    };
+    Some((verb, target))
 }

@@ -196,6 +196,33 @@ pub fn scope_chip(
     }
 }
 
+/// The boards' Status Chip, e.g. "Sandbox" or "exit 1".
+pub fn status_chip(
+    icon: Option<IconName>,
+    label: impl Into<SharedString>,
+    color: Color,
+    cx: &App,
+) -> Div {
+    let colors = cx.theme().colors();
+    h_flex()
+        .flex_none()
+        .h(px(20.))
+        .px(px(7.))
+        .gap_1()
+        .rounded_full()
+        .border_1()
+        .border_color(colors.border_selected)
+        .bg(colors.elevated_surface_background)
+        .children(icon.map(|icon| Icon::new(icon).size(IconSize::XSmall).color(color)))
+        .child(
+            Label::new(label)
+                .size(LabelSize::XSmall)
+                .weight(FontWeight::MEDIUM)
+                .color(color)
+                .single_line(),
+        )
+}
+
 /// Two or more choices side by side; the chosen one is filled and outlined in the accent, as in
 /// the boards.
 pub fn segment_option(

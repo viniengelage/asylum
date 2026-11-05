@@ -7,12 +7,11 @@ use crate::{
     Agent, AgentInitialContent, AgentThreadSource, NewExternalAgentThread, ThreadId,
     thread_metadata_store::ThreadMetadataStore,
 };
-use agent::ZED_AGENT_ID;
 use agent_client_protocol::schema::v2 as acp;
 use gpui::{AnyElement, App, Context, SharedString, Window, actions};
 use i18n::t;
 use task_agents::TaskAgent;
-use ui::{ContextMenu, PopoverMenu, Tooltip, prelude::*};
+use ui::{Tooltip, prelude::*};
 use util::ResultExt as _;
 
 actions!(
@@ -355,201 +354,168 @@ impl AgentPanel {
         }
     }
 
+    /// Starting a thread from the panel's "+" never replaces a conversation.
+    pub(super) fn prepare_tab_for_new_thread(&mut self, cx: &App) {
+        if self.active_thread_has_messages(cx) {
+            self.prepare_new_agent_tab(cx);
+        }
+    }
+
+    fn render_agent_tab(
+        &self,
+        index: usize,
+        info: TabInfo,
+        active: bool,
+        closable: bool,
+        cx: &Context<Self>,
+    ) -> gpui::Stateful<gpui::Div> {
+        let colors = cx.theme().colors();
+        let group = SharedString::from(format!("agent-tab-{index}"));
+        let icon = match info.external_icon {
+            Some(path) => Icon::from_external_svg(path),
+            None => Icon::new(info.icon),
+        }
+        .size(IconSize::Small)
+        .color(if info.is_task_agent {
+            Color::Accent
+        } else if active {
+            Color::Default
+        } else {
+            Color::Muted
+        });
+        let tooltip = format!("{} · {}", info.label, info.title);
+        h_flex()
+            .id(("agent-tab", index))
+            .group(group.clone())
+            .flex_shrink_0()
+            .h(px(26.))
+            .pl(px(10.))
+            .pr(if closable { px(4.) } else { px(10.) })
+            .gap_1p5()
+            .rounded(px(6.))
+            .border_1()
+            .border_color(gpui::transparent_black())
+            .when(active, |this| {
+                this.bg(colors.element_selected)
+                    .border_color(colors.border_selected)
+            })
+            .when(!active, |this| {
+                this.cursor_pointer()
+                    .hover(|this| this.bg(colors.element_hover))
+            })
+            .max_w(px(if active { 200. } else { 140. }))
+            .child(icon)
+            .child(
+                Label::new(info.label)
+                    .size(LabelSize::Small)
+                    .weight(if active {
+                        gpui::FontWeight::SEMIBOLD
+                    } else {
+                        gpui::FontWeight::MEDIUM
+                    })
+                    .color(if active { Color::Default } else { Color::Muted })
+                    .single_line()
+                    .truncate(),
+            )
+            .tooltip(Tooltip::text(tooltip))
+            .when(closable, |this| {
+                this.child(
+                    div()
+                        .when(!active, |this| this.visible_on_hover(group.clone()))
+                        .child(
+                            IconButton::new(("close-agent-tab", index), IconName::Close)
+                                .icon_size(IconSize::XSmall)
+                                .tooltip(Tooltip::text(t!("agent_ui.agent_tabs.close_tab")))
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    cx.stop_propagation();
+                                    this.close_agent_tab(index, window, cx);
+                                })),
+                        ),
+                )
+            })
+    }
+
+    /// Shown even with a single tab, because the panel's actions (threads, "+") live here.
     pub(super) fn render_agent_tabs(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.has_agent_tabs() {
+        if !self.has_open_project(cx) {
             return None;
         }
+        let new_thread_menu = self.render_new_thread_menu(cx);
         let colors = cx.theme().colors();
         let mut strip = h_flex()
             .id("agent-tabs")
-            .flex_1()
             .min_w_0()
+            .h(px(32.))
+            .p(px(3.))
             .gap_0p5()
+            .rounded(px(8.))
+            .border_1()
+            .border_color(colors.border)
+            .bg(colors.editor_background)
             .overflow_x_scroll();
-        for (index, thread_id) in self.agent_tabs.iter().copied().enumerate() {
-            let info = self.tab_info(thread_id, cx);
-            let active = index == self.active_agent_tab;
-            let group = SharedString::from(format!("agent-tab-{index}"));
-            let icon = match info.external_icon {
-                Some(path) => Icon::from_external_svg(path),
-                None => Icon::new(info.icon),
+
+        if self.has_agent_tabs() {
+            for (index, thread_id) in self.agent_tabs.iter().copied().enumerate() {
+                let info = self.tab_info(thread_id, cx);
+                let active = index == self.active_agent_tab;
+                strip = strip.child(
+                    self.render_agent_tab(index, info, active, true, cx)
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.activate_agent_tab(index, window, cx);
+                        })),
+                );
             }
-            .size(IconSize::Small)
-            .color(if active || info.is_task_agent {
-                Color::Accent
-            } else {
-                Color::Muted
-            });
-            let tooltip = format!("{} · {}", info.label, info.title);
-            strip = strip.child(
-                h_flex()
-                    .id(("agent-tab", index))
-                    .group(group.clone())
-                    .flex_shrink_0()
-                    .h(px(26.))
-                    .pl_2()
-                    .pr_1()
-                    .gap_1p5()
-                    .rounded_md()
-                    .cursor_pointer()
-                    .when(active, |this| {
-                        this.bg(colors.tab_active_background)
-                            .border_1()
-                            .border_color(colors.border)
-                    })
-                    .when(!active, |this| {
-                        this.hover(|this| this.bg(colors.element_hover))
-                    })
-                    .child(icon)
-                    .child(
-                        Label::new(info.label)
-                            .size(LabelSize::Small)
-                            .color(if active { Color::Default } else { Color::Muted })
-                            .single_line()
-                            .truncate(),
-                    )
-                    .max_w(px(if active { 200. } else { 140. }))
-                    .child(
-                        div()
-                            .when(!active, |this| this.visible_on_hover(group.clone()))
-                            .child(
-                                IconButton::new(("close-agent-tab", index), IconName::Close)
-                                    .icon_size(IconSize::XSmall)
-                                    .tooltip(Tooltip::text(t!("agent_ui.agent_tabs.close_tab")))
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        cx.stop_propagation();
-                                        this.close_agent_tab(index, window, cx);
-                                    })),
-                            ),
-                    )
-                    .tooltip(Tooltip::text(tooltip))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.activate_agent_tab(index, window, cx);
-                    })),
-            );
+        } else {
+            let info = match self.active_thread_id(cx) {
+                Some(thread_id) => self.tab_info(thread_id, cx),
+                None => TabInfo {
+                    label: if self.active_terminal_id().is_some() {
+                        "Terminal".into()
+                    } else {
+                        self.selected_agent.label()
+                    },
+                    title: SharedString::default(),
+                    icon: if self.active_terminal_id().is_some() {
+                        IconName::Terminal
+                    } else {
+                        self.selected_agent.icon().unwrap_or(IconName::ZedAgent)
+                    },
+                    external_icon: None,
+                    is_task_agent: false,
+                },
+            };
+            strip = strip.child(self.render_agent_tab(0, info, true, false, cx));
         }
+
+        // The threads sidebar is where past threads live, so it stands in for the history view.
+        let history_button = IconButton::new("toggle-thread-history", IconName::History)
+            .icon_size(IconSize::Small)
+            .tooltip(|_, cx| {
+                Tooltip::for_action(
+                    t!("agent_ui.agent_panel.threads"),
+                    &workspace::ToggleWorkspaceSidebar,
+                    cx,
+                )
+            })
+            .on_click(|_, window, cx| {
+                window.dispatch_action(Box::new(workspace::ToggleWorkspaceSidebar), cx);
+            });
 
         Some(
             h_flex()
                 .flex_none()
                 .w_full()
-                .h(px(34.))
-                .px_1p5()
+                .h(px(44.))
+                .px_2()
                 .gap_1()
                 .bg(colors.tab_bar_background)
                 .border_b_1()
                 .border_color(colors.border_variant)
                 .child(strip)
-                .child(self.render_new_agent_tab_menu(cx))
+                .child(div().flex_1())
+                .child(history_button)
+                .child(new_thread_menu)
                 .into_any_element(),
         )
-    }
-
-    fn render_new_agent_tab_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let panel = cx.entity().downgrade();
-        let store = self.project.read(cx).agent_server_store().read(cx);
-        let external = store
-            .external_agents()
-            .map(|id| {
-                (
-                    id.clone(),
-                    store
-                        .agent_display_name(id)
-                        .unwrap_or_else(|| SharedString::from(id.to_string())),
-                    store.agent_icon(id),
-                )
-            })
-            .collect::<Vec<_>>();
-        let task_agents = self
-            .tab_task_agents
-            .iter()
-            .map(|agent| (agent.command.clone(), agent.name.clone()))
-            .collect::<Vec<_>>();
-        PopoverMenu::new("new-agent-tab-menu")
-            .trigger_with_tooltip(
-                IconButton::new("new-agent-tab", IconName::Plus).icon_size(IconSize::Small),
-                Tooltip::text(t!("agent_ui.agent_tabs.new_tab")),
-            )
-            .anchor(gpui::Anchor::TopRight)
-            .menu(move |window, cx| {
-                let panel = panel.clone();
-                let external = external.clone();
-                let task_agents = task_agents.clone();
-                Some(ContextMenu::build(
-                    window,
-                    cx,
-                    move |mut menu, _window, _cx| {
-                        menu = menu.header(t!("agent_ui.agent_tabs.new_tab"));
-                        let open_with =
-                            |agent_id: project::AgentId, panel: gpui::WeakEntity<AgentPanel>| {
-                                move |window: &mut Window, cx: &mut App| {
-                                    panel
-                                        .update(cx, |panel, cx| {
-                                            panel.prepare_new_agent_tab(cx);
-                                            panel.new_external_agent_thread(
-                                                &NewExternalAgentThread::new(agent_id.clone()),
-                                                window,
-                                                cx,
-                                            );
-                                        })
-                                        .log_err();
-                                }
-                            };
-                        menu = menu.item(
-                            ui::ContextMenuEntry::new("Asylum Agent")
-                                .icon(IconName::ZedAgent)
-                                .icon_color(Color::Muted)
-                                .handler(open_with(ZED_AGENT_ID.clone(), panel.clone())),
-                        );
-                        for (agent_id, name, icon) in external {
-                            let entry = ui::ContextMenuEntry::new(name)
-                                .icon_color(Color::Muted)
-                                .handler(open_with(agent_id, panel.clone()));
-                            menu = menu.item(match icon {
-                                Some(path) => entry.custom_icon_svg(path),
-                                None => entry.icon(IconName::SquareDot),
-                            });
-                        }
-                        if !task_agents.is_empty() {
-                            menu = menu
-                                .separator()
-                                .header(t!("agent_ui.agent_tabs.from_project"));
-                            for (command, name) in task_agents {
-                                let panel = panel.clone();
-                                menu = menu.item(
-                                    ui::ContextMenuEntry::new(format!("{name}  /{command}"))
-                                        .icon(IconName::UserGroup)
-                                        .icon_color(Color::Muted)
-                                        .handler(move |window, cx| {
-                                            panel
-                                                .update(cx, |panel, cx| {
-                                                    panel.prepare_new_agent_tab(cx);
-                                                    panel.new_task_agent_thread(
-                                                        &command, window, cx,
-                                                    );
-                                                })
-                                                .log_err();
-                                        }),
-                                );
-                            }
-                        }
-                        let manage_panel = panel;
-                        menu.separator().entry(
-                            t!("agent_ui.agent_tabs.manage_agents"),
-                            None,
-                            move |window, cx| {
-                                if let Some(workspace) = manage_panel
-                                    .upgrade()
-                                    .and_then(|panel| panel.read(cx).workspace.upgrade())
-                                {
-                                    workspace.update(cx, |workspace, cx| {
-                                        crate::task_agents_view::open(workspace, window, cx)
-                                    });
-                                }
-                            },
-                        )
-                    },
-                ))
-            })
     }
 }

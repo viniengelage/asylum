@@ -235,6 +235,7 @@
     "context": "AgentPanel",
     "use_key_equivalents": true,
     "bindings": {
+      "f2": "agent::RenameSelectedThread",
       "ctrl-n": "agent::NewThread",
       "shift-alt-c": "agent::OpenSettings",
       "shift-alt-i": "agent::ToggleOptionsMenu",
@@ -612,6 +613,12 @@
       "ctrl-\\": "pane::SplitRight",
       "alt-.": "editor::GoToHunk",
       "alt-,": "editor::GoToPreviousHunk",
+    },
+  },
+  {
+    "context": "MessageEditor > Editor",
+    "bindings": {
+      "f2": "agent::RenameSelectedThread",
     },
   },
   {

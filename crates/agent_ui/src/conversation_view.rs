@@ -2018,6 +2018,7 @@ impl ConversationView {
                             cx.notify();
                         }
                         active.sync_elicitation_state_for_entry(*index, window, cx);
+                        active.collapse_finished_terminal(*index, cx);
                         active.auto_expand_streaming_thought(cx);
                         active.sync_generating_indicator(cx);
                     });
@@ -17682,8 +17683,9 @@ pub(crate) mod tests {
                 match resolution % 3 {
                     0 => {
                         cx.simulate_click(
+                            // Allow is the rightmost control in the footer.
                             point(
-                                selected_buttons.left() + px(24.0),
+                                selected_buttons.right() - px(24.0),
                                 selected_buttons.center().y,
                             ),
                             gpui::Modifiers::default(),
