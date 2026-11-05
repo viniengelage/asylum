@@ -71,6 +71,11 @@ pub trait Panel: Focusable + EventEmitter<PanelEvent> + Render + Sized {
     ) {
     }
     fn icon(&self, window: &Window, cx: &App) -> Option<ui::IconName>;
+    /// The icon on the panel's tab. Panels that keep their button out of the status bar (the
+    /// toolkit ones return no `icon`) still want one here.
+    fn tab_icon(&self, window: &Window, cx: &App) -> Option<ui::IconName> {
+        self.icon(window, cx)
+    }
     fn icon_tooltip(&self, window: &Window, cx: &App) -> Option<&'static str>;
     fn toggle_action(&self) -> Box<dyn Action>;
     fn icon_label(&self, _window: &Window, _: &App) -> Option<String> {
@@ -144,6 +149,7 @@ pub trait PanelHandle: Send + Sync {
     fn has_flexible_size(&self, window: &Window, cx: &App) -> bool;
     fn set_flexible_size(&self, flexible: bool, window: &mut Window, cx: &mut App);
     fn icon(&self, window: &Window, cx: &App) -> Option<ui::IconName>;
+    fn tab_icon(&self, window: &Window, cx: &App) -> Option<ui::IconName>;
     fn icon_tooltip(&self, window: &Window, cx: &App) -> Option<&'static str>;
     fn toggle_action(&self, window: &Window, cx: &App) -> Box<dyn Action>;
     fn icon_label(&self, window: &Window, cx: &App) -> Option<String>;
@@ -276,6 +282,10 @@ where
 
     fn icon(&self, window: &Window, cx: &App) -> Option<ui::IconName> {
         self.read(cx).icon(window, cx)
+    }
+
+    fn tab_icon(&self, window: &Window, cx: &App) -> Option<ui::IconName> {
+        self.read(cx).tab_icon(window, cx)
     }
 
     fn icon_tooltip(&self, window: &Window, cx: &App) -> Option<&'static str> {
@@ -1216,7 +1226,7 @@ impl Dock {
                 .style(ui::TabStyle::Pill)
                 .children(visible_entries.into_iter().enumerate().map(
                     |(visible_index, (panel_index, entry))| {
-                        let icon = entry.panel.icon(window, cx);
+                        let icon = entry.panel.tab_icon(window, cx);
                         let panel_id = entry.panel.panel_id();
                         let label = entry.panel.tab_label(window, cx);
                         let is_active = is_open && active_panel_index == Some(panel_index);

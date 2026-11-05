@@ -171,12 +171,13 @@ impl Docker {
         self.get_json("/networks").await
     }
 
-    /// What `docker system prune` removes: stopped containers, dangling images, unused networks
-    /// and the build cache. Volumes stay, since they hold data.
+    /// Dangling images, unused networks, unused anonymous volumes and the build cache. Containers
+    /// are left alone even when stopped: after the daemon crashes every container is stopped, and
+    /// a cleanup then would wipe them all. Named volumes stay too, since they hold data.
     pub async fn prune(&self) -> Result<PruneReport, DockerError> {
-        let containers: PruneResponse = self.post_prune("/containers/prune").await?;
         let images: PruneResponse = self.post_prune("/images/prune").await?;
         let networks: PruneResponse = self.post_prune("/networks/prune").await?;
+        let volumes: PruneResponse = self.post_prune("/volumes/prune").await?;
         // Podman and older engines have no build cache endpoint.
         let build_cache = match self.post_prune("/build/prune").await {
             Ok(response) => response,
@@ -184,7 +185,6 @@ impl Docker {
             Err(error) => return Err(error),
         };
         Ok(PruneReport {
-            containers: containers.containers_deleted.as_ref().map_or(0, Vec::len),
             images: images
                 .images_deleted
                 .iter()
@@ -192,7 +192,8 @@ impl Docker {
                 .filter(|image| image.deleted.is_some())
                 .count(),
             networks: networks.networks_deleted.as_ref().map_or(0, Vec::len),
-            space_reclaimed: [containers, images, build_cache]
+            volumes: volumes.volumes_deleted.as_ref().map_or(0, Vec::len),
+            space_reclaimed: [images, volumes, build_cache]
                 .iter()
                 .map(|response| response.space_reclaimed.unwrap_or_default())
                 .sum(),
@@ -1146,18 +1147,18 @@ pub struct Volume {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PruneReport {
-    pub containers: usize,
     pub images: usize,
     pub networks: usize,
+    pub volumes: usize,
     pub space_reclaimed: u64,
 }
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 struct PruneResponse {
-    containers_deleted: Option<Vec<String>>,
     images_deleted: Option<Vec<ImageDeleteEntry>>,
     networks_deleted: Option<Vec<String>>,
+    volumes_deleted: Option<Vec<String>>,
     space_reclaimed: Option<u64>,
 }
 

@@ -141,7 +141,7 @@ impl<T: Panel> Item for PanelItem<T> {
     }
 
     fn tab_icon(&self, window: &Window, cx: &App) -> Option<Icon> {
-        self.panel.read(cx).icon(window, cx).map(Icon::new)
+        self.panel.read(cx).tab_icon(window, cx).map(Icon::new)
     }
 
     fn to_item_events(event: &Self::Event, f: &mut dyn FnMut(ItemEvent)) {

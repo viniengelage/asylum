@@ -281,9 +281,9 @@ impl DockerPanel {
                 let message = match result {
                     Ok(report) => t!(
                         "docker.prune.done",
-                        containers = report.containers,
                         images = report.images,
                         networks = report.networks,
+                        volumes = report.volumes,
                         space = format_bytes(report.space_reclaimed)
                     )
                     .to_string(),
@@ -2021,6 +2021,10 @@ impl Panel for DockerPanel {
     /// toolkit button is already the way in.
     fn icon(&self, _window: &Window, _cx: &App) -> Option<IconName> {
         None
+    }
+
+    fn tab_icon(&self, _window: &Window, _cx: &App) -> Option<IconName> {
+        Some(IconName::Docker)
     }
 
     fn icon_tooltip(&self, _window: &Window, _cx: &App) -> Option<&'static str> {

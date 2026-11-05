@@ -2464,6 +2464,10 @@ impl Panel for ClickUpPanel {
         None
     }
 
+    fn tab_icon(&self, _window: &Window, _cx: &App) -> Option<IconName> {
+        Some(IconName::ListTodo)
+    }
+
     fn icon_tooltip(&self, _window: &Window, _cx: &App) -> Option<&'static str> {
         Some("ClickUp")
     }

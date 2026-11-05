@@ -1973,6 +1973,10 @@ impl Panel for ElasticPanel {
         None
     }
 
+    fn tab_icon(&self, _window: &Window, _cx: &App) -> Option<IconName> {
+        Some(IconName::CloudPulse)
+    }
+
     fn icon_tooltip(&self, _window: &Window, _cx: &App) -> Option<&'static str> {
         Some("Elastic")
     }

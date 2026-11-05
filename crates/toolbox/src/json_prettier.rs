@@ -496,6 +496,10 @@ impl Panel for JsonPrettierPanel {
         None
     }
 
+    fn tab_icon(&self, _window: &Window, _cx: &App) -> Option<IconName> {
+        Some(IconName::Json)
+    }
+
     fn icon_tooltip(&self, _window: &Window, _cx: &App) -> Option<&'static str> {
         Some("JSON Prettier")
     }
