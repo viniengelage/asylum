@@ -60,6 +60,7 @@ use editor::{Editor, MultiBuffer};
 use extension_host::ExtensionStore;
 use feature_flags::{CreateThreadToolFeatureFlag, FeatureFlagAppExt as _};
 
+use context_server::ContextServerId;
 use fs::Fs;
 use futures::FutureExt as _;
 use gpui::{
@@ -72,6 +73,7 @@ use i18n::t;
 use language::LanguageRegistry;
 use language_model::LanguageModelRegistry;
 use notifications::status_toast::StatusToast;
+use project::context_server_store::{ContextServerStatus, ContextServerStore};
 use project::{Project, ProjectPath, Worktree};
 use settings::{NotifyWhenAgentWaiting, Settings, SettingsStore, update_settings_file};
 
@@ -250,6 +252,95 @@ fn open_global_rules(workspace: &mut Workspace, window: &mut Window, cx: &mut Co
             cx,
         )
         .detach_and_log_err(cx);
+}
+
+fn add_context_server_entries(
+    mut menu: ContextMenu,
+    store: &Entity<ContextServerStore>,
+    cx: &App,
+) -> ContextMenu {
+    let on_demand_servers = &AgentSettings::get_global(cx).on_demand_context_servers;
+    let servers: Vec<_> = {
+        let store = store.read(cx);
+        store
+            .server_ids()
+            .iter()
+            .map(|id| {
+                let enabled = store.is_server_enabled(id, cx);
+                let status = store
+                    .status_for_server(id)
+                    .unwrap_or(ContextServerStatus::Stopped);
+                let on_demand = on_demand_servers
+                    .iter()
+                    .any(|server| server == id.0.as_ref());
+                (id.clone(), enabled, status, on_demand)
+            })
+            .collect()
+    };
+    if servers.is_empty() {
+        return menu;
+    }
+    for (id, enabled, status, on_demand) in servers {
+        let state = if !enabled {
+            t!("agent_ui.options_menu.mcp_status.off")
+        } else {
+            match status {
+                ContextServerStatus::Running => t!("agent_ui.options_menu.mcp_status.running"),
+                ContextServerStatus::Starting => t!("agent_ui.options_menu.mcp_status.starting"),
+                ContextServerStatus::Stopped if on_demand => {
+                    t!("agent_ui.options_menu.mcp_status.on_demand")
+                }
+                ContextServerStatus::Stopped => t!("agent_ui.options_menu.mcp_status.stopped"),
+                ContextServerStatus::Error(_) => t!("agent_ui.options_menu.mcp_status.error"),
+                ContextServerStatus::AuthRequired
+                | ContextServerStatus::ClientSecretRequired { .. } => {
+                    t!("agent_ui.options_menu.mcp_status.needs_auth")
+                }
+                ContextServerStatus::Authenticating => {
+                    t!("agent_ui.options_menu.mcp_status.authenticating")
+                }
+            }
+        };
+        let store = store.clone();
+        menu = menu.toggleable_entry(
+            format!("{} · {}", id.0, state),
+            enabled,
+            IconPosition::Start,
+            None,
+            move |_window, cx| set_context_server_enabled(&store, &id, !enabled, cx),
+        );
+    }
+    menu.separator()
+}
+
+fn set_context_server_enabled(
+    store: &Entity<ContextServerStore>,
+    id: &ContextServerId,
+    enabled: bool,
+    cx: &mut App,
+) {
+    store.update(cx, |store, cx| {
+        if enabled {
+            if let Some(server) = store.get_server(id) {
+                store.start_server(server, cx);
+            }
+        } else {
+            store.stop_server(id, cx).log_err();
+        }
+    });
+    let id = id.0.clone();
+    update_settings_file(<dyn Fs>::global(cx), cx, move |settings, _| {
+        settings
+            .project
+            .context_servers
+            .entry(id)
+            .or_insert_with(|| settings::ContextServerSettingsContent::Extension {
+                enabled,
+                remote: false,
+                settings: serde_json::json!({}),
+            })
+            .set_enabled(enabled);
+    });
 }
 
 fn open_project_rules(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
@@ -5689,6 +5780,7 @@ impl AgentPanel {
             .is_some();
 
         let workspace = self.workspace.clone();
+        let context_server_store = self.project.read(cx).context_server_store();
 
         PopoverMenu::new("agent-options-menu")
             .trigger_with_tooltip(
@@ -5815,7 +5907,14 @@ impl AgentPanel {
                                 .submenu_with_icon(
                                     t!("agent_ui.options_menu.mcp_servers"),
                                     IconName::Server,
-                                    |menu, _window, _cx| {
+                                    {
+                                        let context_server_store = context_server_store.clone();
+                                        move |mut menu, _window, cx| {
+                                        menu = add_context_server_entries(
+                                            menu,
+                                            &context_server_store,
+                                            cx,
+                                        );
                                         menu.action(
                                             t!("agent_ui.options_menu.add_server"),
                                             Box::new(zed_actions::OpenSettingsAt {
@@ -5832,6 +5931,7 @@ impl AgentPanel {
                                                 id: None,
                                             }),
                                         )
+                                    }
                                     },
                                 )
                                 .separator();
