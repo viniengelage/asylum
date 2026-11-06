@@ -66,19 +66,7 @@ rm /usr/local/bin/asylum
 
 ### Asylum won't open or shows "damaged" warning
 
-If macOS reports that Asylum is damaged or can't be opened, it's likely a Gatekeeper issue. Try:
-
-1. Right-click (or Control-click) on Asylum in Applications
-2. Select "Open" from the context menu
-3. Click "Open" in the dialog that appears
-
-This tells macOS to trust the application.
-
-If that doesn't work, remove the quarantine attribute:
-
-```sh
-xattr -cr /Applications/Asylum.app
-```
+Releases are signed with a Developer ID and notarized by Apple, so Gatekeeper opens them without any extra step. If macOS reports that Asylum is damaged or can't be opened, the download was most likely incomplete or modified: download the DMG again from the [releases page](https://github.com/viniengelage/asylum/releases/latest) and reinstall.
 
 ### CLI command not found
 

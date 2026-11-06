@@ -325,14 +325,8 @@ jobs:
           Built from ${GITHUB_SHA}, based on Zed ${ZED_VERSION}.
           Installed copies of Asylum update to this release by themselves.
 
-          Builds are not notarized.
-
-          **macOS:** open the DMG, drag Asylum to Applications, then clear the quarantine flag
-          once so Gatekeeper lets it start:
-
-          \`\`\`sh
-          xattr -dr com.apple.quarantine /Applications/Asylum.app
-          \`\`\`
+          **macOS:** open the DMG and drag Asylum to Applications. The app is signed and
+          notarized, so it opens like any other app.
 
           **Windows:** run the installer; on the SmartScreen prompt choose
           "More info" → "Run anyway".

@@ -77,8 +77,8 @@ Download the latest build from the
 | Windows (x86_64) | Preview: the Android emulator works; the iOS Simulator and Web Preview are macOS-only |
 | Linux | Builds from source; no packaged release yet |
 
-Builds are not notarized yet. On macOS, the first time you open Asylum right-click the app and
-choose **Open**.
+macOS builds are signed with a Developer ID and notarized by Apple, so Asylum opens like any
+other app.
 
 Asylum uses its own data directories (`~/Library/Application Support/Asylum` and
 `~/.config/asylum` on macOS), so it can be installed next to Zed without sharing settings.
