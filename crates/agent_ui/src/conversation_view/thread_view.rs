@@ -8065,12 +8065,15 @@ impl ThreadView {
         let card_background = cx.theme().colors().elevated_surface_background;
         let card_border = cx.theme().colors().border;
         let card_hover_background = cx.theme().colors().ghost_element_hover;
+        let max_content_width = AgentSettings::get_global(cx).max_content_width;
 
-        v_flex()
-            .flex_1()
-            .min_h_0()
-            .justify_end()
-            .p(DynamicSpacing::Base16.rems(cx))
+        // Laid out like the composer below it, so the cards line up with its edges at any width.
+        let suggestions = v_flex()
+            .when_some(max_content_width, |this, max_w| this.flex_basis(max_w))
+            .when(max_content_width.is_none(), |this| this.w_full())
+            .min_w_0()
+            .flex_shrink_1()
+            .flex_grow_0()
             .gap(DynamicSpacing::Base12.rems(cx))
             .child(
                 Label::new(t!("agent_ui.thread_view.suggestions.title"))
@@ -8107,7 +8110,16 @@ impl ThreadView {
                             });
                         })
                 },
-            ))
+            ));
+
+        h_flex()
+            .flex_1()
+            .min_h_0()
+            .justify_center()
+            .items_end()
+            .px(DynamicSpacing::Base08.rems(cx))
+            .py(DynamicSpacing::Base16.rems(cx))
+            .child(suggestions)
     }
 
     fn render_mention_button(&self, _cx: &mut Context<Self>) -> impl IntoElement {

@@ -6772,7 +6772,7 @@ impl Render for AgentPanel {
                     })
                 }
             }))
-            .children(self.render_agent_tabs(cx))
+            .children(self.render_agent_tabs(window, cx))
             .child(self.render_toolbar(window, cx))
             .map(|parent| match self.visible_surface() {
                 VisibleSurface::Uninitialized if !self.has_open_project(cx) => {

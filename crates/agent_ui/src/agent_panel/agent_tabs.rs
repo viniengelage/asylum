@@ -435,8 +435,18 @@ impl AgentPanel {
             })
     }
 
+    /// Zoomed, the panel is overlaid on the whole window, including the corner where the
+    /// macOS traffic lights sit, so its tab row has to make room for them.
+    fn covers_traffic_lights(&self, window: &Window) -> bool {
+        self.zoomed && PlatformStyle::platform() == PlatformStyle::Mac && !window.is_fullscreen()
+    }
+
     /// Shown even with a single tab, because the panel's actions (threads, "+") live here.
-    pub(super) fn render_agent_tabs(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(super) fn render_agent_tabs(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         if !self.has_open_project(cx) {
             return None;
         }
@@ -511,6 +521,9 @@ impl AgentPanel {
                 .bg(colors.tab_bar_background)
                 .border_b_1()
                 .border_color(colors.border_variant)
+                .when(self.covers_traffic_lights(window), |this| {
+                    this.pl(px(ui::utils::TRAFFIC_LIGHT_PADDING))
+                })
                 .child(strip)
                 .child(div().flex_1())
                 .child(history_button)
