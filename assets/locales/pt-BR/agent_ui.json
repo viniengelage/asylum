@@ -758,5 +758,8 @@
   "subagent.automatic_why": "Por que {choice}",
   "subagent.automatic_meta": "{reason} · escolha automática pelo benchmarks.md",
   "model_benchmarks.used_by_auto": "usado pelo Automático",
-  "model_benchmarks.compare": "Comparar com o padrão"
+  "model_benchmarks.compare": "Comparar com o padrão",
+  "notes.parked": "Prompt estacionado em Rascunhos · ⌥⌘V para voltar",
+  "notes.undo": "Desfazer",
+  "context_picker.notes": "Notas"
 }

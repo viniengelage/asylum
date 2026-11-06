@@ -357,6 +357,8 @@ impl UserMessage {
         const MERGE_CONFLICT_TAG: &str = "<merge_conflicts>";
         const OPEN_SQL_EDITORS_TAG: &str = "<sql_editors>";
         const OPEN_PULL_REQUESTS_TAG: &str = "<pull_requests>\nThe user pointed at these pull requests of the project's repository. Read more with the repo_* tools, never through an MCP server:\n";
+        const OPEN_NOTES_TAG: &str =
+            "<notes>\nThe user attached these notes from their notes panel:\n";
         const OPEN_LOGS_TAG: &str = "<logs>\nThe user pointed at these logs from the Elastic dock (personal data masked). Read more with the elastic_* tools:\n";
         const OPEN_PROJECT_ITEMS_TAG: &str = "<project_items>\nThe user pointed at these items of the GitHub project in the Tarefas dock. Read and change them with the project_* tools:\n";
         const OPEN_SKILLS_TAG: &str =
@@ -375,6 +377,7 @@ impl UserMessage {
         let mut sql_editors_context = OPEN_SQL_EDITORS_TAG.to_string();
         let mut pull_requests_context = OPEN_PULL_REQUESTS_TAG.to_string();
         let mut logs_context = OPEN_LOGS_TAG.to_string();
+        let mut notes_context = OPEN_NOTES_TAG.to_string();
         let mut project_items_context = OPEN_PROJECT_ITEMS_TAG.to_string();
         let mut skills_context = OPEN_SKILLS_TAG.to_string();
 
@@ -506,6 +509,9 @@ impl UserMessage {
                         MentionUri::Logs { .. } => {
                             write!(&mut logs_context, "\n{}\n", content).ok();
                         }
+                        MentionUri::Note { title, .. } => {
+                            write!(&mut notes_context, "\nNote: {}\n{}\n", title, content).ok();
+                        }
                         MentionUri::Skill { source, .. } => {
                             let label = format!("{} ({})", uri.name(), source);
                             write!(&mut skills_context, "\nSkill: {}\n{}\n", label, content).ok();
@@ -610,6 +616,13 @@ impl UserMessage {
             message
                 .content
                 .push(language_model::MessageContent::Text(project_items_context));
+        }
+
+        if notes_context.len() > OPEN_NOTES_TAG.len() {
+            notes_context.push_str("</notes>\n");
+            message
+                .content
+                .push(language_model::MessageContent::Text(notes_context));
         }
 
         if logs_context.len() > OPEN_LOGS_TAG.len() {

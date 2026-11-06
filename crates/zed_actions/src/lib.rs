@@ -1130,3 +1130,18 @@ pub mod git_panel {
         ]
     );
 }
+
+pub mod notes {
+    use gpui::Action;
+    use schemars::JsonSchema;
+    use serde::Deserialize;
+
+    /// Inserts text into the focused field as if it were pasted: the editor, the agent's
+    /// composer or the terminal.
+    #[derive(Clone, PartialEq, Deserialize, JsonSchema, Action)]
+    #[action(namespace = notes)]
+    #[serde(deny_unknown_fields)]
+    pub struct InsertText {
+        pub text: String,
+    }
+}

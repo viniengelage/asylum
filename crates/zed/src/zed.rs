@@ -6505,6 +6505,7 @@ mod tests {
                 "multi_workspace",
                 "new_process_modal",
                 "notebook",
+                "notes",
                 "onboarding",
                 "outline",
                 "outline_panel",

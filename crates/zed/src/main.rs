@@ -843,6 +843,7 @@ fn main() {
         tabular_data_preview::init(cx);
         svg_preview::init(cx);
         toolbox::init(cx);
+        notes::init(cx);
         clickup::init(cx);
         repo_hosting::init(cx);
         github_projects::init(cx);

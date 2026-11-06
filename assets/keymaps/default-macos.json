@@ -2100,4 +2100,44 @@
       "right": ["tabular_data::MoveFocusedCell", { "direction": "right" }],
     },
   },
+  {
+    "context": "Workspace",
+    "bindings": {
+      "cmd-alt-v": "notes::OpenPalette",
+      "cmd-alt-n": "notes::Save",
+      "cmd-alt-shift-v": "notes::ToggleFocus",
+      "cmd-alt-1": ["notes::PastePinned", { "slot": 1 }],
+      "cmd-alt-2": ["notes::PastePinned", { "slot": 2 }],
+      "cmd-alt-3": ["notes::PastePinned", { "slot": 3 }],
+      "cmd-alt-4": ["notes::PastePinned", { "slot": 4 }],
+      "cmd-alt-5": ["notes::PastePinned", { "slot": 5 }],
+      "cmd-alt-6": ["notes::PastePinned", { "slot": 6 }],
+      "cmd-alt-7": ["notes::PastePinned", { "slot": 7 }],
+      "cmd-alt-8": ["notes::PastePinned", { "slot": 8 }],
+      "cmd-alt-9": ["notes::PastePinned", { "slot": 9 }],
+    },
+  },
+  {
+    "context": "NotesPalette > Editor",
+    "bindings": {
+      "cmd-c": "notes::CopyNote",
+      "cmd-e": "notes::EditNote",
+      "cmd-p": "notes::TogglePin",
+      "cmd-backspace": "notes::DeleteNote",
+      "cmd-n": "notes::CreateNote",
+    },
+  },
+  {
+    "context": "NotesQuickNote",
+    "bindings": {
+      "cmd-enter": "notes::SaveQuickNote",
+      "escape": "menu::Cancel",
+    },
+  },
+  {
+    "context": "NotesQuickNote > Editor && mode == single_line",
+    "bindings": {
+      "enter": "notes::SaveQuickNote",
+    },
+  },
 ]

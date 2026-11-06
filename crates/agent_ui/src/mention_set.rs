@@ -162,6 +162,7 @@ impl MentionSet {
                 self.confirm_mention_for_sql_query(abs_path, cx)
             }
             MentionUri::Logs { id, .. } => self.confirm_mention_for_logs(id, cx),
+            MentionUri::Note { abs_path, .. } => self.confirm_mention_for_note(abs_path, cx),
             MentionUri::ProjectItem {
                 project_id,
                 item_id,
@@ -374,6 +375,7 @@ impl MentionSet {
                 self.confirm_mention_for_sql_query(abs_path, cx)
             }
             MentionUri::Logs { id, .. } => self.confirm_mention_for_logs(id, cx),
+            MentionUri::Note { abs_path, .. } => self.confirm_mention_for_note(abs_path, cx),
             MentionUri::ProjectItem {
                 project_id,
                 item_id,
@@ -537,6 +539,25 @@ impl MentionSet {
                 }
             });
             Ok(mention)
+        })
+    }
+
+    /// Notes may live outside the project, so they are read from disk instead of a buffer.
+    fn confirm_mention_for_note(
+        &self,
+        abs_path: PathBuf,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<Mention>> {
+        let fs = <dyn fs::Fs>::global(cx);
+        cx.background_spawn(async move {
+            let content = fs
+                .load(&abs_path)
+                .await
+                .with_context(|| format!("reading note {}", abs_path.display()))?;
+            Ok(Mention::Text {
+                content,
+                tracked_buffers: Vec::new(),
+            })
         })
     }
 

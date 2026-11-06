@@ -966,6 +966,62 @@ impl MessageEditor {
         chunks
     }
 
+    /// Moves the prompt to the notes as a draft and empties the composer, so the user can
+    /// do the thing they noticed was missing and come back to it.
+    fn park_in_notes(&mut self, _: &notes::Save, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(workspace) = self.workspace.upgrade() else {
+            return;
+        };
+        let text = self.text(cx);
+        if text.trim().is_empty() {
+            notes::open_quick_note(&workspace, String::new(), None, window, cx);
+            return;
+        }
+        let store = notes::NotesStore::global(cx);
+        let create = store.update(cx, |store, cx| {
+            store.create(
+                notes::NewNote {
+                    title: notes::title_from_text(&text),
+                    body: text.clone(),
+                    kind: notes::NoteKind::Draft,
+                    scope: notes::NoteScope::Global,
+                    pin: None,
+                    thread: None,
+                },
+                cx,
+            )
+        });
+        self.clear(window, cx);
+        let message_editor = cx.weak_entity();
+        cx.spawn_in(window, async move |_, cx| {
+            let path = create.await?;
+            workspace.update(cx, |workspace, cx| {
+                let toast = workspace::Toast::new(
+                    workspace::notifications::NotificationId::unique::<ParkedPrompt>(),
+                    i18n::t!("agent_ui.notes.parked").to_string(),
+                )
+                .on_click(
+                    i18n::t!("agent_ui.notes.undo").to_string(),
+                    move |window, cx| {
+                        message_editor
+                            .update(cx, |message_editor, cx| {
+                                message_editor.insert_text(&text, window, cx);
+                            })
+                            .log_err();
+                        store
+                            .update(cx, |store, cx| {
+                                store.delete_path(path.clone(), notes::NoteScope::Global, cx)
+                            })
+                            .detach_and_log_err(cx);
+                    },
+                );
+                workspace.show_toast(toast, cx);
+            });
+            anyhow::Ok(())
+        })
+        .detach_and_log_err(cx);
+    }
+
     pub fn clear(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.editor.update(cx, |editor, cx| {
             editor.clear(window, cx);
@@ -2146,6 +2202,7 @@ impl Render for MessageEditor {
             .on_action(cx.listener(Self::send_immediately))
             .on_action(cx.listener(Self::chat_with_follow))
             .on_action(cx.listener(Self::cancel))
+            .on_action(cx.listener(Self::park_in_notes))
             .capture_action(cx.listener(Self::copy))
             .capture_action(cx.listener(Self::cut))
             .on_action(cx.listener(Self::paste_raw))
@@ -2185,6 +2242,8 @@ impl Render for MessageEditor {
             })
     }
 }
+
+struct ParkedPrompt;
 
 pub struct MessageEditorAddon {}
 

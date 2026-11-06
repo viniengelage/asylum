@@ -170,6 +170,7 @@ pub(crate) enum PromptContextType {
     ProjectItem,
     Logs,
     Container,
+    Note,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -259,6 +260,7 @@ impl TryFrom<&str> for PromptContextType {
             "item" => Ok(Self::ProjectItem),
             "log" => Ok(Self::Logs),
             "container" => Ok(Self::Container),
+            "note" | "nota" => Ok(Self::Note),
             _ => Err(format!("Invalid context picker mode: {}", value)),
         }
     }
@@ -279,6 +281,7 @@ impl PromptContextType {
             Self::ProjectItem => "item",
             Self::Logs => "log",
             Self::Container => "container",
+            Self::Note => "note",
         }
     }
 
@@ -296,6 +299,7 @@ impl PromptContextType {
             Self::ProjectItem => return t!("agent_ui.context_picker.project_items"),
             Self::Logs => return t!("agent_ui.context_picker.logs"),
             Self::Container => return t!("agent_ui.context_picker.containers"),
+            Self::Note => return t!("agent_ui.context_picker.notes"),
         };
         label.into()
     }
@@ -314,6 +318,7 @@ impl PromptContextType {
             Self::ProjectItem => IconName::ListTodo,
             Self::Logs => IconName::CloudPulse,
             Self::Container => IconName::Box,
+            Self::Note => IconName::Notepad,
         }
     }
 }
@@ -331,6 +336,7 @@ pub(crate) enum Match {
     PullRequest(task_agents::PullRequestEntry),
     ProjectItem(task_agents::ProjectItemEntry),
     Logs(task_agents::LogMention),
+    Note(notes::Note),
 }
 
 #[derive(Debug, Clone)]
@@ -353,6 +359,7 @@ impl Match {
             Match::PullRequest(_) => 1.,
             Match::ProjectItem(_) => 1.,
             Match::Logs(_) => 1.,
+            Match::Note(_) => 1.,
         }
     }
 }
@@ -1277,6 +1284,63 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
         task_agents::container_mentions(workspace.read(cx).project(), cx)
     }
 
+    fn note_mentions(&self, workspace: &Entity<Workspace>, cx: &App) -> Vec<notes::Note> {
+        if !self.source.supports_context(PromptContextType::File, cx) {
+            return Vec::new();
+        }
+        notes::notes_for_project(workspace.read(cx).project(), cx)
+            .into_iter()
+            .filter(|note| note.kind == notes::NoteKind::Note)
+            .collect()
+    }
+
+    fn build_note_completion(
+        note: notes::Note,
+        source_range: Range<Anchor>,
+        source: Arc<T>,
+        editor: WeakEntity<Editor>,
+        mention_set: WeakEntity<MentionSet>,
+        workspace: Entity<Workspace>,
+    ) -> Completion {
+        let uri = MentionUri::Note {
+            abs_path: note.path.clone(),
+            title: note.title.to_string(),
+        };
+        let crease_text: SharedString = uri.name().into();
+        let new_text = format!("[@{}]({}) ", crease_text, uri.to_uri());
+        let new_text_len = new_text.len();
+        let preview = note
+            .body
+            .lines()
+            .find(|line| !line.trim().is_empty())
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        Completion {
+            replace_range: source_range.clone(),
+            new_text,
+            label: CodeLabel::plain(format!("{} · {}", note.title, preview), None),
+            documentation: None,
+            source: project::CompletionSource::Custom,
+            icon_path: Some(IconName::Notepad.path().into()),
+            icon_color: None,
+            match_start: None,
+            snippet_deduplication_key: None,
+            insert_text_mode: None,
+            confirm: Some(confirm_completion_callback(
+                crease_text,
+                source_range.start,
+                new_text_len - 1,
+                uri,
+                source,
+                editor,
+                mention_set,
+                workspace,
+            )),
+            group: None,
+        }
+    }
+
     fn project_item_entries(
         &self,
         workspace: &Entity<Workspace>,
@@ -1556,6 +1620,21 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
                     .map(Match::Logs)
                     .collect(),
             ),
+
+            Some(PromptContextType::Note) => {
+                let query = query.to_lowercase();
+                Task::ready(
+                    self.note_mentions(&workspace, cx)
+                        .into_iter()
+                        .filter(|note| {
+                            query.is_empty()
+                                || note.title.to_lowercase().contains(&query)
+                                || note.body.to_lowercase().contains(&query)
+                        })
+                        .map(Match::Note)
+                        .collect(),
+                )
+            }
 
             Some(PromptContextType::Container) => {
                 let query = query.to_lowercase();
@@ -1997,6 +2076,10 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
 
         if !self.container_mentions(workspace, cx).is_empty() {
             entries.push(PromptContextEntry::Mode(PromptContextType::Container));
+        }
+
+        if !self.note_mentions(workspace, cx).is_empty() {
+            entries.push(PromptContextEntry::Mode(PromptContextType::Note));
         }
 
         if self
@@ -2602,6 +2685,14 @@ impl<T: PromptCompletionProviderDelegate> CompletionProvider for PromptCompletio
                                             cx,
                                         ))
                                     }
+                                    Match::Note(note) => Some(Self::build_note_completion(
+                                        note,
+                                        source_range.clone(),
+                                        source.clone(),
+                                        editor.clone(),
+                                        mention_set.clone(),
+                                        workspace.clone(),
+                                    )),
                                     Match::Logs(entry) => Some(Self::build_logs_completion(
                                         entry,
                                         source_range.clone(),

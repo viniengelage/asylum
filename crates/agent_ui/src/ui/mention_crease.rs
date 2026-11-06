@@ -251,6 +251,9 @@ fn open_mention_uri(
                 cx,
             );
         }
+        MentionUri::Note { abs_path, .. } => {
+            open_skill_file(workspace, abs_path, window, cx);
+        }
         MentionUri::Logs { id, .. } => {
             let project = workspace.project().clone();
             task_agents::open_log_mention(&project, &id, window, cx).log_err();

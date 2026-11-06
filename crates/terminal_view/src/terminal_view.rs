@@ -992,6 +992,19 @@ impl TerminalView {
     }
 
     ///Attempt to paste the clipboard into the terminal
+    fn insert_text(
+        &mut self,
+        action: &zed_actions::notes::InsertText,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.read_only {
+            return;
+        }
+        self.terminal
+            .update(cx, |terminal, _| terminal.paste(&action.text));
+    }
+
     fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
         if self.read_only {
             return;
@@ -1483,6 +1496,7 @@ impl Render for TerminalView {
             .on_action(cx.listener(TerminalView::copy))
             .on_action(cx.listener(TerminalView::editor_copy))
             .on_action(cx.listener(TerminalView::paste))
+            .on_action(cx.listener(TerminalView::insert_text))
             .on_action(cx.listener(TerminalView::editor_paste))
             .on_action(cx.listener(TerminalView::paste_text))
             .on_action(cx.listener(TerminalView::clear))

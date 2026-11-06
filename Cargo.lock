@@ -514,6 +514,7 @@ dependencies = [
  "markdown",
  "menu",
  "multi_buffer",
+ "notes",
  "notifications",
  "ordered-float 5.5.0",
  "parking_lot",
@@ -11799,6 +11800,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf23ab2b905654b4cb177e30b629937b3868311d4e1cba859f899c041046e69b"
 dependencies = [
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "notes"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "collections",
+ "editor",
+ "fs",
+ "futures 0.3.34",
+ "fuzzy",
+ "gpui",
+ "i18n",
+ "log",
+ "menu",
+ "paths",
+ "picker",
+ "project",
+ "schemars 1.0.4",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "ui",
+ "util",
+ "workspace",
+ "zed_actions",
 ]
 
 [[package]]
@@ -23301,6 +23329,7 @@ dependencies = [
  "miniprofiler_ui",
  "nix",
  "node_runtime",
+ "notes",
  "notifications",
  "objc2 0.6.3",
  "objc2-app-kit 0.3.2",

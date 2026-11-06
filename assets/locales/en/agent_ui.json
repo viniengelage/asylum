@@ -758,5 +758,8 @@
   "subagent.automatic_why": "Why {choice}",
   "subagent.automatic_meta": "{reason} · picked automatically from benchmarks.md",
   "model_benchmarks.used_by_auto": "used by Auto",
-  "model_benchmarks.compare": "Compare with default"
+  "model_benchmarks.compare": "Compare with default",
+  "notes.parked": "Prompt parked in Drafts · ⌥⌘V brings it back",
+  "notes.undo": "Undo",
+  "context_picker.notes": "Notes"
 }

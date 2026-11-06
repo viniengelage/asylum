@@ -16343,6 +16343,19 @@ pub(crate) fn open_link(
                     cx,
                 );
             }
+            MentionUri::Note { abs_path, .. } => {
+                workspace
+                    .open_abs_path(
+                        abs_path,
+                        workspace::OpenOptions {
+                            focus: Some(true),
+                            ..Default::default()
+                        },
+                        window,
+                        cx,
+                    )
+                    .detach_and_log_err(cx);
+            }
             MentionUri::Logs { id, .. } => {
                 let project = workspace.project().clone();
                 task_agents::open_log_mention(&project, &id, window, cx).log_err();

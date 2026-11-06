@@ -108,6 +108,12 @@ pub enum MentionUri {
         id: String,
         title: String,
     },
+    /// A note from the Notes panel. Its file may live outside the project, so it is read
+    /// straight from disk.
+    Note {
+        abs_path: PathBuf,
+        title: String,
+    },
 }
 
 impl MentionUri {
@@ -308,6 +314,14 @@ impl MentionUri {
                         reference: query_param(&url, "ref").unwrap_or_default(),
                         title: query_param(&url, "title").unwrap_or_default(),
                     })
+                } else if path.starts_with("/agent/note") {
+                    validate_query_params(&url, &["path", "title"])?;
+                    Ok(Self::Note {
+                        abs_path: PathBuf::from(
+                            query_param(&url, "path").context("Missing path for note")?,
+                        ),
+                        title: query_param(&url, "title").unwrap_or_default(),
+                    })
                 } else if path.starts_with("/agent/logs") {
                     validate_query_params(&url, &["id", "title"])?;
                     Ok(Self::Logs {
@@ -403,6 +417,7 @@ impl MentionUri {
             MentionUri::Skill {
                 skill_file_path, ..
             } => Some(skill_file_path),
+            MentionUri::Note { abs_path, .. } => Some(abs_path),
             MentionUri::PastedImage { .. }
             | MentionUri::Thread { .. }
             | MentionUri::Rule { .. }
@@ -495,6 +510,7 @@ impl MentionUri {
                 None => title.clone(),
             },
             MentionUri::Logs { title, .. } => title.clone(),
+            MentionUri::Note { title, .. } => title.clone(),
         }
     }
 
@@ -604,6 +620,7 @@ impl MentionUri {
             }
             MentionUri::Logs { .. } => IconName::CloudPulse.path().into(),
             MentionUri::Skill { .. } => IconName::Sparkle.path().into(),
+            MentionUri::Note { .. } => IconName::Notepad.path().into(),
         }
     }
 
@@ -763,6 +780,13 @@ impl MentionUri {
                     .append_pair("project", project_id)
                     .append_pair("item", item_id)
                     .append_pair("ref", reference)
+                    .append_pair("title", title);
+                url
+            }
+            MentionUri::Note { abs_path, title } => {
+                let mut url = Url::parse("zed:///agent/note").unwrap();
+                url.query_pairs_mut()
+                    .append_pair("path", &abs_path.to_string_lossy())
                     .append_pair("title", title);
                 url
             }
