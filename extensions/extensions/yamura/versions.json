@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Yamura <yxmura@proton.me>"
+   ],
+   "description": "Beautiful theme for Zed with great eye-soothing colors",
+   "download_count": 0,
+   "id": "yamura",
+   "name": "Yamura",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:03:37Z",
+   "repository": "https://github.com/yxmura/yamura-zed-theme",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

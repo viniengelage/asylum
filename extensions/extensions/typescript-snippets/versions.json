@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "seekode <nicolas@seekode.dev>"
+   ],
+   "description": "Essential TypeScript snippets for faster development with comprehensive type support",
+   "download_count": 0,
+   "id": "typescript-snippets",
+   "name": "TypeScript Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-06T12:00:48Z",
+   "repository": "https://github.com/seekode/zed-ts-snippets",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

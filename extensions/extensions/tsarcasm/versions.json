@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Xander <1174877+xtrasmal@users.noreply.github.com>"
+   ],
+   "description": "Lighten up, it's a dark Zed theme",
+   "download_count": 0,
+   "id": "tsarcasm",
+   "name": "TSARCASM Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:00:42Z",
+   "repository": "https://github.com/xtrasmal/zed-theme-tsarcasm",
+   "schema_version": 1,
+   "version": "0.0.9",
+   "wasm_api_version": null
+  }
+ ]
+}

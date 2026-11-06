@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Zacess <contact@zacess.com>"
+   ],
+   "description": "High contrast themes matching the Zacess reader: Light, Dark, Yellow on Black, Cream, High Contrast Dark and High Contrast Light, every text and syntax colour at 7:1 or more.",
+   "download_count": 0,
+   "id": "zacess-themes",
+   "name": "Zacess Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:04:04Z",
+   "repository": "https://github.com/zacesshq/themes",
+   "schema_version": 1,
+   "version": "0.2.1",
+   "wasm_api_version": null
+  }
+ ]
+}

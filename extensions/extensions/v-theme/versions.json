@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "necm1 <necmi.m.hasan@outlook.de>"
+   ],
+   "description": "Simple dark & high contrast theme",
+   "download_count": 0,
+   "id": "v-theme",
+   "name": "V Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:01:28Z",
+   "repository": "https://github.com/necm1/v-zed-theme",
+   "schema_version": 2,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Noel Horv\u00e1th <noelhorvath69@gmail.com>"
+   ],
+   "description": "A high-contrast pitch black theme based on the original for Visual Studio Code.",
+   "download_count": 0,
+   "id": "vibrant-abyss",
+   "name": "Vibrant Abyss",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:01:50Z",
+   "repository": "https://github.com/noelhorvath/vibrant-abyss-zed",
+   "schema_version": 1,
+   "version": "0.4.14",
+   "wasm_api_version": null
+  }
+ ]
+}

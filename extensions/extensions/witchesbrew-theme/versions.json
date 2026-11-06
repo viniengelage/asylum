@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "shoenot"
+   ],
+   "description": "A witchy, wine-y colorscheme for zed. Based on the witchesbrew.nvim theme.",
+   "download_count": 0,
+   "id": "witchesbrew-theme",
+   "name": "witches brew",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:03:05Z",
+   "repository": "https://github.com/shoenot/witchesbrew.zed",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

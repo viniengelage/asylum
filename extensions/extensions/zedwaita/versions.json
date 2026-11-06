@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "someone13574 <owenlaw222@gmail.com>"
+   ],
+   "description": "Light and dark Adwaita theme for Zed.",
+   "download_count": 0,
+   "id": "zedwaita",
+   "name": "Zedwaita",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:04:08Z",
+   "repository": "https://github.com/someone13574/zed-adwaita-theme",
+   "schema_version": 1,
+   "version": "0.0.7",
+   "wasm_api_version": null
+  }
+ ]
+}

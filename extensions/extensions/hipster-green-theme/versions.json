@@ -4,6 +4,23 @@
    "authors": [
     "Ayush Bhat <tfeayush@gmail.com>"
    ],
+   "description": "14 bold terminal-style themes: the original Hipster Green from iTerm2/Tabby plus pink, purple, blue, red, amber, matrix, forest, midnight, mint, moss and two light ones",
+   "download_count": 0,
+   "id": "hipster-green-theme",
+   "name": "Hipster",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T11:59:40Z",
+   "repository": "https://github.com/1ay1/hipster-zed-theme",
+   "schema_version": 1,
+   "version": "1.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Ayush Bhat <tfeayush@gmail.com>"
+   ],
    "description": "An exact port of Tabby/iTerm2's Hipster Green color scheme - a vibrant terminal-inspired theme with classic green-on-black aesthetic and modern syntax highlighting",
    "download_count": 0,
    "id": "hipster-green-theme",

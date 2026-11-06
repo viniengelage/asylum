@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Abhinav Sarkar"
+   ],
+   "description": "A zed editor theme for total concentration.",
+   "download_count": 0,
+   "id": "truly-zen-theme",
+   "name": "Truly Zen",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:00:41Z",
+   "repository": "https://github.com/abhinaaaavvv/truly-zen-theme",
+   "schema_version": 1,
+   "version": "1.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

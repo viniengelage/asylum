@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Kenny Heard <work@kennyheard.dev>"
+   ],
+   "description": "Designed for clarity and focus.",
+   "download_count": 0,
+   "id": "zen",
+   "name": "Zen",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:04:11Z",
+   "repository": "https://github.com/kennyheard/zed-theme-zen",
+   "schema_version": 1,
+   "version": "0.0.5",
+   "wasm_api_version": null
+  }
+ ]
+}

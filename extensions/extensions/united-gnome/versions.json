@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Smyrnis Giannis <smyrnisgiannis@gmail.com>"
+   ],
+   "description": "Color themes based on gnome",
+   "download_count": 0,
+   "id": "united-gnome",
+   "name": "United Gnome",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:01:22Z",
+   "repository": "https://github.com/Smyrnis/united-gnome-theme",
+   "schema_version": 1,
+   "version": "0.5.10",
+   "wasm_api_version": null
+  }
+ ]
+}

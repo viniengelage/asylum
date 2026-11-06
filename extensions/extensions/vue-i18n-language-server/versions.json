@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "XusCloud <XusCloud@gmail.com>"
+   ],
+   "description": "Show configurable inline translations for i18n keys in Vue/TS/TSX, with hover, diagnostics, completion, definition, and references.",
+   "download_count": 0,
+   "id": "vue-i18n-language-server",
+   "name": "Vue I18n",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-11-06T12:02:24Z",
+   "repository": "https://github.com/XusCloud/zed-vue-i18n",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": "0.7.0"
+  }
+ ]
+}

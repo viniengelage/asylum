@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Randa Zraik <randazraik@outlook.com>"
+   ],
+   "description": "VSCode great icons theme for Zed",
+   "download_count": 0,
+   "id": "vscode-great-icons",
+   "name": "VSCode Great Icons Theme",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-11-06T12:01:58Z",
+   "repository": "https://github.com/randazraik/zed-vscode-great-icons",
+   "schema_version": 1,
+   "version": "0.2.8",
+   "wasm_api_version": null
+  }
+ ]
+}

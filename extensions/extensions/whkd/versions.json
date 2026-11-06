@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "LGUG2Z <lgug2z@fastmail.com>"
+   ],
+   "description": "Tree-sitter syntax highlighting for whkd",
+   "download_count": 0,
+   "id": "whkd",
+   "name": "whkd",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-06T12:03:02Z",
+   "repository": "https://github.com/LGUG2Z/zed-whkd",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Alan Hamlett <alan@wakatime.com>",
+    "bestgopher <84328409@qq.com>"
+   ],
+   "description": "Wakatime support.",
+   "download_count": 0,
+   "id": "wakatime",
+   "name": "wakatime",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-11-06T12:02:49Z",
+   "repository": "https://github.com/wakatime/zed-wakatime",
+   "schema_version": 1,
+   "version": "0.1.10",
+   "wasm_api_version": "0.7.0"
+  }
+ ]
+}

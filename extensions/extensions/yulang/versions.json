@@ -1,0 +1,23 @@
+{
+ "data": [
+  {
+   "authors": [
+    "momota"
+   ],
+   "description": "Yulang language support",
+   "download_count": 0,
+   "id": "yulang",
+   "name": "Yulang",
+   "provides": [
+    "languages",
+    "grammars",
+    "language-servers"
+   ],
+   "published_at": "2026-11-06T12:04:03Z",
+   "repository": "https://github.com/momota1029/yulang-zed",
+   "schema_version": 1,
+   "version": "0.0.10",
+   "wasm_api_version": "0.4.0"
+  }
+ ]
+}

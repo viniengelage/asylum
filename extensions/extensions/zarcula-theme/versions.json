@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ihor Horun <igor.goroun@gmail.com>"
+   ],
+   "description": "Darcula\u2019s sophisticated cousin, custom-built for Zed.",
+   "download_count": 0,
+   "id": "zarcula-theme",
+   "name": "Zarcula",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:04:05Z",
+   "repository": "https://github.com/igorgoroun/zed-zarcula-theme",
+   "schema_version": 1,
+   "version": "0.1.2",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Nate Butler <iamnbutler@gmail.com>"
+   ],
+   "description": "Some of the legacy themes Zed shipped with initially: Andromeda, Atelier, Ros\u00e9 Pine, Sandcastle, Solarized, Summercamp",
+   "download_count": 0,
+   "id": "zed-legacy-themes",
+   "name": "Zed Legacy Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:04:06Z",
+   "repository": "https://github.com/zed-extensions/legacy-themes",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

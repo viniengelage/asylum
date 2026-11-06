@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Gael Lopes Da Silva <gael.lopes-da-silva@outlook.fr>"
+   ],
+   "description": "A yellow material theme for Zed",
+   "download_count": 0,
+   "id": "yellowed",
+   "name": "Yellowed",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:03:40Z",
+   "repository": "https://github.com/gael-lopes-da-silva/YellowedZed",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

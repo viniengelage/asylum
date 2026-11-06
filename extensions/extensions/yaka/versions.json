@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Kanyesigye"
+   ],
+   "description": "A light theme for the Zed Editor",
+   "download_count": 0,
+   "id": "yaka",
+   "name": "Yaka Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:03:37Z",
+   "repository": "https://github.com/edgarkanyes/yaka",
+   "schema_version": 1,
+   "version": "0.0.4",
+   "wasm_api_version": null
+  }
+ ]
+}

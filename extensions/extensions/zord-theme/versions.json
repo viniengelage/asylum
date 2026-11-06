@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Diogo Pereira <contact@diogopereira.dev>"
+   ],
+   "description": "A modern and minimalistic dark theme for the Zed editor, focused on visual comfort, balanced contrast, and a color palette inspired by Dracula, with its own strong identity.",
+   "download_count": 0,
+   "id": "zord-theme",
+   "name": "Zord Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:04:18Z",
+   "repository": "https://github.com/diogopereiradev/zord-theme",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

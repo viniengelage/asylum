@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "\u30d5\u30e9\u30f3\u30bd\u30ef <https://github.com/frank-vdm>"
+   ],
+   "description": "Y\u016bgen (\u5e7d\u7384) \u2013 A profound awareness of the universe that triggers feelings too deep and mysterious for words.",
+   "download_count": 0,
+   "id": "yugen",
+   "name": "Yugen Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:03:42Z",
+   "repository": "https://github.com/frank-vdm/yugen",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

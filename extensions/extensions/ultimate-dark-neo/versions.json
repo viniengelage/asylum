@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Rune B"
+   ],
+   "description": "A muted and pleasant dark theme for Zed with some italics to distinguish certain parts of the syntax. Designed for use with the programming font Victor Mono.",
+   "download_count": 0,
+   "id": "ultimate-dark-neo",
+   "name": "Ultimate Dark Neo",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:01:02Z",
+   "repository": "https://github.com/rubjo/ultimate-dark-neo-zed",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

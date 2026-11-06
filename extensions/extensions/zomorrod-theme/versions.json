@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ali Nayreez alinayreez@gmail.com"
+   ],
+   "description": "A dark, visually appealing cool theme with an emerald like feel",
+   "download_count": 0,
+   "id": "zomorrod-theme",
+   "name": "Zomorrod",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:04:18Z",
+   "repository": "https://github.com/AliNayreez/zomorrod-theme",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

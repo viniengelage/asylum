@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "slymax <contact@slymax.com>"
+   ],
+   "description": "a theme for Zed based on the Monokai Pro color scheme",
+   "download_count": 0,
+   "id": "zedokai",
+   "name": "Zedokai",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:04:07Z",
+   "repository": "https://github.com/slymax/zedokai",
+   "schema_version": 1,
+   "version": "1.2.2",
+   "wasm_api_version": null
+  }
+ ]
+}

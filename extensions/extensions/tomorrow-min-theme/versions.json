@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "blaqat <blaqat.ag@gmail.com>"
+   ],
+   "description": "Fork of [Tomorrow Theme](https://github.com/biaqat/tomorrow-theme-zed) with less highlights.",
+   "download_count": 0,
+   "id": "tomorrow-min-theme",
+   "name": "Tomorrow Minimal Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:00:12Z",
+   "repository": "https://github.com/biaqat/tomorrow-min-theme-zed",
+   "schema_version": 1,
+   "version": "1.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

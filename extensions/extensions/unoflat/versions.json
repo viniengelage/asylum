@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Bryan Buchanan <bryan.b@hey.com>"
+   ],
+   "description": "Uno Flat is a minimal Zed theme based on Atom's One Dark.",
+   "download_count": 0,
+   "id": "unoflat",
+   "name": "Uno Flat Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:01:24Z",
+   "repository": "https://github.com/bryanbuchanan/unoflat",
+   "schema_version": 1,
+   "version": "0.1.6",
+   "wasm_api_version": null
+  }
+ ]
+}

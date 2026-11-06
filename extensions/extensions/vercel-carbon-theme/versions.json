@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "SwiftlyDaniel"
+   ],
+   "description": "A Zed theme inspired by Vercel's visual language.",
+   "download_count": 0,
+   "id": "vercel-carbon-theme",
+   "name": "Vercel Carbon",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:01:39Z",
+   "repository": "https://github.com/SwiftlyDaniel/zed-vercel-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

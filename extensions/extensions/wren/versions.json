@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Michael Gaver-Holmes <hgmich+noreply@users.github.com>"
+   ],
+   "description": "Syntax higlighting support for Wren",
+   "download_count": 0,
+   "id": "wren",
+   "name": "Wren Language support.",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-06T12:03:28Z",
+   "repository": "https://github.com/hgmich/zed-wren",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

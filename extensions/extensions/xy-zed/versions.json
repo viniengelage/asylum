@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Daniel Zarifpour <z@rifpour.xyz>"
+   ],
+   "description": "\ud83d\udc08\u200d\u2b1b A sleek and sophisticated dark theme with vibrant, intelligent syntax highlighting. Please report issues \u27a9",
+   "download_count": 0,
+   "id": "xy-zed",
+   "name": "XY-Zed Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:03:36Z",
+   "repository": "https://github.com/zarifpour/xy-zed",
+   "schema_version": 1,
+   "version": "0.1.4",
+   "wasm_api_version": null
+  }
+ ]
+}

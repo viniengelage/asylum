@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Xscriptor"
+   ],
+   "description": "Twelve Xscriptor color palettes for Zed: X, Madrid, Lahabana, Miami, Paris, Tokio, Oslo, Helsinki, Berlin, London, Praha and Bogota.",
+   "download_count": 0,
+   "id": "xscriptor-theme",
+   "name": "Xscriptor Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:03:36Z",
+   "repository": "https://github.com/xscriptor-colors/zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

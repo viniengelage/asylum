@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Jules Sorensen <julessorens@gmail.com>"
+   ],
+   "description": "Wakfu Theme for Zed",
+   "download_count": 0,
+   "id": "wakfu-theme",
+   "name": "Wakfu Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:02:49Z",
+   "repository": "https://github.com/JulesSorensen/zed-wakfu-theme",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

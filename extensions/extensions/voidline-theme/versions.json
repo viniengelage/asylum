@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Aryan Bhardwaj"
+   ],
+   "description": "Low-glare Zed themes with carbon-black surfaces, focused syntax colors, and an optional glass variant.",
+   "download_count": 0,
+   "id": "voidline-theme",
+   "name": "Voidline Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:01:54Z",
+   "repository": "https://github.com/knownIndie/voidline-zed-theme",
+   "schema_version": 1,
+   "version": "0.1.2",
+   "wasm_api_version": null
+  }
+ ]
+}

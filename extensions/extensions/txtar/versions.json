@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Tom Fleet <me@followtheprocess.codes>"
+   ],
+   "description": "Language support for txtar files",
+   "download_count": 0,
+   "id": "txtar",
+   "name": "Txtar",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-06T12:00:47Z",
+   "repository": "https://github.com/FollowTheProcess/zed-txtar",
+   "schema_version": 1,
+   "version": "0.3.0",
+   "wasm_api_version": null
+  }
+ ]
+}

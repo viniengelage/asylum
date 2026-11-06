@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Z\u00e9 Po\u00e7as"
+   ],
+   "description": "A warm dark theme with muted greys and Gruvbox-inspired syntax colours",
+   "download_count": 0,
+   "id": "zenith-theme",
+   "name": "Zenith",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:04:12Z",
+   "repository": "https://github.com/zepocas/zenith-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

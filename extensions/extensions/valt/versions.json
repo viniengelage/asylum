@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Dan Wood <daniel4wood@icloud.com>"
+   ],
+   "description": "a nice theme",
+   "download_count": 0,
+   "id": "valt",
+   "name": "Valt",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:01:31Z",
+   "repository": "https://github.com/valtism/valt",
+   "schema_version": 1,
+   "version": "1.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

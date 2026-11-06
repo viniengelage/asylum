@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Artem Krinitsyn <arkriny@arkriny.com>",
+    "L1NC5 <https://github.com/L1NC5>"
+   ],
+   "description": "A cool, dark, low contrast colorscheme for Zed. Pastel yet vivid, like a fleeting memory...",
+   "download_count": 0,
+   "id": "vague",
+   "name": "Vague Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:01:29Z",
+   "repository": "https://github.com/vague-theme/vague-zed",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

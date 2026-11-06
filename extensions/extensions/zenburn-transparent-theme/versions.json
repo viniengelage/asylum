@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Demetrios Rockas <demetrios@rockas.dev>"
+   ],
+   "description": "Low-contrast Zenburn for Zed with a transparent/blurred UI; syntax colors matched to the VSCode Zenburn theme",
+   "download_count": 0,
+   "id": "zenburn-transparent-theme",
+   "name": "Zenburn Transparent",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:04:11Z",
+   "repository": "https://github.com/rockas-d/zenburn-transparent",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

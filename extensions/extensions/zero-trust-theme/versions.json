@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Yannick Boog"
+   ],
+   "description": "A clean and secure theme for Zed featuring light and dark variants with excellent readability and professional color schemes",
+   "download_count": 0,
+   "id": "zero-trust-theme",
+   "name": "Zero Trust Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:04:13Z",
+   "repository": "https://github.com/yannickboog/zero-trust-theme",
+   "schema_version": 1,
+   "version": "0.2.1",
+   "wasm_api_version": null
+  }
+ ]
+}

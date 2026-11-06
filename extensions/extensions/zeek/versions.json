@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Jamie Carambat"
+   ],
+   "description": "Provides Zeek Syntax Highlighting",
+   "download_count": 0,
+   "id": "zeek",
+   "name": "Zeek",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-06T12:04:11Z",
+   "repository": "https://github.com/0xORB/zeek-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "d1y <chenhonzhou@gmail.com>"
+   ],
+   "description": "Portable VScode Monokai Charcoal",
+   "download_count": 0,
+   "id": "vscode-monokai-charcoal",
+   "name": "VScode Monokai Charcoal",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:02:01Z",
+   "repository": "https://github.com/d1y/vscode-monokaicharcoal.zed",
+   "schema_version": 0,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

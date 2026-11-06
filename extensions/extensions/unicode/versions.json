@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Gabrielle Guimar\u00e3es de Oliveira <gabrielle1guim@gmail.com>"
+   ],
+   "description": "Unicode characters for Zed",
+   "download_count": 0,
+   "id": "unicode",
+   "name": "Unicode",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-11-06T12:01:21Z",
+   "repository": "https://github.com/aripiprazole/unicode",
+   "schema_version": 1,
+   "version": "0.1.5",
+   "wasm_api_version": "0.1.0"
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "x <x032205@gmail.com>"
+   ],
+   "description": "Minimal and modern semi-transparent dark theme, in desaturated silver and the original saturated palette.",
+   "download_count": 0,
+   "id": "tsar",
+   "name": "Argent",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:00:42Z",
+   "repository": "https://github.com/x032205/argent-zed-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Loris Croce <loris.croce@uca.fr>"
+   ],
+   "description": "XQuery language support for Zed",
+   "download_count": 0,
+   "id": "xquery",
+   "name": "XQuery",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-06T12:03:36Z",
+   "repository": "https://github.com/lorcroce/zed-xquery",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -11,6 +11,23 @@
    "provides": [
     "themes"
    ],
+   "published_at": "2026-11-06T11:59:44Z",
+   "repository": "https://github.com/josiasbeem/monochromator",
+   "schema_version": 1,
+   "version": "0.5.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Josias Beem <josias@beem.at>"
+   ],
+   "description": "Distraction-free monochrome coding theme",
+   "download_count": 0,
+   "id": "monochromator-theme",
+   "name": "Monochromator",
+   "provides": [
+    "themes"
+   ],
    "published_at": "2026-11-03T11:54:53Z",
    "repository": "https://codeberg.org/beem/monochromator",
    "schema_version": 1,

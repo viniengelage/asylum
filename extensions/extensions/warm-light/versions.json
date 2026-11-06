@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Yang Gang <yanggang.uefi@gmail.com>"
+   ],
+   "description": "Warm Light theme for the Zed code editor.",
+   "download_count": 0,
+   "id": "warm-light",
+   "name": "Warm Light",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:02:51Z",
+   "repository": "https://github.com/YangGangUEFI/zed-theme-warm-light",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Lucas Souza"
+   ],
+   "description": "A Dracula-inspired forest green theme with emerald, jade and lime tones. Also available in black, gray, purple, burgundy, ocean and light variants.",
+   "download_count": 0,
+   "id": "verdula-theme",
+   "name": "Verdula",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:01:40Z",
+   "repository": "https://github.com/LucasSouza76/verdula-theme",
+   "schema_version": 1,
+   "version": "0.0.5",
+   "wasm_api_version": null
+  }
+ ]
+}

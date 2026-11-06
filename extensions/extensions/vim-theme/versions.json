@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Daniel Thompson, Zed Industries and Benjamin Davies"
+   ],
+   "description": "A port of the bundled Vim color schemes",
+   "download_count": 0,
+   "id": "vim-theme",
+   "name": "Vim Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:01:51Z",
+   "repository": "https://github.com/daniel-thompson/vim-theme-for-zed",
+   "schema_version": 1,
+   "version": "0.5.1",
+   "wasm_api_version": null
+  }
+ ]
+}

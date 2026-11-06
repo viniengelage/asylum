@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "blaqat <blaqat.ag@gmail.com>"
+   ],
+   "description": "Theme based off the moonscript.org code examples",
+   "download_count": 0,
+   "id": "yue-theme",
+   "name": "Yue Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:03:42Z",
+   "repository": "https://github.com/biaqat/yue-theme-zed",
+   "schema_version": 1,
+   "version": "1.2.1",
+   "wasm_api_version": null
+  }
+ ]
+}

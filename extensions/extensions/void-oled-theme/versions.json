@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Rusty Daemon"
+   ],
+   "description": "A very dark theme for Zed Editor",
+   "download_count": 0,
+   "id": "void-oled-theme",
+   "name": "Void OLED",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:01:54Z",
+   "repository": "https://github.com/RustyDaemon/zed-void-oled-theme.git",
+   "schema_version": 1,
+   "version": "0.8.9",
+   "wasm_api_version": null
+  }
+ ]
+}

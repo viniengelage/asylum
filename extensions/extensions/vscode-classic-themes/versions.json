@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Alan <alanisme.my@gmail.com>"
+   ],
+   "description": "\u2764\ufe0f All 19 built-in Visual Studio Code color themes, ported to Zed.",
+   "download_count": 0,
+   "id": "vscode-classic-themes",
+   "name": "VS Code Classics",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:01:56Z",
+   "repository": "https://github.com/alanisme/vscode-themes-for-zed",
+   "schema_version": 1,
+   "version": "0.4.3",
+   "wasm_api_version": null
+  }
+ ]
+}

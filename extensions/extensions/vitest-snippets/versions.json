@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Jonah Werre<jonahwerre@gmail.com>"
+   ],
+   "description": "A comprehensive collection of Vitest snippets for the Zed editor to speed up test development.",
+   "download_count": 0,
+   "id": "vitest-snippets",
+   "name": "Vitest Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-06T12:01:53Z",
+   "repository": "https://github.com/jwerre/vitest-snippets",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

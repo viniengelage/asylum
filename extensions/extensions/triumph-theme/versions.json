@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Bushenzie <buchenzii@gmail.com>"
+   ],
+   "description": "Dark theme based on One Dark and Palenight",
+   "download_count": 0,
+   "id": "triumph-theme",
+   "name": "Triumph",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:00:40Z",
+   "repository": "https://github.com/Bushenzie/triumph",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

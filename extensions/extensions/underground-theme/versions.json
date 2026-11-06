@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Andrey Yurtaev <mdrdnt@gmail.com>"
+   ],
+   "description": "Underground theme for Zed editor",
+   "download_count": 0,
+   "id": "underground-theme",
+   "name": "Underground theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:01:06Z",
+   "repository": "https://github.com/i-amdroid/zed-underground-theme",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "isaiah hamilton <isaiah7hamilton@gmail.com>"
+   ],
+   "description": "A native Zed port of Gruvbox and Gruvbox Material theme with thoughtful improvements.",
+   "download_count": 0,
+   "id": "zedbox",
+   "name": "Zedbox",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:04:06Z",
+   "repository": "https://github.com/isaiah-hamilton/zedbox",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Mathieu Souflis <contact@mathieusouflis.com>"
+   ],
+   "description": "Dark, black, and light themes for Zed, inspired by the Version 14 brand palette.",
+   "download_count": 0,
+   "id": "version14-theme",
+   "name": "Version 14",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:01:43Z",
+   "repository": "https://github.com/version14/zed-theme",
+   "schema_version": 1,
+   "version": "0.4.2",
+   "wasm_api_version": null
+  }
+ ]
+}

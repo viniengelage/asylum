@@ -4,6 +4,23 @@
    "authors": [
     "fajriyan <fajriyan20@gmail.com>"
    ],
+   "description": "Deepz \u2014 Deep themes for Zed. Sharks not included.",
+   "download_count": 0,
+   "id": "deepz-theme",
+   "name": "Deepz",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T11:59:36Z",
+   "repository": "https://github.com/fajriyan/deepz-theme",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "fajriyan <fajriyan20@gmail.com>"
+   ],
    "description": "Deepz \u2014 Deep dark theme for Zed",
    "download_count": 0,
    "id": "deepz-theme",

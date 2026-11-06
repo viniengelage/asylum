@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Rune B"
+   ],
+   "description": "A collection of useful snippets for Vue 3.",
+   "download_count": 0,
+   "id": "vue-snippets",
+   "name": "Vue snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-06T12:02:24Z",
+   "repository": "https://github.com/rubjo/zed-vue-snippets",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

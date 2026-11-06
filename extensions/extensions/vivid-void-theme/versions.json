@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Jakub Karp <lirinlabs@gmail.com>"
+   ],
+   "description": "A deep, void-like aesthetic featuring highly vivid syntax highlighting.",
+   "download_count": 0,
+   "id": "vivid-void-theme",
+   "name": "Vivid Void",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:01:53Z",
+   "repository": "https://github.com/fn-jakubkarp/zed-vivid-void-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

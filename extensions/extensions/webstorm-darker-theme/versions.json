@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "jxshwa"
+   ],
+   "description": "Webstorm Darker Theme for Zed",
+   "download_count": 0,
+   "id": "webstorm-darker-theme",
+   "name": "Webstorm Darker Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:02:59Z",
+   "repository": "https://github.com/jxshwa/webstorm-darker-theme.git",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

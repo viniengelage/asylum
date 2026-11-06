@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "mikaeladev <mikaeladev@icloud.com>"
+   ],
+   "description": "Syntax highlighting for yuck (eww) files",
+   "download_count": 0,
+   "id": "yuck",
+   "name": "Yuck",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-06T12:03:41Z",
+   "repository": "https://github.com/mikaeladev/zed-yuck",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

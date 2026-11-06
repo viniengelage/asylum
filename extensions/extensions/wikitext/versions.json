@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Benjamin Davies <bentendavies@gmail.com>"
+   ],
+   "description": "Wikitext language support.",
+   "download_count": 0,
+   "id": "wikitext",
+   "name": "Wikitext",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-06T12:03:04Z",
+   "repository": "https://github.com/Benjamin-Davies/zed-wikitext",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

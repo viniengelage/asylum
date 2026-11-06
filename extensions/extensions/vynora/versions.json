@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Xuancong Meng <xuancongmeng@gmail.com>"
+   ],
+   "description": "a theme for Zed based on the Monokai color scheme",
+   "download_count": 0,
+   "id": "vynora",
+   "name": "Vynora",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:02:25Z",
+   "repository": "https://github.com/QuarkPixel/Vynora",
+   "schema_version": 1,
+   "version": "0.0.3",
+   "wasm_api_version": null
+  }
+ ]
+}

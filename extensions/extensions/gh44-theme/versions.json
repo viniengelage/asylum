@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Gentrit Halili"
+   ],
+   "description": "gh44 theme for Zed",
+   "download_count": 0,
+   "id": "gh44-theme",
+   "name": "gh44",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T11:59:38Z",
+   "repository": "https://github.com/gentrithalili1/gh44-theme",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

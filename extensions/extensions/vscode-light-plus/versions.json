@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Eric Eastwood <contact@ericeastwood.com>"
+   ],
+   "description": "Port of the VSCode Light+ theme to Zed",
+   "download_count": 0,
+   "id": "vscode-light-plus",
+   "name": "VSCode Light+",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:02:01Z",
+   "repository": "https://github.com/MadLittleMods/zed-theme-vscode-light-plus",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

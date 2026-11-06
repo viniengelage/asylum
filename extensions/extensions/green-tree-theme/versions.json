@@ -4,6 +4,23 @@
    "authors": [
     "yuukiLike"
    ],
+   "description": "Four green-focused themes for Zed. Day Vivid pairs soft sage with colorful syntax and AA 4.5:1 normal text. Three dark variants target AAA 7:1 primary text and AA 4.5:1 comments. Green debugger highlights.",
+   "download_count": 0,
+   "id": "green-tree-theme",
+   "name": "GreenTree",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T11:59:38Z",
+   "repository": "https://github.com/yuukiLike/zed-skin",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "yuukiLike"
+   ],
    "description": "A high contrast theme collection for Zed. Three dark variants target WCAG AAA 7:1 for primary text, with AA 4.5:1 for comments. Search and selections prioritize appearance. Warm-white Day Vivid favors brighter colors.",
    "download_count": 0,
    "id": "green-tree-theme",

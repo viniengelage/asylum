@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Luan Santos <zed@luan.sh>"
+   ],
+   "description": "Wgsl language support for Zed",
+   "download_count": 0,
+   "id": "wgsl",
+   "name": "Wgsl",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-06T12:03:00Z",
+   "repository": "https://github.com/luan/zed-wgsl",
+   "schema_version": 0,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

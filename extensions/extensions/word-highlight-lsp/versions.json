@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Marco Ivaldi <raptor@0xdeadbeef.info>"
+   ],
+   "description": "Highlight all occurrences of selected words with multiple colors to quickly identify them in code.",
+   "download_count": 0,
+   "id": "word-highlight-lsp",
+   "name": "Word Highlight",
+   "provides": [
+    "language-servers"
+   ],
+   "published_at": "2026-11-06T12:03:27Z",
+   "repository": "https://github.com/0xdea/zed-highlight",
+   "schema_version": 1,
+   "version": "0.1.5",
+   "wasm_api_version": "0.7.0"
+  }
+ ]
+}

@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "elkraneo"
+   ],
+   "description": "Syntax highlighting for OpenUSD ASCII files (.usd, .usda).",
+   "download_count": 0,
+   "id": "usd",
+   "name": "USD",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-06T12:01:26Z",
+   "repository": "https://github.com/elkraneo/zed-usd",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Lihuen Molina <lihue.molina@gmail.com>"
+   ],
+   "description": "\ud83c\udf4e Recreate Xcode's native feel in Zed with authentic themes for a seamless, Apple-inspired coding environment.",
+   "download_count": 0,
+   "id": "xcode-themes",
+   "name": "Xcode Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:03:30Z",
+   "repository": "https://github.com/skarline/zed-xcode-themes",
+   "schema_version": 1,
+   "version": "2.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

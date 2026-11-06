@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Gurvir Randhawa <gurvirrandhawa28@gmail.com>"
+   ],
+   "description": "A dark, violet-toned theme designed for quality & visual comfort",
+   "download_count": 0,
+   "id": "ultraviolet-theme",
+   "name": "ultraViolet",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:01:03Z",
+   "repository": "https://github.com/Gurvirr/zed-ultraViolet",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

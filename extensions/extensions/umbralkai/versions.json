@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Andrew Sen <platformer@github.com>"
+   ],
+   "description": "A dark theme with perceptually uniform syntax colors. Inspired by Monokai and Penumbra.",
+   "download_count": 0,
+   "id": "umbralkai",
+   "name": "Umbralkai",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:01:04Z",
+   "repository": "https://github.com/platformer/zed-umbralkai",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

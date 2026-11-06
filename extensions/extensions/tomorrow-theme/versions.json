@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "blaqat <blaqat.ag@gmail.com>"
+   ],
+   "description": "Theme Based on chriskempson's Tomorrow Theme, VS Code's Tomorrow Night Blue, and mdBook's Coal Theme",
+   "download_count": 0,
+   "id": "tomorrow-theme",
+   "name": "Tomorrow Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:00:13Z",
+   "repository": "https://github.com/biaqat/tomorrow-theme-zed",
+   "schema_version": 1,
+   "version": "1.2.1",
+   "wasm_api_version": null
+  }
+ ]
+}

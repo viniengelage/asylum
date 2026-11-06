@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "algebnaly <mail@algebnaly.com>"
+   ],
+   "description": "Syntax Highlight for XDR",
+   "download_count": 0,
+   "id": "xdr-naive",
+   "name": "XDR Syntax Highlight",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-06T12:03:30Z",
+   "repository": "https://github.com/algebnaly/xdr.zed.git",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

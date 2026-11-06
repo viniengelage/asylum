@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Xiangpeng Hao (adapted from Microsoft's VSCode theme)"
+   ],
+   "description": "A port of Visual Studio Code's Light Modern theme for Zed",
+   "download_count": 0,
+   "id": "vscode-light-modern",
+   "name": "VSCode Light Modern Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:02:00Z",
+   "repository": "https://github.com/XiangpengHao/zed-theme-vscode-light-modern",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

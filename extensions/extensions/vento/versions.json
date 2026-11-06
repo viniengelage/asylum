@@ -1,0 +1,23 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Deniz Ak\u015fim\u015fek <deniz@aksimsek.tr>",
+    "Bob Rockefeller"
+   ],
+   "description": "Highlighting for the Vento templating language",
+   "download_count": 0,
+   "id": "vento",
+   "name": "Vento",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-06T12:01:39Z",
+   "repository": "https://codeberg.org/dz4k/zed-vento",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

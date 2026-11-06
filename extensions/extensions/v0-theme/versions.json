@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "blaqat <blaqat.ag@gmail.com>"
+   ],
+   "description": "Theme used in v0 chat ported for zed",
+   "download_count": 0,
+   "id": "v0-theme",
+   "name": "v0 theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:01:28Z",
+   "repository": "https://github.com/biaqat/v0-theme-zed",
+   "schema_version": 1,
+   "version": "0.6.0",
+   "wasm_api_version": null
+  }
+ ]
+}

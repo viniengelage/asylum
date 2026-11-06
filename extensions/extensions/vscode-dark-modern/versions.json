@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "kcamcam <kevincamellini@gmail.com>"
+   ],
+   "description": "VSCode Dark Modern Theme for Zed",
+   "download_count": 0,
+   "id": "vscode-dark-modern",
+   "name": "VSCode Dark Modern",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:01:57Z",
+   "repository": "https://github.com/kcamcam/vscode_dark_modern.zed",
+   "schema_version": 1,
+   "version": "0.1.6",
+   "wasm_api_version": null
+  }
+ ]
+}

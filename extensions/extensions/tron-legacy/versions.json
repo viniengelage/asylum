@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Bret Comnes <bcomnes@gmail.com>"
+   ],
+   "description": "A port of the Tron Legacy theme for Zed",
+   "download_count": 0,
+   "id": "tron-legacy",
+   "name": "Tron Legacy",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:00:40Z",
+   "repository": "https://github.com/bcomnes/zed-theme-tron-legacy",
+   "schema_version": 1,
+   "version": "1.2.2",
+   "wasm_api_version": null
+  }
+ ]
+}

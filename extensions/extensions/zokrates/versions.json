@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "threonyl <83128427+threonyl@users.noreply.github.com>"
+   ],
+   "description": "ZoKrates language support for Zed",
+   "download_count": 0,
+   "id": "zokrates",
+   "name": "ZoKrates",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-06T12:04:17Z",
+   "repository": "https://github.com/threonyl/zokrates-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "yayashn <yks@dr.com>"
+   ],
+   "description": "Polished and comprehensive VSCode Dark Modern theme for Zed.",
+   "download_count": 0,
+   "id": "vscode-dark-polished",
+   "name": "VSCode Dark Polished",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:01:58Z",
+   "repository": "https://github.com/yayashn/vscode-dark-polished",
+   "schema_version": 1,
+   "version": "0.0.9",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "eth0net <eth0net@pm.me>"
+   ],
+   "description": "Syntax highlighting for VHS `.tape` files",
+   "download_count": 0,
+   "id": "vhs",
+   "name": "VHS",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-06T12:01:48Z",
+   "repository": "https://github.com/eth0net/zed-vhs",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "vari.sh"
+   ],
+   "description": "A gothic, arcane colour scheme in two variants, Obsidian and Ivory.",
+   "download_count": 0,
+   "id": "cremisi-theme",
+   "name": "Cremisi",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T11:59:35Z",
+   "repository": "https://github.com/vari-sh/Cremisi-Theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

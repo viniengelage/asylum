@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Renzo Johnson <4695400+renzojohnson@users.noreply.github.com>"
+   ],
+   "description": "180 curated WooCommerce snippets \u2014 hooks, CRUD, HPOS, Block Checkout, REST API, and more",
+   "download_count": 0,
+   "id": "woocommerce-snippets",
+   "name": "WooCommerce Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-06T12:03:06Z",
+   "repository": "https://github.com/renzojohnson/woocommerce-snippets",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

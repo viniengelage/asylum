@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Felipe Lima"
+   ],
+   "description": "Fully warm palette, minimal blue light, contrast-audited. Your eyes deserved this.",
+   "download_count": 0,
+   "id": "warm-burnout-theme",
+   "name": "Warm Burnout",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:02:50Z",
+   "repository": "https://github.com/felipefdl/warm-burnout",
+   "schema_version": 1,
+   "version": "1.4.2",
+   "wasm_api_version": null
+  }
+ ]
+}

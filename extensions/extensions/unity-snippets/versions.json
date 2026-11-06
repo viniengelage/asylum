@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Abdallah Alwarawreh"
+   ],
+   "description": "A collection of Unity snippets for faster development.",
+   "download_count": 0,
+   "id": "unity-snippets",
+   "name": "Unity Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-06T12:01:23Z",
+   "repository": "https://github.com/abdallah-alwarawreh/unity-zed-snippets",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

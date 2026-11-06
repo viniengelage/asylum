@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Shawn Yu <yyuxiaoran@qq.com>"
+   ],
+   "description": "TOON support.",
+   "download_count": 0,
+   "id": "toon",
+   "name": "TOON",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-06T12:00:38Z",
+   "repository": "https://github.com/3swordman/zed-toon",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

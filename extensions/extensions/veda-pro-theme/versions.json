@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Manikandan <manikandan@xqsit.dev>"
+   ],
+   "description": "A vivid One Dark Pro-inspired Zed theme on a deep violet-indigo background.",
+   "download_count": 0,
+   "id": "veda-pro-theme",
+   "name": "Veda Pro",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:01:38Z",
+   "repository": "https://github.com/xqsit94/veda-pro-zed",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Nathan Brodin <nathan@brodin.dev>"
+   ],
+   "description": "\u25b2 Vercel light and dark theme, like in Vercel's docs.",
+   "download_count": 0,
+   "id": "vercel-theme",
+   "name": "Vercel Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:01:40Z",
+   "repository": "https://github.com/NathanBrodin/zed-vercel-theme",
+   "schema_version": 1,
+   "version": "1.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

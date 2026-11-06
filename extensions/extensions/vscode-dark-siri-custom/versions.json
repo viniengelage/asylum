@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "rschili <rschili@users.noreply.github.com>"
+   ],
+   "description": "VSCode Dark Siri Custom Theme for Zed",
+   "download_count": 0,
+   "id": "vscode-dark-siri-custom",
+   "name": "VSCode Dark Siri Custom",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:01:58Z",
+   "repository": "https://github.com/rschili/zed-theme-vscode-dark-siri-custom",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

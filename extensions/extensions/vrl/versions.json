@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Zhongqiu Zhao <belltoy@gmail.com>"
+   ],
+   "description": "VRL extension for Zed",
+   "download_count": 0,
+   "id": "vrl",
+   "name": "VRL",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-06T12:01:55Z",
+   "repository": "https://github.com/belltoy/zed-vrl",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

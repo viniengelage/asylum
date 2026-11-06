@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Amsh Shrestha <sthaamsh37@gmail.com>"
+   ],
+   "description": "Clean surfaces, five syntax colours. Enough to tell your code apart, not enough to distract. Ships with an OLED-tuned dark variant and a light variant \u2014 Slatehollow Light.",
+   "download_count": 0,
+   "id": "vantadark-theme",
+   "name": "Slatehollow",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:01:37Z",
+   "repository": "https://github.com/ams-sth/slatehollow",
+   "schema_version": 1,
+   "version": "3.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

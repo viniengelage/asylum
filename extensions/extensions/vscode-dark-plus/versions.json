@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "d1y <chenhonzhou@gmail.com>"
+   ],
+   "description": "Portable Vscode Dark Plus Theme",
+   "download_count": 0,
+   "id": "vscode-dark-plus",
+   "name": "Vscode Dark Plus Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:01:57Z",
+   "repository": "https://github.com/d1y/vscode_dark_plus.zed",
+   "schema_version": 0,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

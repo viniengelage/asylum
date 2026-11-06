@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ihor Manzii <ihormanzii@gmail.com>"
+   ],
+   "description": "Calm, neutral dark and light themes with soft pastel syntax colors, inspired by the macOS look.",
+   "download_count": 0,
+   "id": "lull-theme",
+   "name": "Lull",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T11:59:42Z",
+   "repository": "https://github.com/ihormanzii/zed-lull-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

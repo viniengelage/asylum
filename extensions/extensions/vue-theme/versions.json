@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "ColasssNotMe <ecyw7355608@gmail.com>"
+   ],
+   "description": "A port of Vue Theme from VSCode",
+   "download_count": 0,
+   "id": "vue-theme",
+   "name": "Vue Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:02:25Z",
+   "repository": "https://github.com/ColasssNotMe/vue-theme-zed",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

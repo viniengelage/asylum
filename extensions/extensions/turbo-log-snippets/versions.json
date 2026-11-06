@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Gaurav <devgauravjatt@gmail.com>"
+   ],
+   "description": "Turbo Console Log-inspired debug logging snippets for JS, TS, TSX, Python and PHP.",
+   "download_count": 0,
+   "id": "turbo-log-snippets",
+   "name": "Turbo Log Snippets",
+   "provides": [
+    "snippets"
+   ],
+   "published_at": "2026-11-06T12:00:44Z",
+   "repository": "https://github.com/devgauravjatt/turbo-log-snippets",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

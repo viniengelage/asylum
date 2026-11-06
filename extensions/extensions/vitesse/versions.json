@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "d1y <chenhonzhou@gmail.com>"
+   ],
+   "description": "Vitesse Theme For Zed",
+   "download_count": 0,
+   "id": "vitesse",
+   "name": "Vitesse Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:01:52Z",
+   "repository": "https://github.com/d1y/vitesse.zed",
+   "schema_version": 1,
+   "version": "0.0.2",
+   "wasm_api_version": null
+  }
+ ]
+}

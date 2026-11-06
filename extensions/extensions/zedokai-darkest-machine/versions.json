@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Stamen Georgiev <tuzemec@gmail.com>"
+   ],
+   "description": "A theme for Zed, based on Zedokai Filter Machine",
+   "download_count": 0,
+   "id": "zedokai-darkest-machine",
+   "name": "Zedokai Darkest Machine",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:04:07Z",
+   "repository": "https://github.com/tuzemec/zedokai-darkest-machine",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "BlockLune <39331194+BlockLune@users.noreply.github.com>"
+   ],
+   "description": "WXML (WeiXin Markup Language) support for Zed.",
+   "download_count": 0,
+   "id": "wxml",
+   "name": "WXML",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-06T12:03:29Z",
+   "repository": "https://github.com/BlockLune/zed-wxml",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

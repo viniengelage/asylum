@@ -1,0 +1,23 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Masashi Umezawa <ume@softumeya.com>"
+   ],
+   "description": "Tonel Smalltalk language support.",
+   "download_count": 0,
+   "id": "tonel-smalltalk",
+   "name": "Tonel Smalltalk",
+   "provides": [
+    "languages",
+    "grammars",
+    "language-servers"
+   ],
+   "published_at": "2026-11-06T12:00:36Z",
+   "repository": "https://github.com/mumez/zed-extension-tonel-smalltalk",
+   "schema_version": 1,
+   "version": "0.3.0",
+   "wasm_api_version": "0.7.0"
+  }
+ ]
+}

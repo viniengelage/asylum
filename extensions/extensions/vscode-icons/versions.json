@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Roberto Huertas <roberto.huertas@outlook.com>"
+   ],
+   "description": "Original vscode-icons, reimagined for Zed",
+   "download_count": 0,
+   "id": "vscode-icons",
+   "name": "VSCode Icons",
+   "provides": [
+    "icon-themes"
+   ],
+   "published_at": "2026-11-06T12:02:00Z",
+   "repository": "https://github.com/vscode-icons/vscode-icons-zed",
+   "schema_version": 1,
+   "version": "13.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

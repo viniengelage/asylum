@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "fabrialberio"
+   ],
+   "description": "Light and dark themes inspired by VSCode Modern themes.",
+   "download_count": 0,
+   "id": "vscode-modern",
+   "name": "VSCode Modern Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:02:01Z",
+   "repository": "https://github.com/fabrialberio/zed-vscode-modern-theme",
+   "schema_version": 1,
+   "version": "0.1.2",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Eugene Bokhan <eugenebokhan@icloud.com>"
+   ],
+   "description": "VS Code 2026 inspired light and dark themes for Zed",
+   "download_count": 0,
+   "id": "vscode-2026-theme",
+   "name": "VS Code 2026 Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:01:55Z",
+   "repository": "https://github.com/eugenebokhan/zed-vscode-2026-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

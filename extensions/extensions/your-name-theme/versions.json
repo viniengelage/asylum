@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ahum Maitra <theahummaitra@gmail.com>"
+   ],
+   "description": "This theme is inspired to Your Name. anime film. Thanks!",
+   "download_count": 0,
+   "id": "your-name-theme",
+   "name": "Your Name. Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:03:41Z",
+   "repository": "https://github.com/TheAhumMaitra/Your-Name-Zed-theme",
+   "schema_version": 1,
+   "version": "1.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

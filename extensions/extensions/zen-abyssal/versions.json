@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "KevInCompile <kevcoc10@gmail.com>"
+   ],
+   "description": "A theme you'll probably like for zed.",
+   "download_count": 0,
+   "id": "zen-abyssal",
+   "name": "Zen Abyssal",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:04:11Z",
+   "repository": "https://github.com/KevInCompile/ZenAbyssal",
+   "schema_version": 1,
+   "version": "1.4.3",
+   "wasm_api_version": null
+  }
+ ]
+}

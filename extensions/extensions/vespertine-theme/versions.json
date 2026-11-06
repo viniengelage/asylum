@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Filipe Veronezi"
+   ],
+   "description": "Peppermint and orange flavored light theme for Zed.",
+   "download_count": 0,
+   "id": "vespertine-theme",
+   "name": "Vespertine",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-06T12:01:47Z",
+   "repository": "https://github.com/filipeveronezi/vespertine",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}
