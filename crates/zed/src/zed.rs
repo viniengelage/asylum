@@ -20,7 +20,7 @@ pub mod visual_tests;
 pub(crate) mod windows_only_instance;
 
 use agent_settings::{UserAgentsMdState, init_user_agents_md};
-use agent_ui::AgentDiffToolbar;
+use agent_ui::{AgentDiffToolbar, ModelBenchmarksToolbar};
 use anyhow::Context as _;
 pub use app_menus::*;
 use assets::Assets;
@@ -1656,6 +1656,8 @@ fn initialize_pane(
             toolbar.add_item(commit_view_toolbar, window, cx);
             let agent_diff_toolbar = cx.new(AgentDiffToolbar::new);
             toolbar.add_item(agent_diff_toolbar, window, cx);
+            let model_benchmarks_toolbar = cx.new(|_| ModelBenchmarksToolbar::new());
+            toolbar.add_item(model_benchmarks_toolbar, window, cx);
             let basedpyright_banner = cx.new(|cx| BasedPyrightBanner::new(workspace, cx));
             toolbar.add_item(basedpyright_banner, window, cx);
             let image_view_toolbar = cx.new(|_| image_viewer::ImageViewToolbarControls::new());

@@ -146,6 +146,30 @@ pub(crate) struct SubagentCardState {
     pub can_stop: bool,
     /// The subagent entries this card covers; `None` covers all of them.
     pub entries: Option<SubagentEntries>,
+    pub automatic_choice: Option<AutomaticChoice>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct AutomaticChoice {
+    pub reason: SharedString,
+    pub effort: Option<SharedString>,
+}
+
+impl AutomaticChoice {
+    fn from_tool_call(tool_call: &ToolCall) -> Option<Self> {
+        let input = tool_call.raw_input.as_ref()?;
+        let reason = input.get("model_reason")?.as_str()?.trim();
+        if reason.is_empty() {
+            return None;
+        }
+        Some(Self {
+            reason: reason.to_string().into(),
+            effort: input
+                .get("effort")
+                .and_then(|effort| effort.as_str())
+                .map(|effort| effort.to_string().into()),
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -174,6 +198,7 @@ impl SubagentCardState {
                     start: info.message_start_index,
                     end: info.message_end_index,
                 }),
+            automatic_choice: AutomaticChoice::from_tool_call(tool_call),
         }
     }
 
@@ -191,6 +216,7 @@ impl SubagentCardState {
             error,
             can_stop: status == SubagentStatus::Running && can_cancel,
             entries: None,
+            automatic_choice: None,
         }
     }
 
@@ -267,6 +293,7 @@ mod tests {
             error: None,
             can_stop: false,
             entries,
+            automatic_choice: None,
         }
     }
 

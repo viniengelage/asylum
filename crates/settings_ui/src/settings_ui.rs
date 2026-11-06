@@ -765,6 +765,7 @@ fn init_renderers(cx: &mut App) {
         .add_basic_renderer::<settings::NotifyWhenAgentWaiting>(render_dropdown)
         .add_basic_renderer::<settings::PlaySoundWhenAgentDone>(render_dropdown)
         .add_basic_renderer::<settings::ThinkingBlockDisplay>(render_dropdown)
+        .add_basic_renderer::<settings::SubagentModelMode>(render_dropdown)
         .add_basic_renderer::<settings::SubagentThinkingEffort>(render_dropdown)
         .add_basic_renderer::<settings::ImageFileSizeUnit>(render_dropdown)
         .add_basic_renderer::<settings::StatusStyle>(render_dropdown)
@@ -1627,6 +1628,9 @@ impl SettingsPageItem {
                             }),
                         ),
                 )
+                .when_some(action_link.details, |this, details| {
+                    this.child(div().pb_4().child(details(settings_window, window, cx)))
+                })
                 .when(bottom_border, |this| this.child(Divider::horizontal()))
                 .into_any_element(),
         }
@@ -2355,6 +2359,7 @@ struct ActionLink {
     description: Option<SharedString>,
     button_text: SharedString,
     on_click: Arc<dyn Fn(&mut SettingsWindow, &mut Window, &mut App) + Send + Sync>,
+    details: Option<fn(&SettingsWindow, &mut Window, &mut Context<SettingsWindow>) -> AnyElement>,
     files: FileMask,
 }
 
@@ -2636,6 +2641,10 @@ impl SettingsWindow {
                 .ok();
         })
         .detach();
+
+        let model_benchmarks = agent::model_benchmarks::ModelBenchmarksStore::global(cx);
+        cx.observe(&model_benchmarks, |_, _, cx| cx.notify())
+            .detach();
 
         let title_bar = if !cfg!(target_os = "macos") {
             Some(cx.new(|cx| PlatformTitleBar::new("settings-title-bar", cx)))
@@ -8649,6 +8658,7 @@ pub mod test {
             description: description.map(SharedString::from),
             button_text: SharedString::from("Change"),
             on_click: Arc::new(|_, _, _| {}),
+            details: None,
             files: USER,
         })
     }

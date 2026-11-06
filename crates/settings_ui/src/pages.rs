@@ -4,6 +4,7 @@ mod external_agents_page;
 mod feature_flags;
 mod llm_providers_page;
 mod mcp_servers_page;
+mod model_benchmarks;
 mod sandbox_settings;
 mod skill_creator;
 mod skills_setup;
@@ -23,6 +24,7 @@ pub(crate) use llm_providers_page::{
 pub(crate) use mcp_servers_page::{
     McpServerForm, render_add_server_popover, render_mcp_servers_page,
 };
+pub(crate) use model_benchmarks::{open_model_benchmarks, render_model_benchmarks_details};
 pub(crate) use sandbox_settings::render_sandbox_settings_page;
 pub(crate) use skill_creator::{
     SkillCreatorEvent, SkillCreatorPage, render_skill_creator_page, skill_url_from_clipboard,

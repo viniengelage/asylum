@@ -3207,6 +3207,7 @@ impl FlowView {
                     "step-model",
                     agent_step.model.clone(),
                     t!("agent_ui.flow_editor.agent.model_from_agent"),
+                    false,
                     move |model, cx| {
                         view.update(cx, |view, cx| {
                             view.edit_agent_step(index, cx, |agent_step| agent_step.model = model);

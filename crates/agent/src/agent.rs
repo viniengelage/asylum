@@ -1,6 +1,7 @@
 mod db;
 mod learnings;
 mod legacy_thread;
+pub mod model_benchmarks;
 mod native_agent_server;
 pub mod outline;
 mod pattern_extraction;
@@ -3997,10 +3998,22 @@ pub struct NativeThreadEnvironment {
 }
 
 impl NativeThreadEnvironment {
+    #[cfg(test)]
     pub(crate) fn create_subagent_thread(
         &self,
         label: String,
         model: Option<AgentModelId>,
+        cx: &mut App,
+    ) -> Result<Rc<dyn SubagentHandle>> {
+        self.create_subagent_thread_with_effort(label, model, None, cx)
+    }
+
+    /// `effort` comes from the automatic subagent selection and wins over every configured one.
+    pub(crate) fn create_subagent_thread_with_effort(
+        &self,
+        label: String,
+        model: Option<AgentModelId>,
+        effort: Option<String>,
         cx: &mut App,
     ) -> Result<Rc<dyn SubagentHandle>> {
         let model = if let Some(model_id) = model {
@@ -4032,6 +4045,9 @@ impl NativeThreadEnvironment {
 
         let subagent_thread: Entity<Thread> = cx.new(|cx| {
             let mut thread = Thread::new_subagent(&parent_thread_entity, model.as_ref(), cx);
+            if let Some(effort) = effort {
+                thread.set_subagent_effort(effort);
+            }
             thread.set_title(label.into(), cx);
             thread
         });
@@ -4226,9 +4242,34 @@ impl ThreadEnvironment for NativeThreadEnvironment {
         &self,
         label: String,
         model: Option<AgentModelId>,
+        effort: Option<String>,
         cx: &mut App,
     ) -> Result<Rc<dyn SubagentHandle>> {
-        self.create_subagent_thread(label, model, cx)
+        self.create_subagent_thread_with_effort(label, model, effort, cx)
+    }
+
+    fn automatic_subagent_selection(&self, cx: &mut App) -> Task<Option<AutomaticSubagentContext>> {
+        let Some(thread) = self.thread.upgrade() else {
+            return Task::ready(None);
+        };
+        let thread = thread.read(cx);
+        let selection = thread.automatic_subagent_selection(cx);
+        if !selection.is_on() {
+            return Task::ready(None);
+        }
+        let project = thread.project().read(cx);
+        let fs = project.fs().clone();
+        let worktree_roots = project
+            .visible_worktrees(cx)
+            .map(|worktree| worktree.read(cx).abs_path().to_path_buf())
+            .collect();
+        cx.background_spawn(async move {
+            let benchmarks = model_benchmarks::load_model_benchmarks(fs, worktree_roots).await;
+            Some(AutomaticSubagentContext {
+                selection,
+                benchmarks,
+            })
+        })
     }
 
     fn resume_subagent(

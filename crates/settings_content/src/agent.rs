@@ -66,6 +66,30 @@ pub enum SidebarSide {
     Right,
 }
 
+/// How subagents pick their model.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    MergeFrom,
+    strum::VariantArray,
+    strum::VariantNames,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum SubagentModelMode {
+    /// `subagent_model`, or the parent thread's model when it isn't set.
+    #[default]
+    Configured,
+    /// The agent picks the model of each subagent from the model benchmarks file.
+    Auto,
+}
+
 /// How thinking blocks should be displayed by default in the agent panel.
 #[derive(
     Clone,
@@ -86,6 +110,8 @@ pub enum SubagentThinkingEffort {
     /// Subagents use the parent thread's effort.
     #[default]
     Inherit,
+    /// The agent picks the effort of each subagent from the model benchmarks file.
+    Auto,
     Low,
     Medium,
     High,
@@ -96,10 +122,11 @@ pub enum SubagentThinkingEffort {
 }
 
 impl SubagentThinkingEffort {
-    /// The effort level value models advertise, or `None` for [`Self::Inherit`].
+    /// The effort level value models advertise, or `None` for [`Self::Inherit`] and
+    /// [`Self::Auto`].
     pub fn value(self) -> Option<&'static str> {
         match self {
-            Self::Inherit => None,
+            Self::Inherit | Self::Auto => None,
             Self::Low => Some("low"),
             Self::Medium => Some("medium"),
             Self::High => Some("high"),
@@ -335,6 +362,11 @@ pub struct AgentSettingsContent {
     /// thinking, effort, and speed settings when not specified. If the configured
     /// model is unavailable, the parent thread's model is used instead.
     pub subagent_model: Option<LanguageModelSelection>,
+    /// Whether subagents use `subagent_model` or the agent picks the model of each
+    /// subagent from the model benchmarks file.
+    ///
+    /// Default: configured
+    pub subagent_model_mode: Option<SubagentModelMode>,
     /// Thinking effort for subagents, used instead of the parent thread's effort.
     /// The effort set in `subagent_model` takes precedence, and a level the
     /// subagent's model doesn't support is ignored.

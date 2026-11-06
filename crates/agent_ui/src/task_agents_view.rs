@@ -954,7 +954,11 @@ impl TaskAgentsView {
             cx.notify();
             return;
         }
-        if [&agent.model, &agent.subagent_model]
+        let subagent_model = agent
+            .subagent_model
+            .as_ref()
+            .filter(|_| !agent.subagent_model_is_auto());
+        if [agent.model.as_ref(), subagent_model]
             .into_iter()
             .flatten()
             .any(|model| task_agents::ModelReference::parse(model).is_none())
@@ -1669,6 +1673,7 @@ impl TaskAgentsView {
             "task-agent-model",
             current,
             t!("agent_ui.task_agents.model.thread"),
+            false,
             move |model, cx| {
                 view.update(cx, |view, cx| view.set_model(model, cx))
                     .log_err();
@@ -1692,6 +1697,7 @@ impl TaskAgentsView {
             "task-agent-subagent-model",
             current,
             t!("agent_ui.task_agents.model.subagent_default"),
+            true,
             move |model, cx| {
                 view.update(cx, |view, cx| view.set_subagent_model(model, cx))
                     .log_err();
@@ -1717,6 +1723,7 @@ impl TaskAgentsView {
                 None | Some(SubagentThinkingEffort::Inherit) => {
                     t!("agent_ui.task_agents.effort.default")
                 }
+                Some(SubagentThinkingEffort::Auto) => t!("agent_ui.task_agents.model.automatic"),
                 Some(SubagentThinkingEffort::Low) => t!("agent_ui.task_agents.effort.low"),
                 Some(SubagentThinkingEffort::Medium) => t!("agent_ui.task_agents.effort.medium"),
                 Some(SubagentThinkingEffort::High) => t!("agent_ui.task_agents.effort.high"),
@@ -1728,6 +1735,7 @@ impl TaskAgentsView {
         let menu = ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
             let options = std::iter::once(None).chain(
                 [
+                    SubagentThinkingEffort::Auto,
                     SubagentThinkingEffort::Low,
                     SubagentThinkingEffort::Medium,
                     SubagentThinkingEffort::High,
@@ -3278,11 +3286,19 @@ pub(crate) fn model_dropdown(
     id: &'static str,
     current: Option<String>,
     empty_label: impl Into<SharedString>,
+    offers_automatic: bool,
     on_select: impl Fn(Option<String>, &mut App) + 'static,
     window: &mut Window,
     cx: &mut App,
 ) -> DropdownMenu {
-    let (label, menu) = model_menu(current, empty_label, on_select, window, cx);
+    let (label, menu) = model_menu(
+        current,
+        empty_label,
+        offers_automatic,
+        on_select,
+        window,
+        cx,
+    );
     selector(id, IconName::Sparkle, label, menu)
 }
 
@@ -3290,6 +3306,7 @@ pub(crate) fn model_dropdown(
 pub(crate) fn model_menu(
     current: Option<String>,
     empty_label: impl Into<SharedString>,
+    offers_automatic: bool,
     on_select: impl Fn(Option<String>, &mut App) + 'static,
     window: &mut Window,
     cx: &mut App,
@@ -3315,8 +3332,10 @@ pub(crate) fn model_menu(
             groups.push((provider.name().0, models));
         }
     }
+    let automatic_label = t!("agent_ui.task_agents.model.automatic");
     let label: SharedString = match current.as_deref() {
         None => empty_label.clone(),
+        Some(task_agents::AUTO_SUBAGENT_MODEL) if offers_automatic => automatic_label.clone(),
         Some(reference) => groups
             .iter()
             .find_map(|(_, models)| {
@@ -3338,6 +3357,16 @@ pub(crate) fn model_menu(
             None,
             move |_window, cx| keep(None, cx),
         );
+        if offers_automatic {
+            let keep = on_select.clone();
+            menu = menu.toggleable_entry(
+                automatic_label.clone(),
+                current.as_deref() == Some(task_agents::AUTO_SUBAGENT_MODEL),
+                IconPosition::Start,
+                None,
+                move |_window, cx| keep(Some(task_agents::AUTO_SUBAGENT_MODEL.to_string()), cx),
+            );
+        }
         if groups.is_empty() {
             menu = menu
                 .separator()

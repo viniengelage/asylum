@@ -752,5 +752,11 @@
   "task_agents.tools_tab.mcps_id": "context servers",
   "task_agents.runs.title": "THREADS",
   "task_agents.runs.empty": "Nenhuma execução ainda.",
-  "task_agents.runs.empty_hint": "Toda thread entregue a este agente aparece aqui."
+  "task_agents.runs.empty_hint": "Toda thread entregue a este agente aparece aqui.",
+  "task_agents.model.automatic": "Automático",
+  "subagent.automatic": "Automático",
+  "subagent.automatic_why": "Por que {choice}",
+  "subagent.automatic_meta": "{reason} · escolha automática pelo benchmarks.md",
+  "model_benchmarks.used_by_auto": "usado pelo Automático",
+  "model_benchmarks.compare": "Comparar com o padrão"
 }

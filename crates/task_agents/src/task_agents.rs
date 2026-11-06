@@ -254,6 +254,19 @@ impl Default for TaskAgentTriggers {
     }
 }
 
+pub const AUTO_SUBAGENT_MODEL: &str = "auto";
+
+const AUTO_SUBAGENT_EFFORT: &str = "auto";
+
+fn subagent_effort_frontmatter_value(
+    effort: settings::SubagentThinkingEffort,
+) -> Option<&'static str> {
+    match effort {
+        settings::SubagentThinkingEffort::Auto => Some(AUTO_SUBAGENT_EFFORT),
+        effort => effort.value(),
+    }
+}
+
 /// The `permissions` key whose rules apply to every tool without an entry of its own,
 /// MCP tools included.
 pub const ALL_TOOLS_PERMISSION_KEY: &str = "*";
@@ -307,6 +320,10 @@ impl TaskAgent {
         self.model.as_deref().and_then(ModelReference::parse)
     }
 
+    pub fn subagent_model_is_auto(&self) -> bool {
+        self.subagent_model.as_deref() == Some(AUTO_SUBAGENT_MODEL)
+    }
+
     pub fn subagent_model_reference(&self) -> Option<ModelReference> {
         self.subagent_model
             .as_deref()
@@ -346,7 +363,9 @@ impl TaskAgent {
             profile: self.profile.as_deref(),
             model: self.model.as_deref(),
             subagent_model: self.subagent_model.as_deref(),
-            subagent_effort: self.subagent_effort.and_then(|effort| effort.value()),
+            subagent_effort: self
+                .subagent_effort
+                .and_then(subagent_effort_frontmatter_value),
             toolkits: &self.toolkits,
             tools: &self.tools,
             permissions: self
@@ -443,11 +462,19 @@ pub fn parse_task_agent(path: &Path, content: &str, source: TaskAgentSource) -> 
         .filter(|model| ModelReference::parse(model).is_some());
     let subagent_model = frontmatter
         .subagent_model
-        .filter(|model| ModelReference::parse(model).is_some());
+        .map(|model| model.trim().to_string())
+        .filter(|model| model == AUTO_SUBAGENT_MODEL || ModelReference::parse(model).is_some());
     let subagent_effort = frontmatter
         .subagent_effort
         .as_deref()
-        .and_then(|effort| settings::SubagentThinkingEffort::from_value(effort.trim()));
+        .map(str::trim)
+        .and_then(|effort| {
+            if effort == AUTO_SUBAGENT_EFFORT {
+                Some(settings::SubagentThinkingEffort::Auto)
+            } else {
+                settings::SubagentThinkingEffort::from_value(effort)
+            }
+        });
 
     Ok(TaskAgent {
         id,
@@ -811,6 +838,30 @@ mod tests {
         )
         .expect("an unknown level should not break the agent");
         assert_eq!(unknown.subagent_effort, None);
+    }
+
+    #[test]
+    fn test_automatic_subagent_model_and_effort_round_trip() {
+        let path = Path::new("/app/.asylum/agents/explorar.md");
+        let agent = parse_task_agent(
+            path,
+            "---\nname: Explorar\nsubagent_model: auto\nsubagent_effort: auto\n---\nExplora.",
+            project_source(),
+        )
+        .expect("agent should parse");
+        assert!(agent.subagent_model_is_auto());
+        assert_eq!(agent.subagent_model_reference(), None);
+        assert_eq!(
+            agent.subagent_effort,
+            Some(settings::SubagentThinkingEffort::Auto)
+        );
+        let markdown = agent.to_markdown().expect("serializes");
+        assert!(markdown.contains("subagent_model: auto"));
+        assert!(markdown.contains("subagent_effort: auto"));
+        let reparsed =
+            parse_task_agent(path, &markdown, project_source()).expect("round trip should parse");
+        assert!(reparsed.subagent_model_is_auto());
+        assert_eq!(reparsed.subagent_effort, agent.subagent_effort);
     }
 
     #[test]

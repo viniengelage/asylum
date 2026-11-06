@@ -256,6 +256,7 @@ fn sync_action_link(
                 })
                 .ok();
         }),
+        details: None,
         files: USER,
     })
 }
@@ -1869,6 +1870,7 @@ fn keymap_page(vim: Box<[SettingsPageItem]>) -> SettingsPage {
                         .ok();
                     window.remove_window();
                 }),
+                details: None,
                 files: USER,
             }),
         ]
@@ -9199,8 +9201,31 @@ fn ai_pages(cx: &App) -> [SettingsPage; 5] {
                 files: USER,
             }),
             SettingsPageItem::SettingItem(SettingItem {
+                title: "Subagent Model",
+                description: "Which model subagents use. 'Configured' uses the subagent model set in settings, or the parent thread's model; 'Auto' lets the agent pick the cheapest model that fits each subtask from the model benchmarks file.",
+                field: Box::new(SettingField {
+                    organization_override: None,
+                    json_path: Some("agent.subagent_model_mode"),
+                    pick: |settings_content| {
+                        settings_content
+                            .agent
+                            .as_ref()?
+                            .subagent_model_mode
+                            .as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .agent
+                            .get_or_insert_default()
+                            .subagent_model_mode = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
                 title: "Subagent Thinking Effort",
-                description: "How hard subagents think. 'Inherit' uses the parent thread's effort; a lower level spends fewer tokens. Ignored when the subagent's model doesn't offer the level.",
+                description: "How hard subagents think. 'Inherit' uses the parent thread's effort; 'Auto' takes the effort from the same row of the model benchmarks file as the model. A lower level spends fewer tokens; a level the subagent's model doesn't offer is ignored.",
                 field: Box::new(SettingField {
                     organization_override: None,
                     json_path: Some("agent.subagent_thinking_effort"),
@@ -9219,6 +9244,18 @@ fn ai_pages(cx: &App) -> [SettingsPage; 5] {
                     },
                 }),
                 metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::ActionLink(ActionLink {
+                title: crate::t("Model Benchmarks"),
+                description: Some(crate::t(
+                    "The table Auto reads to pick each subagent's model and effort: tier, cost and what each model is good for. Edit it freely; Asylum's default stays saved.",
+                )),
+                button_text: crate::t("Open in Editor"),
+                on_click: Arc::new(|settings_window, window, cx| {
+                    crate::pages::open_model_benchmarks(settings_window, None, window, cx);
+                }),
+                details: Some(crate::pages::render_model_benchmarks_details),
                 files: USER,
             }),
             SettingsPageItem::SettingItem(SettingItem {

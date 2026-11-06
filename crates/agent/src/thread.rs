@@ -820,6 +820,23 @@ pub trait TerminalHandle {
     fn was_stopped_by_user(&self, cx: &AsyncApp) -> Result<bool>;
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AutomaticSubagentSelection {
+    pub model: bool,
+    pub effort: bool,
+}
+
+impl AutomaticSubagentSelection {
+    pub fn is_on(&self) -> bool {
+        self.model || self.effort
+    }
+}
+
+pub struct AutomaticSubagentContext {
+    pub selection: AutomaticSubagentSelection,
+    pub benchmarks: crate::model_benchmarks::LoadedModelBenchmarks,
+}
+
 pub trait SubagentHandle {
     /// The session ID of this subagent thread
     fn id(&self) -> acp_v2::SessionId;
@@ -845,8 +862,16 @@ pub trait ThreadEnvironment {
         &self,
         label: String,
         model: Option<AgentModelId>,
+        effort: Option<String>,
         cx: &mut App,
     ) -> Result<Rc<dyn SubagentHandle>>;
+
+    fn automatic_subagent_selection(
+        &self,
+        _cx: &mut App,
+    ) -> Task<Option<AutomaticSubagentContext>> {
+        Task::ready(None)
+    }
 
     fn resume_subagent(
         &self,
@@ -1503,6 +1528,24 @@ impl Thread {
             thread.apply_subagent_thinking_effort(effort);
         }
         thread
+    }
+
+    pub fn set_subagent_effort(&mut self, effort: String) {
+        self.apply_subagent_thinking_effort(effort);
+    }
+
+    pub fn automatic_subagent_selection(&self, cx: &App) -> AutomaticSubagentSelection {
+        let settings = AgentSettings::get_global(cx);
+        let task_agent = self.task_agent.as_ref().or(self.parent_task_agent.as_ref());
+        let model = match task_agent.filter(|agent| agent.subagent_model.is_some()) {
+            Some(agent) => agent.subagent_model_is_auto(),
+            None => settings.subagent_model_mode == settings::SubagentModelMode::Auto,
+        };
+        let effort = match task_agent.and_then(|agent| agent.subagent_effort) {
+            Some(effort) => effort == settings::SubagentThinkingEffort::Auto,
+            None => settings.subagent_effort_auto,
+        };
+        AutomaticSubagentSelection { model, effort }
     }
 
     fn apply_subagent_thinking_effort(&mut self, effort: String) {

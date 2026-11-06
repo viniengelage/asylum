@@ -624,6 +624,7 @@ impl NewAgentModal {
         let (model, model_menu) = model_menu(
             agent.model.clone(),
             t!("agent_ui.task_agents.model.thread"),
+            false,
             move |model, cx| {
                 modal
                     .update(cx, |modal, cx| {

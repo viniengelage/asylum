@@ -250,6 +250,7 @@ impl crate::ThreadEnvironment for FakeThreadEnvironment {
         &self,
         _label: String,
         model: Option<AgentModelId>,
+        _effort: Option<String>,
         _cx: &mut App,
     ) -> Result<Rc<dyn SubagentHandle>> {
         self.subagent_models.borrow_mut().push(model);
@@ -297,6 +298,7 @@ impl crate::ThreadEnvironment for MultiTerminalEnvironment {
         &self,
         _label: String,
         _model: Option<AgentModelId>,
+        _effort: Option<String>,
         _cx: &mut App,
     ) -> Result<Rc<dyn SubagentHandle>> {
         unimplemented!()
@@ -6241,6 +6243,8 @@ async fn test_spawn_agent_tool_forwards_explicit_model(cx: &mut TestAppContext) 
                     message: "prompt".to_string(),
                     session_id: None,
                     model: Some("fake-corp/cheap-model".to_string()),
+                    effort: None,
+                    model_reason: None,
                 }),
                 event_stream,
                 cx,
@@ -6274,6 +6278,8 @@ async fn test_spawn_agent_tool_rejects_model_when_resuming(cx: &mut TestAppConte
                     message: "prompt".to_string(),
                     session_id: Some(acp_v2::SessionId::new("subagent-id")),
                     model: Some("fake-corp/other-model".to_string()),
+                    effort: None,
+                    model_reason: None,
                 }),
                 event_stream,
                 cx,
@@ -6344,6 +6350,8 @@ async fn test_subagent_tool_call_end_to_end(cx: &mut TestAppContext) {
         message: "subagent task prompt".to_string(),
         session_id: None,
         model: None,
+        effort: None,
+        model_reason: None,
     };
     let subagent_tool_use = LanguageModelToolUse {
         id: "subagent_1".into(),
@@ -6493,6 +6501,8 @@ async fn test_subagent_tool_output_does_not_include_thinking(cx: &mut TestAppCon
         message: "subagent task prompt".to_string(),
         session_id: None,
         model: None,
+        effort: None,
+        model_reason: None,
     };
     let subagent_tool_use = LanguageModelToolUse {
         id: "subagent_1".into(),
@@ -6652,6 +6662,8 @@ async fn test_subagent_tool_call_cancellation_during_task_prompt(cx: &mut TestAp
         message: "subagent task prompt".to_string(),
         session_id: None,
         model: None,
+        effort: None,
+        model_reason: None,
     };
     let subagent_tool_use = LanguageModelToolUse {
         id: "subagent_1".into(),
@@ -6790,6 +6802,8 @@ async fn test_subagent_tool_resume_session(cx: &mut TestAppContext) {
         message: "do the first task".to_string(),
         session_id: None,
         model: None,
+        effort: None,
+        model_reason: None,
     };
     let subagent_tool_use = LanguageModelToolUse {
         id: "subagent_1".into(),
@@ -6862,6 +6876,8 @@ async fn test_subagent_tool_resume_session(cx: &mut TestAppContext) {
         message: "do the follow-up task".to_string(),
         session_id: Some(subagent_session_id.clone()),
         model: None,
+        effort: None,
+        model_reason: None,
     };
     let resume_tool_use = LanguageModelToolUse {
         id: "subagent_2".into(),
@@ -7852,6 +7868,8 @@ async fn test_subagent_error_propagation(cx: &mut TestAppContext) {
         message: "subagent task prompt".to_string(),
         session_id: None,
         model: None,
+        effort: None,
+        model_reason: None,
     };
     let subagent_tool_use = LanguageModelToolUse {
         id: "subagent_1".into(),

@@ -13960,9 +13960,10 @@ impl ThreadView {
             .rev()
             .collect::<Vec<_>>();
 
+        let automatic_choice = state.automatic_choice.clone();
         let meta = {
             let mut parts = vec![t!("agent_ui.subagent.label").to_string()];
-            if let Some(model_name) = model_name.as_ref() {
+            if let Some(model_name) = model_name.as_ref().filter(|_| automatic_choice.is_none()) {
                 parts.push(model_name.to_string());
             }
             if step_count > 0 {
@@ -14024,6 +14025,71 @@ impl ThreadView {
                 ),
             )
         };
+
+        let automatic_row = automatic_choice.map(|choice| {
+            let effort = choice.effort.as_deref().map(|effort| match effort {
+                "low" => t!("agent_ui.task_agents.effort.low"),
+                "medium" => t!("agent_ui.task_agents.effort.medium"),
+                "high" => t!("agent_ui.task_agents.effort.high"),
+                "xhigh" => t!("agent_ui.task_agents.effort.xhigh"),
+                "max" => t!("agent_ui.task_agents.effort.max"),
+                other => other.to_string().into(),
+            });
+            let chip_label: SharedString = match (model_name.as_ref(), effort.as_ref()) {
+                (Some(model), Some(effort)) => format!("{model} · {effort}").into(),
+                (Some(model), None) => model.clone(),
+                (None, Some(effort)) => effort.clone(),
+                (None, None) => t!("agent_ui.subagent.automatic"),
+            };
+            let tooltip_title = t!("agent_ui.subagent.automatic_why", choice = &chip_label);
+            let tooltip_meta = t!("agent_ui.subagent.automatic_meta", reason = &choice.reason);
+            h_flex()
+                .w_full()
+                .px_3()
+                .pb(px(10.))
+                .gap_2()
+                .child(
+                    h_flex()
+                        .id(format!("subagent-automatic-{}", entry_ix))
+                        .flex_none()
+                        .h(px(22.))
+                        .px(px(7.))
+                        .gap_1()
+                        .rounded_md()
+                        .bg(colors.element_selected)
+                        .border_1()
+                        .border_color(colors.border_transparent)
+                        .hover(|this| this.border_color(colors.border_focused))
+                        .child(
+                            Icon::new(IconName::Sparkle)
+                                .size(IconSize::XSmall)
+                                .color(Color::Accent),
+                        )
+                        .child(
+                            Label::new(chip_label)
+                                .size(LabelSize::Small)
+                                .weight(gpui::FontWeight::MEDIUM)
+                                .single_line(),
+                        )
+                        .tooltip(move |_, cx| {
+                            Tooltip::with_meta(
+                                tooltip_title.clone(),
+                                None,
+                                tooltip_meta.clone(),
+                                cx,
+                            )
+                        }),
+                )
+                .child(
+                    div().min_w_0().flex_1().overflow_hidden().child(
+                        Label::new(choice.reason)
+                            .size(LabelSize::Small)
+                            .color(Color::Muted)
+                            .single_line()
+                            .truncate(),
+                    ),
+                )
+        });
 
         let trail = (!is_expanded && !is_awaiting && !last_steps.is_empty()).then(|| {
             let count = last_steps.len();
@@ -14167,6 +14233,7 @@ impl ThreadView {
                         )
                     }),
             )
+            .children(automatic_row)
             .children(trail)
             .when_some(thread_view, |this, thread_view| {
                 let thread = &thread_view.read(cx).thread;
