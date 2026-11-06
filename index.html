@@ -3,171 +3,859 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Asylum</title>
-  <meta name="description" content="A free and open-source code editor for mobile and full-stack development, built on top of Zed.">
+  <title data-i18n="meta.title">Asylum: coding is madness, here it gets padded walls</title>
+  <meta name="description" data-i18n-attr="content:meta.description" content="A free and open-source editor for mobile and full-stack work, with an iOS simulator, an Android emulator, a browser, API, database and Docker built in, plus an agent that uses all of it.">
+  <meta name="theme-color" content="#08070c">
+  <meta property="og:title" content="Asylum">
+  <meta property="og:description" data-i18n-attr="content:meta.description" content="A free and open-source editor for mobile and full-stack work, with an iOS simulator, an Android emulator, a browser, API, database and Docker built in, plus an agent that uses all of it.">
+  <meta property="og:image" content="assets/devices.webp">
   <link rel="icon" href="asylum-app-icon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=Instrument+Serif:ital@1&family=JetBrains+Mono:wght@400;500;700&display=swap">
   <style>
     :root {
-      --background: #08070c;
-      --surface: #0e0d14;
-      --surface-raised: #15131d;
-      --border: #1f1c2b;
-      --text: #edeaf5;
-      --text-muted: #9c96ae;
-      --accent: #c084fc;
-      --accent-strong: #7c3aed;
-      --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
-      --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
-    }
-    @media (prefers-color-scheme: light) {
-      :root {
-        --background: #faf9fc;
-        --surface: #ffffff;
-        --surface-raised: #f3f0f8;
-        --border: #e4dfee;
-        --text: #17141f;
-        --text-muted: #5f5873;
-        --accent: #6d28d9;
-        --accent-strong: #6d28d9;
-      }
+      --bg-base: #08070c;
+      --bg-raised: #0e0d14;
+      --bg-surface: #13111b;
+      --border-subtle: #1f1c2b;
+      --border-strong: #322c46;
+      --border-glow: #6d28d9;
+      --text-primary: #edeaf5;
+      --text-secondary: #9c96ae;
+      --text-muted: #837c98;
+      --accent: #a855f7;
+      --accent-bright: #c084fc;
+      --brand: #7c3aed;
+      --amber: #e8b368;
+      --teal: #2dd4bf;
+      --glass: rgb(19 17 27 / 0.66);
+      --hairline: rgb(255 255 255 / 0.09);
+      --font-sans: "Inter Tight", system-ui, -apple-system, "Segoe UI", sans-serif;
+      --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+      --font-serif: "Instrument Serif", Georgia, serif;
+      --content: 1200px;
+      --gutter: 24px;
+      color-scheme: dark;
     }
     * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; scroll-padding-top: 96px; }
     body {
       margin: 0;
-      background: var(--background);
-      color: var(--text);
+      background: var(--bg-base);
+      color: var(--text-primary);
       font-family: var(--font-sans);
+      font-size: 16px;
       line-height: 1.55;
       -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
     }
-    a { color: var(--accent); text-decoration: none; }
+    img { display: block; max-width: 100%; height: auto; }
+    a { color: var(--accent-bright); text-decoration: none; }
     a:hover { text-decoration: underline; }
-    .page { max-width: 1040px; margin: 0 auto; padding: 0 20px; }
-    header {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 20px 0; border-bottom: 1px solid var(--border);
-    }
-    .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; color: var(--text); }
-    .brand img { width: 28px; height: 28px; }
-    nav { display: flex; gap: 20px; font-size: 14px; }
-    nav a { color: var(--text-muted); }
-    .hero { padding: 72px 0 56px; display: grid; gap: 40px; grid-template-columns: 1.2fr 0.8fr; align-items: center; }
-    .hero h1 { font-size: clamp(34px, 5vw, 52px); line-height: 1.1; margin: 0 0 16px; letter-spacing: -0.02em; }
-    .hero p { font-size: 18px; color: var(--text-muted); margin: 0 0 28px; max-width: 34em; }
-    .hero-icon { justify-self: center; width: min(260px, 70vw); filter: drop-shadow(0 24px 48px rgba(124, 58, 237, 0.35)); }
-    .actions { display: flex; flex-wrap: wrap; gap: 12px; }
+    :focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; border-radius: 6px; }
+    em.accent { font-family: var(--font-serif); font-style: italic; font-weight: 400; color: var(--accent-bright); letter-spacing: 0; }
+    .skip-link { position: absolute; left: 16px; top: -48px; z-index: 20; padding: 10px 14px; border-radius: 8px; background: var(--brand); color: #ffffff; }
+    .skip-link:focus { top: 16px; }
+
+    .container { width: min(var(--content), 100% - 2 * var(--gutter)); margin-inline: auto; }
+    .glass { background: var(--glass); border: 1px solid var(--hairline); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.14); border-radius: 16px; }
+    .eyebrow { font-family: var(--font-mono); font-size: 12px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); margin: 0 0 16px; }
+    .mono { font-family: var(--font-mono); }
+    .tag { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 999px; font-family: var(--font-mono); font-size: 11px; font-weight: 500; color: var(--accent-bright); background: rgb(168 85 247 / 0.12); border: 1px solid rgb(168 85 247 / 0.28); white-space: nowrap; }
+
     .button {
-      display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; border-radius: 10px;
-      font-weight: 600; font-size: 15px; border: 1px solid var(--border); color: var(--text); background: var(--surface-raised);
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; padding: 12px 22px;
+      border-radius: 12px; font-weight: 600; font-size: 15px; color: var(--text-primary);
+      background: var(--bg-surface); border: 1px solid var(--border-strong);
+      transition: border-color 160ms ease-out, box-shadow 160ms ease-out, background 160ms ease-out;
     }
-    .button.primary { background: var(--accent-strong); border-color: var(--accent-strong); color: #ffffff; }
-    .button:hover { text-decoration: none; filter: brightness(1.08); }
-    .note { font-size: 13px; color: var(--text-muted); margin-top: 14px; }
-    section { padding: 48px 0; border-top: 1px solid var(--border); }
-    h2 { font-size: 24px; margin: 0 0 24px; letter-spacing: -0.01em; }
-    .features { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
-    .feature { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; }
-    .feature h3 { font-size: 16px; margin: 0 0 8px; }
-    .feature p { margin: 0; font-size: 14px; color: var(--text-muted); }
-    table { width: 100%; border-collapse: collapse; font-size: 14px; }
-    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
-    th { color: var(--text-muted); font-weight: 600; }
-    code { font-family: var(--font-mono); font-size: 13px; background: var(--surface-raised); padding: 2px 6px; border-radius: 6px; }
-    pre { font-family: var(--font-mono); font-size: 13px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; overflow-x: auto; }
-    footer { padding: 32px 0 48px; border-top: 1px solid var(--border); font-size: 13px; color: var(--text-muted); }
-    footer p { margin: 0 0 8px; }
-    @media (max-width: 760px) {
-      .hero { grid-template-columns: 1fr; padding-top: 48px; }
-      .hero-icon { order: -1; width: 140px; justify-self: start; }
-      nav { display: none; }
+    .button:hover { text-decoration: none; border-color: var(--accent); box-shadow: 0 0 24px rgb(124 58 237 / 0.35); }
+    .button.primary { background: var(--brand); border-color: var(--brand); color: #ffffff; }
+    .button.primary:hover { background: #8b4cf0; }
+    .button.small { min-height: 36px; padding: 7px 14px; font-size: 13px; border-radius: 10px; }
+
+    /* Navigation */
+    .nav {
+      position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 10;
+      display: flex; align-items: center; gap: 20px; padding: 8px 8px 8px 16px;
+      width: max-content; max-width: calc(100% - 2 * var(--gutter));
+      background: rgb(14 13 20 / 0.72); border: 1px solid var(--hairline); border-radius: 16px;
+      backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    }
+    .lockup { display: inline-flex; align-items: center; gap: 8px; color: var(--text-primary); font-weight: 600; font-size: 17px; letter-spacing: -0.01em; }
+    .lockup:hover { text-decoration: none; }
+    .lockup img { width: 24px; height: 24px; }
+    .nav-links { display: flex; gap: 18px; font-size: 14px; }
+    .nav-links a { color: var(--text-secondary); }
+    .nav-links a:hover { color: var(--text-primary); text-decoration: none; }
+    .nav-actions { display: flex; align-items: center; gap: 8px; }
+    .language { display: inline-flex; padding: 2px; border-radius: 10px; border: 1px solid var(--border-strong); }
+    .language button {
+      min-width: 36px; min-height: 30px; padding: 0 8px; border: 0; border-radius: 8px; cursor: pointer;
+      background: transparent; color: var(--text-muted); font: 500 12px var(--font-mono);
+    }
+    .language button[aria-pressed="true"] { background: var(--bg-surface); color: var(--text-primary); }
+
+    /* Hero */
+    .hero { position: relative; padding: 160px 0 0; text-align: center; isolation: isolate; }
+    .bloom {
+      position: absolute; inset: 40px 0 auto; height: 900px; z-index: -1; pointer-events: none;
+      background: radial-gradient(50% 45% at 50% 40%, rgb(126 34 206 / 0.28), transparent 70%);
+      animation: breathe 8s ease-in-out infinite alternate;
+    }
+    @keyframes breathe { from { opacity: 0.8; } to { opacity: 1; } }
+    .hero-icon { width: 88px; height: 88px; margin: 0 auto 24px; filter: drop-shadow(0 16px 40px rgb(124 58 237 / 0.45)); }
+    .badge {
+      display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; margin-bottom: 24px;
+      font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+      color: var(--accent-bright); background: rgb(168 85 247 / 0.1); border: 1px solid rgb(168 85 247 / 0.32);
+      transition: border-color 160ms ease-out, background 160ms ease-out;
+    }
+    .badge:hover { text-decoration: none; border-color: var(--accent-bright); background: rgb(168 85 247 / 0.18); }
+    .badge .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--teal); }
+    .hero h1 { margin: 0 auto 24px; font-size: clamp(40px, 6.4vw, 76px); line-height: 1.04; letter-spacing: -0.035em; font-weight: 700; max-width: 14em; }
+    .hero .lead { margin: 0 auto 32px; max-width: 620px; font-size: clamp(17px, 1.6vw, 19px); color: var(--text-secondary); }
+    .actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; }
+    .hero-meta { margin: 20px 0 64px; font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
+    .shot { border-radius: 14px; border: 1px solid var(--hairline); overflow: hidden; background: var(--bg-raised); box-shadow: 0 30px 80px rgb(0 0 0 / 0.55), 0 0 0 1px rgb(0 0 0 / 0.4); }
+    .hero .shot { box-shadow: 0 40px 120px rgb(76 29 149 / 0.45), 0 0 0 1px rgb(0 0 0 / 0.4); }
+
+    /* Proof */
+    .proof { display: grid; grid-template-columns: repeat(3, 1fr); margin: 80px auto 0; padding-bottom: 32px; }
+    .stat { text-align: center; padding: 8px 16px; }
+    .stat + .stat { border-left: 1px solid var(--border-subtle); }
+    .stat strong { display: block; font-size: 40px; line-height: 1.2; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+    .stat span { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
+
+    /* Sections */
+    section.block { padding: 128px 0; border-top: 1px solid var(--border-subtle); position: relative; }
+    .section-head { display: grid; grid-template-columns: 1fr minmax(0, 400px); gap: 48px; align-items: end; margin-bottom: 56px; }
+    .section-head h2 { margin: 0; font-size: clamp(32px, 4.2vw, 52px); line-height: 1.06; letter-spacing: -0.03em; font-weight: 700; }
+    .section-head p { margin: 0; color: var(--text-secondary); font-size: 17px; }
+    h3 { margin: 0 0 8px; font-size: 19px; line-height: 1.3; letter-spacing: -0.01em; }
+    .card p, .caption p { margin: 0; color: var(--text-secondary); font-size: 15px; }
+    .card { padding: 24px; }
+    .card-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+    .card-label { font-family: var(--font-mono); font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted); }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+    .strip { margin-top: 16px; padding: 16px 20px; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; font-family: var(--font-mono); font-size: 13px; color: var(--text-secondary); }
+    .strip b { color: var(--accent); font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; }
+    .facts { list-style: none; margin: 20px 0 0; padding: 0; display: grid; gap: 8px; font-family: var(--font-mono); font-size: 13px; color: var(--text-secondary); }
+
+    .media-card { overflow: hidden; }
+    .media-card .shot { border-radius: 0; border: 0; border-bottom: 1px solid var(--hairline); box-shadow: none; }
+    .media-card .card { padding: 24px; }
+
+    .ui-docks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; align-items: start; }
+    .ui-docks figure { margin: 0; }
+    .ui-docks .shot { max-height: 520px; }
+    .ui-docks .shot img { width: 100%; }
+    .caption { margin-top: 16px; }
+    .caption .card-label { display: block; margin-bottom: 6px; color: var(--accent); }
+    .split { display: grid; grid-template-columns: 1.3fr 1fr; gap: 40px; align-items: center; margin-top: 24px; padding: 24px; }
+
+    .agent-layout { display: grid; grid-template-columns: 360px 1fr; gap: 40px; align-items: start; }
+    .feature-list { display: grid; gap: 28px; }
+    .feature-list .card-label { display: block; margin-bottom: 6px; color: var(--accent); }
+    .feature-list p { margin: 0; color: var(--text-secondary); font-size: 15px; }
+    .providers { margin-top: 40px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; padding: 0; margin: 0; }
+    .chips li { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border-strong); background: var(--bg-raised); font-size: 13px; color: var(--text-secondary); }
+    .chips li.highlight { color: var(--text-primary); border-color: rgb(168 85 247 / 0.5); background: rgb(168 85 247 / 0.12); }
+
+    .metric { display: block; margin: 4px 0 2px; font-size: 40px; font-weight: 700; letter-spacing: -0.02em; color: var(--text-primary); }
+    .card.featured { border-color: rgb(168 85 247 / 0.4); background: linear-gradient(180deg, rgb(124 58 237 / 0.16), var(--glass)); }
+    .bench { display: grid; grid-template-columns: 1fr 1.25fr; gap: 48px; align-items: center; margin-top: 56px; }
+    .bench-visual { position: relative; padding-bottom: 72px; }
+    .bench-visual .overlap { position: absolute; right: -16px; bottom: 0; width: 46%; }
+
+    .profiles-layout { display: grid; grid-template-columns: 1fr 1.4fr; gap: 48px; align-items: center; }
+    .dock { display: inline-flex; gap: 14px; padding: 14px 18px 10px; margin-top: 32px; border-radius: 22px; }
+    .dock-item { display: grid; justify-items: center; gap: 6px; }
+    .dock-item img { width: 60px; height: 60px; }
+    .dock-item i { width: 4px; height: 4px; border-radius: 50%; background: rgb(237 234 245 / 0.7); }
+    .dock-item i.off { background: transparent; }
+    .dock-caption { margin-top: 12px; font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
+
+    .os-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: stretch; }
+    .repo { padding: 28px; display: flex; flex-direction: column; gap: 20px; }
+    .repo-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .repo-title a { display: inline-flex; align-items: center; gap: 10px; font-family: var(--font-mono); font-weight: 700; color: var(--text-primary); }
+    .repo-title svg { width: 20px; height: 20px; }
+    .repo p { margin: 0; color: var(--text-secondary); }
+    .repo-facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; padding: 16px 0; border-block: 1px solid var(--border-subtle); }
+    .repo-facts strong { display: block; font-size: 18px; }
+    .repo-facts span { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+    .repo .button { align-self: flex-start; margin-top: auto; }
+    .terminal { display: flex; flex-direction: column; border-radius: 16px; overflow: hidden; background: #0b0a10; border: 1px solid var(--border-subtle); }
+    .terminal-bar { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border-subtle); background: #101016; }
+    .lights { display: flex; gap: 8px; }
+    .lights i { width: 10px; height: 10px; border-radius: 50%; }
+    .lights i:nth-child(1) { background: #f87171; } .lights i:nth-child(2) { background: #f0b46a; } .lights i:nth-child(3) { background: #bef264; }
+    .terminal-bar span { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.14em; color: var(--text-muted); text-transform: uppercase; }
+    .terminal pre { margin: 0; padding: 24px; font: 14px/1.75 var(--font-mono); color: var(--text-primary); overflow-x: auto; white-space: pre; }
+    .terminal .comment { color: var(--text-muted); font-style: italic; }
+    .terminal .comment a { color: var(--text-secondary); text-decoration: underline; }
+    .terminal .command { color: var(--accent-bright); }
+    .terminal .argument { color: var(--teal); }
+    .terminal .prompt { color: #bef264; }
+    .cursor { display: inline-block; width: 0.6em; height: 1.1em; vertical-align: -0.2em; background: var(--accent-bright); animation: blink 1.1s steps(1) infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    .cta { text-align: center; padding: 160px 0 128px; border-top: 1px solid var(--border-subtle); position: relative; isolation: isolate; overflow: hidden; }
+    .cta .bloom { inset: auto 0 -300px; height: 800px; background: radial-gradient(45% 50% at 50% 50%, rgb(126 34 206 / 0.3), transparent 70%); }
+    .cta h2 { margin: 16px 0 20px; font-size: clamp(36px, 5.4vw, 64px); line-height: 1.05; letter-spacing: -0.035em; }
+    .cta p { margin: 0 auto 32px; max-width: 520px; color: var(--text-secondary); font-size: 17px; }
+    .cta .prompt-line { font-family: var(--font-mono); font-size: 14px; color: var(--text-muted); }
+    .cta .prompt-line b { color: #bef264; font-weight: 500; }
+
+    footer { border-top: 1px solid var(--border-subtle); padding: 32px 0 48px; font-size: 13px; color: var(--text-muted); }
+    footer .container { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px 24px; align-items: center; }
+    footer p { margin: 0; }
+    footer nav { display: flex; gap: 16px; }
+    footer a { color: var(--text-secondary); }
+
+    @media (max-width: 1000px) {
+      .nav-links { display: none; }
+      .section-head, .agent-layout, .bench, .profiles-layout, .os-layout, .split { grid-template-columns: 1fr; }
+      .section-head { gap: 16px; }
+      .grid-4 { grid-template-columns: repeat(2, 1fr); }
+      .grid-3 { grid-template-columns: 1fr; }
+      .ui-docks { grid-template-columns: 1fr; }
+      .ui-docks .shot { max-height: 420px; }
+    }
+    @media (max-width: 640px) {
+      :root { --gutter: 16px; }
+      .nav { gap: 10px; padding-left: 12px; }
+      .nav .github { display: none; }
+      .button.small, .language button { min-height: 44px; }
+      .hero { padding-top: 128px; }
+      .proof { grid-template-columns: 1fr; gap: 16px; }
+      .stat + .stat { border-left: 0; border-top: 1px solid var(--border-subtle); padding-top: 16px; }
+      section.block { padding: 88px 0; }
+      .grid-2, .grid-4, .repo-facts { grid-template-columns: 1fr; }
+      .dock { gap: 8px; padding: 10px 12px 8px; }
+      .dock-item img { width: 44px; height: 44px; }
+      .bench-visual { padding-bottom: 0; }
+      .bench-visual .overlap { position: static; width: 100%; margin-top: 16px; }
+      .actions .button { width: 100%; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      .bloom, .cursor { animation: none; }
+      * { transition: none !important; }
     }
   </style>
 </head>
 <body>
-  <div class="page">
-    <header>
-      <a class="brand" href="./"><img src="asylum-app-icon.svg" alt="">Asylum</a>
-      <nav>
-        <a href="#features">Features</a>
-        <a href="#download">Download</a>
-        <a href="https://github.com/viniengelage/asylum/tree/main/docs/src">Docs</a>
-        <a href="https://github.com/viniengelage/asylum">GitHub</a>
-      </nav>
-    </header>
+  <a class="skip-link" href="#main" data-i18n="nav.skip">Skip to content</a>
 
-    <div class="hero">
-      <div>
-        <h1>The editor for mobile and full-stack work.</h1>
-        <p>Asylum keeps everything that makes Zed fast and adds the tools you usually keep in other windows: device emulators, a browser, an API client, a database client and an agent that can drive all of them. Free and open source, with no account or subscription.</p>
-        <div class="actions">
-          <a class="button primary" href="https://github.com/viniengelage/asylum/releases/latest">Download for macOS</a>
-          <a class="button" href="https://github.com/viniengelage/asylum/releases/latest">Windows (preview)</a>
-          <a class="button" href="https://github.com/viniengelage/asylum">Source code</a>
-        </div>
-        <p class="note">Apple Silicon and Windows x86_64. GPL-3.0-or-later.</p>
+  <header class="nav">
+    <a class="lockup" href="./" aria-label="Asylum"><img src="asylum-app-icon.svg" alt="">asylum</a>
+    <nav class="nav-links" data-i18n-attr="aria-label:nav.label" aria-label="Sections">
+      <a href="#devices" data-i18n="nav.devices">Simulators</a>
+      <a href="#tools" data-i18n="nav.tools">Tools</a>
+      <a href="#agent" data-i18n="nav.agent">Agent</a>
+      <a href="#open-source">Open source</a>
+    </nav>
+    <div class="nav-actions">
+      <div class="language" role="group" data-i18n-attr="aria-label:nav.language" aria-label="Language">
+        <button type="button" data-language="en" aria-pressed="true">EN</button>
+        <button type="button" data-language="pt-BR" aria-pressed="false">PT</button>
       </div>
-      <img class="hero-icon" src="asylum-app-icon.svg" alt="Asylum app icon">
+      <a class="button small github" href="https://github.com/viniengelage/asylum">GitHub</a>
+      <a class="button small primary" href="#download" data-i18n="nav.download">Download</a>
+    </div>
+  </header>
+
+  <main id="main">
+    <div class="hero">
+      <div class="bloom" aria-hidden="true"></div>
+      <div class="container">
+        <img class="hero-icon" src="asylum-app-icon.svg" alt="">
+        <a class="badge" href="https://github.com/viniengelage/asylum/releases" data-release-link>
+          <span class="dot" aria-hidden="true"></span>
+          <span><span data-release-version>v2.0</span> · <span data-i18n="hero.badge">free and open source</span></span>
+        </a>
+        <h1 data-i18n="hero.title">Coding is madness.<br>Here it gets padded <em class="accent">walls.</em></h1>
+        <p class="lead" data-i18n="hero.lead">An editor for mobile and full-stack work with an iOS simulator, an Android emulator, a browser, API, database and Docker inside it. Plus an agent that knows how to use all of it. Built on Zed, in Rust, with no account and no subscription.</p>
+        <div class="actions" id="download">
+          <a class="button primary" href="https://github.com/viniengelage/asylum/releases/latest/download/Asylum-aarch64.dmg" data-i18n="cta.mac">Download for macOS</a>
+          <a class="button" href="https://github.com/viniengelage/asylum"><span data-i18n="hero.source">View code on GitHub</span> <span aria-hidden="true">↗</span></a>
+        </div>
+        <p class="hero-meta">macOS Apple Silicon · Windows (preview) · GPL-3.0</p>
+        <div class="shot">
+          <img src="assets/devices.webp" width="1728" height="1080" fetchpriority="high"
+            data-i18n-attr="alt:alt.devices" alt="Asylum with a to-do app project open: the code on the left and the iOS simulator and Android emulator running side by side on the right.">
+        </div>
+      </div>
+      <div class="container proof">
+        <div class="stat"><strong>16</strong><span data-i18n="proof.crates">Rust crates of my own</span></div>
+        <div class="stat"><strong data-i18n="proof.lines.value">~95k</strong><span data-i18n="proof.lines">new lines on top of Zed</span></div>
+        <div class="stat"><strong data-release-version>v2.0</strong><span data-i18n="proof.release">released · updates itself</span></div>
+      </div>
     </div>
 
-    <section id="features">
-      <h2>Everything in one window</h2>
-      <div class="features">
-        <div class="feature">
-          <h3>iOS Simulator, embedded</h3>
-          <p>Run and drive the simulator inside the editor on macOS, with touch, keyboard and rotation, plus a manager to download runtimes and create devices.</p>
+    <section class="block" id="devices">
+      <div class="container">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow" data-i18n="devices.eyebrow">Simulators</p>
+            <h2 data-i18n="devices.title">Your app running<br><em class="accent">next to</em> the code.</h2>
+          </div>
+          <p data-i18n="devices.lead">I got tired of jumping between Xcode, Android Studio and the editor. Here the devices sit in a tab, side by side, and the agent can use them too.</p>
         </div>
-        <div class="feature">
-          <h3>Android emulator, embedded</h3>
-          <p>Asylum downloads the JDK, the SDK and the system images on demand and creates the virtual devices for you.</p>
+        <div class="grid-3">
+          <article class="card glass">
+            <div class="card-top"><span class="card-label">iOS Simulator</span><span class="tag" data-i18n="devices.macOnly">macOS only</span></div>
+            <h3 data-i18n="devices.ios.title">Built into the editor</h3>
+            <p data-i18n="devices.ios.body">It runs through Apple's SimulatorKit, inside an Asylum tab. Pick the runtime and the device, manage simulators and set a fake location.</p>
+          </article>
+          <article class="card glass">
+            <div class="card-top"><span class="card-label">Android Emulator</span><span class="tag">macOS · Windows · Linux</span></div>
+            <h3 data-i18n="devices.android.title">No Android Studio needed</h3>
+            <p data-i18n="devices.android.body">Asylum downloads the JDK, the SDK and the system images and creates the AVDs on its own. Several emulators run at once, in the same panel.</p>
+          </article>
+          <article class="card glass">
+            <div class="card-top"><span class="card-label">Web Preview</span><span class="tag" data-i18n="devices.macOnly">macOS only</span></div>
+            <h3 data-i18n="devices.web.title">Chromium in a tab</h3>
+            <p data-i18n="devices.web.body">A browser in a workspace tab, with DevTools. It also opens the project's PDFs without leaving the editor.</p>
+          </article>
         </div>
-        <div class="feature">
-          <h3>Web Preview</h3>
-          <p>A Chromium tab in the workspace, with DevTools protocol access so the agent can open, inspect and interact with pages.</p>
+        <p class="strip glass"><b data-i18n="devices.agentUses">The agent uses them too</b> device_tap · device_swipe · device_type · device_screenshot · device_logs · browser_click · browser_console · browser_eval</p>
+      </div>
+    </section>
+
+    <section class="block" id="tools">
+      <div class="container">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow" data-i18n="tools.eyebrow">All in one window</p>
+            <h2 data-i18n="tools.title">The tools that used to live<br>in other <em class="accent">windows.</em></h2>
+          </div>
+          <p data-i18n="tools.lead">Database, API, containers, logs, PRs and tasks become editor docks, and every dock becomes a tool for the agent.</p>
         </div>
-        <div class="feature">
-          <h3>API client</h3>
-          <p>Postman collections and OpenAPI specs, environments, captures, cookies and code lenses that send requests straight from your spec.</p>
+        <div class="grid-2">
+          <article class="glass media-card">
+            <div class="shot"><img src="assets/db-query.webp" width="1728" height="1080" loading="lazy" data-i18n-attr="alt:alt.database" alt="Database dock with a SQL query, the catalog tree and the results grid of the to-do app."></div>
+            <div class="card">
+              <p class="card-label" data-i18n="tools.database.label">Database · PostgreSQL</p>
+              <h3 data-i18n="tools.database.title">SQL with autocomplete and transactional edits</h3>
+              <p data-i18n="tools.database.body">Connect over TLS or an SSH tunnel, with a catalog tree and a paged grid. Edit cells and apply everything in one transaction. The agent reads through a read-only connection.</p>
+            </div>
+          </article>
+          <article class="glass media-card">
+            <div class="shot"><img src="assets/api.webp" width="1728" height="1080" loading="lazy" data-i18n-attr="alt:alt.api" alt="API client with a collection generated from openapi.yml and the response of a request."></div>
+            <div class="card">
+              <p class="card-label" data-i18n="tools.api.label">API client · OpenAPI / Swagger</p>
+              <h3 data-i18n="tools.api.title">The collection comes from your openapi.yml</h3>
+              <p data-i18n="tools.api.body">Tags become folders, operations become requests, servers become environments and securitySchemes becomes the login. Send a request straight from the spec with a code lens.</p>
+            </div>
+          </article>
+          <article class="glass media-card">
+            <div class="shot"><img src="assets/docker.webp" width="1728" height="1080" loading="lazy" data-i18n-attr="alt:alt.docker" alt="Docker dock with containers grouped by the compose file and a container's logs."></div>
+            <div class="card">
+              <p class="card-label">Docker · Compose</p>
+              <h3 data-i18n="tools.docker.title">Containers grouped by your compose file</h3>
+              <p data-i18n="tools.docker.body">Terminal and logs in the middle of the editor, with each service's state marked right in docker-compose.yml. The agent reads freely, asks before changing anything and never sees your environment variables.</p>
+            </div>
+          </article>
+          <article class="glass media-card">
+            <div class="shot"><img src="assets/repo-pr.webp" width="1728" height="1080" loading="lazy" data-i18n-attr="alt:alt.pullRequest" alt="Pull request view with the diff, comments and checks."></div>
+            <div class="card">
+              <p class="card-label" data-i18n="tools.pr.label">Pull requests · GitHub and Bitbucket</p>
+              <h3 data-i18n="tools.pr.title">Your branch's PR always on top</h3>
+              <p data-i18n="tools.pr.body">Diffs, comments, checks and merge without opening the website. You can open a PR while looking at the commits you haven't pushed yet, or mention the PR so the agent reviews it.</p>
+            </div>
+          </article>
         </div>
-        <div class="feature">
-          <h3>Database client</h3>
-          <p>PostgreSQL query editor, result grid and schema browser, with results the agent can read and explain.</p>
-        </div>
-        <div class="feature">
-          <h3>Docker and Elasticsearch</h3>
-          <p>Containers, logs and actions, ES|QL queries, live tail and traces, each in its own dock.</p>
-        </div>
-        <div class="feature">
-          <h3>Asylum Agent</h3>
-          <p>An agent tuned to spend fewer tokens, with tools for every dock, task agents, pipelines with acceptance criteria and plan mode. Bring your own model or any ACP agent.</p>
-        </div>
-        <div class="feature">
-          <h3>Settings sync through GitHub</h3>
-          <p>Settings, keymap, snippets, themes, agents and flows follow you in a private gist on your own account. There is no Asylum server.</p>
-        </div>
-        <div class="feature">
-          <h3>Made for ultrawide</h3>
-          <p>A unified pane layout, profiles with their own icon and data, and Asylum's own icon family and Polar theme.</p>
+        <div class="grid-3" style="margin-top: 16px">
+          <article class="card glass">
+            <p class="card-label">Elasticsearch</p>
+            <h3 data-i18n="tools.elastic.title">ES|QL logs and APM traces</h3>
+            <p data-i18n="tools.elastic.body">Live tail of your data streams. The agent queries read-only, with personal data masked.</p>
+          </article>
+          <article class="card glass">
+            <p class="card-label">ClickUp</p>
+            <h3 data-i18n="tools.clickup.title">The branch's task, with a timer</h3>
+            <p data-i18n="tools.clickup.body">Your tasks in a dock. Ask the agent to comment, move a task or turn the conversation into a user story.</p>
+          </article>
+          <article class="card glass">
+            <p class="card-label" data-i18n="tools.settings.label">Settings</p>
+            <h3 data-i18n="tools.settings.title">Sync through your own GitHub</h3>
+            <p data-i18n="tools.settings.body">Settings sync to private gists on your account, with no Asylum server in between. The interface comes in English or Portuguese.</p>
+          </article>
         </div>
       </div>
     </section>
 
-    <section id="download">
-      <h2>Download</h2>
-      <table>
-        <tr><th>Platform</th><th>Status</th></tr>
-        <tr><td>macOS (Apple Silicon)</td><td>Supported. <a href="https://github.com/viniengelage/asylum/releases/latest">Download the DMG</a>.</td></tr>
-        <tr><td>Windows (x86_64)</td><td>Preview. The iOS Simulator and Web Preview are macOS-only.</td></tr>
-        <tr><td>Linux</td><td>Builds from source.</td></tr>
-      </table>
-      <p class="note">Builds are not notarized yet. On macOS, clear the quarantine flag once after installing:</p>
-      <pre>xattr -dr com.apple.quarantine /Applications/Asylum.app</pre>
-      <p class="note">Installed copies update themselves from GitHub Releases.</p>
+    <section class="block" id="interface">
+      <div class="container">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow" data-i18n="ui.eyebrow">Interface</p>
+            <h2 data-i18n="ui.title">Redesigned<br><em class="accent">piece by piece.</em></h2>
+          </div>
+          <p data-i18n="ui.lead">The agent dock, the status bar and the settings were rebuilt from scratch. There are 245 icons drawn for Asylum, and the whole interface is available in English and Portuguese.</p>
+        </div>
+        <div class="ui-docks">
+          <figure>
+            <div class="shot"><img src="assets/dock-thread.webp" width="880" height="2080" loading="lazy" data-i18n-attr="alt:alt.thread" alt="Agent thread where terminal runs, a subagent and file edits show up as cards."></div>
+            <figcaption class="caption"><span class="card-label" data-i18n="ui.thread.label">Thread as cards</span><p data-i18n="ui.thread.body">Terminal runs, subagents and edits become cards with state, time and actions. Reads and searches fold into "Explored the project".</p></figcaption>
+          </figure>
+          <figure>
+            <div class="shot"><img src="assets/dock-terminal.webp" width="880" height="1406" loading="lazy" data-i18n-attr="alt:alt.terminal" alt="Terminal cards in the agent thread showing state, duration and exit code."></div>
+            <figcaption class="caption"><span class="card-label" data-i18n="ui.terminal.label">A terminal that explains itself</span><p data-i18n="ui.terminal.body">State in plain words, with duration and exit code always in view. Success collapses on its own; a failure opens on the error, with "Run again".</p></figcaption>
+          </figure>
+          <figure>
+            <div class="shot"><img src="assets/dock-db.webp" width="880" height="2080" loading="lazy" data-i18n-attr="alt:alt.answer" alt="Agent answer with a table and a chart built from a database query."></div>
+            <figcaption class="caption"><span class="card-label" data-i18n="ui.data.label">Answers with data</span><p data-i18n="ui.data.body">Queries come back as a table and a chart inside the conversation, with "View SQL", "Open in Database" and "Copy CSV".</p></figcaption>
+          </figure>
+        </div>
+        <div class="split glass">
+          <div class="shot"><img src="assets/settings-filter.webp" width="1280" height="900" loading="lazy" data-i18n-attr="alt:alt.settings" alt="Settings window showing the scope being edited and the filter for changed values."></div>
+          <div>
+            <p class="card-label" data-i18n="tools.settings.label">Settings</p>
+            <h3 data-i18n="ui.settings.title">Every value says where it came from</h3>
+            <p style="margin: 0; color: var(--text-secondary)" data-i18n="ui.settings.body">The window shows which scope you're editing (all profiles, one profile or the project), where each value comes from, and an "Only what changes" filter. It also gained Integrations, Devices, Browser and Sync pages.</p>
+            <ul class="facts">
+              <li data-i18n="ui.fact.tabs">→ docks become tabs, built for ultrawide</li>
+              <li data-i18n="ui.fact.status">→ status bar on a single ruler, profile in its own color</li>
+              <li data-i18n="ui.fact.theme">→ Polar Dark theme, IBM Plex Sans and Mono</li>
+              <li data-i18n="ui.fact.approvals">→ approvals show the reason and the scope</li>
+            </ul>
+          </div>
+        </div>
+      </div>
     </section>
 
-    <footer>
-      <p>Asylum is an independent fork of <a href="https://github.com/zed-industries/zed">Zed</a>. It is not affiliated with or endorsed by Zed Industries, Inc. "Zed" is a trademark of Zed Industries, Inc.</p>
-      <p>Distributed under GPL-3.0-or-later, with Apache-2.0 components where marked. <a href="https://github.com/viniengelage/asylum/blob/main/NOTICE">Notice</a> · <a href="https://github.com/viniengelage/asylum/blob/main/LICENSE-GPL">License</a> · <a href="https://github.com/viniengelage/asylum/issues">Report an issue</a></p>
-    </footer>
-  </div>
+    <section class="block" id="agent">
+      <div class="container">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Asylum Agent</p>
+            <h2 data-i18n="agent.title">An agent that uses <em class="accent">all</em> of this.</h2>
+          </div>
+          <p data-i18n="agent.lead">It plans, runs subagents, drives the simulators and queries the database. And it spends fewer tokens than before doing it.</p>
+        </div>
+        <div class="agent-layout">
+          <div class="feature-list">
+            <div>
+              <span class="card-label">Plan mode</span>
+              <h3 data-i18n="agent.plan.title">A plan before touching the code</h3>
+              <p data-i18n="agent.plan.body">It proposes the steps and the files. You edit, approve with ⌘↵ and follow the progress in a card.</p>
+            </div>
+            <div>
+              <span class="card-label" data-i18n="agent.pipelines.label">Agents and pipelines</span>
+              <h3 data-i18n="agent.pipelines.title">Task agents, in a pipeline</h3>
+              <p data-i18n="agent.pipelines.body">Create agents you call with a /command, import your Claude Code subagents and chain everything into pipelines with approval steps.</p>
+            </div>
+            <div>
+              <span class="card-label" data-i18n="agent.learnings.label">Learnings</span>
+              <h3 data-i18n="agent.learnings.title">Memory you approve</h3>
+              <p data-i18n="agent.learnings.body">What it learns about the project becomes a note you approve, and that note goes into every new conversation.</p>
+            </div>
+            <div>
+              <span class="card-label">Toolkits</span>
+              <h3 data-i18n="agent.toolkits.title">Every dock becomes a tool</h3>
+              <p data-i18n="agent.toolkits.body">Database, API, Docker, PRs, simulators and the browser expose tools to the agent. You turn each toolkit on or off per profile, and every write asks for approval.</p>
+            </div>
+          </div>
+          <div class="shot"><img src="assets/plan-ready.webp" width="1728" height="1080" loading="lazy" data-i18n-attr="alt:alt.plan" alt="Plan mode card with the proposed steps and files, waiting for approval."></div>
+        </div>
+        <div class="providers">
+          <p class="eyebrow" data-i18n="agent.providers">Use whatever model you want</p>
+          <ul class="chips">
+            <li class="highlight" data-i18n="agent.providers.claude">Claude · subscription via OAuth</li>
+            <li>OpenAI</li><li>Gemini</li><li>Ollama</li><li>LM Studio</li><li>OpenRouter</li><li>Mistral</li><li>DeepSeek</li><li>xAI</li><li>Bedrock</li><li>Copilot</li>
+            <li data-i18n="agent.providers.acp">Claude Code and Codex via ACP</li>
+            <li>MCP</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="block" id="efficiency">
+      <div class="container">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow" data-i18n="efficiency.eyebrow">Fewer tokens, the right model</p>
+            <h2 data-i18n="efficiency.title">Spends <em class="accent">less</em> to do the same.</h2>
+          </div>
+          <p data-i18n="efficiency.lead">Before every call, Asylum cuts what doesn't help the agent. And each part of the work goes to the cheapest model that can handle it.</p>
+        </div>
+        <div class="grid-4">
+          <article class="card glass featured">
+            <p class="card-label" data-i18n="efficiency.mcp.label">On-demand MCP</p>
+            <strong class="metric" data-i18n="efficiency.mcp.value">~380k</strong>
+            <h3 data-i18n="efficiency.mcp.title">tokens per call, just in schemas</h3>
+            <p data-i18n="efficiency.mcp.body">That's what one of my profiles used to spend, and half of it came from a single server with 524 tools. Now each server only comes in when the agent asks and you approve.</p>
+          </article>
+          <article class="card glass">
+            <p class="card-label">Terminal</p>
+            <h3 data-i18n="efficiency.terminal.title">Only the output that matters</h3>
+            <p data-i18n="efficiency.terminal.body">Build progress, passing tests, git hints and repeated lines are dropped before they reach the model. Errors stay whole, with the beginning and the end.</p>
+          </article>
+          <article class="card glass">
+            <p class="card-label">JSON</p>
+            <h3 data-i18n="efficiency.json.title">Big responses, trimmed down</h3>
+            <p data-i18n="efficiency.json.body">Fetch, MCP and toolkits send the first and last items of each list and anything that looks like an error. You still see the full result.</p>
+          </article>
+          <article class="card glass">
+            <p class="card-label">repo_map</p>
+            <h3 data-i18n="efficiency.map.title">A map instead of reading</h3>
+            <p data-i18n="efficiency.map.body">One call shows the folders and the symbols in each file, with line numbers. Then the agent reads only the part it needs.</p>
+          </article>
+        </div>
+        <p class="strip glass">
+          <span data-i18n="efficiency.strip.saved">→ the thread shows how many tokens were saved</span>
+          <span data-i18n="efficiency.strip.learnings">→ approved learnings save rediscovering the project</span>
+        </p>
+        <div class="bench">
+          <div>
+            <p class="eyebrow" data-i18n="bench.eyebrow">Subagents on Auto</p>
+            <h3 style="font-size: clamp(24px, 2.6vw, 32px); letter-spacing: -0.02em" data-i18n="bench.title">The right model and effort for each subtask</h3>
+            <p style="color: var(--text-secondary)" data-i18n="bench.body">Before opening a subagent, the agent checks benchmarks.md: Terminal-Bench, FrontierCode, price and "good for / avoid for" for each model at each effort level. It goes with the cheapest one that gets it done without rework, and the subagent card explains the choice.</p>
+            <ul class="facts">
+              <li data-i18n="bench.fact.sources">→ numbers published by the labs, with sources</li>
+              <li data-i18n="bench.fact.editable">→ editable: project › user › Asylum default</li>
+              <li data-i18n="bench.fact.invalid">→ invalid rows flagged right in the editor</li>
+            </ul>
+          </div>
+          <div class="bench-visual">
+            <div class="shot"><img src="assets/benchmarks-md.webp" width="2200" height="1410" loading="lazy" data-i18n-attr="alt:alt.benchmarks" alt="The benchmarks.md file open in the editor, with a table of models, effort levels and scores."></div>
+            <div class="shot overlap"><img src="assets/auto-model-panel.webp" width="1416" height="1148" loading="lazy" data-i18n-attr="alt:alt.autoModel" alt="Subagent card explaining which model and effort were picked and why."></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="block" id="profiles">
+      <div class="container profiles-layout">
+        <div>
+          <p class="eyebrow" data-i18n="profiles.eyebrow">Profiles</p>
+          <h2 style="margin: 0 0 20px; font-size: clamp(32px, 4.2vw, 52px); line-height: 1.06; letter-spacing: -0.03em" data-i18n="profiles.title">Work and personal,<br><em class="accent">side by side.</em></h2>
+          <p style="margin: 0; color: var(--text-secondary); font-size: 17px" data-i18n="profiles.lead">Each profile is an isolated instance with its own data, git identity, AI providers, MCP servers, accounts and keychain. Work folders always open in the work profile.</p>
+          <div class="dock glass" aria-hidden="true">
+            <span class="dock-item"><img src="assets/profiles/asylum-app-icon-amber-macos.svg" alt=""><i></i></span>
+            <span class="dock-item"><img src="assets/profiles/asylum-app-icon-teal-macos.svg" alt=""><i></i></span>
+            <span class="dock-item"><img src="assets/profiles/asylum-app-icon-purple-macos.svg" alt=""><i></i></span>
+            <span class="dock-item"><img src="assets/profiles/asylum-app-icon-blue-macos.svg" alt=""><i class="off"></i></span>
+            <span class="dock-item"><img src="assets/profiles/asylum-app-icon-rose-macos.svg" alt=""><i class="off"></i></span>
+          </div>
+          <p class="dock-caption" data-i18n="profiles.dock">On macOS, each profile gets an icon in its own color in the Dock and in ⌘-Tab.</p>
+        </div>
+        <div class="shot"><img src="assets/profiles.webp" width="1728" height="1080" loading="lazy" data-i18n-attr="alt:alt.profiles" alt="Profile picker with work and personal profiles, each in its own color."></div>
+      </div>
+    </section>
+
+    <section class="block" id="open-source">
+      <div class="container">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Open source</p>
+            <h2 data-i18n="os.title">Open code, <em class="accent">all of it.</em></h2>
+          </div>
+          <p data-i18n="os.lead">No account, no subscription and no server of my own. Everything is on GitHub: you can read it, build it, open an issue or send a PR.</p>
+        </div>
+        <div class="os-layout">
+          <article class="repo glass">
+            <div class="repo-title">
+              <a href="https://github.com/viniengelage/asylum">
+                <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+                viniengelage/asylum
+              </a>
+              <span class="tag">GPL-3.0</span>
+            </div>
+            <p data-i18n="os.repo">An independent fork of Zed, kept up to date with upstream (it's on Zed 1.27 today). What makes Zed fast is still there: GPU rendering, tree-sitter, LSP, multi-buffers and Vim mode.</p>
+            <div class="repo-facts">
+              <div><strong>Rust</strong><span>GPUI · tree-sitter · LSP</span></div>
+              <div><strong>macOS + Win</strong><span data-i18n="os.fact.linux">Linux builds from source</span></div>
+              <div><strong data-i18n="os.fact.languages.value">en · pt-BR</strong><span data-i18n="os.fact.languages">interface languages</span></div>
+            </div>
+            <ul class="chips">
+              <li data-i18n="os.chip.account">no account</li>
+              <li data-i18n="os.chip.subscription">no subscription</li>
+              <li data-i18n="os.chip.server">no server of my own</li>
+              <li data-i18n="os.chip.telemetry">no remote telemetry</li>
+            </ul>
+            <a class="button" href="https://github.com/viniengelage/asylum"><span data-i18n="os.button">View the repository</span> <span aria-hidden="true">↗</span></a>
+          </article>
+          <div class="terminal">
+            <div class="terminal-bar"><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span><span data-i18n="os.install">Install · zsh</span></div>
+<pre><span class="comment" data-i18n="os.step.download"># 1. download the latest version from</span>
+<span class="comment">#    <a href="https://github.com/viniengelage/asylum/releases">github.com/viniengelage/asylum/releases</a></span>
+
+<span class="comment" data-i18n="os.step.open"># 2. open it and pick a profile</span>
+<span class="command">open</span> -a <span class="argument">Asylum</span>
+
+<span class="prompt">asylum</span> ~ $ <span data-i18n="tagline">dev is madness</span><span class="cursor" aria-hidden="true"></span></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="cta">
+      <div class="bloom" aria-hidden="true"></div>
+      <div class="container">
+        <p class="prompt-line"><b>asylum</b> ~ $ <span data-i18n="tagline">dev is madness</span>_</p>
+        <h2 data-i18n="cta.title">Stop switching <em class="accent">windows.</em></h2>
+        <p data-i18n="cta.lead">Free and open source, in English or Portuguese. I built it because I got tired of having ten windows open to take care of a single app.</p>
+        <div class="actions">
+          <a class="button primary" href="https://github.com/viniengelage/asylum/releases/latest/download/Asylum-aarch64.dmg" data-i18n="cta.mac">Download for macOS</a>
+          <a class="button" href="https://github.com/viniengelage/asylum/releases/latest/download/Asylum-x86_64.exe">Windows (preview)</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container">
+      <p>© 2026 Vinicios Engelage · GPL-3.0 · <span data-i18n="footer.disclaimer">Independent project, not affiliated with Zed Industries.</span></p>
+      <nav data-i18n-attr="aria-label:footer.label" aria-label="Project links">
+        <a href="https://github.com/viniengelage/asylum/releases" data-i18n="footer.releases">Releases</a>
+        <a href="https://github.com/viniengelage/asylum/blob/main/NOTICE">Notice</a>
+        <a href="https://github.com/viniengelage/asylum/blob/main/LICENSE-GPL" data-i18n="footer.license">License</a>
+        <a href="https://github.com/viniengelage/asylum/issues" data-i18n="footer.issues">Report an issue</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script>
+    const translations = {
+      "pt-BR": {
+        "meta.title": "Asylum: programar é loucura, aqui ela tem paredes acolchoadas",
+        "meta.description": "Um editor gratuito e open source para mobile e full-stack, com simulador iOS, emulador Android, navegador, API, banco e Docker dentro dele, e um agente que usa tudo isso.",
+        "nav.skip": "Pular para o conteúdo",
+        "nav.label": "Seções",
+        "nav.language": "Idioma",
+        "nav.devices": "Simuladores",
+        "nav.tools": "Ferramentas",
+        "nav.agent": "Agente",
+        "nav.download": "Baixar",
+        "hero.badge": "gratuito e open source",
+        "hero.title": "Programar é loucura.<br>Aqui ela tem paredes <em class=\"accent\">acolchoadas.</em>",
+        "hero.lead": "Um editor para mobile e full-stack com simulador iOS, emulador Android, navegador, API, banco e Docker dentro dele. E um agente que sabe usar tudo isso. Feito sobre o Zed, em Rust, sem conta e sem assinatura.",
+        "hero.source": "Ver código no GitHub",
+        "cta.mac": "Baixar para macOS",
+        "alt.devices": "Asylum com o projeto de um app de tarefas aberto: o código à esquerda e o simulador iOS e o emulador Android rodando lado a lado à direita.",
+        "proof.crates": "crates próprias em Rust",
+        "proof.lines.value": "~95 mil",
+        "proof.lines": "linhas novas sobre o Zed",
+        "proof.release": "publicada · atualiza sozinha",
+        "devices.eyebrow": "Simuladores",
+        "devices.title": "Seu app rodando<br><em class=\"accent\">ao lado</em> do código.",
+        "devices.lead": "Cansei de pular entre Xcode, Android Studio e o editor. Aqui os aparelhos ficam numa aba, lado a lado, e o agente também mexe neles.",
+        "devices.macOnly": "só macOS",
+        "devices.ios.title": "Embutido no editor",
+        "devices.ios.body": "Roda pelo SimulatorKit da Apple, dentro de uma aba do Asylum. Escolha o runtime e o aparelho, gerencie simuladores e simule localização.",
+        "devices.android.title": "Sem instalar o Android Studio",
+        "devices.android.body": "O Asylum baixa JDK, SDK e imagens de sistema e cria os AVDs sozinho. Vários emuladores rodando ao mesmo tempo, no mesmo painel.",
+        "devices.web.title": "Chromium numa aba",
+        "devices.web.body": "Navegador numa aba do workspace, com DevTools. Também abre os PDFs do projeto sem sair do editor.",
+        "devices.agentUses": "O agente também usa",
+        "tools.eyebrow": "Tudo numa janela",
+        "tools.title": "As ferramentas que viviam<br>em outras <em class=\"accent\">janelas.</em>",
+        "tools.lead": "Banco, API, containers, logs, PRs e tarefas viram docks do editor, e cada dock vira ferramenta do agente.",
+        "alt.database": "Dock de banco com uma consulta SQL, a árvore do catálogo e a grade de resultados do app de tarefas.",
+        "tools.database.label": "Banco de dados · PostgreSQL",
+        "tools.database.title": "SQL com autocomplete e edição em transação",
+        "tools.database.body": "Conexão por TLS ou túnel SSH, árvore do catálogo, grade paginada. Edite células e aplique tudo numa transação. O agente lê por uma conexão só-leitura.",
+        "alt.api": "Cliente de API com uma coleção gerada do openapi.yml e a resposta de um request.",
+        "tools.api.label": "Cliente de API · OpenAPI / Swagger",
+        "tools.api.title": "A coleção nasce do seu openapi.yml",
+        "tools.api.body": "Tags viram pastas, operações viram requests, servers viram ambientes e o securitySchemes vira login. Mande um request direto da spec, pelo code lens.",
+        "alt.docker": "Dock do Docker com containers agrupados pelo compose e os logs de um container.",
+        "tools.docker.title": "Containers agrupados pelo seu compose",
+        "tools.docker.body": "Terminal e logs no centro do editor, com o estado de cada serviço marcado no próprio docker-compose.yml. O agente lê à vontade, pede antes de mexer e nunca vê suas variáveis de ambiente.",
+        "alt.pullRequest": "Tela de pull request com o diff, os comentários e os checks.",
+        "tools.pr.label": "Pull requests · GitHub e Bitbucket",
+        "tools.pr.title": "O PR da sua branch sempre no topo",
+        "tools.pr.body": "Diffs, comentários, checks e merge sem abrir o site. Dá para abrir um PR vendo os commits que faltam subir, ou mencionar o PR para o agente revisar.",
+        "tools.elastic.title": "Logs em ES|QL e traces de APM",
+        "tools.elastic.body": "Live tail dos data streams. O agente consulta só-leitura e com dados pessoais mascarados.",
+        "tools.clickup.title": "A tarefa da branch, com timer",
+        "tools.clickup.body": "Suas tarefas numa dock. Peça ao agente para comentar, mover ou transformar a conversa numa user story.",
+        "tools.settings.label": "Configurações",
+        "tools.settings.title": "Sync pelo seu GitHub, em pt-BR",
+        "tools.settings.body": "Configurações sincronizadas em gists privados da sua conta, sem servidor do Asylum no meio. Interface em português ou inglês.",
+        "ui.eyebrow": "Interface",
+        "ui.title": "Redesenhado<br><em class=\"accent\">peça por peça.</em>",
+        "ui.lead": "A dock do agente, a barra de status e as configurações foram refeitas do zero. São 245 ícones desenhados para o Asylum, e a interface inteira está em português.",
+        "alt.thread": "Thread do agente em que terminal, subagente e edições de arquivo aparecem como cards.",
+        "ui.thread.label": "Thread em cards",
+        "ui.thread.body": "Terminal, subagente e edição viram cards com estado, tempo e ações. Leituras e buscas se juntam em \"Explorou o projeto\".",
+        "alt.terminal": "Cards de terminal na thread do agente com estado, tempo e exit code.",
+        "ui.terminal.label": "Terminal que se explica",
+        "ui.terminal.body": "Estado por extenso, tempo e exit code sempre à vista. Sucesso colapsa sozinho; falha abre no erro, com \"Rodar de novo\".",
+        "alt.answer": "Resposta do agente com tabela e gráfico montados a partir de uma consulta ao banco.",
+        "ui.data.label": "Respostas com dados",
+        "ui.data.body": "Consultas voltam como tabela e gráfico dentro da conversa, com \"Ver SQL\", \"Abrir no Banco\" e \"Copiar CSV\".",
+        "alt.settings": "Janela de configurações mostrando o escopo em edição e o filtro de valores alterados.",
+        "ui.settings.title": "Cada valor diz de onde veio",
+        "ui.settings.body": "A janela mostra qual escopo você está editando (todos os perfis, um perfil ou o projeto), de onde vem cada valor e um filtro \"Só o que muda\". Ganhou páginas de Integrações, Dispositivos, Navegador e Sync.",
+        "ui.fact.tabs": "→ docks viram abas, pensado para ultrawide",
+        "ui.fact.status": "→ barra de status numa régua só, perfil na sua cor",
+        "ui.fact.theme": "→ tema Polar Dark, IBM Plex Sans e Mono",
+        "ui.fact.approvals": "→ aprovações com o motivo e o escopo à vista",
+        "agent.title": "Um agente que usa <em class=\"accent\">tudo</em> isso.",
+        "agent.lead": "Ele planeja, roda subagentes, mexe nos simuladores e consulta o banco. E gasta menos tokens que antes para fazer isso.",
+        "agent.plan.title": "Plano antes de tocar no código",
+        "agent.plan.body": "Ele propõe os passos e os arquivos. Você edita, aprova com ⌘↵ e acompanha o progresso num card.",
+        "agent.pipelines.label": "Agentes e esteiras",
+        "agent.pipelines.title": "Agentes por tarefa, em pipeline",
+        "agent.pipelines.body": "Crie agentes chamados por /comando, importe os subagentes do Claude Code e encadeie tudo em esteiras com aprovação.",
+        "agent.learnings.label": "Aprendizados",
+        "agent.learnings.title": "Memória que você aprova",
+        "agent.learnings.body": "O que ele aprende sobre o projeto vira nota aprovada por você e entra em toda conversa nova.",
+        "agent.toolkits.title": "Cada dock vira ferramenta",
+        "agent.toolkits.body": "Banco, API, Docker, PRs, simuladores e navegador expõem ferramentas ao agente. Você liga ou desliga cada toolkit por perfil, e toda escrita pede aprovação.",
+        "alt.plan": "Card do plan mode com os passos e arquivos propostos, esperando aprovação.",
+        "agent.providers": "Use o modelo que quiser",
+        "agent.providers.claude": "Claude · assinatura via OAuth",
+        "agent.providers.acp": "Claude Code e Codex via ACP",
+        "efficiency.eyebrow": "Menos tokens, modelo certo",
+        "efficiency.title": "Gasta <em class=\"accent\">menos</em> para fazer o mesmo.",
+        "efficiency.lead": "Antes de cada chamada, o Asylum corta o que não ajuda o agente. E cada parte do trabalho vai para o modelo mais barato que dá conta.",
+        "efficiency.mcp.label": "MCP sob demanda",
+        "efficiency.mcp.value": "~380 mil",
+        "efficiency.mcp.title": "tokens por chamada, só de schema",
+        "efficiency.mcp.body": "Era o que um dos meus perfis gastava, e metade vinha de um único servidor com 524 ferramentas. Agora cada servidor só entra quando o agente pede e você aprova.",
+        "efficiency.terminal.title": "Só a saída que importa",
+        "efficiency.terminal.body": "Progresso de build, testes que passaram, dicas do git e linhas repetidas saem antes de chegar ao modelo. Erros ficam inteiros, com o começo e o fim.",
+        "efficiency.json.title": "Respostas grandes, enxutas",
+        "efficiency.json.body": "Fetch, MCP e toolkits mandam o primeiro e o último item das listas e tudo que parece erro. Você continua vendo o resultado completo.",
+        "efficiency.map.title": "Mapa em vez de leitura",
+        "efficiency.map.body": "Uma chamada mostra as pastas e os símbolos de cada arquivo, com a linha. Depois o agente lê só o trecho de que precisa.",
+        "efficiency.strip.saved": "→ a thread mostra quantos tokens foram economizados",
+        "efficiency.strip.learnings": "→ aprendizados aprovados poupam redescobrir o projeto",
+        "bench.eyebrow": "Subagentes no Automático",
+        "bench.title": "O modelo e o esforço certos para cada subtarefa",
+        "bench.body": "Antes de abrir um subagente, o agente consulta o benchmarks.md: Terminal-Bench, FrontierCode, preço e \"bom para / evitar para\" de cada modelo em cada nível de esforço. Fica com o mais barato que resolve sem retrabalho, e o card do subagente explica a escolha.",
+        "bench.fact.sources": "→ números publicados pelos laboratórios, com fonte",
+        "bench.fact.editable": "→ editável: projeto › usuário › padrão do Asylum",
+        "bench.fact.invalid": "→ linha inválida sinalizada direto no editor",
+        "alt.benchmarks": "Arquivo benchmarks.md aberto no editor, com uma tabela de modelos, níveis de esforço e notas.",
+        "alt.autoModel": "Card de subagente explicando qual modelo e esforço foram escolhidos e por quê.",
+        "profiles.eyebrow": "Perfis",
+        "profiles.title": "Trabalho e pessoal,<br><em class=\"accent\">lado a lado.</em>",
+        "profiles.lead": "Cada perfil é uma instância isolada: dados, identidade do git, provedores de IA, servidores MCP, contas e chaveiro próprios. Pastas do trabalho sempre abrem no perfil do trabalho.",
+        "profiles.dock": "No macOS, cada perfil ganha um ícone de cor própria no Dock e no ⌘-Tab.",
+        "alt.profiles": "Seletor de perfis com perfis de trabalho e pessoal, cada um na sua cor.",
+        "os.title": "Código aberto, <em class=\"accent\">inteiro.</em>",
+        "os.lead": "Sem conta, sem assinatura e sem servidor próprio. Está tudo no GitHub: dá para ler, compilar, abrir issue ou mandar PR.",
+        "os.repo": "Fork independente do Zed, atualizado com o upstream (hoje está no Zed 1.27). O que deixa o Zed rápido continua lá: interface na GPU, tree-sitter, LSP, multi-buffers e Vim mode.",
+        "os.fact.linux": "Linux compila do fonte",
+        "os.fact.languages.value": "pt-BR",
+        "os.fact.languages": "e inglês",
+        "os.chip.account": "sem conta",
+        "os.chip.subscription": "sem assinatura",
+        "os.chip.server": "sem servidor próprio",
+        "os.chip.telemetry": "sem telemetria remota",
+        "os.button": "Ver o repositório",
+        "os.install": "Instalar · zsh",
+        "os.step.download": "# 1. baixe a última versão em",
+        "os.step.open": "# 2. abra e escolha um perfil",
+        "tagline": "dev é loucura",
+        "cta.title": "Pare de trocar de <em class=\"accent\">janela.</em>",
+        "cta.lead": "Gratuito, open source e em português. Fiz porque cansei de ter dez janelas abertas para cuidar de um app só.",
+        "footer.disclaimer": "Projeto independente, sem afiliação com a Zed Industries.",
+        "footer.label": "Links do projeto",
+        "footer.license": "Licença",
+        "footer.issues": "Reportar um problema"
+      }
+    };
+
+    const languageStorageKey = "asylum-language";
+    const supportedLanguages = ["en", "pt-BR"];
+    const englishText = new Map();
+    const englishAttributes = new Map();
+
+    function parseAttributeBindings(element) {
+      return element.dataset.i18nAttr.split(";").map((binding) => {
+        const [attribute, key] = binding.split(":");
+        return { attribute, key };
+      });
+    }
+
+    for (const element of document.querySelectorAll("[data-i18n]")) {
+      englishText.set(element.dataset.i18n, element.innerHTML);
+    }
+    for (const element of document.querySelectorAll("[data-i18n-attr]")) {
+      for (const { attribute, key } of parseAttributeBindings(element)) {
+        englishAttributes.set(key, element.getAttribute(attribute));
+      }
+    }
+
+    function translate(key, language, fallback) {
+      return translations[language]?.[key] ?? fallback.get(key);
+    }
+
+    function applyLanguage(language) {
+      document.documentElement.lang = language;
+      for (const element of document.querySelectorAll("[data-i18n]")) {
+        element.innerHTML = translate(element.dataset.i18n, language, englishText);
+      }
+      for (const element of document.querySelectorAll("[data-i18n-attr]")) {
+        for (const { attribute, key } of parseAttributeBindings(element)) {
+          element.setAttribute(attribute, translate(key, language, englishAttributes));
+        }
+      }
+      for (const button of document.querySelectorAll("[data-language]")) {
+        button.setAttribute("aria-pressed", String(button.dataset.language === language));
+      }
+    }
+
+    function readStoredLanguage() {
+      try {
+        return localStorage.getItem(languageStorageKey);
+      } catch {
+        return null;
+      }
+    }
+
+    function initialLanguage() {
+      const requested = new URLSearchParams(location.search).get("lang");
+      if (requested) {
+        return requested.toLowerCase().startsWith("pt") ? "pt-BR" : "en";
+      }
+      const stored = readStoredLanguage();
+      if (supportedLanguages.includes(stored)) {
+        return stored;
+      }
+      const prefersPortuguese = navigator.languages.some((language) => language.toLowerCase().startsWith("pt"));
+      return prefersPortuguese ? "pt-BR" : "en";
+    }
+
+    for (const button of document.querySelectorAll("[data-language]")) {
+      button.addEventListener("click", () => {
+        applyLanguage(button.dataset.language);
+        try {
+          localStorage.setItem(languageStorageKey, button.dataset.language);
+        } catch {
+          // Storage can be blocked (private mode); the choice still applies to this page view.
+        }
+      });
+    }
+
+    applyLanguage(initialLanguage());
+
+    // Release tags look like "asylum-v2.0.14"; the badge shows "v2.0.14" and links to that release.
+    fetch("https://api.github.com/repos/viniengelage/asylum/releases/latest", { headers: { Accept: "application/vnd.github+json" } })
+      .then((response) => (response.ok ? response.json() : Promise.reject(new Error(`GitHub API returned ${response.status}`))))
+      .then((release) => {
+        const version = release.tag_name.replace(/^asylum-/, "");
+        for (const element of document.querySelectorAll("[data-release-version]")) {
+          element.textContent = version;
+        }
+        for (const link of document.querySelectorAll("[data-release-link]")) {
+          link.href = release.html_url;
+        }
+      })
+      .catch((error) => console.warn("Could not load the latest Asylum release:", error));
+  </script>
 </body>
 </html>
