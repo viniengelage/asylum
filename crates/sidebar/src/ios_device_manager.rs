@@ -1539,7 +1539,6 @@ impl IosDeviceManagerModal {
             WizardPurpose::Create => t!("sidebar.ios_manager.wizard_title_create"),
             WizardPurpose::DownloadRuntime => t!("sidebar.ios_manager.wizard_title_download"),
         };
-        let colors = cx.theme().colors().clone();
         let header = v_flex()
             .w_full()
             .gap_4()
@@ -1547,8 +1546,6 @@ impl IosDeviceManagerModal {
             .pr(px(20.))
             .pb_4()
             .pl_6()
-            .border_b_1()
-            .border_color(colors.border)
             .child(self.render_header(title, None, cx))
             .when(wizard.purpose == WizardPurpose::Create, |this| {
                 this.child(self.render_wizard_steps(wizard, cx))
@@ -2303,8 +2300,6 @@ impl IosDeviceManagerModal {
             .pr(px(20.))
             .pb_4()
             .pl_6()
-            .border_b_1()
-            .border_color(colors.border)
             .child(self.render_header(
                 t!("sidebar.ios_manager.edit_title", name = device.name),
                 None,

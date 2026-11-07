@@ -19,6 +19,7 @@ use gpui::{
 use i18n::t;
 use language::LanguageRegistry;
 use std::{sync::Arc, time::Duration};
+use ui::section_label;
 use ui::{Checkbox, Indicator, Tooltip, prelude::*};
 use ui_input::{ErasedEditorEvent, InputField};
 use util::ResultExt as _;
@@ -1248,13 +1249,6 @@ impl ApiRequestView {
             }))
     }
 
-    fn section_label(text: impl Into<SharedString>) -> impl IntoElement {
-        Label::new(text)
-            .size(LabelSize::XSmall)
-            .weight(FontWeight::SEMIBOLD)
-            .color(Color::Muted)
-    }
-
     fn render_params(&self, cx: &mut Context<Self>) -> AnyElement {
         let descriptions: Vec<(String, Option<String>, bool)> = self
             .operation(cx)
@@ -1276,7 +1270,7 @@ impl ApiRequestView {
         v_flex()
             .gap_2()
             .when(!self.path_params.is_empty(), |this| {
-                this.child(Self::section_label("PATH"))
+                this.child(section_label("PATH"))
                     .children(self.path_params.iter().map(|(name, input)| {
                         let description = descriptions
                             .iter()
@@ -1304,7 +1298,7 @@ impl ApiRequestView {
                             })
                     }))
             })
-            .child(Self::section_label("QUERY"))
+            .child(section_label("QUERY"))
             .child(self.render_rows("query", &self.query_rows, cx))
             .child(self.add_row_button("query", t!("api_client.request.add_parameter"), cx))
             .into_any_element()
@@ -1384,17 +1378,14 @@ impl ApiRequestView {
                     .h(px(32.))
                     .min_h(px(32.))
                     .child(div().flex_none().w(px(20.)))
-                    .child(name_column(
-                        Self::section_label("HEADER").into_any_element(),
-                    ))
+                    .child(name_column(section_label("HEADER").into_any_element()))
                     .child(
                         div()
                             .flex_1()
-                            .child(Self::section_label(t!("api_client.request.value_column"))),
+                            .child(section_label(t!("api_client.request.value_column"))),
                     )
                     .child(origin_column(
-                        Self::section_label(t!("api_client.request.origin_column"))
-                            .into_any_element(),
+                        section_label(t!("api_client.request.origin_column")).into_any_element(),
                     ))
                     .child(div().flex_none().w(px(24.))),
             )
@@ -1882,40 +1873,40 @@ impl ApiRequestView {
                 )
             })
             .when(!operation.parameters.is_empty(), |this| {
-                this.child(Self::section_label(t!(
-                    "api_client.request.parameters_section"
-                )))
-                .children(operation.parameters.iter().map(|parameter| {
-                    let location = match parameter.location {
-                        ParameterLocation::Path => "path",
-                        ParameterLocation::Query => "query",
-                        ParameterLocation::Header => "header",
-                        ParameterLocation::Cookie => "cookie",
-                    };
-                    h_flex()
-                        .gap_2()
-                        .child(
-                            Label::new(parameter.name.clone())
-                                .size(LabelSize::Small)
-                                .buffer_font(cx),
-                        )
-                        .child(chip(location, Color::Muted, cx))
-                        .when(parameter.required, |this| {
-                            this.child(chip(t!("api_client.request.required"), Color::Warning, cx))
-                        })
-                        .when_some(parameter.description.clone(), |this, description| {
-                            this.child(
-                                Label::new(description)
-                                    .size(LabelSize::XSmall)
-                                    .color(Color::Muted)
-                                    .truncate(),
+                this.child(section_label(t!("api_client.request.parameters_section")))
+                    .children(operation.parameters.iter().map(|parameter| {
+                        let location = match parameter.location {
+                            ParameterLocation::Path => "path",
+                            ParameterLocation::Query => "query",
+                            ParameterLocation::Header => "header",
+                            ParameterLocation::Cookie => "cookie",
+                        };
+                        h_flex()
+                            .gap_2()
+                            .child(
+                                Label::new(parameter.name.clone())
+                                    .size(LabelSize::Small)
+                                    .buffer_font(cx),
                             )
-                        })
-                }))
+                            .child(chip(location, Color::Muted, cx))
+                            .when(parameter.required, |this| {
+                                this.child(chip(
+                                    t!("api_client.request.required"),
+                                    Color::Warning,
+                                    cx,
+                                ))
+                            })
+                            .when_some(parameter.description.clone(), |this, description| {
+                                this.child(
+                                    Label::new(description)
+                                        .size(LabelSize::XSmall)
+                                        .color(Color::Muted)
+                                        .truncate(),
+                                )
+                            })
+                    }))
             })
-            .child(Self::section_label(t!(
-                "api_client.request.responses_section"
-            )))
+            .child(section_label(t!("api_client.request.responses_section")))
             .children(operation.responses.iter().map(|response| {
                 let status: u16 = response.status.parse().unwrap_or(0);
                 h_flex()
@@ -2431,9 +2422,7 @@ impl ApiRequestView {
             .min_h_0()
             .overflow_y_scroll()
             .gap_1()
-            .child(Self::section_label(t!(
-                "api_client.request.cookies_set_section"
-            )))
+            .child(section_label(t!("api_client.request.cookies_set_section")))
             .when(exchange.cookies_set.is_empty(), |this| {
                 this.child(
                     Label::new(t!("api_client.request.no_set_cookie"))
@@ -2445,7 +2434,7 @@ impl ApiRequestView {
             .child(
                 h_flex()
                     .pt_2()
-                    .child(Self::section_label(t!(
+                    .child(section_label(t!(
                         "api_client.request.cookies_stored_section"
                     )))
                     .child(div().flex_1())
@@ -2687,9 +2676,7 @@ impl ApiRequestView {
                         .child(
                             h_flex()
                                 .pb_2()
-                                .child(Self::section_label(t!(
-                                    "api_client.request.sent_request_section"
-                                )))
+                                .child(section_label(t!("api_client.request.sent_request_section")))
                                 .child(div().flex_1())
                                 .child(
                                     ui::secondary_button(

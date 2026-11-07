@@ -3,16 +3,17 @@ use smallvec::SmallVec;
 
 use crate::prelude::*;
 
-/// Which edge of a bar carries its dividing rule.
+/// Which edge of its content a bar sits on.
 ///
-/// A strip at the top of a pane rules against the content below it; a strip at the bottom
-/// rules against the content above it. Everything else about the two is identical, so they
-/// share [`HeaderBar`] rather than being hand-rolled separately.
+/// A header shares the pane's surface with the content below it, so it has no rule: spacing
+/// separates the two. A footer sits under content that scrolls behind it, so it keeps a faint
+/// rule on its top edge. Everything else about the two is identical, so they share
+/// [`HeaderBar`] rather than being hand-rolled separately.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum HeaderBarEdge {
-    /// The bar sits above its content; the rule is on its bottom edge.
+    /// The bar sits above its content, without a rule.
     Top,
-    /// The bar sits below its content; the rule is on its top edge.
+    /// The bar sits below its content; a faint rule marks its top edge.
     Bottom,
 }
 
@@ -199,11 +200,10 @@ impl RenderOnce for HeaderBar {
             .px(slot_padding)
             .gap(slot_gap)
             .bg(self.level.background(cx))
-            .map(|this| match self.edge {
-                HeaderBarEdge::Top => this.border_b_1(),
-                HeaderBarEdge::Bottom => this.border_t_1(),
+            .when(self.edge == HeaderBarEdge::Bottom, |this| {
+                this.border_t_1()
+                    .border_color(cx.theme().colors().border_variant)
             })
-            .border_color(self.level.border(cx))
             .when(!self.start_children.is_empty(), |this| {
                 this.child(slot(h_flex().flex_none()).children(self.start_children))
             })

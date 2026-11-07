@@ -2164,7 +2164,7 @@ impl ContextMenu {
         div()
             .id(("context-menu-child", ix))
             .when(filled, |this| {
-                this.rounded(px(6.))
+                this.rounded(Radius::Sm.rems())
                     .bg(cx.theme().colors().ghost_element_hover)
             })
             .when_some(documentation_aside.clone(), |this, documentation_aside| {
@@ -2551,7 +2551,6 @@ impl Render for ContextMenu {
                 .font_family(ui_font_family.clone())
                 .line_height(line_height)
                 .elevation_2(cx)
-                .when(self.sectioned, |this| this.rounded(px(10.)))
                 .flex()
                 .flex_row()
                 .flex_shrink_0()
@@ -2559,6 +2558,7 @@ impl Render for ContextMenu {
                     v_flex()
                         .id("context-menu")
                         .when(self.sectioned, |this| this.px(px(6.)).py(px(2.)))
+                        .when(!self.sectioned, |this| this.py(px(4.)))
                         .role(Role::Menu)
                         .max_h(vh(0.75, window))
                         .flex_shrink_0()

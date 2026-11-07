@@ -139,7 +139,6 @@ impl ParentElement for TabBar {
 
 impl TabBar {
     fn render_pill(self, cx: &App) -> AnyElement {
-        let border_color = HeaderBarLevel::Pane.border(cx);
         let slot_gap = HeaderBar::slot_gap(cx);
         let segmented = self.layout == TabBarLayout::Segmented;
 
@@ -169,9 +168,7 @@ impl TabBar {
             .when(segmented, |this| this.flex_1())
             .p(DynamicSpacing::Base03.px(cx))
             .rounded(TAB_STRIP_RADIUS)
-            .border_1()
-            .border_color(border_color)
-            .bg(cx.theme().colors().editor_background)
+            .bg(cx.theme().colors().element_background)
             .overflow_hidden()
             .child(tabs);
 
@@ -185,8 +182,6 @@ impl TabBar {
             .gap(DynamicSpacing::Base06.px(cx))
             .rounded_t(pane_corner_radius())
             .bg(HeaderBarLevel::Pane.background(cx))
-            .border_b_1()
-            .border_color(border_color)
             .when(!self.start_children.is_empty(), |this| {
                 this.child(
                     h_flex()

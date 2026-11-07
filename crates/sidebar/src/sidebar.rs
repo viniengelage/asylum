@@ -83,9 +83,9 @@ use theme::ActiveTheme;
 use ui::{
     AgentThreadStatus, ButtonLike, CommonAnimationExt, ContextMenu, ContextMenuEntry, GradientFade,
     HeaderBar, HighlightedLabel, IconPosition, KeyBinding, PopoverMenu, PopoverMenuHandle,
-    ProjectEmptyState, ScrollAxes, Scrollbars, TAB_STRIP_RADIUS, Tab, ThreadItem,
-    ThreadItemWorktreeInfo, TintColor, Tooltip, WithScrollbar, prelude::*, primary_button,
-    progress_line, render_modifiers, right_click_menu, secondary_button,
+    ProjectEmptyState, ScrollAxes, Scrollbars, Tab, ThreadItem, ThreadItemWorktreeInfo, TintColor,
+    Tooltip, WithScrollbar, prelude::*, primary_button, progress_line, render_modifiers,
+    right_click_menu, secondary_button, text_field,
 };
 use unicode_segmentation::UnicodeSegmentation as _;
 use util::ResultExt as _;
@@ -437,7 +437,7 @@ fn primary_action_button(id: impl Into<ElementId>, enabled: bool, cx: &App) -> S
         .h(DynamicSpacing::Base28.px(cx))
         .justify_center()
         .gap(DynamicSpacing::Base06.px(cx))
-        .rounded(TAB_STRIP_RADIUS)
+        .rounded(Radius::Sm.rems())
         .bg(fill)
         .text_color(colors.text)
         .map(|this| {
@@ -524,10 +524,10 @@ fn render_device_picker(
                 .min_w_0()
                 .px(DynamicSpacing::Base10.px(cx))
                 .gap(DynamicSpacing::Base08.px(cx))
-                .rounded(TAB_STRIP_RADIUS)
+                .rounded(Radius::Md.rems())
                 .border_1()
-                .border_color(colors.border)
-                .bg(colors.elevated_surface_background)
+                .border_color(colors.border_selected)
+                .bg(colors.element_background)
                 .when(!disabled, |this| {
                     this.group_hover("", |style| style.bg(hover_fill))
                 })
@@ -8116,13 +8116,6 @@ impl Sidebar {
         );
 
         let filter_focused = self.filter_editor.focus_handle(cx).is_focused(window);
-        let colors = cx.theme().colors();
-        let field_border = if filter_focused {
-            colors.border_focused
-        } else {
-            colors.border
-        };
-        let field_background = colors.elevated_surface_background;
 
         v_flex()
             .flex_none()
@@ -8131,17 +8124,12 @@ impl Sidebar {
                 this.child(
                     HeaderBar::new("sidebar-search-header")
                         .child(
-                            h_flex()
+                            text_field(filter_focused, cx)
                                 .flex_1()
-                                .min_w_0()
                                 .h(DynamicSpacing::Base28.px(cx))
                                 .pl(DynamicSpacing::Base10.px(cx))
                                 .pr(DynamicSpacing::Base04.px(cx))
                                 .gap(DynamicSpacing::Base08.px(cx))
-                                .rounded(TAB_STRIP_RADIUS)
-                                .border_1()
-                                .border_color(field_border)
-                                .bg(field_background)
                                 .child(
                                     Icon::new(IconName::MagnifyingGlass)
                                         .size(IconSize::Small)
@@ -11422,8 +11410,6 @@ impl Sidebar {
                     .flex_none()
                     .px_2()
                     .gap_1()
-                    .border_b_1()
-                    .border_color(colors.border)
                     .child(
                         h_flex()
                             .p(px(3.))

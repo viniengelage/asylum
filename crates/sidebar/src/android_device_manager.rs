@@ -1457,7 +1457,6 @@ impl AndroidDeviceManagerModal {
                     .unwrap_or_else(|| avd.clone())
             ),
         };
-        let colors = cx.theme().colors().clone();
         let header = v_flex()
             .w_full()
             .gap_4()
@@ -1465,8 +1464,6 @@ impl AndroidDeviceManagerModal {
             .pr(px(20.))
             .pb_4()
             .pl_6()
-            .border_b_1()
-            .border_color(colors.border)
             .child(self.render_header(title, None, cx))
             .when(
                 !matches!(wizard.purpose, WizardPurpose::DownloadImage),

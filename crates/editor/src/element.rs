@@ -7193,7 +7193,7 @@ pub fn render_breadcrumb_text(
     });
 
     let breadcrumbs = Itertools::intersperse_with(highlighted_segments, || {
-        Label::new("›").color(Color::Placeholder).into_any_element()
+        Label::new("/").color(Color::Disabled).into_any_element()
     });
 
     let breadcrumbs_stack = h_flex()

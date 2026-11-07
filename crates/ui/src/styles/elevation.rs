@@ -46,34 +46,36 @@ impl ElevationIndex {
             ElevationIndex::Surface => vec![],
             ElevationIndex::EditorSurface => vec![],
 
+            // Polar's surfaces are a few lightness points apart, so a short soft shadow
+            // vanishes against them; floating surfaces need a long, dark one to lift off.
             ElevationIndex::ElevatedSurface => vec![
-                BoxShadow::new(px(0.), px(2.), hsla(0., 0., 0., 0.12)).blur_radius(px(3.)),
                 BoxShadow::new(
                     px(0.),
-                    px(1.),
-                    hsla(0., 0., 0., if is_light { 0.03 } else { 0.06 }),
-                ),
+                    px(16.),
+                    hsla(0., 0., 0., if is_light { 0.12 } else { 0.55 }),
+                )
+                .blur_radius(px(40.)),
+                BoxShadow::new(
+                    px(0.),
+                    px(2.),
+                    hsla(0., 0., 0., if is_light { 0.06 } else { 0.25 }),
+                )
+                .blur_radius(px(6.)),
             ],
 
             ElevationIndex::ModalSurface => vec![
                 BoxShadow::new(
                     px(0.),
-                    px(2.),
-                    hsla(0., 0., 0., if is_light { 0.06 } else { 0.12 }),
+                    px(24.),
+                    hsla(0., 0., 0., if is_light { 0.16 } else { 0.65 }),
                 )
-                .blur_radius(px(3.)),
+                .blur_radius(px(64.)),
                 BoxShadow::new(
                     px(0.),
-                    px(3.),
-                    hsla(0., 0., 0., if is_light { 0.06 } else { 0.08 }),
+                    px(2.),
+                    hsla(0., 0., 0., if is_light { 0.06 } else { 0.25 }),
                 )
                 .blur_radius(px(6.)),
-                BoxShadow::new(px(0.), px(6.), hsla(0., 0., 0., 0.04)).blur_radius(px(12.)),
-                BoxShadow::new(
-                    px(0.),
-                    px(1.),
-                    hsla(0., 0., 0., if is_light { 0.04 } else { 0.12 }),
-                ),
             ],
 
             _ => vec![],

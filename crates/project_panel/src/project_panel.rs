@@ -671,6 +671,9 @@ fn get_item_color(is_sticky: bool, cx: &App) -> ItemColors {
         colors.panel_background
     };
 
+    // A marked row is told apart by its accent tint alone; an accent outline on top made the
+    // selection the loudest thing in the panel. The outline stays for keyboard focus.
+    let marked = default.blend(colors.text_accent.opacity(0.2));
     ItemColors {
         default,
         hover: if is_sticky {
@@ -681,8 +684,8 @@ fn get_item_color(is_sticky: bool, cx: &App) -> ItemColors {
         // Blended onto the row's own surface rather than left translucent: icon decorations
         // knock out their outline with this colour, and a translucent knockout would show the
         // icon through it.
-        marked: default.blend(colors.text_accent.opacity(0.2)),
-        marked_border: colors.border_focused.opacity(0.6),
+        marked,
+        marked_border: marked,
         focused: colors.panel_focused_border,
         drag_over: colors.drop_target_background,
     }

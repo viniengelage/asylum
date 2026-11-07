@@ -1108,11 +1108,10 @@ impl Item for Editor {
 
     // In a non-singleton case, the breadcrumbs are actually shown on sticky file headers of the multibuffer.
     fn breadcrumbs(&self, cx: &App) -> Option<(Vec<HighlightedText>, Option<Font>)> {
+        // The path and symbols are chrome, not code, so they follow the UI font; the
+        // highlights still carry the symbols' syntax colors.
         if self.buffer.read(cx).is_singleton() {
-            let font = theme_settings::ThemeSettings::get_global(cx)
-                .buffer_font
-                .clone();
-            Some((self.breadcrumbs_inner(cx)?, Some(font)))
+            Some((self.breadcrumbs_inner(cx)?, None))
         } else {
             None
         }

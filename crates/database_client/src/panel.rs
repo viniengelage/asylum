@@ -26,6 +26,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant, SystemTime},
 };
+use ui::section_label;
 use ui::{
     ContextMenu, Indicator, KeyBinding, PopoverMenu, PopoverTriggerArea, Tooltip, prelude::*,
     primary_button,
@@ -2004,14 +2005,6 @@ fn relative_age(modified: SystemTime) -> SharedString {
         86_400..172_800 => t!("database_client.panel.age_yesterday"),
         _ => t!("database_client.panel.age_days", count = seconds / 86_400),
     }
-}
-
-/// The uppercase heading over a group in the dock (SCHEMAS, QUERIES SALVAS).
-pub(crate) fn section_label(text: impl Into<SharedString>) -> Label {
-    Label::new(text)
-        .size(LabelSize::XSmall)
-        .weight(FontWeight::SEMIBOLD)
-        .color(Color::Muted)
 }
 
 const SQL_KEYWORDS: &[&str] = &[

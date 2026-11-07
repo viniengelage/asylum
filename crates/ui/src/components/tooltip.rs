@@ -224,6 +224,7 @@ where
     div().pl_2().pt_2p5().child(
         v_flex()
             .elevation_2(app)
+            .rounded(Radius::Md.rems())
             .font(ui_font)
             .text_ui(app)
             .text_color(app.theme().colors().text)

@@ -11,10 +11,10 @@ const TAB_SLOT_SIZE: Pixels = px(14.);
 
 /// A pill sits inside a strip rounded to [`TAB_STRIP_RADIUS`] with a 3px inset, so its own
 /// radius has to be smaller or the two sets of corners collide.
-const TAB_PILL_RADIUS: Pixels = px(6.);
+const TAB_PILL_RADIUS: Pixels = px(7.);
 
 /// Radius of the rounded strip that holds [`TabStyle::Pill`] tabs.
-pub const TAB_STRIP_RADIUS: Pixels = px(8.);
+pub const TAB_STRIP_RADIUS: Pixels = px(10.);
 
 /// How a [`Tab`] marks itself as selected.
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
@@ -23,8 +23,8 @@ pub enum TabStyle {
     /// as one plane. Needs [`Tab::surface`].
     #[default]
     Surface,
-    /// The selected tab is a raised pill inside a rounded strip: elevated fill, accent border
-    /// and accent icon. This is the style for every island's strip, where continuity with the
+    /// The selected tab is a raised pill inside a rounded strip: elevated fill, light border
+    /// and a short shadow, like the thumb of a segmented control. This is the style for every island's strip, where continuity with the
     /// content was too subtle to tell which tab was active.
     Pill,
 }
@@ -186,8 +186,12 @@ impl Tab {
             .border_1()
             .map(|this| {
                 if selected {
-                    this.bg(colors.element_selected)
-                        .border_color(colors.border_focused.opacity(0.55))
+                    this.bg(colors.elevated_surface_background)
+                        .border_color(colors.border_selected)
+                        .shadow(vec![
+                            gpui::BoxShadow::new(px(0.), px(1.), gpui::hsla(0., 0., 0., 0.5))
+                                .blur_radius(px(2.)),
+                        ])
                 } else {
                     this.border_color(gpui::transparent_black())
                         .hover(|style| style.bg(colors.ghost_element_hover))

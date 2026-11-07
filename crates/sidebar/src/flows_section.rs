@@ -59,7 +59,6 @@ impl Sidebar {
         if records.is_empty() {
             return None;
         }
-        let colors = cx.theme().colors();
         let collapsed = self.flows_section_collapsed;
         let live = records
             .iter()
@@ -108,12 +107,7 @@ impl Sidebar {
                 this.serialize(cx);
                 cx.notify();
             }));
-        let mut section = v_flex()
-            .flex_none()
-            .pb_1()
-            .border_b_1()
-            .border_color(colors.border_variant)
-            .child(header);
+        let mut section = v_flex().flex_none().pb_2().child(header);
         if !collapsed {
             let shown = if self.flows_section_show_all {
                 records.len()

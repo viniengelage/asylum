@@ -533,7 +533,6 @@ impl Render for ThreadImportModal {
                 };
 
                 ListItem::new(("thread-import-agent", ix))
-                    .rounded()
                     .spacing(ListItemSpacing::Sparse)
                     .focused(is_focused)
                     .disabled(row_disabled)

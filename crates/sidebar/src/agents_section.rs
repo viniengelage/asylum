@@ -436,7 +436,6 @@ impl Sidebar {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let colors = cx.theme().colors();
         let collapsed = self.agents_section_collapsed;
         let (mut agents, mut project_agents) = if collapsed {
             (Vec::new(), Vec::new())
@@ -500,12 +499,7 @@ impl Sidebar {
                 cx.notify();
             }));
 
-        let mut section = v_flex()
-            .flex_none()
-            .pb_1()
-            .border_b_1()
-            .border_color(colors.border_variant)
-            .child(header);
+        let mut section = v_flex().flex_none().pb_2().child(header);
         if !collapsed {
             for (index, row) in agents.into_iter().enumerate() {
                 section =

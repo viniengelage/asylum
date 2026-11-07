@@ -7,11 +7,43 @@ use gpui::{Pixels, Rems, Window, rems};
 /// `rounded_lg` calls and one literal `px(8.)` in a `paint_quad` — so changing one of them
 /// silently left the others behind. Read the radius from here instead of restating it.
 pub fn pane_corner_radius() -> Rems {
-    rems(0.75)
+    Radius::Xl.rems()
 }
 
 /// [`pane_corner_radius`] resolved against the window's rem size, for paint-time callers that
 /// build [`gpui::Corners`] directly instead of going through a style method.
 pub fn pane_corner_radius_px(window: &Window) -> Pixels {
     pane_corner_radius() * window.rem_size()
+}
+
+/// The corner radius scale shared by every component, so nested surfaces can follow
+/// "inner radius = outer radius - padding" instead of each picking its own `px(…)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Radius {
+    /// 4px: keybindings, badges, small indicators.
+    Xs,
+    /// 6px: buttons and icon buttons.
+    Sm,
+    /// 8px: fields, list rows, tabs, grouped blocks.
+    Md,
+    /// 12px: menus, popovers, cards.
+    Lg,
+    /// 16px: panes, docks and modals.
+    Xl,
+}
+
+impl Radius {
+    pub fn rems(self) -> Rems {
+        match self {
+            Radius::Xs => rems(0.25),
+            Radius::Sm => rems(0.375),
+            Radius::Md => rems(0.5),
+            Radius::Lg => rems(0.75),
+            Radius::Xl => rems(1.),
+        }
+    }
+
+    pub fn px(self, window: &Window) -> Pixels {
+        self.rems() * window.rem_size()
+    }
 }

@@ -133,8 +133,8 @@ trait StatusItemViewHandle: Send {
 }
 
 /// The groups the status bar is divided into, in the order they appear from left to right.
-/// Dividers between them are what let the user tell a dock toggle from a tool from a fact
-/// about the editor without reading every icon.
+/// Each group of buttons sits in its own tinted capsule, which is what lets the user tell a
+/// dock toggle from a tool from a fact about the editor without reading every icon.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum StatusItemZone {
     /// The profile this process runs as, at the very start so it is the first thing read.
@@ -155,6 +155,15 @@ pub(crate) enum StatusItemZone {
 }
 
 impl StatusItemZone {
+    /// Zones made of toggle buttons are grouped in a capsule; the editor facts are plain text
+    /// and the toolbox is a single button, so a capsule would only add noise around them.
+    fn has_capsule(self) -> bool {
+        matches!(
+            self,
+            Self::Docks | Self::Navigation | Self::Status | Self::Panels
+        )
+    }
+
     fn id(self) -> &'static str {
         match self {
             Self::Profile => "status-bar-profile",
@@ -288,7 +297,7 @@ impl StatusBar {
                 continue;
             }
             if !elements.is_empty() {
-                elements.push(render_zone_divider(cx));
+                elements.push(render_zone_gap(cx));
             }
             elements.push(render_zone(zone, &items, cx));
         }
@@ -358,6 +367,11 @@ fn render_zone(zone: StatusItemZone, items: &[&dyn StatusItemViewHandle], cx: &A
         })
         .h(status_bar_item_height(cx))
         .gap(DynamicSpacing::Base04.rems(cx))
+        .when(zone.has_capsule(), |this| {
+            this.px(px(2.))
+                .rounded(Radius::Md.rems())
+                .bg(cx.theme().colors().element_background)
+        })
         .map(|this| {
             if zone == StatusItemZone::Toolkit {
                 this.child(render_toolkit_menu(items, cx))
@@ -412,18 +426,11 @@ fn render_toolkit_menu(items: &[&dyn StatusItemViewHandle], cx: &App) -> AnyElem
         .into_any_element()
 }
 
-/// The divider carries the space on both of its sides, so zones sit the same distance apart
-/// on the left and right of the bar.
-fn render_zone_divider(cx: &App) -> AnyElement {
+/// The space between two zones; the capsules themselves mark where a zone starts and ends.
+fn render_zone_gap(cx: &App) -> AnyElement {
     div()
         .flex_none()
-        .px(DynamicSpacing::Base08.rems(cx))
-        .child(
-            div()
-                .w_px()
-                .h(DynamicSpacing::Base16.rems(cx))
-                .bg(cx.theme().colors().border_selected),
-        )
+        .w(DynamicSpacing::Base06.rems(cx))
         .into_any_element()
 }
 

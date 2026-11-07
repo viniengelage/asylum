@@ -5,15 +5,25 @@ use crate::prelude::*;
 
 fn elevated<E: Styled>(this: E, cx: &App, index: ElevationIndex) -> E {
     this.bg(cx.theme().colors().elevated_surface_background)
-        .rounded_lg()
+        .rounded(Radius::Lg.rems())
         .border_1()
-        .border_color(cx.theme().colors().border_variant)
+        .border_color(cx.theme().colors().border_selected)
         .shadow(index.shadow(cx))
+}
+
+/// The gap between workspace cards is only a few lightness points darker than the cards, so
+/// a soft drop shadow is what makes them read as separate pieces instead of a cut-out grid.
+fn workspace_card_shadow(cx: &App) -> Vec<gpui::BoxShadow> {
+    let opacity = match cx.theme().appearance() {
+        theme::Appearance::Light => 0.08,
+        theme::Appearance::Dark => 0.4,
+    };
+    vec![gpui::BoxShadow::new(px(0.), px(8.), hsla(0., 0., 0., opacity)).blur_radius(px(24.))]
 }
 
 fn elevated_borderless<E: Styled>(this: E, cx: &mut App, index: ElevationIndex) -> E {
     this.bg(cx.theme().colors().elevated_surface_background)
-        .rounded_lg()
+        .rounded(Radius::Lg.rems())
         .shadow(index.shadow(cx))
 }
 
@@ -97,11 +107,13 @@ pub trait StyledExt: Styled + Sized {
     /// The fill is left to the caller, since it says which step of the surface ladder the card
     /// sits on: `panel_background` for a dock, `editor_background` for a pane.
     ///
-    /// Sets `rounded(pane_corner_radius())`, `border_1()`, `border_color()`, `overflow_hidden()`.
+    /// Sets `rounded(pane_corner_radius())`, `border_1()`, `border_color()`, `shadow()`,
+    /// `overflow_hidden()`.
     fn workspace_card(self, cx: &App) -> Self {
         self.rounded(pane_corner_radius())
             .border_1()
             .border_color(cx.theme().colors().border)
+            .shadow(workspace_card_shadow(cx))
             .overflow_hidden()
     }
 

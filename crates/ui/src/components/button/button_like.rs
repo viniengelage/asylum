@@ -466,7 +466,7 @@ impl ButtonSize {
         match self {
             ButtonSize::Large => rems_from_px(32_f32),
             ButtonSize::Medium => rems_from_px(28_f32),
-            ButtonSize::Default => rems_from_px(22_f32),
+            ButtonSize::Default => rems_from_px(24_f32),
             ButtonSize::Compact => rems_from_px(18_f32),
             ButtonSize::None => rems_from_px(16_f32),
         }
@@ -808,10 +808,11 @@ impl RenderOnce for ButtonLike {
             })
             .when(is_outlined, |this| this.border_1())
             .when_some(self.rounding, |this, rounding| {
-                this.when(rounding.top_left, |this| this.rounded_tl_sm())
-                    .when(rounding.top_right, |this| this.rounded_tr_sm())
-                    .when(rounding.bottom_right, |this| this.rounded_br_sm())
-                    .when(rounding.bottom_left, |this| this.rounded_bl_sm())
+                let radius = Radius::Sm.rems();
+                this.when(rounding.top_left, |this| this.rounded_tl(radius))
+                    .when(rounding.top_right, |this| this.rounded_tr(radius))
+                    .when(rounding.bottom_right, |this| this.rounded_br(radius))
+                    .when(rounding.bottom_left, |this| this.rounded_bl(radius))
             })
             .gap(DynamicSpacing::Base04.rems(cx))
             .map(|this| match self.size {

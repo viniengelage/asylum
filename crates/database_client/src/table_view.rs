@@ -1096,8 +1096,6 @@ impl TableView {
                         .px_3p5()
                         .py_3()
                         .gap_3()
-                        .border_b_1()
-                        .border_color(colors.border)
                         .child(
                             Label::new(t!("database_client.table.sql_to_run"))
                                 .size(LabelSize::Small)

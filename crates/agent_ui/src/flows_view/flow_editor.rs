@@ -12,6 +12,7 @@ use flows::{
 use gpui::{CursorStyle, Entity, FontWeight, Hsla, Subscription, Window};
 use i18n::t;
 use task_agents::{TaskAgent, TaskAgentSource};
+use ui::section_label;
 use ui::{
     Checkbox, ContextMenu, PopoverMenu, Tooltip, prelude::*, primary_button, secondary_button,
     segment_option,
@@ -193,10 +194,6 @@ fn verifier_kind(verifier: &Verifier) -> VerifierKind {
         Verifier::Agent(_) => VerifierKind::Agent,
         Verifier::Command(_) => VerifierKind::Command,
     }
-}
-
-fn section_label(text: impl Into<SharedString>) -> Label {
-    Label::new(text).size(LabelSize::XSmall).color(Color::Muted)
 }
 
 fn description(text: impl Into<SharedString>) -> Label {

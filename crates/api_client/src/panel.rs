@@ -21,9 +21,10 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
+use ui::section_label;
 use ui::{
-    CommonAnimationExt as _, ContextMenu, Divider, Indicator, PopoverMenu, PopoverTriggerArea,
-    SwitchField, ToggleState, Tooltip, prelude::*,
+    CommonAnimationExt as _, ContextMenu, Indicator, PopoverMenu, PopoverTriggerArea, SwitchField,
+    ToggleState, Tooltip, prelude::*,
 };
 use ui_input::{ErasedEditorEvent, InputField};
 use util::ResultExt as _;
@@ -1648,7 +1649,7 @@ impl ApiPanel {
                         } else {
                             chosen.servers.join(" · ")
                         };
-                        this.child(Divider::horizontal())
+                        this.child(div().h_2())
                             .child(section_label(t!("api_client.panel.plan_section")))
                             .child(plan_row(
                                 IconName::Folder,
@@ -1699,7 +1700,7 @@ impl ApiPanel {
                                 ))
                             })
                     })
-                    .child(Divider::horizontal())
+                    .child(div().h_2())
                     .child(note_row(
                         IconName::RotateCw,
                         t!("api_client.panel.note_watch_title"),
@@ -2403,7 +2404,7 @@ impl ApiPanel {
                     .child(field_label(label.clone()))
                     .child(input.clone())
             }))
-            .child(Divider::horizontal())
+            .child(div().h_2())
             .child(section_label(t!("api_client.settings.login_section")))
             .child(field_label(
                 t!("api_client.settings.login_request").to_string(),
@@ -2536,7 +2537,7 @@ impl ApiPanel {
                 },
             )
             .child(h_flex().gap_2().child(test_button).child(logout_button))
-            .child(Divider::horizontal())
+            .child(div().h_2())
             .child(section_label(t!("api_client.settings.headers_section")))
             .when(has_bearer_login, |this| {
                 this.child(
@@ -2643,7 +2644,7 @@ impl ApiPanel {
             .child(field_label(
                 t!("api_client.settings.authorization_note").to_string(),
             ))
-            .child(Divider::horizontal())
+            .child(div().h_2())
             .child(section_label(t!(
                 "api_client.settings.environments_section"
             )))
@@ -2833,13 +2834,6 @@ impl ApiPanel {
             )
             .into_any_element()
     }
-}
-
-pub(crate) fn section_label(text: impl Into<SharedString>) -> Label {
-    Label::new(text)
-        .size(LabelSize::XSmall)
-        .weight(FontWeight::SEMIBOLD)
-        .color(Color::Muted)
 }
 
 /// A section title with a note at its right, like the spec key the section comes from.

@@ -3,7 +3,29 @@
 //! use these instead.
 
 use crate::{KeyBinding, prelude::*};
-use gpui::{Div, FontWeight, Stateful, px};
+use gpui::{BoxShadow, Div, FontWeight, Stateful, hsla, px};
+
+/// The halo around a focused field. A ring outside the border marks focus without swapping
+/// the whole border to the accent, which made every focused field shout.
+pub fn focus_ring(cx: &App) -> Vec<BoxShadow> {
+    vec![
+        BoxShadow::new(
+            px(0.),
+            px(0.),
+            cx.theme().colors().border_focused.opacity(0.25),
+        )
+        .spread_radius(px(3.)),
+    ]
+}
+
+/// The lift of a filled button: a short drop shadow plus a faint highlight along the top edge,
+/// so the fill reads as a pressable piece instead of a flat swatch.
+fn raised_shadow() -> Vec<BoxShadow> {
+    vec![
+        BoxShadow::new(px(0.), px(1.), hsla(0., 0., 0., 0.5)).blur_radius(px(2.)),
+        BoxShadow::new(px(0.), px(1.), hsla(0., 0., 1., 0.12)).inset(),
+    ]
+}
 
 /// A form's main action, filled with the theme's strong accent as in the boards. The `Filled`
 /// button style is a neutral gray in the Polar theme, so it can't say "this is the next step".
@@ -21,9 +43,10 @@ pub fn primary_button(
         .px_3()
         .gap_1p5()
         .flex_none()
-        .rounded_md()
+        .rounded(Radius::Sm.rems())
         .cursor_pointer()
         .bg(fill)
+        .shadow(raised_shadow())
         .hover(move |this| this.bg(fill.opacity(0.85)))
         .children(icon.map(|icon| {
             Icon::new(icon)
@@ -54,9 +77,10 @@ pub fn secondary_button(
         .px_3()
         .gap_1p5()
         .flex_none()
-        .rounded_md()
+        .rounded(Radius::Sm.rems())
         .border_1()
-        .border_color(colors.border)
+        .border_color(colors.border_selected)
+        .bg(colors.element_background)
         .when(enabled, |this| {
             this.cursor_pointer()
                 .hover(|this| this.bg(colors.element_hover))
@@ -130,14 +154,15 @@ pub fn text_field(focused: bool, cx: &App) -> Div {
         .h(px(30.))
         .px(px(10.))
         .gap(px(1.))
-        .rounded(px(8.))
+        .rounded(Radius::Md.rems())
         .border_1()
         .border_color(if focused {
-            colors.border_focused
+            colors.border_focused.opacity(0.7)
         } else {
-            colors.border
+            colors.border_selected
         })
-        .bg(colors.editor_background)
+        .bg(colors.element_background)
+        .when(focused, |this| this.shadow(focus_ring(cx)))
 }
 
 /// The boards' select box: the chosen value and a chevron, in the [`text_field`] frame. Wrap it
@@ -156,10 +181,10 @@ pub fn select_field(
         .px(px(10.))
         .gap_1()
         .justify_between()
-        .rounded(px(8.))
+        .rounded(Radius::Md.rems())
         .border_1()
-        .border_color(colors.border)
-        .bg(colors.editor_background)
+        .border_color(colors.border_selected)
+        .bg(colors.element_background)
         .cursor_pointer()
         .hover(|this| this.bg(colors.element_hover))
         .child(
@@ -330,8 +355,8 @@ pub fn status_chip(
         )
 }
 
-/// Two or more choices side by side; the chosen one is filled and outlined in the accent, as in
-/// the boards.
+/// Two or more choices side by side; the chosen one is a raised thumb inside the track, like the
+/// selected tab of a pill tab bar.
 pub fn segment_option(
     id: impl Into<gpui::ElementId>,
     label: impl Into<SharedString>,
@@ -346,12 +371,15 @@ pub fn segment_option(
         .min_w_0()
         .h(px(28.))
         .justify_center()
-        .rounded(px(5.))
+        .rounded(px(7.))
         .border_1()
         .border_color(gpui::transparent_black())
         .when(selected, |this| {
-            this.bg(colors.element_selected)
-                .border_color(colors.border_focused)
+            this.bg(colors.elevated_surface_background)
+                .border_color(colors.border_selected)
+                .shadow(vec![
+                    BoxShadow::new(px(0.), px(1.), hsla(0., 0., 0., 0.5)).blur_radius(px(2.)),
+                ])
         })
         .when(enabled && !selected, |this| {
             this.cursor_pointer()
@@ -376,16 +404,13 @@ pub fn segment_option(
         )
 }
 
-/// The bordered track that holds a row of [`segment_option`]s.
+/// The tinted track that holds a row of [`segment_option`]s.
 pub fn segmented_control(cx: &App) -> Div {
-    let colors = cx.theme().colors();
     h_flex()
-        .p_0p5()
+        .p(px(3.))
         .gap_0p5()
-        .rounded_md()
-        .border_1()
-        .border_color(colors.border)
-        .bg(colors.editor_background)
+        .rounded(px(10.))
+        .bg(cx.theme().colors().element_background)
 }
 
 /// The radio of the boards' choice cards: an accent ring with a dot when chosen, a plain ring
@@ -429,8 +454,9 @@ pub fn destructive_button(
         .h(px(30.))
         .px_3()
         .flex_none()
-        .rounded_md()
+        .rounded(Radius::Sm.rems())
         .bg(if enabled { fill } else { fill.opacity(0.4) })
+        .when(enabled, |this| this.shadow(raised_shadow()))
         .when(enabled, |this| {
             this.cursor_pointer()
                 .hover(move |this| this.bg(fill.opacity(0.85)))
@@ -514,16 +540,16 @@ pub fn progress_line(fraction: f32, cx: &App) -> Div {
         )
 }
 
-/// The surface of the boards' modals: 14 px corners, the strong border and a deep shadow. The
-/// caller sets the width.
+/// The surface of the boards' modals: the largest radius, the strong border and the modal
+/// shadow. The caller sets the width.
 pub fn modal_surface(cx: &App) -> Div {
     let colors = cx.theme().colors();
     v_flex()
-        .rounded(px(14.))
+        .rounded(Radius::Xl.rems())
         .border_1()
         .border_color(colors.border_selected)
         .bg(colors.elevated_surface_background)
-        .shadow_lg()
+        .shadow(crate::ElevationIndex::ModalSurface.shadow(cx))
         .overflow_hidden()
 }
 
@@ -538,7 +564,7 @@ pub fn modal_footer(cx: &App) -> Div {
         .pr_4()
         .gap_2()
         .border_t_1()
-        .border_color(colors.border)
+        .border_color(colors.border_variant)
         .bg(colors.elevated_surface_background)
 }
 

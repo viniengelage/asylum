@@ -6,6 +6,7 @@ use gpui::{
     WeakEntity,
 };
 use i18n::t;
+use ui::EmptyState;
 use ui::{
     KeyBinding, Tooltip, prelude::*, primary_button, secondary_button, segment_option,
     segmented_control, text_field,
@@ -461,38 +462,17 @@ impl NotesPanel {
                         .h(px(20.))
                         .flex_none()
                         .justify_center()
-                        .rounded(px(4.))
-                        .border_1()
-                        .border_color(cx.theme().colors().border)
+                        .rounded(Radius::Xs.rems())
+                        .bg(cx.theme().colors().element_background)
                         .child(Label::new(key).size(LabelSize::XSmall).buffer_font(cx)),
                 )
                 .child(Label::new(text).size(LabelSize::Small).color(Color::Muted))
         };
-        v_flex()
-            .flex_1()
-            .w_full()
-            .items_center()
-            .justify_center()
-            .gap_3()
-            .px_8()
-            .child(
-                h_flex()
-                    .size(px(44.))
-                    .justify_center()
-                    .rounded(px(10.))
-                    .bg(cx.theme().colors().element_selected)
-                    .child(Icon::new(IconName::Notepad).color(Color::Accent)),
-            )
-            .child(Label::new(t!("notes.empty.title")).weight(gpui::FontWeight::BOLD))
-            .child(
-                Label::new(t!("notes.empty.body"))
-                    .size(LabelSize::Small)
-                    .color(Color::Muted),
-            )
-            .child(
+        EmptyState::new(IconName::Notepad, t!("notes.empty.title"))
+            .description(t!("notes.empty.body"))
+            .action(
                 v_flex()
                     .gap_1p5()
-                    .pt_1()
                     .child(hint("⌥⌘N", t!("notes.empty.hint_save")))
                     .child(hint("⌥⌘V", t!("notes.empty.hint_palette")))
                     .child(hint("⌥⌘1–9", t!("notes.empty.hint_pinned"))),

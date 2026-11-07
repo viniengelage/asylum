@@ -54,7 +54,6 @@ pub struct ListItem {
     selectable: bool,
     always_show_disclosure_icon: bool,
     outlined: bool,
-    rounded: bool,
     overflow_x: bool,
     focused: Option<bool>,
     dock: Option<DockSide>,
@@ -90,7 +89,6 @@ impl ListItem {
             selectable: true,
             always_show_disclosure_icon: false,
             outlined: false,
-            rounded: false,
             overflow_x: false,
             focused: None,
             dock: None,
@@ -249,11 +247,6 @@ impl ListItem {
         self
     }
 
-    pub fn rounded(mut self) -> Self {
-        self.rounded = true;
-        self
-    }
-
     pub fn overflow_x(mut self) -> Self {
         self.overflow_x = true;
         self
@@ -316,19 +309,18 @@ impl RenderOnce for ListItem {
                             DockSide::Right => this.border_r_2(),
                         })
                         .when(focused && !self.disabled, |this| {
-                            this.border_color(cx.theme().colors().border_focused)
+                            this.border_color(cx.theme().colors().border_focused.opacity(0.7))
                         })
                 })
                 .when(self.selectable && !self.disabled, |this| {
                     this.hover(|style| style.bg(cx.theme().colors().ghost_element_hover))
                         .active(|style| style.bg(cx.theme().colors().ghost_element_active))
-                        .when(self.outlined, |this| this.rounded_sm())
                         .when(self.selected, |this| {
                             this.bg(cx.theme().colors().ghost_element_selected)
                         })
                 })
             })
-            .when(self.rounded, |this| this.rounded_sm())
+            .rounded(Radius::Sm.rems())
             .when_some(self.on_hover, |this, on_hover| this.on_hover(on_hover))
             .child(
                 h_flex()
@@ -371,7 +363,7 @@ impl RenderOnce for ListItem {
                         this.when_some(self.focused, |this, focused| {
                             if focused && !self.disabled {
                                 this.border_1()
-                                    .border_color(cx.theme().colors().border_focused)
+                                    .border_color(cx.theme().colors().border_focused.opacity(0.7))
                             } else {
                                 this.border_1()
                             }
@@ -384,18 +376,9 @@ impl RenderOnce for ListItem {
                                 })
                         })
                         // Inset items are the rows of menus and pickers, where the keyboard
-                        // selection and the row under the pointer are both visible at once. A
-                        // fill alone makes them indistinguishable, so the selection also gets
-                        // the accent border of a selected pill tab. The border is always there
-                        // so that selecting an item doesn't shift its content by a pixel.
-                        .when(self.focused.is_none(), |this| {
-                            let selected = self.selected && self.selectable && !self.disabled;
-                            this.border_1().border_color(if selected {
-                                cx.theme().colors().border_focused.opacity(0.55)
-                            } else {
-                                gpui::transparent_black()
-                            })
-                        })
+                        // selection and the row under the pointer are both visible at once. The
+                        // selection is an accent tint and hover a neutral one, so the hue alone
+                        // tells them apart without an outline.
                     })
                     .when_some(
                         self.on_click.filter(|_| !self.disabled),
@@ -404,7 +387,7 @@ impl RenderOnce for ListItem {
                     .when(self.outlined, |this| {
                         this.border_1()
                             .border_color(cx.theme().colors().border)
-                            .rounded_sm()
+                            .rounded(Radius::Sm.rems())
                             .overflow_hidden()
                     })
                     .when_some(self.on_secondary_mouse_down, |this, on_mouse_down| {
@@ -415,7 +398,7 @@ impl RenderOnce for ListItem {
                     .when_some(self.tooltip, |this, tooltip| this.tooltip(tooltip))
                     .map(|this| {
                         if self.inset {
-                            this.rounded_sm()
+                            this.rounded(Radius::Sm.rems())
                         } else {
                             // When an item is not inset draw the indent spacing inside of the item
                             this.ml(self.indent_level as f32 * self.indent_step_size)

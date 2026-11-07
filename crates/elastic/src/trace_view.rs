@@ -14,6 +14,7 @@ use gpui::{
 use i18n::t;
 use project::Project;
 use std::sync::Arc;
+use ui::section_label;
 use ui::{Tooltip, prelude::*};
 use util::ResultExt as _;
 use workspace::{
@@ -612,8 +613,16 @@ impl TraceView {
                     .gap_2()
                     .border_b_1()
                     .border_color(cx.theme().colors().border_variant)
-                    .child(section_label(t!("elastic.trace.column_span")).w(px(NAME_WIDTH)))
-                    .child(section_label(t!("elastic.trace.column_service")).w(px(SERVICE_WIDTH)))
+                    .child(
+                        div()
+                            .w(px(NAME_WIDTH))
+                            .child(section_label(t!("elastic.trace.column_span"))),
+                    )
+                    .child(
+                        div()
+                            .w(px(SERVICE_WIDTH))
+                            .child(section_label(t!("elastic.trace.column_service"))),
+                    )
                     .child(
                         h_flex()
                             .flex_1()
@@ -626,7 +635,9 @@ impl TraceView {
                             })),
                     )
                     .child(
-                        section_label(t!("elastic.trace.column_duration")).w(px(DURATION_WIDTH)),
+                        div()
+                            .w(px(DURATION_WIDTH))
+                            .child(section_label(t!("elastic.trace.column_duration"))),
                     ),
             )
             .children(trace.spans.iter().enumerate().map(|(index, span)| {
@@ -885,15 +896,6 @@ impl TraceView {
             )
             .into_any_element()
     }
-}
-
-fn section_label(text: impl Into<SharedString>) -> gpui::Div {
-    div().child(
-        Label::new(text)
-            .size(LabelSize::XSmall)
-            .weight(FontWeight::SEMIBOLD)
-            .color(Color::Muted),
-    )
 }
 
 /// `capturePayment (src/modules/payments/checkout.ts)` → that file, at its first line: the APM
