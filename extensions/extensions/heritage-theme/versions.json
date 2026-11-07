@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Heritage Themes"
+   ],
+   "description": "Colour themes drawn from the colour traditions of different cultures.",
+   "download_count": 0,
+   "id": "heritage-theme",
+   "name": "Heritage Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-07T10:59:29Z",
+   "repository": "https://github.com/heritage-themes/heritage-themes-zed",
+   "schema_version": 1,
+   "version": "1.3.2",
+   "wasm_api_version": null
+  }
+ ]
+}

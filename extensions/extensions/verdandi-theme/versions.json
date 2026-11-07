@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "emeraldsanto"
+   ],
+   "description": "A monochrome theme that can live without color. Ported from the VS Code Verdandi theme by be5invis. Includes light (Verdandi) and dark (Verdandi Alter) variants.",
+   "download_count": 0,
+   "id": "verdandi-theme",
+   "name": "Verdandi Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-07T10:59:31Z",
+   "repository": "https://github.com/emeraldsanto/zed-theme-verdandi",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

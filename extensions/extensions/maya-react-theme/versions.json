@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Yathin K <yathink3@gmail.com>"
+   ],
+   "description": "A sleek, modern dark theme pack for Zed editor featuring Maya, Maya Black, Pure, and Winter.",
+   "download_count": 0,
+   "id": "maya-react-theme",
+   "name": "Maya React Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-07T10:59:30Z",
+   "repository": "https://github.com/yathink3/carbon-react-color-theme-zed",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}
