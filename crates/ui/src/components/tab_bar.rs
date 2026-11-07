@@ -26,6 +26,7 @@ pub struct TabBar {
     start_children: SmallVec<[AnyElement; 2]>,
     children: SmallVec<[AnyElement; 2]>,
     after_tabs: Option<AnyElement>,
+    after_strip: Option<AnyElement>,
     end_children: SmallVec<[AnyElement; 2]>,
     scroll_handle: Option<ScrollHandle>,
 }
@@ -39,6 +40,7 @@ impl TabBar {
             start_children: SmallVec::new(),
             children: SmallVec::new(),
             after_tabs: None,
+            after_strip: None,
             end_children: SmallVec::new(),
             scroll_handle: None,
         }
@@ -64,11 +66,19 @@ impl TabBar {
 
     /// An element that fills the space between the tabs and the end children.
     ///
-    /// With [`TabStyle::Pill`] the strip hugs its tabs, so anything that should span the rest
-    /// of the bar — a pane's drop target for "after the last tab" — goes here instead of into
-    /// the strip.
+    /// With [`TabStyle::Pill`] it goes inside the strip after the tabs and makes the strip grow
+    /// to the end children, so a pane with a single tab still reads as one rail. Without it the
+    /// strip hugs its tabs.
     pub fn after_tabs(mut self, element: impl IntoElement) -> Self {
         self.after_tabs = Some(element.into_any_element());
+        self
+    }
+
+    /// An element placed right after the strip of a [`TabStyle::Pill`] or
+    /// [`TabStyle::Capsule`] bar, outside it, so the strip keeps hugging its tabs. Give it
+    /// `flex_1` to fill the space up to the end children.
+    pub fn after_strip(mut self, element: impl IntoElement) -> Self {
+        self.after_strip = Some(element.into_any_element());
         self
     }
 
@@ -141,6 +151,7 @@ impl TabBar {
     fn render_pill(self, cx: &App) -> AnyElement {
         let slot_gap = HeaderBar::slot_gap(cx);
         let segmented = self.layout == TabBarLayout::Segmented;
+        let grows = segmented || self.after_tabs.is_some();
 
         let tabs = match self.layout {
             TabBarLayout::Scrollable => h_flex()
@@ -165,12 +176,23 @@ impl TabBar {
 
         let strip = h_flex()
             .min_w_0()
-            .when(segmented, |this| this.flex_1())
+            .when(grows, |this| this.flex_1())
             .p(DynamicSpacing::Base03.px(cx))
             .rounded(TAB_STRIP_RADIUS)
             .bg(cx.theme().colors().element_background)
             .overflow_hidden()
-            .child(tabs);
+            .child(tabs)
+            .when_some(self.after_tabs, |this, after_tabs| {
+                this.child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .self_stretch()
+                        .flex()
+                        .items_center()
+                        .child(after_tabs),
+                )
+            });
 
         h_flex()
             .id(self.id)
@@ -195,19 +217,9 @@ impl TabBar {
                     .flex_1()
                     .min_w_0()
                     .h_full()
+                    .gap(DynamicSpacing::Base06.px(cx))
                     .child(strip)
-                    .map(|this| match self.after_tabs {
-                        Some(after_tabs) => this.child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .h_full()
-                                .flex()
-                                .items_center()
-                                .child(after_tabs),
-                        ),
-                        None => this,
-                    }),
+                    .children(self.after_strip),
             )
             .when(!self.end_children.is_empty(), |this| {
                 this.child(
@@ -223,7 +235,7 @@ impl TabBar {
 
 impl RenderOnce for TabBar {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        if self.style == TabStyle::Pill {
+        if matches!(self.style, TabStyle::Pill | TabStyle::Capsule) {
             return self.render_pill(cx);
         }
 

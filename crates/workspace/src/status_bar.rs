@@ -1,12 +1,14 @@
 use crate::{
-    ItemHandle, MultiWorkspace, Pane,
+    ItemHandle, MultiWorkspace, Pane, ToolkitSettings,
     dock::{PanelButtons, StatusBarButton},
 };
 use gpui::{
     Action, AnyElement, AnyView, App, Context, Entity, FocusHandle, Focusable, IntoElement,
     ParentElement, Render, Role, SharedString, Styled, Subscription, WeakEntity, Window,
 };
-use settings::{SettingsContent, SettingsStore, update_settings_file};
+use settings::{
+    Settings as _, SettingsContent, SettingsStore, ToolkitDisplay, update_settings_file,
+};
 use std::{any::TypeId, rc::Rc, sync::Arc};
 use ui::{
     ButtonLike, ContextMenu, ContextMenuEntry, IconButtonShape, IconPosition, PopoverMenu, Tooltip,
@@ -41,10 +43,122 @@ impl HideStatusItem {
     }
 }
 
-/// A developer tool as a row of the toolkit menu in the status bar.
-pub struct ToolkitEntry {
+/// The area of work a toolkit belongs to, which groups it in the status bar and the settings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToolkitDomain {
+    Frontend,
+    Backend,
+    Infra,
+    Work,
+}
+
+impl ToolkitDomain {
+    pub const ALL: [ToolkitDomain; 4] = [
+        ToolkitDomain::Frontend,
+        ToolkitDomain::Backend,
+        ToolkitDomain::Infra,
+        ToolkitDomain::Work,
+    ];
+
+    pub fn label(self) -> SharedString {
+        match self {
+            ToolkitDomain::Frontend => i18n::t!("workspace.toolkit.domain.frontend"),
+            ToolkitDomain::Backend => i18n::t!("workspace.toolkit.domain.backend"),
+            ToolkitDomain::Infra => i18n::t!("workspace.toolkit.domain.infra"),
+            ToolkitDomain::Work => i18n::t!("workspace.toolkit.domain.work"),
+        }
+    }
+}
+
+/// A toolkit as the status bar and the settings list it, whether or not it is registered.
+pub struct ToolkitInfo {
+    /// The id `toolkit.hidden` in the settings is keyed by.
+    pub id: &'static str,
+    pub domain: ToolkitDomain,
     pub icon: IconName,
-    pub label: SharedString,
+    pub label: fn() -> SharedString,
+}
+
+/// Ids of the toolkits that are not agent toolkits; the others live in `task_agents::toolkit_ids`.
+pub mod toolkit_ids {
+    pub const JSON_PRETTIER: &str = "json_prettier";
+    pub const AGENTS: &str = "agents";
+    pub const FLOWS: &str = "flows";
+}
+
+pub const TOOLKITS: &[ToolkitInfo] = &[
+    ToolkitInfo {
+        id: toolkit_ids::JSON_PRETTIER,
+        domain: ToolkitDomain::Frontend,
+        icon: IconName::Json,
+        label: || "JSON Prettier".into(),
+    },
+    ToolkitInfo {
+        id: task_agents::toolkit_ids::DESIGN,
+        domain: ToolkitDomain::Frontend,
+        icon: IconName::Pencil,
+        label: || "Design".into(),
+    },
+    ToolkitInfo {
+        id: task_agents::toolkit_ids::API,
+        domain: ToolkitDomain::Backend,
+        icon: IconName::ArrowRightLeft,
+        label: || "API".into(),
+    },
+    ToolkitInfo {
+        id: task_agents::toolkit_ids::DATABASE,
+        domain: ToolkitDomain::Backend,
+        icon: IconName::Database,
+        label: || i18n::t!("database_client.toolkit.name"),
+    },
+    ToolkitInfo {
+        id: task_agents::toolkit_ids::ELASTIC,
+        domain: ToolkitDomain::Backend,
+        icon: IconName::CloudPulse,
+        label: || "Elastic".into(),
+    },
+    ToolkitInfo {
+        id: task_agents::toolkit_ids::DOCKER,
+        domain: ToolkitDomain::Infra,
+        icon: IconName::Docker,
+        label: || "Docker".into(),
+    },
+    ToolkitInfo {
+        id: task_agents::toolkit_ids::REPO,
+        domain: ToolkitDomain::Infra,
+        icon: IconName::PullRequest,
+        label: || "Repo".into(),
+    },
+    ToolkitInfo {
+        id: task_agents::toolkit_ids::CLICKUP,
+        domain: ToolkitDomain::Work,
+        icon: IconName::ListTodo,
+        label: || "ClickUp".into(),
+    },
+    ToolkitInfo {
+        id: task_agents::toolkit_ids::GITHUB_PROJECTS,
+        domain: ToolkitDomain::Work,
+        icon: IconName::Blocks,
+        label: || i18n::t!("github_projects.dock.title"),
+    },
+    ToolkitInfo {
+        id: toolkit_ids::AGENTS,
+        domain: ToolkitDomain::Work,
+        icon: IconName::UserGroup,
+        label: || i18n::t!("agent_ui.task_agents.segment.agents"),
+    },
+    ToolkitInfo {
+        id: toolkit_ids::FLOWS,
+        domain: ToolkitDomain::Work,
+        icon: IconName::ListTree,
+        label: || i18n::t!("agent_ui.flows.toolkit_label"),
+    },
+];
+
+/// A developer tool as a button or menu row of the toolkit in the status bar. Its name, icon
+/// and domain come from its [`ToolkitInfo`] in [`TOOLKITS`].
+pub struct ToolkitEntry {
+    pub id: &'static str,
     /// Whether the tool's dock is showing; the row is filled and the toolkit button lit.
     pub is_open: bool,
     /// What opens the tool, for the shortcut the row shows.
@@ -133,8 +247,6 @@ trait StatusItemViewHandle: Send {
 }
 
 /// The groups the status bar is divided into, in the order they appear from left to right.
-/// Each group of buttons sits in its own tinted capsule, which is what lets the user tell a
-/// dock toggle from a tool from a fact about the editor without reading every icon.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum StatusItemZone {
     /// The profile this process runs as, at the very start so it is the first thing read.
@@ -155,8 +267,6 @@ pub(crate) enum StatusItemZone {
 }
 
 impl StatusItemZone {
-    /// Zones made of toggle buttons are grouped in a capsule; the editor facts are plain text
-    /// and the toolbox is a single button, so a capsule would only add noise around them.
     fn has_capsule(self) -> bool {
         matches!(
             self,
@@ -374,7 +484,14 @@ fn render_zone(zone: StatusItemZone, items: &[&dyn StatusItemViewHandle], cx: &A
         })
         .map(|this| {
             if zone == StatusItemZone::Toolkit {
-                this.child(render_toolkit_menu(items, cx))
+                let toolkits = visible_toolkits(items, cx);
+                if ToolkitSettings::get_global(cx).display == ToolkitDisplay::Inline
+                    && !toolkits.is_empty()
+                {
+                    this.child(render_toolkit_inline(toolkits, cx))
+                } else {
+                    this.child(render_toolkit_menu(toolkits))
+                }
             } else {
                 this.children(
                     items
@@ -387,16 +504,51 @@ fn render_zone(zone: StatusItemZone, items: &[&dyn StatusItemViewHandle], cx: &A
         .into_any_element()
 }
 
-/// One toolbox button for every developer tool, lit while any of them is open; its menu has a
-/// row per tool, the open ones filled.
-fn render_toolkit_menu(items: &[&dyn StatusItemViewHandle], cx: &App) -> AnyElement {
-    let entries: Rc<Vec<ToolkitEntry>> = Rc::new(
-        items
-            .iter()
-            .filter_map(|item| item.toolkit_entry(cx))
+type VisibleToolkits = Rc<Vec<(&'static ToolkitInfo, ToolkitEntry)>>;
+
+/// The toolkits to show, in catalog order. Hidden ones keep their actions, so the command
+/// palette still reaches them.
+fn visible_toolkits(items: &[&dyn StatusItemViewHandle], cx: &App) -> VisibleToolkits {
+    let hidden = &ToolkitSettings::get_global(cx).hidden;
+    let mut toolkits: Vec<(usize, &'static ToolkitInfo, ToolkitEntry)> = items
+        .iter()
+        .filter_map(|item| item.toolkit_entry(cx))
+        .filter(|entry| !hidden.contains(entry.id))
+        .filter_map(|entry| {
+            let index = TOOLKITS.iter().position(|info| info.id == entry.id)?;
+            Some((index, TOOLKITS.get(index)?, entry))
+        })
+        .collect();
+    toolkits.sort_by_key(|(index, _, _)| *index);
+    Rc::new(
+        toolkits
+            .into_iter()
+            .map(|(_, info, entry)| (info, entry))
             .collect(),
+    )
+}
+
+fn open_toolkit_settings(window: &mut Window, cx: &mut App) {
+    window.dispatch_action(
+        Box::new(zed_actions::OpenSettingsPage {
+            page: "Toolkit".into(),
+            target: None,
+        }),
+        cx,
     );
-    let any_open = entries.iter().any(|entry| entry.is_open);
+}
+
+fn customize_toolkit_entry() -> ContextMenuEntry {
+    ContextMenuEntry::new(i18n::t!("workspace.toolkit.customize"))
+        .icon(IconName::Sliders)
+        .handler(open_toolkit_settings)
+}
+
+/// One toolbox button for every developer tool, lit while any of them is open; its menu has a
+/// row per tool grouped by domain, the open ones filled. The button stays even when every
+/// toolkit is hidden, so the way back to the settings does too.
+fn render_toolkit_menu(toolkits: VisibleToolkits) -> AnyElement {
+    let any_open = toolkits.iter().any(|(_, entry)| entry.is_open);
     PopoverMenu::new("status-bar-toolkit-menu")
         .anchor(gpui::Anchor::BottomRight)
         .trigger(
@@ -406,27 +558,94 @@ fn render_toolkit_menu(items: &[&dyn StatusItemViewHandle], cx: &App) -> AnyElem
                 .tooltip(Tooltip::text(i18n::t!("workspace.toolkit.title"))),
         )
         .menu(move |window, cx| {
-            let entries = entries.clone();
+            let toolkits = toolkits.clone();
             Some(ContextMenu::build(window, cx, move |menu, _window, _cx| {
-                entries.iter().fold(
-                    menu.sectioned().header(i18n::t!("workspace.toolkit.title")),
-                    |menu, entry| {
-                        let toggle = entry.toggle.clone();
-                        menu.item(
-                            ContextMenuEntry::new(entry.label.clone())
-                                .icon(entry.icon)
-                                .toggleable(IconPosition::End, entry.is_open)
-                                .action(entry.action.boxed_clone())
-                                .handler(move |window, cx| toggle(window, cx)),
-                        )
-                    },
-                )
+                let menu = ToolkitDomain::ALL
+                    .into_iter()
+                    .fold(menu.sectioned(), |menu, domain| {
+                        let mut in_domain = toolkits
+                            .iter()
+                            .filter(|(info, _)| info.domain == domain)
+                            .peekable();
+                        if in_domain.peek().is_none() {
+                            return menu;
+                        }
+                        in_domain.fold(menu.header(domain.label()), |menu, (info, entry)| {
+                            let toggle = entry.toggle.clone();
+                            menu.item(
+                                ContextMenuEntry::new((info.label)())
+                                    .icon(info.icon)
+                                    .toggleable(IconPosition::End, entry.is_open)
+                                    .action(entry.action.boxed_clone())
+                                    .handler(move |window, cx| toggle(window, cx)),
+                            )
+                        })
+                    });
+                let menu = if toolkits.is_empty() {
+                    menu
+                } else {
+                    menu.separator()
+                };
+                menu.item(customize_toolkit_entry())
             }))
         })
         .into_any_element()
 }
 
-/// The space between two zones; the capsules themselves mark where a zone starts and ends.
+fn render_toolkit_inline(toolkits: VisibleToolkits, cx: &App) -> AnyElement {
+    let groups: Vec<AnyElement> = ToolkitDomain::ALL
+        .into_iter()
+        .filter_map(|domain| {
+            let buttons: Vec<AnyElement> = toolkits
+                .iter()
+                .filter(|(info, _)| info.domain == domain)
+                .map(|(info, entry)| render_inline_toolkit_button(info, entry))
+                .collect();
+            if buttons.is_empty() {
+                return None;
+            }
+            Some(h_flex().gap_0p5().children(buttons).into_any_element())
+        })
+        .collect();
+    // Without padding the capsule fits the bar's 24px slot like the other zones.
+    let capsule = ui::button_group(groups, cx).p_0().px(px(2.));
+    right_click_menu("status-bar-toolkit-inline-menu")
+        .trigger(move |_is_active, _window, _cx| capsule)
+        .menu(|window, cx| {
+            ContextMenu::build(window, cx, |menu, _window, _cx| {
+                menu.item(customize_toolkit_entry()).item(
+                    ContextMenuEntry::new(i18n::t!("workspace.toolkit.show_as_menu"))
+                        .icon(IconName::Toolbox)
+                        .handler(|_window, cx| {
+                            update_settings_file(<dyn fs::Fs>::global(cx), cx, |settings, _cx| {
+                                settings.toolkit.get_or_insert_default().display =
+                                    Some(ToolkitDisplay::Menu);
+                            })
+                        }),
+                )
+            })
+        })
+        .into_any_element()
+}
+
+fn render_inline_toolkit_button(info: &'static ToolkitInfo, entry: &ToolkitEntry) -> AnyElement {
+    let toggle = entry.toggle.clone();
+    let action = entry.action.boxed_clone();
+    let label = (info.label)();
+    StatusBarButton::new(
+        SharedString::from(format!("status-bar-toolkit-{}", info.id)),
+        info.icon,
+        entry.is_open,
+    )
+    .tab_index(0isize)
+    .aria_label(label.clone())
+    .tooltip(move |_window, cx| {
+        Tooltip::with_meta(label.clone(), Some(&*action), info.domain.label(), cx)
+    })
+    .on_click(move |_event, window, cx| toggle(window, cx))
+    .into_any_element()
+}
+
 fn render_zone_gap(cx: &App) -> AnyElement {
     div()
         .flex_none()

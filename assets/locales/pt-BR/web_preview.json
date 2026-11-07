@@ -69,6 +69,7 @@
   "install.heading_missing": "O Web Preview precisa do Chromium",
   "install.install": "Instalar",
   "install.try_again": "Tentar de novo",
+  "tab_label": "Navegador",
   "toolbar.back": "Voltar",
   "toolbar.forward": "Avançar",
   "toolbar.loading": "Carregando…",
@@ -77,7 +78,7 @@
   "toolbar.reload": "Recarregar",
   "toolbar.stop": "Parar",
   "toolbar.url_placeholder": "Digite a URL...",
-  "toolkit_button.new_tab": "Nova aba do Browser",
+  "toolkit_button.new_tab": "Nova aba do Navegador",
   "unsupported.detail": "Por enquanto o browser embutido só funciona no macOS.",
   "unsupported.headline": "Web Preview ainda não está disponível neste sistema",
   "waiting_for_browser": "Aguardando o browser..."

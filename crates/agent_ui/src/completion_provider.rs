@@ -170,6 +170,7 @@ pub(crate) enum PromptContextType {
     ProjectItem,
     Logs,
     Container,
+    Design,
     Note,
 }
 
@@ -260,6 +261,7 @@ impl TryFrom<&str> for PromptContextType {
             "item" => Ok(Self::ProjectItem),
             "log" => Ok(Self::Logs),
             "container" => Ok(Self::Container),
+            "design" => Ok(Self::Design),
             "note" | "nota" => Ok(Self::Note),
             _ => Err(format!("Invalid context picker mode: {}", value)),
         }
@@ -281,6 +283,7 @@ impl PromptContextType {
             Self::ProjectItem => "item",
             Self::Logs => "log",
             Self::Container => "container",
+            Self::Design => "design",
             Self::Note => "note",
         }
     }
@@ -299,6 +302,7 @@ impl PromptContextType {
             Self::ProjectItem => return t!("agent_ui.context_picker.project_items"),
             Self::Logs => return t!("agent_ui.context_picker.logs"),
             Self::Container => return t!("agent_ui.context_picker.containers"),
+            Self::Design => return t!("agent_ui.context_picker.designs"),
             Self::Note => return t!("agent_ui.context_picker.notes"),
         };
         label.into()
@@ -318,6 +322,7 @@ impl PromptContextType {
             Self::ProjectItem => IconName::ListTodo,
             Self::Logs => IconName::CloudPulse,
             Self::Container => IconName::Box,
+            Self::Design => IconName::Pencil,
             Self::Note => IconName::Notepad,
         }
     }
@@ -1284,6 +1289,17 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
         task_agents::container_mentions(workspace.read(cx).project(), cx)
     }
 
+    fn design_mentions(
+        &self,
+        workspace: &Entity<Workspace>,
+        cx: &App,
+    ) -> Vec<task_agents::LogMention> {
+        if !self.source.supports_context(PromptContextType::Design, cx) {
+            return Vec::new();
+        }
+        task_agents::design_mentions(workspace.read(cx).project(), cx)
+    }
+
     fn note_mentions(&self, workspace: &Entity<Workspace>, cx: &App) -> Vec<notes::Note> {
         if !self.source.supports_context(PromptContextType::File, cx) {
             return Vec::new();
@@ -1636,6 +1652,21 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
                 )
             }
 
+            Some(PromptContextType::Design) => {
+                let query = query.to_lowercase();
+                Task::ready(
+                    self.design_mentions(&workspace, cx)
+                        .into_iter()
+                        .filter(|entry| {
+                            query.is_empty()
+                                || entry.title.to_lowercase().contains(&query)
+                                || entry.detail.to_lowercase().contains(&query)
+                        })
+                        .map(Match::Logs)
+                        .collect(),
+                )
+            }
+
             Some(PromptContextType::Container) => {
                 let query = query.to_lowercase();
                 Task::ready(
@@ -1797,6 +1828,7 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
                     .collect::<Vec<_>>();
                 let mut log_mentions = self.log_mentions(&workspace, cx);
                 log_mentions.extend(self.container_mentions(&workspace, cx));
+                log_mentions.extend(self.design_mentions(&workspace, cx));
                 let log_candidates = log_mentions
                     .iter()
                     .enumerate()
@@ -1804,6 +1836,8 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
                         let keyword = if entry.id.starts_with(task_agents::CONTAINER_MENTION_PREFIX)
                         {
                             PromptContextType::Container.keyword()
+                        } else if entry.id.starts_with(task_agents::DESIGN_MENTION_PREFIX) {
+                            PromptContextType::Design.keyword()
                         } else {
                             PromptContextType::Logs.keyword()
                         };
@@ -2076,6 +2110,10 @@ impl<T: PromptCompletionProviderDelegate> PromptCompletionProvider<T> {
 
         if !self.container_mentions(workspace, cx).is_empty() {
             entries.push(PromptContextEntry::Mode(PromptContextType::Container));
+        }
+
+        if !self.design_mentions(workspace, cx).is_empty() {
+            entries.push(PromptContextEntry::Mode(PromptContextType::Design));
         }
 
         if !self.note_mentions(workspace, cx).is_empty() {
@@ -2960,14 +2998,23 @@ impl MentionCompletion {
             // Safe since we check no leading whitespace above
             end += mode_text.len();
 
+            let mut reference_is_inline = false;
             if let Some(parsed_mode) = PromptContextType::try_from(mode_text).ok()
                 && supported_modes.contains(&parsed_mode)
             {
                 mode = Some(parsed_mode);
+            } else if let Some(reference) =
+                mode_text.strip_prefix(task_agents::DESIGN_MENTION_PREFIX)
+                && supported_modes.contains(&PromptContextType::Design)
+            {
+                mode = Some(PromptContextType::Design);
+                argument = Some(reference.to_string()).filter(|reference| !reference.is_empty());
+                reference_is_inline = true;
             } else {
                 argument = Some(mode_text.to_string());
             }
             match rest_of_line[mode_text.len()..].find(|c: char| !c.is_whitespace()) {
+                _ if reference_is_inline => {}
                 Some(whitespace_count) => {
                     if let Some(argument_text) = parts.next() {
                         // If mode wasn't recognized but we have an argument, don't suggest completions
@@ -4092,6 +4139,21 @@ mod tests {
                 argument: None,
             }),
             "Should parse mention immediately after '{{'"
+        );
+
+        let supported_modes_with_design = vec![PromptContextType::File, PromptContextType::Design];
+        assert_eq!(
+            MentionCompletion::try_parse(
+                "Lorem @design:abc Ipsum",
+                0,
+                &supported_modes_with_design
+            ),
+            Some(MentionCompletion {
+                source_range: 6..17,
+                mode: Some(PromptContextType::Design),
+                argument: Some("abc".to_string()),
+            }),
+            "A design reference should not consume the following word"
         );
     }
 

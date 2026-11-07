@@ -96,7 +96,7 @@ fn render_context_server_timeout(
         files: USER | PROJECT,
     });
 
-    item.render(settings_window, 0, false, false, window, cx)
+    item.render(settings_window, 0, true, true, window, cx)
 }
 
 fn get_context_server_store(
@@ -560,7 +560,6 @@ pub(crate) fn render_add_server_popover(
     window: &mut Window,
     cx: &mut Context<SettingsWindow>,
 ) -> impl IntoElement {
-    let original_window = settings_window.original_window;
     // Stable handle so the button keeps focus state across renders and can show a
     // focus ring even when the page is opened (and the button auto-focused) via a
     // mouse click, where `focus_visible` styling is suppressed.
@@ -621,7 +620,6 @@ pub(crate) fn render_add_server_popover(
                         i18n::translate_text("settings_ui_text", "Add Remote Server"),
                         None,
                         {
-                            let settings_window = settings_window.clone();
                             move |window, cx| {
                                 settings_window
                                     .update(cx, |this, cx| {
@@ -642,25 +640,17 @@ pub(crate) fn render_add_server_popover(
                         i18n::translate_text("settings_ui_text", "Install from Extensions"),
                         None,
                         {
-                            move |_window, cx| {
-                                if let Some(original_window) = original_window.as_ref() {
-                                    cx.activate(true);
-                                    original_window
-                                        .update(cx, |_, window, cx| {
-                                            window.activate_window();
-                                            window.dispatch_action(
-                                                zed_actions::Extensions {
-                                                    category_filter: Some(
-                                                        ExtensionCategoryFilter::ContextServers,
-                                                    ),
-                                                    id: None,
-                                                }
-                                                .boxed_clone(),
-                                                cx,
-                                            );
-                                        })
-                                        .log_err();
-                                }
+                            move |window, cx| {
+                                window.dispatch_action(
+                                    zed_actions::Extensions {
+                                        category_filter: Some(
+                                            ExtensionCategoryFilter::ContextServers,
+                                        ),
+                                        id: None,
+                                    }
+                                    .boxed_clone(),
+                                    cx,
+                                );
                             }
                         },
                     )

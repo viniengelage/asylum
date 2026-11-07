@@ -1,0 +1,14 @@
+{
+  "panel.close_panel": "Fechar painel",
+  "panel.inline_assist": "Assistente inline",
+  "panel.new": "Novo…",
+  "panel.new_terminal": "Novo terminal",
+  "panel.spawn_task": "Executar tarefa",
+  "panel.split_down": "Dividir para baixo",
+  "panel.split_left": "Dividir à esquerda",
+  "panel.split_pane": "Dividir painel",
+  "panel.split_right": "Dividir à direita",
+  "panel.split_up": "Dividir para cima",
+  "panel.zoom_in": "Ampliar",
+  "panel.zoom_out": "Reduzir"
+}

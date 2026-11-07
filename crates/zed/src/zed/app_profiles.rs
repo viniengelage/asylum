@@ -111,8 +111,6 @@ pub struct AppProfile {
     /// start with `~` and may be a glob, such as `~/Projects/trix/**`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub folders: Vec<String>,
-    /// The entries of `folders` that open by themselves when this profile starts, so the
-    /// user lands in their project instead of an empty window.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub open_on_launch: Vec<String>,
 }
@@ -245,8 +243,6 @@ fn is_glob(entry: &str) -> bool {
     entry.contains(['*', '?', '[', '{'])
 }
 
-/// The folders the running profile opens when the app starts, resolved to directories that
-/// still exist. A folder that was moved or deleted is skipped rather than failing the launch.
 pub fn launch_folders() -> Vec<PathBuf> {
     let Some(profiles) = load_profiles().log_err() else {
         return Vec::new();
@@ -347,12 +343,8 @@ fn open_manager(_: &mut Workspace, window: &mut Window, cx: &mut Context<Workspa
 /// it belongs to.
 pub fn init(cx: &mut App) {
     settings_ui::register_profiles_page(
-        std::rc::Rc::new(|original_window, window, cx| {
+        std::rc::Rc::new(|workspace, window, cx| {
             let store = ProfileStore::global(cx);
-            let workspace = original_window
-                .and_then(|handle| handle.read(cx).ok())
-                .map(|multi_workspace| multi_workspace.workspace().downgrade())
-                .unwrap_or_else(WeakEntity::new_invalid);
             cx.new(|cx| ManageProfilesModal::new_embedded(store, workspace, window, cx))
                 .into()
         }),
@@ -2321,13 +2313,6 @@ impl ManageProfilesModal {
         self.save_name(cx);
     }
 
-    fn render_section_title(title: SharedString) -> impl IntoElement {
-        Label::new(title)
-            .size(LabelSize::XSmall)
-            .weight(gpui::FontWeight::BOLD)
-            .color(Color::Placeholder)
-    }
-
     fn render_nav(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let store = self.store.read(cx);
         let rows = store.profiles.iter().enumerate().map(|(index, profile)| {
@@ -2380,7 +2365,7 @@ impl ManageProfilesModal {
                 div()
                     .px_1p5()
                     .py_1()
-                    .child(Self::render_section_title(t!("zed.profiles.title"))),
+                    .child(ui::section_label(t!("zed.profiles.title"))),
             )
             .children(rows)
             .child(
@@ -2407,7 +2392,7 @@ impl ManageProfilesModal {
                     .p_2()
                     .rounded_md()
                     .bg(cx.theme().colors().element_background)
-                    .child(Self::render_section_title(t!("zed.manager.shared_title")))
+                    .child(ui::section_label(t!("zed.manager.shared_title")))
                     .child(
                         Label::new(t!("zed.manager.shared_detail"))
                             .size(LabelSize::XSmall)
@@ -2425,36 +2410,21 @@ impl ManageProfilesModal {
     ) -> impl IntoElement {
         v_flex()
             .w_full()
-            .rounded(px(10.))
-            .border_1()
-            .border_color(cx.theme().colors().border)
-            .bg(cx.theme().colors().element_background)
-            .child(
-                h_flex()
-                    .justify_between()
-                    .px(px(14.))
-                    .py_2p5()
-                    .child(Self::render_section_title(title.to_uppercase().into()))
-                    .children(action),
-            )
-            .when(rows.is_empty(), |this| {
-                this.when_some(empty, |this, empty| {
-                    this.child(
-                        div()
-                            .px_3()
-                            .py_2()
-                            .border_t_1()
-                            .border_color(cx.theme().colors().border_variant)
-                            .child(Label::new(empty).size(LabelSize::Small).color(Color::Muted)),
-                    )
-                })
+            .gap_1p5()
+            .child(ui::section_header(title, action).px_1())
+            .when(!rows.is_empty() || empty.is_some(), |this| {
+                this.child(
+                    ui::grouped_block(cx)
+                        .when(rows.is_empty(), |this| {
+                            this.children(empty.map(|empty| {
+                                div().px_3().py_2().child(
+                                    Label::new(empty).size(LabelSize::Small).color(Color::Muted),
+                                )
+                            }))
+                        })
+                        .children(rows),
+                )
             })
-            .children(rows.into_iter().map(|row| {
-                div()
-                    .border_t_1()
-                    .border_color(cx.theme().colors().border)
-                    .child(row)
-            }))
     }
 
     fn render_row(
@@ -3544,41 +3514,24 @@ impl ManageProfilesModal {
                     t!("zed.profiles.status_closed")
                 };
                 let profile_id = profile.id.clone();
-                h_flex()
-                    .id(("profile-segment", index))
-                    .h(px(26.))
-                    .px_2p5()
-                    .gap_1p5()
-                    .rounded(px(6.))
-                    .border_1()
-                    .border_color(gpui::transparent_black())
-                    .cursor_pointer()
-                    .when(selected, |this| {
-                        this.bg(colors.element_selected)
-                            .border_color(colors.border_focused)
-                    })
-                    .when(!selected, |this| {
-                        this.hover(|this| this.bg(colors.element_hover))
-                    })
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.select(profile_id.clone(), window, cx)
-                    }))
-                    .child(div().size(px(7.)).rounded_full().bg(profile.color.hsla()))
-                    .child(
-                        Label::new(profile.name.clone())
-                            .size(LabelSize::Small)
-                            .weight(gpui::FontWeight::MEDIUM)
-                            .color(if selected {
-                                Color::Default
-                            } else {
-                                Color::Muted
-                            }),
-                    )
-                    .child(
-                        Label::new(status)
-                            .size(LabelSize::XSmall)
-                            .color(Color::Muted),
-                    )
+                ui::segment_option(
+                    ("profile-segment", index),
+                    profile.name.clone(),
+                    selected,
+                    true,
+                    cx,
+                )
+                .flex_none()
+                .px_2p5()
+                .gap_1p5()
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.select(profile_id.clone(), window, cx)
+                }))
+                .child(
+                    Label::new(status)
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted),
+                )
             })
             .collect::<Vec<_>>();
 
@@ -3594,7 +3547,7 @@ impl ManageProfilesModal {
                     .child(
                         h_flex()
                             .w_full()
-                            .px_7()
+                            .px_8()
                             .py_2p5()
                             .gap_2p5()
                             .bg(color.opacity(0.06))
@@ -3654,7 +3607,7 @@ impl ManageProfilesModal {
                     .w_full()
                     .h(px(56.))
                     .flex_none()
-                    .px_7()
+                    .px_8()
                     .gap_3()
                     .bg(colors.panel_background)
                     .child(
@@ -3663,17 +3616,7 @@ impl ManageProfilesModal {
                             .weight(gpui::FontWeight::BOLD),
                     )
                     .child(div().flex_1())
-                    .child(
-                        h_flex()
-                            .h(px(32.))
-                            .p_0p5()
-                            .gap_0p5()
-                            .rounded_lg()
-                            .border_1()
-                            .border_color(colors.border_selected)
-                            .bg(colors.editor_background)
-                            .children(segments),
-                    )
+                    .child(ui::segmented_control(cx).children(segments))
                     .child(
                         ui::secondary_button(
                             "new-profile",
@@ -3905,7 +3848,7 @@ impl ManageProfilesModal {
             .child(
                 h_flex()
                     .items_start()
-                    .px_7()
+                    .px_8()
                     .pt_5()
                     .pb_5()
                     .gap_4()

@@ -638,6 +638,7 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
             cx.new(|cx| database_client::DatabaseToolkitButton::new(workspace, cx));
         let elastic_button = cx.new(|cx| elastic::ElasticToolkitButton::new(workspace, cx));
         let docker_button = cx.new(|cx| docker::DockerToolkitButton::new(workspace, cx));
+        let design_button = cx.new(|cx| design_viewer::DesignToolkitButton::new(workspace, cx));
         let task_agents_button =
             cx.new(|cx| agent_ui::task_agents_view::TaskAgentsToolkitButton::new(workspace, cx));
         let flows_button =
@@ -663,6 +664,7 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
             status_bar.add_left_item(active_file_name, window, cx);
             status_bar.add_left_item(flow_run_chip, window, cx);
             status_bar.add_toolkit_item(toolbox_button, window, cx);
+            status_bar.add_toolkit_item(design_button, window, cx);
             status_bar.add_toolkit_item(clickup_button, window, cx);
             status_bar.add_toolkit_item(repo_button, window, cx);
             status_bar.add_toolkit_item(projects_button, window, cx);
@@ -6470,6 +6472,7 @@ mod tests {
                 "database_client",
                 "debug_panel",
                 "debugger",
+                "design",
                 "dev",
                 "devices",
                 "docker",

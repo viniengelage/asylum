@@ -16,19 +16,12 @@ pub fn pane_corner_radius_px(window: &Window) -> Pixels {
     pane_corner_radius() * window.rem_size()
 }
 
-/// The corner radius scale shared by every component, so nested surfaces can follow
-/// "inner radius = outer radius - padding" instead of each picking its own `px(…)`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Radius {
-    /// 4px: keybindings, badges, small indicators.
     Xs,
-    /// 6px: buttons and icon buttons.
     Sm,
-    /// 8px: fields, list rows, tabs, grouped blocks.
     Md,
-    /// 12px: menus, popovers, cards.
     Lg,
-    /// 16px: panes, docks and modals.
     Xl,
 }
 

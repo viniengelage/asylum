@@ -3,17 +3,9 @@ use smallvec::SmallVec;
 
 use crate::prelude::*;
 
-/// Which edge of its content a bar sits on.
-///
-/// A header shares the pane's surface with the content below it, so it has no rule: spacing
-/// separates the two. A footer sits under content that scrolls behind it, so it keeps a faint
-/// rule on its top edge. Everything else about the two is identical, so they share
-/// [`HeaderBar`] rather than being hand-rolled separately.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum HeaderBarEdge {
-    /// The bar sits above its content, without a rule.
     Top,
-    /// The bar sits below its content; a faint rule marks its top edge.
     Bottom,
 }
 

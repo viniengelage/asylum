@@ -1,0 +1,14 @@
+{
+  "panel.close_panel": "Close Panel",
+  "panel.inline_assist": "Inline Assist",
+  "panel.new": "New…",
+  "panel.new_terminal": "New Terminal",
+  "panel.spawn_task": "Spawn Task",
+  "panel.split_down": "Split Down",
+  "panel.split_left": "Split Left",
+  "panel.split_pane": "Split Pane",
+  "panel.split_right": "Split Right",
+  "panel.split_up": "Split Up",
+  "panel.zoom_in": "Zoom In",
+  "panel.zoom_out": "Zoom Out"
+}

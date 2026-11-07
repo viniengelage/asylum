@@ -1,0 +1,6 @@
+{
+  "failure.body": "Volte ao Asylum e tente conectar de novo.",
+  "failure.title": "A autorização falhou",
+  "success.body": "Pode fechar esta aba e voltar ao Asylum.",
+  "success.title": "Autorização concluída"
+}

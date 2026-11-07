@@ -63,7 +63,7 @@ use notifications::status_toast::StatusToast;
 use project::{
     AgentId, AgentRegistryStore, Event as ProjectEvent, WorktreeId, repo_identity_path_if_local,
 };
-use recent_projects::sidebar_recent_projects::SidebarRecentProjects;
+use recent_projects::{RecentProjects, sidebar_recent_projects::SidebarRecentProjects};
 use remote::{RemoteConnectionOptions, same_remote_connection_identity};
 
 use serde::{Deserialize, Serialize};
@@ -81,11 +81,11 @@ use task::{
 
 use theme::ActiveTheme;
 use ui::{
-    AgentThreadStatus, ButtonLike, CommonAnimationExt, ContextMenu, ContextMenuEntry, GradientFade,
-    HeaderBar, HighlightedLabel, IconPosition, KeyBinding, PopoverMenu, PopoverMenuHandle,
-    ProjectEmptyState, ScrollAxes, Scrollbars, Tab, ThreadItem, ThreadItemWorktreeInfo, TintColor,
-    Tooltip, WithScrollbar, prelude::*, primary_button, progress_line, render_modifiers,
-    right_click_menu, secondary_button, text_field,
+    AgentThreadStatus, ButtonLike, CommonAnimationExt, ContextMenu, ContextMenuEntry, EmptyState,
+    EmptyStateTone, GradientFade, HeaderBar, HighlightedLabel, IconPosition, KeyBinding,
+    PopoverMenu, PopoverMenuHandle, ProjectEmptyState, ScrollAxes, Scrollbars, Tab, ThreadItem,
+    ThreadItemWorktreeInfo, TintColor, Tooltip, WithScrollbar, card, prelude::*, primary_button,
+    progress_line, render_modifiers, right_click_menu, secondary_button, text_field,
 };
 use unicode_segmentation::UnicodeSegmentation as _;
 use util::ResultExt as _;
@@ -491,6 +491,173 @@ pub(crate) fn render_device_status_chip(status: DeviceStatus, cx: &App) -> Div {
                 .weight(FontWeight::MEDIUM)
                 .color(color),
         )
+}
+
+fn render_prepare_step(
+    label: SharedString,
+    done: bool,
+    running: bool,
+    progress: Option<android_sdk::DownloadProgress>,
+    note: Option<Label>,
+    cx: &App,
+) -> Div {
+    let border_selected = cx.theme().colors().border_selected;
+    let success = Color::Success.color(cx);
+    let marker = div()
+        .size(px(16.))
+        .mt_0p5()
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .rounded_full()
+        .map(|this| {
+            if done {
+                this.bg(success.opacity(0.12)).child(
+                    Icon::new(IconName::Check)
+                        .size(IconSize::XSmall)
+                        .color(Color::Success),
+                )
+            } else if running {
+                this.child(
+                    Icon::new(IconName::LoadCircle)
+                        .size(IconSize::Small)
+                        .color(Color::Accent)
+                        .with_rotate_animation(2),
+                )
+            } else {
+                this.border(px(1.5)).border_color(border_selected)
+            }
+        });
+    let progress_text = progress.map(|progress| {
+        if progress.installing {
+            t!("sidebar.prepare.installing").to_string()
+        } else if progress.total > 0 {
+            let mut text = t!(
+                "sidebar.prepare.progress",
+                downloaded = format_bytes(progress.downloaded.min(progress.total)),
+                total = format_bytes(progress.total)
+            )
+            .to_string();
+            if let Some(remaining) = progress.remaining {
+                let minutes = remaining.as_secs().div_ceil(60).max(1);
+                let remaining_text = if minutes == 1 {
+                    t!("sidebar.prepare.remaining.one", minutes = minutes)
+                } else {
+                    t!("sidebar.prepare.remaining.other", minutes = minutes)
+                };
+                text.push_str(" · ");
+                text.push_str(&remaining_text);
+            }
+            text
+        } else {
+            t!(
+                "sidebar.prepare.downloaded",
+                size = format_bytes(progress.downloaded)
+            )
+            .to_string()
+        }
+    });
+    let fraction = progress.map(|progress| {
+        if progress.installing {
+            1.0
+        } else if progress.total > 0 {
+            progress.downloaded as f32 / progress.total as f32
+        } else {
+            0.0
+        }
+    });
+    h_flex()
+        .w_full()
+        .gap_2p5()
+        .items_start()
+        .child(marker)
+        .child(
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .gap_1p5()
+                .child(
+                    Label::new(label)
+                        .size(LabelSize::Small)
+                        .weight(if running {
+                            FontWeight::SEMIBOLD
+                        } else {
+                            FontWeight::NORMAL
+                        })
+                        .color(if done || running {
+                            Color::Default
+                        } else {
+                            Color::Placeholder
+                        }),
+                )
+                .when_some(fraction, |this, fraction| {
+                    this.child(progress_line(fraction, cx))
+                })
+                .when_some(progress_text, |this, text| {
+                    this.child(Label::new(text).size(LabelSize::XSmall).color(Color::Muted))
+                })
+                .children(note),
+        )
+}
+
+fn render_prepare_layout(
+    title: SharedString,
+    description: Option<SharedString>,
+    steps: impl IntoIterator<Item = Div>,
+    hint: SharedString,
+    action: Option<AnyElement>,
+    cx: &App,
+) -> Div {
+    v_flex()
+        .flex_1()
+        .min_h_0()
+        .justify_center()
+        .px_5()
+        .py_6()
+        .gap_5()
+        .child(
+            v_flex()
+                .w_full()
+                .gap_1()
+                .child(
+                    Label::new(title)
+                        .size(LabelSize::Large)
+                        .weight(FontWeight::SEMIBOLD),
+                )
+                .children(description.map(|description| {
+                    Label::new(description)
+                        .size(LabelSize::Small)
+                        .color(Color::Muted)
+                })),
+        )
+        .child(card(cx).gap(px(14.)).p_4().children(steps))
+        .child(
+            h_flex()
+                .w_full()
+                .gap_2()
+                .child(
+                    div().flex_1().min_w_0().child(
+                        Label::new(hint)
+                            .size(LabelSize::XSmall)
+                            .color(Color::Placeholder),
+                    ),
+                )
+                .children(action),
+        )
+}
+
+fn render_open_log_button(id: &'static str, cx: &App) -> Stateful<Div> {
+    secondary_button(
+        id,
+        Some((IconName::FileTextOutlined, Color::Muted)),
+        t!("sidebar.devices.open_log"),
+        true,
+        cx,
+    )
+    .on_click(|_, window, cx| {
+        window.dispatch_action(Box::new(workspace::OpenLog), cx);
+    })
 }
 
 /// The device picker of the devices panel: which device is shown, on what OS, and whether it
@@ -1375,6 +1542,7 @@ pub struct Sidebar {
     hovered_device_tab: Option<DeviceInstanceKind>,
     restoring_tasks: HashMap<agent_ui::ThreadId, Task<()>>,
     recent_projects_popover_handle: PopoverMenuHandle<SidebarRecentProjects>,
+    project_selector_popover_handle: PopoverMenuHandle<RecentProjects>,
     project_header_menu_handles: HashMap<usize, PopoverMenuHandle<ContextMenu>>,
     project_header_new_thread_menu_handles: HashMap<usize, PopoverMenuHandle<ContextMenu>>,
     project_header_menu_ix: Option<usize>,
@@ -1577,6 +1745,7 @@ impl Sidebar {
             hovered_device_tab: None,
             restoring_tasks: HashMap::new(),
             recent_projects_popover_handle: PopoverMenuHandle::default(),
+            project_selector_popover_handle: PopoverMenuHandle::default(),
             project_header_menu_handles: HashMap::new(),
             project_header_new_thread_menu_handles: HashMap::new(),
             project_header_menu_ix: None,
@@ -7467,6 +7636,67 @@ impl Sidebar {
             .child(self.filter_editor.clone())
     }
 
+    fn render_project_selector(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let multi_workspace = self.multi_workspace.upgrade();
+        let workspace = self.active_workspace(cx);
+
+        let (name, branch) = workspace
+            .as_ref()
+            .map(|workspace| {
+                let project = workspace.read(cx).project().read(cx);
+                let name = recent_projects::project_selector_name(project, cx);
+                let branch = project.active_repository(cx).and_then(|repository| {
+                    repository
+                        .read(cx)
+                        .branch
+                        .as_ref()
+                        .map(|branch| SharedString::from(branch.name().to_string()))
+                });
+                (name, branch)
+            })
+            .unwrap_or_default();
+
+        let focus_handle = workspace
+            .as_ref()
+            .map(|workspace| workspace.read(cx).focus_handle(cx))
+            .unwrap_or_else(|| cx.focus_handle());
+        let workspace = workspace.map(|workspace| workspace.downgrade());
+        let window_project_groups: Vec<ProjectGroupKey> = multi_workspace
+            .map(|multi_workspace| multi_workspace.read(cx).project_group_keys())
+            .unwrap_or_default();
+        let is_open = self.project_selector_popover_handle.is_deployed();
+
+        h_flex().w_full().px(px(8.)).pb(px(8.)).child(
+            PopoverMenu::new("sidebar-project-selector-menu")
+                .full_width(true)
+                .with_handle(self.project_selector_popover_handle.clone())
+                .menu(move |window, cx| {
+                    workspace.as_ref().map(|workspace| {
+                        RecentProjects::popover(
+                            workspace.clone(),
+                            window_project_groups.clone(),
+                            None,
+                            focus_handle.clone(),
+                            window,
+                            cx,
+                        )
+                    })
+                })
+                .trigger(
+                    recent_projects::project_selector(
+                        "sidebar-project-selector",
+                        name,
+                        branch,
+                        is_open,
+                        false,
+                        cx,
+                    )
+                    .w_full(),
+                )
+                .anchor(gpui::Anchor::TopLeft),
+        )
+    }
+
     fn render_recent_projects_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let multi_workspace = self.multi_workspace.upgrade();
 
@@ -8120,6 +8350,7 @@ impl Sidebar {
         v_flex()
             .flex_none()
             .children(window_controls)
+            .child(self.render_project_selector(cx))
             .when(!no_open_projects, |this| {
                 this.child(
                     HeaderBar::new("sidebar-search-header")
@@ -9394,28 +9625,21 @@ impl Sidebar {
             return self.render_xcode_missing(&xcode, cx).into_any_element();
         }
         if !self.ios_simulator_started {
-            return v_flex()
-                .flex_1()
-                .min_h_0()
-                .items_center()
-                .justify_center()
-                .gap_2()
-                .p_4()
-                .child(Icon::new(IconName::Smartphone).size(IconSize::XLarge))
-                .child(Label::new(t!("sidebar.ios.title")))
-                .child(
-                    Label::new(t!("sidebar.ios.boot_prompt"))
-                        .size(LabelSize::Small)
-                        .color(Color::Muted),
-                )
-                .child(
-                    Button::new("boot-ios-simulator", t!("sidebar.ios.boot_button"))
-                        .style(ButtonStyle::Filled)
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.ios_simulator_started = true;
-                            this.refresh_ios_devices(window, cx);
-                            cx.notify();
-                        })),
+            return EmptyState::new(IconName::Smartphone, t!("sidebar.ios.title"))
+                .description(t!("sidebar.ios.boot_prompt"))
+                .action(
+                    primary_button(
+                        "boot-ios-simulator",
+                        Some(IconName::PlayFilled),
+                        t!("sidebar.ios.boot_button"),
+                        None,
+                        cx,
+                    )
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.ios_simulator_started = true;
+                        this.refresh_ios_devices(window, cx);
+                        cx.notify();
+                    })),
                 )
                 .into_any_element();
         }
@@ -9442,6 +9666,57 @@ impl Sidebar {
         let error = self.ios_simulator_error.clone().or(last_error);
         let selected_device = self.selected_ios_device_udid.clone();
         let sidebar = cx.weak_entity();
+        let overlay = if let Some(error) = error {
+            Some(
+                EmptyState::new(IconName::Warning, t!("sidebar.ios.failed_title"))
+                    .tone(EmptyStateTone::Error)
+                    .detail(error)
+                    .action(
+                        h_flex()
+                            .gap_2()
+                            .child(render_open_log_button("open-log-ios", cx))
+                            .child(
+                                primary_button(
+                                    "retry-ios-simulator",
+                                    Some(IconName::RotateCw),
+                                    t!("sidebar.devices.retry"),
+                                    None,
+                                    cx,
+                                )
+                                .on_click(cx.listener(
+                                    |this, _, window, cx| {
+                                        if let Some(manager) = this.ios_simulator_manager.clone() {
+                                            manager.update(cx, |manager, cx| {
+                                                manager.dismiss_error(cx)
+                                            });
+                                        }
+                                        this.ios_simulator_error = None;
+                                        this.refresh_ios_devices(window, cx);
+                                        cx.notify();
+                                    },
+                                )),
+                            ),
+                    ),
+            )
+        } else if let Some(busy_message) = busy_message {
+            Some(
+                EmptyState::new(IconName::LoadCircle, busy_message)
+                    .spinning(true)
+                    .description(t!("sidebar.ios.first_boot_slow")),
+            )
+        } else if !is_discovering_devices && !has_devices {
+            Some(
+                EmptyState::new(IconName::Smartphone, t!("sidebar.ios.no_simulators"))
+                    .description(t!("sidebar.ios.no_simulators_description")),
+            )
+        } else if has_devices && selected_device.is_none() {
+            Some(EmptyState::new(
+                IconName::Smartphone,
+                t!("sidebar.ios.select_to_open"),
+            ))
+        } else {
+            None
+        };
 
         v_flex()
             .flex_1()
@@ -9453,45 +9728,7 @@ impl Sidebar {
                     .flex_1()
                     .min_h_0()
                     .cursor_default()
-                    .child(
-                        v_flex()
-                            .size_full()
-                            .items_center()
-                            .justify_center()
-                            .gap_2()
-                            .p_4()
-                            .when_some(error, |this, error| {
-                                this.child(
-                                    Label::new(error).size(LabelSize::Small).color(Color::Error),
-                                )
-                            })
-                            .when_some(busy_message, |this, busy_message| {
-                                this.child(
-                                    Icon::new(IconName::ArrowCircle)
-                                        .size(IconSize::XLarge)
-                                        .color(Color::Muted)
-                                        .with_rotate_animation(2),
-                                )
-                                .child(Label::new(busy_message))
-                                .child(
-                                    Label::new(t!("sidebar.ios.first_boot_slow"))
-                                        .size(LabelSize::Small)
-                                        .color(Color::Muted),
-                                )
-                            })
-                            .when(!is_discovering_devices && !has_devices, |this| {
-                                this.child(Icon::new(IconName::Smartphone).size(IconSize::XLarge))
-                                    .child(Label::new(t!("sidebar.ios.no_simulators")))
-                                    .child(
-                                        Label::new(t!("sidebar.ios.no_simulators_description"))
-                                            .size(LabelSize::Small)
-                                            .color(Color::Muted),
-                                    )
-                            })
-                            .when(has_devices && selected_device.is_none(), |this| {
-                                this.child(Label::new(t!("sidebar.ios.select_to_open")))
-                            }),
-                    )
+                    .child(v_flex().size_full().children(overlay))
                     .child(
                         canvas(
                             move |bounds, window, cx| {
@@ -9938,14 +10175,7 @@ impl Sidebar {
 
     #[cfg(not(target_os = "macos"))]
     fn render_ios_simulator(&self, _window: &mut Window, _cx: &mut Context<Self>) -> AnyElement {
-        v_flex()
-            .flex_1()
-            .items_center()
-            .justify_center()
-            .gap_2()
-            .p_4()
-            .child(Icon::new(IconName::Smartphone).size(IconSize::XLarge))
-            .child(Label::new(t!("sidebar.ios.embedded_macos_only")))
+        EmptyState::new(IconName::Smartphone, t!("sidebar.ios.embedded_macos_only"))
             .into_any_element()
     }
 
@@ -10232,15 +10462,15 @@ impl Sidebar {
         };
         if matches!(
             state,
-            AndroidSdkState::Unknown | AndroidSdkState::NotInstalled
+            AndroidSdkState::Unknown
+                | AndroidSdkState::NotInstalled
+                | AndroidSdkState::Installing(_)
         ) {
             return None;
         }
 
-        let is_busy = matches!(
-            state,
-            AndroidSdkState::Installing(_) | AndroidSdkState::EmulatorBooting
-        );
+        let has_avds = !avds.is_empty();
+        let is_busy = matches!(state, AndroidSdkState::EmulatorBooting);
         let booting = matches!(state, AndroidSdkState::EmulatorBooting);
         let avd_status = |avd: &android_sdk::AndroidAvd| {
             if running_avd.as_deref() == Some(avd.name.as_str()) {
@@ -10267,11 +10497,7 @@ impl Sidebar {
                 .map(|avd| DevicePickerSummary {
                     name: avd.label().into(),
                     os_version: avd.os_label().map(Into::into),
-                    status: Some(if matches!(state, AndroidSdkState::Installing(_)) {
-                        DeviceStatus::Preparing
-                    } else {
-                        avd_status(avd)
-                    }),
+                    status: Some(avd_status(avd)),
                 }),
         };
 
@@ -10380,9 +10606,13 @@ impl Sidebar {
                     "android-avd-selector",
                     t!("sidebar.android.title"),
                     selected_summary,
-                    t!("sidebar.android.select_placeholder"),
+                    if has_avds {
+                        t!("sidebar.android.select_placeholder")
+                    } else {
+                        t!("sidebar.android.no_virtual_device")
+                    },
                     device_menu,
-                    is_busy,
+                    is_busy || !has_avds,
                     cx,
                 ))
                 .end_child(
@@ -10554,207 +10784,76 @@ impl Sidebar {
         platform: DevicePlatform,
         cx: &mut Context<Self>,
     ) -> Div {
-        let colors = cx.theme().colors().clone();
-        let success = Color::Success.color(cx);
         let first_boot = job
             .steps
             .get(job.current)
             .is_some_and(|step| step.kind == android_sdk::PrepareStepKind::FirstBoot);
-        let steps = job.steps.iter().enumerate().map(|(index, step)| {
-            let done = index < job.current;
-            let running = index == job.current;
-            let marker = div()
-                .size(px(16.))
-                .mt_0p5()
-                .flex()
-                .flex_none()
-                .items_center()
-                .justify_center()
-                .rounded_full()
-                .map(|this| {
-                    if done {
-                        this.bg(success.opacity(0.12)).child(
-                            Icon::new(IconName::Check)
-                                .size(IconSize::XSmall)
-                                .color(Color::Success),
-                        )
-                    } else if running {
-                        this.child(
-                            Icon::new(IconName::LoadCircle)
-                                .size(IconSize::Small)
-                                .color(Color::Accent)
-                                .with_rotate_animation(2),
-                        )
-                    } else {
-                        this.border(px(1.5)).border_color(colors.border_selected)
-                    }
-                });
-            let progress = running.then(|| job.progress).flatten();
-            let progress_text = progress.map(|progress| {
-                if progress.installing {
-                    t!("sidebar.prepare.installing").to_string()
-                } else if progress.total > 0 {
-                    let mut text = t!(
-                        "sidebar.prepare.progress",
-                        downloaded = format_bytes(progress.downloaded.min(progress.total)),
-                        total = format_bytes(progress.total)
-                    )
-                    .to_string();
-                    if let Some(remaining) = progress.remaining {
-                        let minutes = remaining.as_secs().div_ceil(60).max(1);
-                        let remaining_text = if minutes == 1 {
-                            t!("sidebar.prepare.remaining.one", minutes = minutes)
-                        } else {
-                            t!("sidebar.prepare.remaining.other", minutes = minutes)
-                        };
-                        text.push_str(" · ");
-                        text.push_str(&remaining_text);
-                    }
-                    text
-                } else {
-                    t!(
-                        "sidebar.prepare.downloaded",
-                        size = format_bytes(progress.downloaded)
-                    )
-                    .to_string()
-                }
-            });
-            let fraction = progress.map(|progress| {
-                if progress.installing {
-                    1.0
-                } else if progress.total > 0 {
-                    progress.downloaded as f32 / progress.total as f32
-                } else {
-                    0.0
-                }
-            });
-            h_flex()
-                .w_full()
-                .gap_2p5()
-                .items_start()
-                .child(marker)
-                .child(
-                    v_flex()
-                        .flex_1()
-                        .min_w_0()
-                        .gap_1p5()
-                        .child(
-                            Label::new(step.label.clone())
-                                .size(LabelSize::Small)
-                                .weight(if running {
-                                    FontWeight::SEMIBOLD
-                                } else {
-                                    FontWeight::NORMAL
-                                })
-                                .color(if done || running {
-                                    Color::Default
-                                } else {
-                                    Color::Placeholder
-                                }),
-                        )
-                        .when_some(fraction, |this, fraction| {
-                            this.child(progress_line(fraction, cx))
+        let steps = job
+            .steps
+            .iter()
+            .enumerate()
+            .map(|(index, step)| {
+                let running = index == job.current;
+                let note = if running {
+                    (step.kind == android_sdk::PrepareStepKind::Download)
+                        .then(|| job.package.clone())
+                        .flatten()
+                        .map(|package| {
+                            Label::new(package)
+                                .size(LabelSize::XSmall)
+                                .buffer_font(cx)
+                                .color(Color::Placeholder)
                         })
-                        .when_some(progress_text, |this, text| {
-                            this.child(Label::new(text).size(LabelSize::XSmall).color(Color::Muted))
-                        })
-                        .when(
-                            running && step.kind == android_sdk::PrepareStepKind::Download,
-                            |this| {
-                                this.children(job.package.clone().map(|package| {
-                                    Label::new(package)
-                                        .size(LabelSize::XSmall)
-                                        .buffer_font(cx)
-                                        .color(Color::Placeholder)
-                                }))
-                            },
-                        )
-                        .when(!running, |this| {
-                            this.children(step.detail.clone().map(|detail| {
-                                Label::new(detail)
-                                    .size(LabelSize::XSmall)
-                                    .color(Color::Muted)
-                            }))
-                        }),
-                )
-        });
-        v_flex()
-            .flex_1()
-            .min_h_0()
-            .justify_center()
-            .px_5()
-            .py_6()
-            .gap_5()
-            .child(
-                v_flex()
-                    .w_full()
-                    .gap_1()
-                    .child(
-                        Label::new(job.title.clone())
-                            .size(LabelSize::Large)
-                            .weight(FontWeight::SEMIBOLD),
-                    )
-                    .children(job.description.clone().map(|description| {
-                        Label::new(description)
-                            .size(LabelSize::Small)
-                            .color(Color::Muted)
-                    })),
-            )
-            .child(
-                v_flex()
-                    .w_full()
-                    .gap(px(14.))
-                    .p_4()
-                    .rounded_lg()
-                    .bg(colors.elevated_surface_background)
-                    .border_1()
-                    .border_color(colors.border)
-                    .children(steps),
-            )
-            .child(
-                h_flex()
-                    .w_full()
-                    .gap_2()
-                    .child(
-                        div().flex_1().min_w_0().child(
-                            Label::new(if first_boot {
-                                t!("sidebar.prepare.first_boot_slow")
-                            } else {
-                                t!("sidebar.prepare.can_close_dock")
-                            })
+                } else {
+                    step.detail.clone().map(|detail| {
+                        Label::new(detail)
                             .size(LabelSize::XSmall)
-                            .color(Color::Placeholder),
-                        ),
-                    )
-                    .child(
-                        secondary_button(
-                            "cancel-android-prepare",
-                            None,
-                            t!("sidebar.prepare.cancel"),
-                            true,
-                            cx,
-                        )
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            match platform {
-                                DevicePlatform::Android => {
-                                    this.with_android_sdk_manager(cx, |manager, cx| {
-                                        if first_boot {
-                                            manager.stop_emulator(cx);
-                                        } else {
-                                            manager.cancel_prepare(cx);
-                                        }
-                                    })
-                                }
-                                DevicePlatform::Ios => {
-                                    if let Some(manager) = this.ios_simulator_manager.clone() {
-                                        manager
-                                            .update(cx, |manager, cx| manager.cancel_prepare(cx));
-                                    }
-                                }
-                            }
-                        })),
-                    ),
-            )
+                            .color(Color::Muted)
+                    })
+                };
+                render_prepare_step(
+                    step.label.clone(),
+                    index < job.current,
+                    running,
+                    running.then_some(job.progress).flatten(),
+                    note,
+                    cx,
+                )
+            })
+            .collect::<Vec<_>>();
+        let cancel = secondary_button(
+            "cancel-android-prepare",
+            None,
+            t!("sidebar.prepare.cancel"),
+            true,
+            cx,
+        )
+        .on_click(cx.listener(move |this, _, _, cx| match platform {
+            DevicePlatform::Android => this.with_android_sdk_manager(cx, |manager, cx| {
+                if first_boot {
+                    manager.stop_emulator(cx);
+                } else {
+                    manager.cancel_prepare(cx);
+                }
+            }),
+            DevicePlatform::Ios => {
+                if let Some(manager) = this.ios_simulator_manager.clone() {
+                    manager.update(cx, |manager, cx| manager.cancel_prepare(cx));
+                }
+            }
+        }));
+        render_prepare_layout(
+            job.title.clone(),
+            job.description.clone(),
+            steps,
+            if first_boot {
+                t!("sidebar.prepare.first_boot_slow")
+            } else {
+                t!("sidebar.prepare.can_close_dock")
+            },
+            Some(cancel.into_any_element()),
+            cx,
+        )
     }
 
     fn render_android_devices(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -10767,140 +10866,201 @@ impl Sidebar {
                 .child(selector)
                 .child(content)
                 .into_any_element(),
-            None => content.into_any_element(),
+            None => content,
         }
     }
 
-    fn render_android_devices_content(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let (state, first_boot_job) = self
+    fn render_android_devices_content(&self, cx: &mut Context<Self>) -> AnyElement {
+        let (state, first_boot_job, selected_device) = self
             .android_sdk_manager
             .as_ref()
             .map(|manager| {
                 let manager = manager.read(cx);
-                (manager.state().clone(), manager.prepare_job().cloned())
+                let selected_device = manager
+                    .selected_avd()
+                    .and_then(|name| manager.avd(name))
+                    .map(|avd| avd.label());
+                (
+                    manager.state().clone(),
+                    manager.prepare_job().cloned(),
+                    selected_device,
+                )
             })
-            .unwrap_or((AndroidSdkState::Unknown, None));
-
-        let spinner = || {
-            Icon::new(IconName::ArrowCircle)
-                .size(IconSize::XLarge)
-                .color(Color::Muted)
-                .with_rotate_animation(2)
-        };
-        let base = v_flex()
-            .flex_1()
-            .min_h_0()
-            .items_center()
-            .justify_center()
-            .gap_2()
-            .p_4();
+            .unwrap_or((AndroidSdkState::Unknown, None, None));
 
         match state {
-            AndroidSdkState::Unknown => base
-                .child(spinner())
-                .child(Label::new(t!("sidebar.android.checking_sdk"))),
-            AndroidSdkState::NotInstalled => base
-                .child(Icon::new(IconName::Smartphone).size(IconSize::XLarge))
-                .child(Label::new(t!("sidebar.android.not_installed")))
-                .child(
-                    Label::new(t!("sidebar.android.not_installed_description"))
-                        .size(LabelSize::Small)
-                        .color(Color::Muted),
-                )
-                .child(
-                    Button::new("install-android-sdk", t!("sidebar.android.install_sdk"))
-                        .style(ButtonStyle::Filled)
+            AndroidSdkState::Unknown => {
+                EmptyState::new(IconName::LoadCircle, t!("sidebar.android.checking_sdk"))
+                    .spinning(true)
+                    .into_any_element()
+            }
+            AndroidSdkState::NotInstalled => {
+                EmptyState::new(IconName::Smartphone, t!("sidebar.android.not_installed"))
+                    .description(t!("sidebar.android.not_installed_description"))
+                    .action(
+                        primary_button(
+                            "install-android-sdk",
+                            Some(IconName::Download),
+                            t!("sidebar.android.install_sdk"),
+                            None,
+                            cx,
+                        )
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.with_android_sdk_manager(cx, |manager, cx| manager.install(cx));
                         })),
-                ),
-            AndroidSdkState::Installing(step) => {
-                let progress = step.progress.map(|(downloaded, total)| {
-                    let downloaded_mb = downloaded / (1024 * 1024);
-                    if total > 0 {
-                        t!(
-                            "sidebar.android.install_progress",
-                            downloaded = downloaded_mb,
-                            total = total / (1024 * 1024)
-                        )
-                    } else {
-                        t!(
-                            "sidebar.android.install_downloaded",
-                            downloaded = downloaded_mb
-                        )
-                    }
-                });
-                base.child(spinner())
-                    .child(Label::new(step.label))
-                    .when_some(progress, |this, progress| {
-                        this.child(
-                            Label::new(progress)
-                                .size(LabelSize::Small)
-                                .color(Color::Muted),
-                        )
-                    })
-            }
-            AndroidSdkState::Installed => base
-                .child(Icon::new(IconName::Smartphone).size(IconSize::XLarge))
-                .child(Label::new(t!("sidebar.android.sdk_installed")))
-                .child(
-                    Label::new(t!("sidebar.android.sdk_installed_description"))
-                        .size(LabelSize::Small)
-                        .color(Color::Muted),
-                )
-                .child(
-                    primary_button(
-                        "create-android-avd",
-                        None,
-                        t!("sidebar.android.create_avd"),
-                        None,
-                        cx,
                     )
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.show_android_device_manager(ManagerEntry::NewDevice, window, cx);
-                    })),
-                ),
-            AndroidSdkState::AvdReady => base
-                .child(Icon::new(IconName::Smartphone).size(IconSize::XLarge))
-                .child(Label::new(t!("sidebar.android.avd_ready")))
-                .child(
-                    Button::new("boot-android-emulator", t!("sidebar.android.boot_emulator"))
-                        .style(ButtonStyle::Filled)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.with_android_sdk_manager(cx, |manager, cx| {
-                                manager.boot_emulator(cx)
-                            });
-                        })),
-                ),
-            AndroidSdkState::Preparing(job) => {
-                self.render_prepare_job(&job, DevicePlatform::Android, cx)
+                    .action(
+                        Label::new(t!("sidebar.android.not_installed_hint"))
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
+                    )
+                    .into_any_element()
             }
-            AndroidSdkState::EmulatorBooting if first_boot_job.is_some() => match &first_boot_job {
-                Some(job) => self.render_prepare_job(job, DevicePlatform::Android, cx),
-                None => base,
-            },
-            AndroidSdkState::EmulatorBooting => base
-                .child(spinner())
-                .child(Label::new(t!("sidebar.android.booting")))
-                .child(
-                    Label::new(t!("sidebar.android.booting_description"))
-                        .size(LabelSize::Small)
-                        .color(Color::Muted),
-                ),
-            AndroidSdkState::EmulatorRunning { .. } => self.render_android_emulator_screen(cx),
-            AndroidSdkState::Failed(message) => base
-                .child(
-                    Label::new(message)
-                        .size(LabelSize::Small)
-                        .color(Color::Error),
+            AndroidSdkState::Installing(step) => {
+                let progress =
+                    step.progress
+                        .map(|(downloaded, total)| android_sdk::DownloadProgress {
+                            downloaded,
+                            total,
+                            remaining: None,
+                            installing: false,
+                        });
+                render_prepare_layout(
+                    t!("sidebar.android.installing_title"),
+                    None,
+                    [render_prepare_step(
+                        step.label, false, true, progress, None, cx,
+                    )],
+                    t!("sidebar.android.not_installed_hint"),
+                    None,
+                    cx,
                 )
-                .child(
-                    Button::new("retry-android-sdk", t!("sidebar.android.retry")).on_click(
-                        cx.listener(|this, _, _, cx| {
-                            this.with_android_sdk_manager(cx, |manager, cx| manager.refresh(cx));
-                        }),
-                    ),
-                ),
+                .into_any_element()
+            }
+            AndroidSdkState::Installed => {
+                EmptyState::new(IconName::Smartphone, t!("sidebar.android.create_avd_title"))
+                    .description(t!("sidebar.android.sdk_installed_description"))
+                    .action(
+                        primary_button(
+                            "create-android-avd",
+                            Some(IconName::Plus),
+                            t!("sidebar.android.create_avd"),
+                            None,
+                            cx,
+                        )
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.show_android_device_manager(ManagerEntry::NewDevice, window, cx);
+                        })),
+                    )
+                    .into_any_element()
+            }
+            AndroidSdkState::AvdReady => EmptyState::new(
+                IconName::Smartphone,
+                match &selected_device {
+                    Some(name) => t!("sidebar.android.device_off", name = name),
+                    None => t!("sidebar.android.title"),
+                },
+            )
+            .description(t!("sidebar.android.device_off_description"))
+            .action(
+                primary_button(
+                    "boot-android-emulator",
+                    Some(IconName::PlayFilled),
+                    t!("sidebar.android.boot_emulator"),
+                    None,
+                    cx,
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.with_android_sdk_manager(cx, |manager, cx| manager.boot_emulator(cx));
+                })),
+            )
+            .action(
+                Button::new(
+                    "manage-android-devices-empty",
+                    t!("sidebar.android.manage_devices"),
+                )
+                .style(ButtonStyle::Subtle)
+                .start_icon(
+                    Icon::new(IconName::Sliders)
+                        .size(IconSize::XSmall)
+                        .color(Color::Muted),
+                )
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.show_android_device_manager(ManagerEntry::Devices, window, cx);
+                })),
+            )
+            .into_any_element(),
+            AndroidSdkState::Preparing(job) => self
+                .render_prepare_job(&job, DevicePlatform::Android, cx)
+                .into_any_element(),
+            AndroidSdkState::EmulatorBooting if first_boot_job.is_some() => match &first_boot_job {
+                Some(job) => self
+                    .render_prepare_job(job, DevicePlatform::Android, cx)
+                    .into_any_element(),
+                None => div().into_any_element(),
+            },
+            AndroidSdkState::EmulatorBooting => EmptyState::new(
+                IconName::LoadCircle,
+                match &selected_device {
+                    Some(name) => t!("sidebar.android.booting_device", name = name),
+                    None => t!("sidebar.android.booting"),
+                },
+            )
+            .spinning(true)
+            .description(t!("sidebar.android.booting_description"))
+            .action(
+                secondary_button(
+                    "cancel-android-boot",
+                    None,
+                    t!("sidebar.prepare.cancel"),
+                    true,
+                    cx,
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.with_android_sdk_manager(cx, |manager, cx| manager.stop_emulator(cx));
+                })),
+            )
+            .into_any_element(),
+            AndroidSdkState::EmulatorRunning { .. } => {
+                self.render_android_emulator_screen(cx).into_any_element()
+            }
+            AndroidSdkState::Failed(message) => {
+                EmptyState::new(IconName::Warning, t!("sidebar.android.failed_title"))
+                    .tone(EmptyStateTone::Error)
+                    .description(t!("sidebar.android.failed_description"))
+                    .detail(message)
+                    .action(
+                        h_flex()
+                            .gap_2()
+                            .child(render_open_log_button("open-log-android", cx))
+                            .child(
+                                primary_button(
+                                    "retry-android-sdk",
+                                    Some(IconName::RotateCw),
+                                    t!("sidebar.devices.retry"),
+                                    None,
+                                    cx,
+                                )
+                                .on_click(cx.listener(
+                                    |this, _, _, cx| {
+                                        this.with_android_sdk_manager(cx, |manager, cx| {
+                                            // Failed also covers install and device-creation errors,
+                                            // where there is no device to boot again.
+                                            let can_boot = manager
+                                                .selected_avd()
+                                                .is_some_and(|name| manager.avd(name).is_some());
+                                            if can_boot {
+                                                manager.boot_emulator(cx);
+                                            } else {
+                                                manager.refresh(cx);
+                                            }
+                                        });
+                                    },
+                                )),
+                            ),
+                    )
+                    .into_any_element()
+            }
         }
     }
 

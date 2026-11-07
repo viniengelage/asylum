@@ -2989,6 +2989,36 @@ impl Terminal {
         }
     }
 
+    /// The name of the shell this terminal spawned, whichever process is in the foreground.
+    pub fn shell_name(&self) -> Option<String> {
+        match &self.terminal_type {
+            TerminalType::Pty { info, .. } => info
+                .current
+                .read()
+                .as_ref()
+                .and_then(|process| process.shell_name.clone()),
+            TerminalType::DisplayOnly => None,
+        }
+    }
+
+    /// The command line of the foreground process, when it is not the shell itself.
+    pub fn running_foreground_command(&self) -> Option<String> {
+        match &self.terminal_type {
+            TerminalType::Pty { info, .. } => info
+                .current
+                .read()
+                .as_ref()
+                .filter(|process| !process.is_shell)
+                .map(|process| match process.argv.get(1..) {
+                    Some(arguments) if !arguments.is_empty() => {
+                        format!("{} {}", process.name, arguments.join(" "))
+                    }
+                    _ => process.name.clone(),
+                }),
+            TerminalType::DisplayOnly => None,
+        }
+    }
+
     /// Returns the working directory of the process that's connected to the PTY.
     /// That means it returns the working directory of the local shell or program
     /// that's running inside the terminal.
@@ -3055,6 +3085,10 @@ impl Terminal {
     fn scrollback_position(line: i32, history_size: usize) -> i32 {
         let history_size = i32::try_from(history_size).unwrap_or(i32::MAX);
         history_size.saturating_add(line)
+    }
+
+    pub fn title_override(&self) -> Option<&str> {
+        self.title_override.as_deref()
     }
 
     pub fn title(&self, truncate: bool) -> String {

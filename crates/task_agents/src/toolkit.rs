@@ -19,6 +19,7 @@ pub mod toolkit_ids {
     pub const BROWSER: &str = "browser";
     pub const CLICKUP: &str = "clickup";
     pub const DATABASE: &str = "database";
+    pub const DESIGN: &str = "design";
     pub const DEVICES: &str = "devices";
     pub const DOCKER: &str = "docker";
     pub const ELASTIC: &str = "elastic";
@@ -476,6 +477,9 @@ pub fn describe_log_mention(
     if id.starts_with(CONTAINER_MENTION_PREFIX) {
         return describe_container_mention(project, id, cx);
     }
+    if id.starts_with(DESIGN_MENTION_PREFIX) {
+        return describe_design_mention(project, id, cx);
+    }
     if !toolkit_enabled(toolkit_ids::ELASTIC, project, cx) {
         return Task::ready(Err(toolkit_disabled_error(toolkit_ids::ELASTIC, cx)));
     }
@@ -499,6 +503,13 @@ pub fn open_log_mention(
             .try_global::<ContainerSource>()
             .map(|source| source.open.clone())
             .ok_or_else(|| missing_dock_error("Docker"))?;
+        return open(project, id, window, cx);
+    }
+    if id.starts_with(DESIGN_MENTION_PREFIX) {
+        let open = cx
+            .try_global::<DesignSource>()
+            .map(|source| source.open.clone())
+            .ok_or_else(|| missing_dock_error("Design"))?;
         return open(project, id, window, cx);
     }
     let open = cx
@@ -604,6 +615,50 @@ pub fn act_on_container(
     if let Some(source) = cx.try_global::<ContainerSource>() {
         let act = source.act.clone();
         act(project, container_id, action, window, cx);
+    }
+}
+
+/// Screens of a .fig design travel as log mentions whose id starts with this, like containers.
+pub const DESIGN_MENTION_PREFIX: &str = "design:";
+
+/// Installed by the design viewer, so the agent can offer and read design screens without
+/// depending on it.
+#[derive(Clone)]
+pub struct DesignSource {
+    pub list: ListLogMentions,
+    pub describe: DescribeLogMention,
+    pub open: OpenLogMention,
+}
+
+impl Global for DesignSource {}
+
+pub fn register_design_source(source: DesignSource, cx: &mut App) {
+    cx.set_global(source);
+}
+
+pub fn design_mentions(project: &Entity<Project>, cx: &App) -> Vec<LogMention> {
+    if !toolkit_enabled(toolkit_ids::DESIGN, project, cx) {
+        return Vec::new();
+    }
+    cx.try_global::<DesignSource>()
+        .map(|source| (source.list)(project, cx))
+        .unwrap_or_default()
+}
+
+fn describe_design_mention(
+    project: &Entity<Project>,
+    id: &str,
+    cx: &mut App,
+) -> Task<Result<String>> {
+    if !toolkit_enabled(toolkit_ids::DESIGN, project, cx) {
+        return Task::ready(Err(toolkit_disabled_error(toolkit_ids::DESIGN, cx)));
+    }
+    match cx.try_global::<DesignSource>() {
+        Some(source) => {
+            let describe = source.describe.clone();
+            describe(project, id, cx)
+        }
+        None => Task::ready(Err(missing_dock_error("Design"))),
     }
 }
 

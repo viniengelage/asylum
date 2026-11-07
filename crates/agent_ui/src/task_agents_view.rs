@@ -3629,8 +3629,7 @@ impl StatusItemView for TaskAgentsToolkitButton {
         });
         let workspace = self.workspace.clone();
         Some(ToolkitEntry {
-            icon: IconName::UserGroup,
-            label: t!("agent_ui.task_agents.segment.agents"),
+            id: workspace::toolkit_ids::AGENTS,
             is_open,
             action: Box::new(OpenTaskAgents),
             toggle: Rc::new(move |window, cx| {

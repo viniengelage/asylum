@@ -1,13 +1,8 @@
-//! The building blocks of a dock's content: section headings, grouped rows, cards and the empty
-//! state. Docks used to separate their parts with full-width rules; these separate them with
-//! space and a faint fill instead, so a dock reads as one surface.
-
 use gpui::{AnyElement, Div, FontWeight, px};
 use smallvec::SmallVec;
 
-use crate::prelude::*;
+use crate::{CommonAnimationExt, prelude::*};
 
-/// The small uppercase heading over a group of rows (SCHEMAS, COMMITS, ABERTOS).
 pub fn section_label(text: impl Into<SharedString>) -> Label {
     Label::new(text)
         .size(LabelSize::XSmall)
@@ -15,7 +10,6 @@ pub fn section_label(text: impl Into<SharedString>) -> Label {
         .color(Color::Muted)
 }
 
-/// A [`section_label`] with something at its right edge, such as a count, a note or a button.
 pub fn section_header(text: impl Into<SharedString>, end: Option<AnyElement>) -> Div {
     h_flex()
         .w_full()
@@ -26,8 +20,6 @@ pub fn section_header(text: impl Into<SharedString>, end: Option<AnyElement>) ->
         .children(end)
 }
 
-/// The tinted block that holds a section's rows. The radius is the row radius plus the block's
-/// padding, so the corners of a hovered row nest inside the block's.
 pub fn grouped_block(cx: &App) -> Div {
     v_flex()
         .w_full()
@@ -37,7 +29,6 @@ pub fn grouped_block(cx: &App) -> Div {
         .bg(cx.theme().colors().element_background)
 }
 
-/// A bordered card inside a dock or a settings page: a connection, a result, a summary.
 pub fn card(cx: &App) -> Div {
     let colors = cx.theme().colors();
     v_flex()
@@ -48,13 +39,21 @@ pub fn card(cx: &App) -> Div {
         .bg(colors.element_background)
 }
 
-/// What a dock or list shows when it has nothing yet: an accent icon tile, a title, a short
-/// explanation and, optionally, the actions that get the user out of the empty state.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EmptyStateTone {
+    #[default]
+    Default,
+    Error,
+}
+
 #[derive(IntoElement)]
 pub struct EmptyState {
     icon: IconName,
     title: SharedString,
     description: Option<SharedString>,
+    detail: Option<SharedString>,
+    tone: EmptyStateTone,
+    spinning: bool,
     actions: SmallVec<[AnyElement; 2]>,
 }
 
@@ -64,6 +63,9 @@ impl EmptyState {
             icon,
             title: title.into(),
             description: None,
+            detail: None,
+            tone: EmptyStateTone::Default,
+            spinning: false,
             actions: SmallVec::new(),
         }
     }
@@ -73,7 +75,21 @@ impl EmptyState {
         self
     }
 
-    /// Adds content under the description: buttons, or hints such as keyboard shortcuts.
+    pub fn detail(mut self, detail: impl Into<SharedString>) -> Self {
+        self.detail = Some(detail.into());
+        self
+    }
+
+    pub fn tone(mut self, tone: EmptyStateTone) -> Self {
+        self.tone = tone;
+        self
+    }
+
+    pub fn spinning(mut self, spinning: bool) -> Self {
+        self.spinning = spinning;
+        self
+    }
+
     pub fn action(mut self, action: impl IntoElement) -> Self {
         self.actions.push(action.into_any_element());
         self
@@ -82,13 +98,25 @@ impl EmptyState {
 
 impl RenderOnce for EmptyState {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let is_error = self.tone == EmptyStateTone::Error;
+        let error = Color::Error.color(cx);
+        let icon = Icon::new(self.icon).color(if is_error {
+            Color::Error
+        } else {
+            Color::Accent
+        });
+        let icon = if self.spinning {
+            icon.with_rotate_animation(2).into_any_element()
+        } else {
+            icon.into_any_element()
+        };
         v_flex()
             .flex_1()
             .w_full()
             .items_center()
             .justify_center()
             .gap_3()
-            .px_8()
+            .map(|this| if is_error { this.px_8() } else { this.px_10() })
             .py_6()
             .child(
                 h_flex()
@@ -96,14 +124,25 @@ impl RenderOnce for EmptyState {
                     .flex_none()
                     .justify_center()
                     .rounded(Radius::Lg.rems())
-                    .bg(cx.theme().colors().element_selected)
-                    .child(Icon::new(self.icon).color(Color::Accent)),
+                    .map(|this| {
+                        if is_error {
+                            this.bg(error.opacity(0.1))
+                        } else {
+                            this.bg(cx.theme().colors().element_selected)
+                        }
+                    })
+                    .child(icon),
             )
             .child(
                 v_flex()
+                    .w_full()
                     .items_center()
                     .gap_1()
-                    .child(Label::new(self.title).weight(FontWeight::BOLD))
+                    .child(
+                        div()
+                            .text_center()
+                            .child(Label::new(self.title).weight(FontWeight::BOLD)),
+                    )
                     .children(self.description.map(|description| {
                         div().text_center().child(
                             Label::new(description)
@@ -112,11 +151,26 @@ impl RenderOnce for EmptyState {
                         )
                     })),
             )
+            .children(self.detail.map(|detail| {
+                div()
+                    .w_full()
+                    .p_2()
+                    .rounded(Radius::Md.rems())
+                    .border_1()
+                    .border_color(error.opacity(0.2))
+                    .bg(error.opacity(0.06))
+                    .child(
+                        Label::new(detail)
+                            .size(LabelSize::XSmall)
+                            .buffer_font(cx)
+                            .color(Color::Muted),
+                    )
+            }))
             .when(!self.actions.is_empty(), |this| {
                 this.child(
                     v_flex()
                         .items_center()
-                        .gap_1p5()
+                        .gap_2()
                         .pt_1()
                         .children(self.actions),
                 )

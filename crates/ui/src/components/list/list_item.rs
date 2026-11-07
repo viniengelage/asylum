@@ -376,9 +376,6 @@ impl RenderOnce for ListItem {
                                 })
                         })
                         // Inset items are the rows of menus and pickers, where the keyboard
-                        // selection and the row under the pointer are both visible at once. The
-                        // selection is an accent tint and hover a neutral one, so the hue alone
-                        // tells them apart without an outline.
                     })
                     .when_some(
                         self.on_click.filter(|_| !self.disabled),

@@ -21,7 +21,7 @@ use gpui::{
 };
 use i18n::t;
 use ui::{
-    Color, HeaderBar, HeaderBarLevel, Icon, IconButton, IconName, IconSize, Label, Tooltip, h_flex,
+    Color, HeaderBar, HeaderBarLevel, Icon, IconButton, IconName, IconSize, Label, Tooltip,
     prelude::*, v_flex,
 };
 use workspace::{
@@ -75,6 +75,11 @@ const FIRST_PAINT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(
 /// this only has to outlast a cold Chromium renderer's startup.
 #[cfg(target_os = "macos")]
 const PAINT_GIVE_UP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum WebPreviewEvent {
+    UrlChanged(String),
+}
 
 /// Why the tab is showing a message where the page would go.
 struct PreviewError {
@@ -150,7 +155,7 @@ impl Render for WebPreviewToolkitButton {
         let tooltip = if browser_is_active {
             t!("web_preview.toolkit_button.new_tab")
         } else {
-            SharedString::new_static("Browser")
+            t!("web_preview.tab_label")
         };
         workspace::dock::StatusBarButton::new(
             "toolkit-browser",
@@ -158,7 +163,7 @@ impl Render for WebPreviewToolkitButton {
             browser_is_active,
         )
         .tab_index(0isize)
-        .aria_label("Browser")
+        .aria_label(t!("web_preview.tab_label"))
         .tooltip(move |_window, cx| Tooltip::simple(tooltip.clone(), cx))
         .on_click(move |_, window, cx| {
             workspace
@@ -239,6 +244,9 @@ pub struct WebPreviewView {
     request_id: Option<String>,
     #[cfg(target_os = "macos")]
     cef_installer: Entity<cef_install::CefInstaller>,
+    /// Hosted inside another view (such as the design viewer's canvas): no URL toolbar, and
+    /// invisible to the agent's browser tools and the `zed browse` utility.
+    embedded: bool,
 }
 
 impl WebPreviewView {
@@ -252,7 +260,7 @@ impl WebPreviewView {
             workspace.show_toast(
                 workspace::Toast::new(
                     workspace::notifications::NotificationId::unique::<Self>(),
-                    task_agents::toolkit_disabled_message("Browser"),
+                    task_agents::toolkit_disabled_message(&t!("web_preview.tab_label")),
                 )
                 .autohide(),
                 cx,
@@ -326,8 +334,20 @@ impl WebPreviewView {
     }
 
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::build(false, window, cx)
+    }
+
+    pub fn embedded(url: String, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let mut this = Self::build(true, window, cx);
+        this.url = url;
+        this
+    }
+
+    fn build(embedded: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
         #[cfg(target_os = "macos")]
-        agent_toolkit::register_view(cx.weak_entity(), cx);
+        if !embedded {
+            agent_toolkit::register_view(cx.weak_entity(), cx);
+        }
         let focus_handle = cx.focus_handle();
         let browser_focus = cx.focus_handle();
 
@@ -427,7 +447,7 @@ impl WebPreviewView {
 
                 // Check for browse requests from the terminal utility. This is a miss
                 // on nearly every tick, so it runs far slower than the pump.
-                if last_browse_check.elapsed() >= BROWSE_REQUEST_INTERVAL {
+                if !embedded && last_browse_check.elapsed() >= BROWSE_REQUEST_INTERVAL {
                     last_browse_check = std::time::Instant::now();
                     let browse_path = browse_request_path();
                     if let Ok(url) = std::fs::read_to_string(&browse_path) {
@@ -518,11 +538,15 @@ impl WebPreviewView {
                     let should_continue = this.update(cx, |this, cx| {
                         let old_title = this.title.clone();
                         let old_loading = this.loading;
+                        let old_url = this.url.clone();
 
                         this.sync_browser_state();
 
                         if this.title != old_title || this.loading != old_loading {
                             cx.emit(ItemEvent::UpdateTab);
+                        }
+                        if this.url != old_url {
+                            cx.emit(WebPreviewEvent::UrlChanged(this.url.clone()));
                         }
                         cx.notify();
                     });
@@ -546,7 +570,7 @@ impl WebPreviewView {
             browser_focus,
             url_editor,
             url: String::from("about:blank"),
-            title: String::from("Web Preview"),
+            title: String::new(),
             loading: false,
             can_go_back: false,
             can_go_forward: false,
@@ -582,6 +606,7 @@ impl WebPreviewView {
             request_id: None,
             #[cfg(target_os = "macos")]
             cef_installer,
+            embedded,
         }
     }
 
@@ -639,53 +664,51 @@ impl WebPreviewView {
             _ => None,
         };
 
-        v_flex()
-            .flex_1()
-            .w_full()
-            .items_center()
-            .justify_center()
-            .gap_2()
-            .child(Label::new(heading).size(ui::LabelSize::Large))
-            .child(
-                Label::new(detail)
-                    .size(ui::LabelSize::Small)
-                    .color(Color::Muted),
-            )
-            .when_some(progress, |this, fraction| {
-                this.child(
-                    div()
-                        .w(px(280.))
-                        .h(px(4.))
-                        .rounded_full()
-                        .bg(cx.theme().colors().element_background)
-                        .child(
-                            div()
-                                .h_full()
-                                .w(gpui::relative(fraction.clamp(0.0, 1.0)))
-                                .rounded_full()
-                                .bg(cx.theme().colors().element_selected),
-                        ),
-                )
-            })
-            .when(
-                matches!(state, CefInstallState::Missing | CefInstallState::Failed(_)),
-                |this| {
-                    this.child(
-                        ui::Button::new(
-                            "install-cef",
-                            match state {
-                                CefInstallState::Failed(_) => t!("web_preview.install.try_again"),
-                                _ => t!("web_preview.install.install"),
-                            },
-                        )
-                        .style(ui::ButtonStyle::Filled)
-                        .on_click(move |_, _window, cx| {
-                            installer.update(cx, |installer, cx| installer.install(cx));
-                        }),
+        let working = matches!(
+            state,
+            CefInstallState::Downloading { .. } | CefInstallState::Extracting
+        );
+        let failed = matches!(state, CefInstallState::Failed(_));
+        ui::EmptyState::new(
+            if failed {
+                IconName::Warning
+            } else if working {
+                IconName::LoadCircle
+            } else {
+                IconName::Download
+            },
+            heading,
+        )
+        .spinning(working)
+        .when(failed, |this| {
+            this.tone(ui::EmptyStateTone::Error).detail(detail.clone())
+        })
+        .when(!failed, |this| this.description(detail))
+        .when_some(progress, |this, fraction| {
+            this.action(div().w(px(280.)).child(ui::progress_line(fraction, cx)))
+        })
+        .when(
+            matches!(state, CefInstallState::Missing | CefInstallState::Failed(_)),
+            |this| {
+                this.action(
+                    ui::primary_button(
+                        "install-cef",
+                        None,
+                        if failed {
+                            t!("web_preview.install.try_again")
+                        } else {
+                            t!("web_preview.install.install")
+                        },
+                        None,
+                        cx,
                     )
-                },
-            )
-            .into_any_element()
+                    .on_click(move |_, _window, cx| {
+                        installer.update(cx, |installer, cx| installer.install(cx));
+                    }),
+                )
+            },
+        )
+        .into_any_element()
     }
 
     /// Pulls state and any newly painted frame out of CEF.
@@ -715,7 +738,7 @@ impl WebPreviewView {
             if let Some(request_id) = self.request_id.take() {
                 runtime_discovery::write_opened_page(&request_id, &target_id, &self.url);
             }
-            if !self.hidden {
+            if !self.hidden && !self.embedded {
                 runtime_discovery::write_runtime_discovery(&self.url, Some(&target_id));
             }
             self.target_id = Some(target_id);
@@ -1184,6 +1207,32 @@ impl WebPreviewView {
         }
     }
 
+    pub fn navigate(&mut self, url: String, cx: &mut Context<Self>) {
+        #[cfg(target_os = "macos")]
+        if let Some(browser) = &self.browser {
+            browser.navigate_to(&url);
+        }
+        self.url = url;
+        cx.notify();
+    }
+
+    pub fn reload(&mut self, cx: &mut Context<Self>) {
+        #[cfg(target_os = "macos")]
+        if let Some(browser) = &self.browser {
+            browser.reload();
+        }
+        cx.notify();
+    }
+
+    /// Runs `code` in the page's main frame. Dropped when the browser isn't up yet.
+    #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
+    pub fn execute_javascript(&self, code: &str) {
+        #[cfg(target_os = "macos")]
+        if let Some(browser) = &self.browser {
+            browser.execute_javascript(code);
+        }
+    }
+
     fn submit_url(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         let url = self.url_editor.read(cx).text(cx);
         if !url.is_empty() {
@@ -1193,14 +1242,6 @@ impl WebPreviewView {
                 browser.navigate_to(&url);
             }
             runtime_discovery::write_runtime_discovery(&url, self.target_id.as_deref());
-        }
-        cx.notify();
-    }
-
-    fn handle_reload(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        #[cfg(target_os = "macos")]
-        if let Some(ref browser) = self.browser {
-            browser.reload();
         }
         cx.notify();
     }
@@ -1240,6 +1281,8 @@ impl WebPreviewView {
 
 impl EventEmitter<ItemEvent> for WebPreviewView {}
 
+impl EventEmitter<WebPreviewEvent> for WebPreviewView {}
+
 impl Focusable for WebPreviewView {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
         self.focus_handle.clone()
@@ -1253,19 +1296,9 @@ impl Render for WebPreviewView {
                 .id("web-preview-view")
                 .size_full()
                 .track_focus(&self.focus_handle)
-                .items_center()
-                .justify_center()
-                .gap_2()
-                .p_4()
                 .child(
-                    Label::new(t!("web_preview.unsupported.headline"))
-                        .size(ui::LabelSize::Large)
-                        .color(Color::Muted),
-                )
-                .child(
-                    Label::new(t!("web_preview.unsupported.detail"))
-                        .size(ui::LabelSize::Small)
-                        .color(Color::Disabled),
+                    ui::EmptyState::new(IconName::ToolWeb, t!("web_preview.unsupported.headline"))
+                        .description(t!("web_preview.unsupported.detail")),
                 );
         }
 
@@ -1313,37 +1346,25 @@ impl Render for WebPreviewView {
                     IconButton::new("reload", IconName::RotateCw)
                         .icon_size(IconSize::Small)
                         .tooltip(Tooltip::text(t!("web_preview.toolbar.reload")))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.handle_reload(window, cx);
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.reload(cx);
                         }))
                         .into_any_element()
                 },
             ])
             .child(
-                // Mirrors `ui_input::InputField`'s tokens so the URL bar reads like every other
-                // input in the app. It cannot use `InputField` directly, because that builds its
-                // own editor and this view owns and drives `url_editor`.
-                h_flex()
-                    .id("url-bar")
-                    .flex_1()
-                    .min_w_0()
-                    .h(DynamicSpacing::Base24.px(cx))
-                    .px_1()
-                    .items_center()
-                    .rounded_md()
-                    .bg(cx.theme().colors().editor_background)
-                    .border_1()
-                    .border_color(cx.theme().colors().border_variant)
-                    .when(
-                        self.url_editor
-                            .focus_handle(cx)
-                            .contains_focused(window, cx),
-                        |this| this.border_color(cx.theme().colors().border_focused),
-                    )
-                    .on_action(cx.listener(|this, _: &menu::Confirm, window, cx| {
-                        this.submit_url(window, cx);
-                    }))
-                    .child(self.url_editor.clone()),
+                ui::text_field(
+                    self.url_editor
+                        .focus_handle(cx)
+                        .contains_focused(window, cx),
+                    cx,
+                )
+                .id("url-bar")
+                .flex_1()
+                .on_action(cx.listener(|this, _: &menu::Confirm, window, cx| {
+                    this.submit_url(window, cx);
+                }))
+                .child(self.url_editor.clone()),
             )
             .end_children(vec![
                 IconButton::new("go", IconName::ArrowRight)
@@ -1373,8 +1394,8 @@ impl Render for WebPreviewView {
             .id("web-preview-view")
             .size_full()
             .track_focus(&self.focus_handle)
-            .on_action(cx.listener(|this, _: &Reload, window, cx| {
-                this.handle_reload(window, cx);
+            .on_action(cx.listener(|this, _: &Reload, _, cx| {
+                this.reload(cx);
             }))
             .on_action(cx.listener(|this, _: &GoBack, window, cx| {
                 this.handle_go_back(window, cx);
@@ -1391,26 +1412,13 @@ impl Render for WebPreviewView {
             .on_action(cx.listener(|this, _: &SubmitUrl, window, cx| {
                 this.submit_url(window, cx);
             }))
-            .child(toolbar)
+            .when(!self.embedded, |this| this.child(toolbar))
             .child(if let Some(prompt) = install_prompt {
                 prompt
             } else if let Some(ref error) = self.error {
-                v_flex()
-                    .flex_1()
-                    .w_full()
-                    .items_center()
-                    .justify_center()
-                    .gap_2()
-                    .child(
-                        Label::new(error.headline.clone())
-                            .size(ui::LabelSize::Large)
-                            .color(Color::Muted),
-                    )
-                    .child(
-                        Label::new(error.detail.clone())
-                            .size(ui::LabelSize::Small)
-                            .color(Color::Disabled),
-                    )
+                ui::EmptyState::new(IconName::Warning, error.headline.clone())
+                    .tone(ui::EmptyStateTone::Error)
+                    .detail(error.detail.clone())
                     .into_any_element()
             } else {
                 {
@@ -1612,8 +1620,8 @@ impl Item for WebPreviewView {
     }
 
     fn tab_content_text(&self, _detail: usize, _cx: &App) -> SharedString {
-        if self.title.is_empty() || self.title == "Web Preview" {
-            SharedString::from("Web Preview")
+        if self.title.is_empty() {
+            t!("web_preview.tab_label")
         } else {
             SharedString::from(self.title.clone())
         }
@@ -1633,7 +1641,7 @@ impl Item for WebPreviewView {
 
     fn activated(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         self.set_browser_hidden(false);
-        if self.target_id.is_some() {
+        if self.target_id.is_some() && !self.embedded {
             runtime_discovery::write_runtime_discovery(&self.url, self.target_id.as_deref());
         }
     }

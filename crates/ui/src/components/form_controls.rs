@@ -2,11 +2,9 @@
 //! Polar theme and a toggled `Button` only tints its label, so screens that follow the boards
 //! use these instead.
 
-use crate::{KeyBinding, prelude::*};
+use crate::{CommonAnimationExt, Divider, DividerColor, KeyBinding, prelude::*};
 use gpui::{BoxShadow, Div, FontWeight, Stateful, hsla, px};
 
-/// The halo around a focused field. A ring outside the border marks focus without swapping
-/// the whole border to the accent, which made every focused field shout.
 pub fn focus_ring(cx: &App) -> Vec<BoxShadow> {
     vec![
         BoxShadow::new(
@@ -18,8 +16,6 @@ pub fn focus_ring(cx: &App) -> Vec<BoxShadow> {
     ]
 }
 
-/// The lift of a filled button: a short drop shadow plus a faint highlight along the top edge,
-/// so the fill reads as a pressable piece instead of a flat swatch.
 fn raised_shadow() -> Vec<BoxShadow> {
     vec![
         BoxShadow::new(px(0.), px(1.), hsla(0., 0., 0., 0.5)).blur_radius(px(2.)),
@@ -335,6 +331,41 @@ pub fn status_chip(
     color: Color,
     cx: &App,
 ) -> Div {
+    status_chip_shell(
+        icon.map(|icon| {
+            Icon::new(icon)
+                .size(IconSize::XSmall)
+                .color(color)
+                .into_any_element()
+        }),
+        label.into(),
+        color,
+        cx,
+    )
+}
+
+/// A [`status_chip`] whose icon spins, for work in progress such as "Atualizando…".
+pub fn status_chip_spinning(
+    icon: IconName,
+    label: impl Into<SharedString>,
+    color: Color,
+    cx: &App,
+) -> Div {
+    status_chip_shell(
+        Some(
+            Icon::new(icon)
+                .size(IconSize::XSmall)
+                .color(color)
+                .with_rotate_animation(2)
+                .into_any_element(),
+        ),
+        label.into(),
+        color,
+        cx,
+    )
+}
+
+fn status_chip_shell(icon: Option<AnyElement>, label: SharedString, color: Color, cx: &App) -> Div {
     let colors = cx.theme().colors();
     h_flex()
         .flex_none()
@@ -345,7 +376,7 @@ pub fn status_chip(
         .border_1()
         .border_color(colors.border_selected)
         .bg(colors.elevated_surface_background)
-        .children(icon.map(|icon| Icon::new(icon).size(IconSize::XSmall).color(color)))
+        .children(icon)
         .child(
             Label::new(label)
                 .size(LabelSize::XSmall)
@@ -355,8 +386,97 @@ pub fn status_chip(
         )
 }
 
-/// Two or more choices side by side; the chosen one is a raised thumb inside the track, like the
-/// selected tab of a pill tab bar.
+/// The 20 px tile with a name's initial, tinted with an accent derived from the name.
+pub fn initial_tile(name: &str, cx: &App) -> Div {
+    let accents = cx.theme().accents();
+    let accent = if accents.0.is_empty() {
+        cx.theme().colors().text_accent
+    } else {
+        accents.color_for_index(stable_name_hash(name))
+    };
+    let initial: SharedString = name
+        .chars()
+        .next()
+        .map(|letter| letter.to_uppercase().collect::<String>())
+        .unwrap_or_else(|| "?".to_string())
+        .into();
+
+    div()
+        .flex_none()
+        .size(px(20.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(Radius::Sm.rems())
+        .bg(accent.opacity(0.2))
+        .child(
+            Label::new(initial)
+                .size(LabelSize::Small)
+                .weight(FontWeight::SEMIBOLD)
+                .color(Color::Custom(accent)),
+        )
+}
+
+// FNV-1a rather than `DefaultHasher`, whose output may change between Rust releases and
+// would recolor every tile.
+fn stable_name_hash(name: &str) -> u32 {
+    name.bytes().fold(0x811c_9dc5_u32, |hash, byte| {
+        (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193)
+    })
+}
+
+/// The rounded rail under the tab bar that holds a content toolbar (breadcrumbs, actions).
+pub fn toolbar_rail(cx: &App) -> Div {
+    let colors = cx.theme().colors();
+    h_flex()
+        .min_h(px(30.))
+        .items_center()
+        .justify_between()
+        .gap(DynamicSpacing::Base06.rems(cx))
+        .pl(px(10.))
+        .pr(px(3.))
+        .rounded(crate::TAB_STRIP_RADIUS)
+        .bg(colors.element_background.opacity(0.6))
+        .border_1()
+        .border_color(colors.border_variant)
+}
+
+/// `Callout` is a borderless full-width strip; the boards' inline error is a rounded, tinted box.
+pub fn error_callout(
+    title: impl Into<SharedString>,
+    message: impl Into<SharedString>,
+    cx: &App,
+) -> Div {
+    let error = Color::Error.color(cx);
+    h_flex()
+        .w_full()
+        .items_start()
+        .gap_2()
+        .p_3()
+        .rounded(Radius::Md.rems())
+        .border_1()
+        .border_color(error.opacity(0.2))
+        .bg(error.opacity(0.06))
+        .child(
+            Icon::new(IconName::Warning)
+                .size(IconSize::Small)
+                .color(Color::Error),
+        )
+        .child(
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .gap_0p5()
+                .child(
+                    Label::new(title)
+                        .size(LabelSize::Small)
+                        .weight(FontWeight::MEDIUM)
+                        .color(Color::Error),
+                )
+                .child(Label::new(message).size(LabelSize::Small)),
+        )
+}
+
 pub fn segment_option(
     id: impl Into<gpui::ElementId>,
     label: impl Into<SharedString>,
@@ -404,13 +524,58 @@ pub fn segment_option(
         )
 }
 
-/// The tinted track that holds a row of [`segment_option`]s.
 pub fn segmented_control(cx: &App) -> Div {
     h_flex()
         .p(px(3.))
         .gap_0p5()
         .rounded(px(10.))
         .bg(cx.theme().colors().element_background)
+}
+
+pub fn button_group(children: impl IntoIterator<Item = AnyElement>, cx: &App) -> Div {
+    segmented_control(cx)
+        .flex_none()
+        .items_center()
+        .children(interleave_dividers(children, px(14.)))
+}
+
+/// For a row that already sits inside a rail, so it adds no capsule of its own.
+pub fn button_row(children: impl IntoIterator<Item = AnyElement>, cx: &App) -> Div {
+    h_flex()
+        .flex_none()
+        .items_center()
+        .gap(DynamicSpacing::Base06.px(cx))
+        .children(interleave_dividers(children, px(12.)))
+}
+
+pub fn group_icon_button(id: impl Into<ElementId>, icon: IconName, side: f32) -> IconButton {
+    IconButton::new(id, icon)
+        .icon_size(IconSize::Small)
+        .size(ButtonSize::None)
+        .width(rems_from_px(side))
+        .height(rems_from_px(side).into())
+}
+
+/// The divider between the buttons of a [`button_group`] or [`button_row`], also used between
+/// the tabs of a [`crate::TabStyle::Capsule`] strip so both rails share one rule.
+pub fn group_divider(height: Pixels) -> Divider {
+    Divider::vertical()
+        .color(DividerColor::BorderVariant)
+        .h(height)
+}
+
+fn interleave_dividers(
+    children: impl IntoIterator<Item = AnyElement>,
+    divider_height: Pixels,
+) -> Vec<AnyElement> {
+    let mut interleaved = Vec::new();
+    for child in children {
+        if !interleaved.is_empty() {
+            interleaved.push(group_divider(divider_height).into_any_element());
+        }
+        interleaved.push(child);
+    }
+    interleaved
 }
 
 /// The radio of the boards' choice cards: an accent ring with a dot when chosen, a plain ring
@@ -540,8 +705,6 @@ pub fn progress_line(fraction: f32, cx: &App) -> Div {
         )
 }
 
-/// The surface of the boards' modals: the largest radius, the strong border and the modal
-/// shadow. The caller sets the width.
 pub fn modal_surface(cx: &App) -> Div {
     let colors = cx.theme().colors();
     v_flex()
@@ -599,6 +762,12 @@ impl Clickable for PopoverTriggerArea {
     fn cursor_style(mut self, cursor_style: gpui::CursorStyle) -> Self {
         self.cursor_style = cursor_style;
         self
+    }
+}
+
+impl Styled for PopoverTriggerArea {
+    fn style(&mut self) -> &mut gpui::StyleRefinement {
+        self.base.style()
     }
 }
 

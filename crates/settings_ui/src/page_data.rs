@@ -64,6 +64,7 @@ pub(crate) fn settings_data(cx: &App) -> Vec<SettingsPage> {
     vec![
         profiles_page(),
         integrations_page(),
+        toolkit_page(),
         devices_page(),
         browser_page(),
         general_page(cx),
@@ -144,6 +145,21 @@ fn profiles_page() -> SettingsPage {
             in_json: false,
             files: USER,
             render: crate::render_profiles_page,
+        })
+        .profile_scoped()
+}
+
+fn toolkit_page() -> SettingsPage {
+    SettingsPage::new("Toolkit", "Asylum", ui::IconName::Toolbox, Box::new([]))
+        .landing(SubPageLink {
+            title: "Toolkit".into(),
+            r#type: Default::default(),
+            description: None,
+            search_aliases: &["toolkit", "status bar", "inline"],
+            json_path: Some("toolkit"),
+            in_json: false,
+            files: USER,
+            render: crate::pages::render_toolkit_page,
         })
         .profile_scoped()
 }
@@ -239,10 +255,7 @@ fn sync_action_link(
         title: crate::t(title),
         description: Some(crate::t(description)),
         button_text: crate::t(button_text),
-        on_click: Arc::new(move |settings_window, _window, cx| {
-            let Some(original_window) = settings_window.original_window else {
-                return;
-            };
+        on_click: Arc::new(move |_settings_window, window, cx| {
             let action = match cx.build_action(action_name, None) {
                 Ok(action) => action,
                 Err(error) => {
@@ -250,11 +263,7 @@ fn sync_action_link(
                     return;
                 }
             };
-            original_window
-                .update(cx, |_workspace, original_window, cx| {
-                    original_window.dispatch_action(action, cx);
-                })
-                .ok();
+            window.dispatch_action(action, cx);
         }),
         details: None,
         files: USER,
@@ -1857,18 +1866,8 @@ fn keymap_page(vim: Box<[SettingsPageItem]>) -> SettingsPage {
                 title: "Edit Keybindings".into(),
                 description: Some("Customize keybindings in the keymap editor.".into()),
                 button_text: "Open Keymap".into(),
-                on_click: Arc::new(|settings_window, window, cx| {
-                    let Some(original_window) = settings_window.original_window else {
-                        return;
-                    };
-                    original_window
-                        .update(cx, |_workspace, original_window, cx| {
-                            original_window
-                                .dispatch_action(zed_actions::OpenKeymap.boxed_clone(), cx);
-                            original_window.activate_window();
-                        })
-                        .ok();
-                    window.remove_window();
+                on_click: Arc::new(|_settings_window, window, cx| {
+                    window.dispatch_action(zed_actions::OpenKeymap.boxed_clone(), cx);
                 }),
                 details: None,
                 files: USER,

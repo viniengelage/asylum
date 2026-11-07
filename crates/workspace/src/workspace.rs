@@ -128,8 +128,8 @@ use sqlez::{
 };
 use status_bar::StatusBar;
 pub use status_bar::{
-    HideStatusItem, StatusBarItemSize, StatusItemView, ToolkitEntry, add_hide_button_entry,
-    status_bar_item_height,
+    HideStatusItem, StatusBarItemSize, StatusItemView, TOOLKITS, ToolkitDomain, ToolkitEntry,
+    ToolkitInfo, add_hide_button_entry, status_bar_item_height, toolkit_ids,
 };
 use std::{
     any::TypeId,
@@ -166,8 +166,8 @@ use util::{
 use uuid::Uuid;
 pub use workspace_settings::{
     AccessibleMode, AutosaveSetting, BottomDockLayout, EncodingDisplayOptions, FocusFollowsMouse,
-    RestoreOnStartupBehavior, StatusBarSettings, TabBarSettings, WorkspaceSettings,
-    closing_last_window_quits_app, observe_accessible_mode,
+    RestoreOnStartupBehavior, StatusBarSettings, TabBarSettings, ToolkitSettings,
+    WorkspaceSettings, closing_last_window_quits_app, observe_accessible_mode,
 };
 use zed_actions::{Spawn, feedback::FileBugReport, theme::ToggleMode};
 

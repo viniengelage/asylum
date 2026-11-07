@@ -5091,6 +5091,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "design_viewer"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "editor",
+ "fs",
+ "futures 0.3.34",
+ "gpui",
+ "hex",
+ "i18n",
+ "image",
+ "log",
+ "paths",
+ "project",
+ "schemars 1.0.4",
+ "serde",
+ "serde_json",
+ "settings",
+ "sha2 0.10.9",
+ "task_agents",
+ "ui",
+ "url",
+ "util",
+ "web_preview",
+ "which",
+ "workspace",
+ "zed_actions",
+]
+
+[[package]]
 name = "dev_container"
 version = "0.1.0"
 dependencies = [
@@ -12108,6 +12138,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "futures 0.3.34",
+ "i18n",
  "log",
  "tiny_http",
  "url",
@@ -15314,6 +15345,7 @@ dependencies = [
  "fuzzy_nucleo",
  "gpui",
  "http_client",
+ "i18n",
  "indoc",
  "language",
  "log",
@@ -17037,6 +17069,7 @@ dependencies = [
  "copilot_ui",
  "cpal",
  "credentials_provider",
+ "db",
  "edit_prediction",
  "edit_prediction_ui",
  "editor",
@@ -17059,7 +17092,6 @@ dependencies = [
  "menu",
  "paths",
  "picker",
- "platform_title_bar",
  "pretty_assertions",
  "project",
  "regex",
@@ -18678,6 +18710,7 @@ dependencies = [
  "editor",
  "futures 0.3.34",
  "gpui",
+ "i18n",
  "itertools 0.14.0",
  "language",
  "log",
@@ -22755,6 +22788,7 @@ dependencies = [
  "sqlez",
  "strum 0.28.0",
  "task",
+ "task_agents",
  "telemetry",
  "tempfile",
  "theme",
@@ -23270,6 +23304,7 @@ dependencies = [
  "debug_adapter_extension",
  "debugger_tools",
  "debugger_ui",
+ "design_viewer",
  "dev_container",
  "diagnostics",
  "docker",

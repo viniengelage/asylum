@@ -11,8 +11,6 @@ fn elevated<E: Styled>(this: E, cx: &App, index: ElevationIndex) -> E {
         .shadow(index.shadow(cx))
 }
 
-/// The gap between workspace cards is only a few lightness points darker than the cards, so
-/// a soft drop shadow is what makes them read as separate pieces instead of a cut-out grid.
 fn workspace_card_shadow(cx: &App) -> Vec<gpui::BoxShadow> {
     let opacity = match cx.theme().appearance() {
         theme::Appearance::Light => 0.08,

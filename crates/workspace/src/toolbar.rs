@@ -117,26 +117,27 @@ impl Render for Toolbar {
         let has_left_items = self.left_items().count() > 0;
         let has_right_items = self.right_items().count() > 0;
 
+        let colors = cx.theme().colors();
+
+        // No top padding: the tab bar above already ends in its own inset, and doubling it
+        // would detach the rail from the tabs.
         v_flex()
             .group("toolbar")
             .relative()
-            .py(DynamicSpacing::Base06.rems(cx))
             .px(DynamicSpacing::Base08.rems(cx))
+            .pb(DynamicSpacing::Base06.rems(cx))
             .when(has_left_items || has_right_items, |this| {
                 this.gap(DynamicSpacing::Base06.rems(cx))
             })
-            .bg(cx.theme().colors().toolbar_background)
+            .bg(colors.toolbar_background)
             .when(has_left_items || has_right_items, |this| {
                 this.child(
-                    h_flex()
-                        .items_start()
-                        .justify_between()
-                        .gap(DynamicSpacing::Base08.rems(cx))
+                    ui::toolbar_rail(cx)
                         .when(has_left_items, |this| {
                             this.child(
                                 h_flex()
-                                    .min_h_8()
-                                    .flex_auto()
+                                    .flex_1()
+                                    .min_w_0()
                                     .justify_start()
                                     .overflow_x_hidden()
                                     .children(self.left_items().map(|item| item.to_any())),
@@ -145,7 +146,6 @@ impl Render for Toolbar {
                         .when(has_right_items, |this| {
                             this.child(
                                 h_flex()
-                                    .h_8()
                                     .flex_row_reverse()
                                     .when(has_left_items, |this| this.flex_none())
                                     .justify_end()

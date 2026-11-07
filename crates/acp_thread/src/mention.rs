@@ -618,6 +618,9 @@ impl MentionUri {
             MentionUri::Logs { id, .. } if id.starts_with("container:") => {
                 IconName::Box.path().into()
             }
+            MentionUri::Logs { id, .. } if id.starts_with("design:") => {
+                IconName::Pencil.path().into()
+            }
             MentionUri::Logs { .. } => IconName::CloudPulse.path().into(),
             MentionUri::Skill { .. } => IconName::Sparkle.path().into(),
             MentionUri::Note { .. } => IconName::Notepad.path().into(),

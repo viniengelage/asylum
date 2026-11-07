@@ -112,6 +112,7 @@ impl SessionCapabilities {
                 PromptContextType::ProjectItem,
                 PromptContextType::Logs,
                 PromptContextType::Container,
+                PromptContextType::Design,
             ]);
         }
         supported

@@ -19,6 +19,7 @@
   "completion.sql_query_label": "Query {name}",
   "completion.task_agents_group": "Agents",
   "context_picker.containers": "Containers (Docker)",
+  "context_picker.designs": "Designs (.fig)",
   "context_picker.logs": "Logs (Elastic)",
   "context_picker.project_items": "Project items",
   "context_picker.pull_request": "Pull Request",

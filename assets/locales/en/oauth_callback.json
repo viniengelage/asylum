@@ -1,0 +1,6 @@
+{
+  "failure.body": "Go back to Asylum and try connecting again.",
+  "failure.title": "Authorization failed",
+  "success.body": "You can close this tab and return to Asylum.",
+  "success.title": "Authorization complete"
+}

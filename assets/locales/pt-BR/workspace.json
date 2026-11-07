@@ -10,5 +10,14 @@
   "foreign_paths.open_there": "Abrir em {profile}",
   "foreign_paths.title": "Esta pasta pertence ao perfil {profile}",
   "pane.fallback_title": "Painel",
+  "toolkit.customize": "Personalizar toolkit…",
+  "toolkit.domain.backend": "Backend",
+  "toolkit.domain.frontend": "Frontend",
+  "toolkit.domain.infra": "Infra",
+  "toolkit.domain.work": "Trabalho",
+  "toolkit.settings.display": "Exibição",
+  "toolkit.settings.display_inline": "Inline",
+  "toolkit.settings.display_menu": "Menu",
+  "toolkit.show_as_menu": "Mostrar como menu",
   "toolkit.title": "Toolkit"
 }

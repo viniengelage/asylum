@@ -204,6 +204,7 @@ pub struct SettingsContent {
     pub tab_bar: Option<TabBarSettingsContent>,
     pub tab_switcher: Option<TabSwitcherSettingsContent>,
     pub status_bar: Option<StatusBarSettingsContent>,
+    pub toolkit: Option<ToolkitSettingsContent>,
 
     pub preview_tabs: Option<PreviewTabsSettingsContent>,
 
@@ -247,6 +248,9 @@ pub struct SettingsContent {
 
     /// The settings for the image viewer.
     pub image_viewer: Option<ImageViewerSettingsContent>,
+
+    /// The settings for the `.fig` design viewer.
+    pub design: Option<DesignSettingsContent>,
 
     /// The settings for the markdown preview.
     pub markdown_preview: Option<MarkdownPreviewSettingsContent>,
@@ -411,10 +415,10 @@ impl SettingsContent {
 fallible_options::flattened_deserialize!(SettingsContent {
     sections: { project, theme, extension, workspace, editor, remote },
     options: {
-        call_hierarchy, command_palette, file_finder, git_panel, tabs, tab_bar, tab_switcher, status_bar, preview_tabs, agent,
+        call_hierarchy, command_palette, file_finder, git_panel, tabs, tab_bar, tab_switcher, status_bar, toolkit, preview_tabs, agent,
         agent_servers, audio, auto_update, base_keymap, ui_language, collaboration_panel, debugger, diagnostics,
         git,
-        global_lsp_settings, image_viewer, markdown_preview, repl, helix_mode, hide_mouse,
+        global_lsp_settings, image_viewer, design, markdown_preview, repl, helix_mode, hide_mouse,
         journal, log, line_indicator_format, language_models, copilot, outline_panel, project_panel,
         node, proxy, reduce_motion, server_url, credentials_url, session, telemetry, terminal,
         title_bar, vim_mode, calls, which_key, vim, modeline_lines, feature_flags,
@@ -1406,6 +1410,40 @@ pub struct ImageViewerSettingsContent {
     ///
     /// Default: "binary"
     pub unit: Option<ImageFileSizeUnit>,
+}
+
+/// The settings for the `.fig` design viewer.
+#[with_fallible_options]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, MergeFrom, Default, PartialEq)]
+pub struct DesignSettingsContent {
+    /// What the canvas behind the screens is painted with.
+    ///
+    /// Default: "theme"
+    pub canvas_background: Option<DesignCanvasBackground>,
+}
+
+#[with_fallible_options]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    MergeFrom,
+    Default,
+    PartialEq,
+    Eq,
+    strum::VariantArray,
+    strum::VariantNames,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum DesignCanvasBackground {
+    /// The theme's editor subheader color, so the screens sit on the app's own surface.
+    #[default]
+    Theme,
+    /// The page color set in the document.
+    Document,
 }
 
 #[with_fallible_options]

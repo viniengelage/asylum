@@ -3,7 +3,9 @@ use std::rc::Rc;
 
 use crate::prelude::*;
 use crate::{Color, KeyBinding, Label, LabelSize, StyledExt, h_flex, v_flex};
-use gpui::{Action, AnyElement, AnyView, AppContext, FocusHandle, IntoElement, Render};
+use gpui::{
+    Action, AnyElement, AnyView, AppContext, BoxShadow, FocusHandle, IntoElement, Render, hsla,
+};
 
 #[derive(RegisterComponent)]
 pub struct Tooltip {
@@ -219,12 +221,21 @@ where
 {
     let app = (*cx).borrow();
     let ui_font = theme::theme_settings(app).ui_font(app).clone();
+    let shadow_opacity = match app.theme().appearance() {
+        theme::Appearance::Light => 0.1,
+        theme::Appearance::Dark => 0.35,
+    };
 
     // padding to avoid tooltip appearing right below the mouse cursor
     div().pl_2().pt_2p5().child(
         v_flex()
             .elevation_2(app)
             .rounded(Radius::Md.rems())
+            // The menu shadow is sized for large popovers; on a one-line tooltip it reads as a glow.
+            .shadow(vec![
+                BoxShadow::new(px(0.), px(2.), hsla(0., 0., 0., shadow_opacity))
+                    .blur_radius(px(6.)),
+            ])
             .font(ui_font)
             .text_ui(app)
             .text_color(app.theme().colors().text)

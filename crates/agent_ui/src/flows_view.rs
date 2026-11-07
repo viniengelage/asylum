@@ -1869,8 +1869,7 @@ impl StatusItemView for FlowsToolkitButton {
         });
         let workspace = self.workspace.clone();
         Some(ToolkitEntry {
-            icon: IconName::ListTree,
-            label: t!("agent_ui.flows.toolkit_label"),
+            id: workspace::toolkit_ids::FLOWS,
             is_open,
             action: Box::new(RunFlow::default()),
             toggle: Rc::new(move |window, cx| {

@@ -22,45 +22,34 @@ pub(crate) fn open_model_benchmarks(
     window: &mut Window,
     cx: &mut App,
 ) {
-    let Some(original_window) = settings_window.original_window else {
-        return;
-    };
+    let workspace = settings_window.workspace.clone();
     let fs = <dyn Fs>::global(cx);
-    cx.spawn(async move |cx| {
-        let path = model_benchmarks::ensure_user_model_benchmarks(fs).await?;
-        original_window.update(cx, |multi_workspace, window, cx| {
-            multi_workspace
-                .workspace()
-                .clone()
-                .update(cx, |workspace, cx| {
-                    let open = workspace.open_abs_path(
-                        path,
-                        OpenOptions {
-                            visible: Some(OpenVisible::None),
-                            ..Default::default()
-                        },
-                        window,
-                        cx,
-                    );
-                    cx.spawn_in(window, async move |_, cx| {
-                        let item = open.await?;
-                        if let Some(line) = line
-                            && let Some(editor) = item.downcast::<Editor>()
-                        {
-                            let row = u32::try_from(line.saturating_sub(1)).unwrap_or_default();
-                            editor.update_in(cx, |editor, window, cx| {
-                                editor.go_to_singleton_buffer_point(Point::new(row, 0), window, cx);
-                            })?;
-                        }
-                        anyhow::Ok(())
-                    })
-                    .detach_and_log_err(cx);
-                });
-            window.activate_window();
+    window
+        .spawn(cx, async move |cx| {
+            let path = model_benchmarks::ensure_user_model_benchmarks(fs).await?;
+            let open = workspace.update_in(cx, |workspace, window, cx| {
+                workspace.open_abs_path(
+                    path,
+                    OpenOptions {
+                        visible: Some(OpenVisible::None),
+                        ..Default::default()
+                    },
+                    window,
+                    cx,
+                )
+            })?;
+            let item = open.await?;
+            if let Some(line) = line
+                && let Some(editor) = item.downcast::<Editor>()
+            {
+                let row = u32::try_from(line.saturating_sub(1)).unwrap_or_default();
+                editor.update_in(cx, |editor, window, cx| {
+                    editor.go_to_singleton_buffer_point(Point::new(row, 0), window, cx);
+                })?;
+            }
+            anyhow::Ok(())
         })
-    })
-    .detach_and_log_err(cx);
-    window.remove_window();
+        .detach_and_log_err(cx);
 }
 
 fn restore_default(cx: &mut App) {

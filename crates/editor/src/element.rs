@@ -40,6 +40,7 @@ use crate::{
 use buffer_diff::{DiffHunkStatus, DiffHunkStatusKind};
 use collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use feature_flags::{DiffReviewFeatureFlag, FeatureFlagAppExt as _};
+use file_icons::FileIcons;
 use git::{Oid, blame::BlameEntry, commit::ParsedCommitMessage};
 use gpui::{
     Action, Along, AnyElement, App, AppContext, AvailableSpace, Axis as ScrollbarAxis, BorderStyle,
@@ -7143,7 +7144,6 @@ impl Gutter<'_> {
 pub fn render_breadcrumb_text(
     mut segments: Vec<HighlightedText>,
     breadcrumb_font: Option<Font>,
-    prefix: Option<gpui::AnyElement>,
     active_item: &dyn ItemHandle,
     multibuffer_header: bool,
     window: &mut Window,
@@ -7169,35 +7169,60 @@ pub fn render_breadcrumb_text(
         );
     }
 
-    let highlighted_segments = segments.into_iter().enumerate().map(|(index, segment)| {
-        let mut text_style = window.text_style();
-        if let Some(font) = &breadcrumb_font {
-            text_style.font_family = font.family.clone();
-            text_style.font_features = font.features.clone();
-            text_style.font_style = font.style;
-            text_style.font_weight = font.weight;
-        }
-        text_style.color = Color::Muted.color(cx);
+    let mut text_style = window.text_style();
+    if let Some(font) = &breadcrumb_font {
+        text_style.font_family = font.family.clone();
+        text_style.font_features = font.features.clone();
+        text_style.font_style = font.style;
+        text_style.font_weight = font.weight;
+    }
+    text_style.color = Color::Muted.color(cx);
 
-        if index == 0
-            && !workspace::TabBarSettings::get_global(cx).show
-            && active_item.is_dirty(cx)
-            && let Some(styled_element) = apply_dirty_filename_style(&segment, &text_style, cx)
-        {
-            return styled_element;
-        }
+    let has_project_path = active_item.project_path(cx).is_some();
+    // The path arrives as one segment, so it is split here to give the folders and the file
+    // their own icons; a multibuffer header already shows its file next to the path.
+    let split_path = has_project_path && !multibuffer_header;
+    let dirty_filename =
+        !workspace::TabBarSettings::get_global(cx).show && active_item.is_dirty(cx);
 
-        StyledText::new(segment.text.replace('\n', " "))
-            .with_default_highlights(&text_style, segment.highlights)
-            .into_any()
-    });
+    let highlighted_segments = segments
+        .into_iter()
+        .enumerate()
+        .flat_map(|(index, segment)| {
+            if index == 0 && split_path {
+                let path_segments =
+                    render_breadcrumb_path(&segment.text, &text_style, dirty_filename, cx);
+                if !path_segments.is_empty() {
+                    return path_segments;
+                }
+            }
+
+            if index == 0
+                && dirty_filename
+                && let Some(styled_element) = apply_dirty_filename_style(&segment, &text_style, cx)
+            {
+                return vec![styled_element];
+            }
+
+            vec![
+                StyledText::new(segment.text.replace('\n', " "))
+                    .with_default_highlights(&text_style, segment.highlights)
+                    .into_any(),
+            ]
+        });
 
     let breadcrumbs = Itertools::intersperse_with(highlighted_segments, || {
         Label::new("/").color(Color::Disabled).into_any_element()
     });
 
-    let breadcrumbs_stack = h_flex()
-        .gap_1()
+    let breadcrumbs = h_flex()
+        .map(|this| {
+            if split_path {
+                this.gap_1p5()
+            } else {
+                this.gap_1()
+            }
+        })
         .when(multibuffer_header, |this| {
             this.pl_2()
                 .border_l_1()
@@ -7205,17 +7230,9 @@ pub fn render_breadcrumb_text(
         })
         .children(breadcrumbs);
 
-    let breadcrumbs = if let Some(prefix) = prefix {
-        h_flex().gap_1p5().child(prefix).child(breadcrumbs_stack)
-    } else {
-        breadcrumbs_stack
-    };
-
     let editor = active_item
         .downcast::<Editor>()
         .map(|editor| editor.downgrade());
-
-    let has_project_path = active_item.project_path(cx).is_some();
 
     match editor {
         Some(editor) => element
@@ -7295,6 +7312,65 @@ pub fn render_breadcrumb_text(
             .child(breadcrumbs)
             .into_any_element(),
     }
+}
+
+// The caller intersperses the `/` separators.
+fn render_breadcrumb_path(
+    path: &str,
+    text_style: &gpui::TextStyle,
+    dirty: bool,
+    cx: &App,
+) -> Vec<gpui::AnyElement> {
+    let mut parts = path
+        .split(['/', '\\'])
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    let Some(file_name) = parts.pop() else {
+        return Vec::new();
+    };
+
+    let mut elements = parts
+        .into_iter()
+        .enumerate()
+        .map(|(index, directory)| {
+            let directory =
+                StyledText::new(directory.to_string()).with_default_highlights(text_style, []);
+            if index == 0 {
+                h_flex()
+                    .gap_1()
+                    .child(
+                        Icon::new(IconName::Folder)
+                            .size(IconSize::Small)
+                            .color(Color::Muted),
+                    )
+                    .child(directory)
+                    .into_any_element()
+            } else {
+                directory.into_any()
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let file_icon = FileIcons::get_icon(std::path::Path::new(file_name), cx)
+        .map(Icon::from_path)
+        .unwrap_or_else(|| Icon::new(IconName::File))
+        .size(IconSize::Small)
+        .color(Color::Muted);
+    let mut file_style = text_style.clone();
+    file_style.color = Color::Default.color(cx);
+    file_style.font_weight = if dirty {
+        FontWeight::BOLD
+    } else {
+        FontWeight::MEDIUM
+    };
+    elements.push(
+        h_flex()
+            .gap_1()
+            .child(file_icon)
+            .child(StyledText::new(file_name.to_string()).with_default_highlights(&file_style, []))
+            .into_any_element(),
+    );
+    elements
 }
 
 fn apply_dirty_filename_style(

@@ -824,6 +824,9 @@ fn main() {
         vim::init(cx);
         terminal_view::init(cx);
         web_preview::init(cx);
+        // Openers registered later are tried first, so .fig files reach this one before the
+        // generic ones registered above.
+        design_viewer::init(cx);
         android_sdk::init(cx);
         journal::init(app_state.clone(), cx);
         encoding_selector::init(cx);
@@ -861,6 +864,7 @@ fn main() {
         database_client::register_agent_toolkit(cx);
         elastic::register_agent_toolkit(cx);
         docker::register_agent_toolkit(cx);
+        design_viewer::register_agent_toolkit(cx);
         repo_hosting::register_agent_toolkit(cx);
         github_projects::register_agent_toolkit(cx);
         clickup::register_agent_toolkit(cx);
@@ -1231,12 +1235,18 @@ fn handle_open_request(request: OpenRequest, app_state: Arc<AppState>, cx: &mut 
                     let multi_workspace =
                         workspace::get_any_active_multi_workspace(app_state, cx.clone()).await?;
 
-                    multi_workspace.update(cx, |_multi_workspace, _window, cx| {
-                        settings_ui::open_skill_creator(
-                            settings_ui::pages::SkillCreatorOpenMode::Install { content },
-                            Some(multi_workspace),
-                            cx,
-                        );
+                    multi_workspace.update(cx, |multi_workspace, window, cx| {
+                        multi_workspace
+                            .workspace()
+                            .clone()
+                            .update(cx, |workspace, cx| {
+                                settings_ui::open_skill_creator(
+                                    settings_ui::pages::SkillCreatorOpenMode::Install { content },
+                                    workspace,
+                                    window,
+                                    cx,
+                                );
+                            });
                     })
                 })
                 .detach_and_log_err(cx);
@@ -1592,9 +1602,6 @@ pub(crate) async fn restore_or_create_workspace(
     if launch_folders.is_empty() {
         return restore_session_or_create_workspace(app_state, cx).await;
     }
-    // The profile names the folders it starts in: restore whatever else the last session
-    // had, then open those folders, instead of the empty window a launch without a session
-    // would otherwise show.
     if restorable_workspace_locations(cx, &app_state)
         .await
         .is_some()

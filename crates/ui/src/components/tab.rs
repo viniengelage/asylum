@@ -1,6 +1,8 @@
 use std::cmp::Ordering;
 
 use gpui::{AnyElement, Hsla, IntoElement, Stateful};
+
+use crate::group_divider;
 use smallvec::SmallVec;
 
 use crate::prelude::*;
@@ -16,6 +18,12 @@ const TAB_PILL_RADIUS: Pixels = px(7.);
 /// Radius of the rounded strip that holds [`TabStyle::Pill`] tabs.
 pub const TAB_STRIP_RADIUS: Pixels = px(10.);
 
+/// A document tab's close button is a hit target, so it gets a larger square than the 14px
+/// icon slot.
+const DOCUMENT_TAB_CLOSE_SLOT_SIZE: Pixels = px(18.);
+const DOCUMENT_TAB_MIN_WIDTH: Pixels = px(120.);
+const DOCUMENT_TAB_MAX_WIDTH: Pixels = px(200.);
+
 /// How a [`Tab`] marks itself as selected.
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
 pub enum TabStyle {
@@ -27,6 +35,10 @@ pub enum TabStyle {
     /// and a short shadow, like the thumb of a segmented control. This is the style for every island's strip, where continuity with the
     /// content was too subtle to tell which tab was active.
     Pill,
+    /// A [`TabStyle::Pill`] whose selected tab takes the accent tint of an active toggle
+    /// instead of rising out of the strip. The terminal panel uses it so its tabs read as one
+    /// glued capsule rather than as document tabs.
+    Capsule,
 }
 
 /// The position of a [`Tab`] within a list of tabs.
@@ -57,10 +69,15 @@ pub struct Tab {
     position: TabPosition,
     close_side: TabCloseSide,
     full_width: bool,
+    document: bool,
     style: TabStyle,
     surface: Option<Hsla>,
     start_slot: Option<AnyElement>,
     end_slot: Option<AnyElement>,
+    end_slot_indicator: Option<AnyElement>,
+    end_slot_always_visible: bool,
+    hover_group: Option<SharedString>,
+    leading_divider: Option<SharedString>,
     children: SmallVec<[AnyElement; 2]>,
 }
 
@@ -75,10 +92,15 @@ impl Tab {
             position: TabPosition::First,
             close_side: TabCloseSide::End,
             full_width: false,
+            document: false,
             style: TabStyle::Surface,
             surface: None,
             start_slot: None,
             end_slot: None,
+            end_slot_indicator: None,
+            end_slot_always_visible: false,
+            hover_group: None,
+            leading_divider: None,
             children: SmallVec::new(),
         }
     }
@@ -95,6 +117,15 @@ impl Tab {
     /// and let the parent's background show through the rest of the slot.
     pub fn full_width(mut self, full_width: bool) -> Self {
         self.full_width = full_width;
+        self
+    }
+
+    /// Sizes a [`TabStyle::Pill`] tab as a pane's document tab: between 120 and 200px wide,
+    /// with its label left-aligned and truncated, and an 18px close slot.
+    ///
+    /// The children must be able to shrink (`min_w_0`) for the label to truncate.
+    pub fn document(mut self, document: bool) -> Self {
+        self.document = document;
         self
     }
 
@@ -132,6 +163,35 @@ impl Tab {
         self
     }
 
+    /// A status mark, like a modified file's dot, shown in the end slot of a
+    /// [`TabStyle::Pill`] tab while the pointer is not over it. The end slot's button takes its
+    /// place on hover.
+    pub fn end_slot_indicator<E: IntoElement>(mut self, element: impl Into<Option<E>>) -> Self {
+        self.end_slot_indicator = element.into().map(IntoElement::into_any_element);
+        self
+    }
+
+    /// Keeps a [`TabStyle::Pill`] tab's end slot visible on unselected tabs too, for the
+    /// `"always"` close button setting. An indicator still owns the slot until hover.
+    pub fn end_slot_always_visible(mut self, visible: bool) -> Self {
+        self.end_slot_always_visible = visible;
+        self
+    }
+
+    /// Names this [`TabStyle::Capsule`] tab's hover group, so the dividers on either side of it
+    /// can hide while the pointer is over it.
+    pub fn hover_group(mut self, group: impl Into<SharedString>) -> Self {
+        self.hover_group = Some(group.into());
+        self
+    }
+
+    /// Draws a divider in the gap before this [`TabStyle::Capsule`] tab. It takes the previous
+    /// tab's [`Tab::hover_group`], because hovering either neighbour hides it.
+    pub fn leading_divider(mut self, previous_hover_group: Option<SharedString>) -> Self {
+        self.leading_divider = previous_hover_group;
+        self
+    }
+
     pub fn content_height(cx: &App) -> Pixels {
         DynamicSpacing::Base32.px(cx) - px(1.)
     }
@@ -149,7 +209,26 @@ impl Tab {
         let colors = cx.theme().colors();
         let selected = self.selected;
         let full_width = self.full_width;
+        let document = self.document;
         let close_side = self.close_side;
+        let capsule = self.style == TabStyle::Capsule;
+        let own_hover_group = self.hover_group.clone();
+        let leading_divider = self.leading_divider.map(|previous_hover_group| {
+            // GPUI keeps one group-hover style per element, so each neighbour's hover hides a
+            // different element of the pair.
+            let divider = div()
+                .when_some(own_hover_group, |this, group| {
+                    this.group_hover(group, |style| style.invisible())
+                })
+                .child(group_divider(px(14.)));
+            h_flex()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .left(px(-1.5))
+                .group_hover(previous_hover_group, |style| style.invisible())
+                .child(divider)
+        });
         let text_color = if selected {
             colors.text
         } else {
@@ -157,14 +236,42 @@ impl Tab {
         };
 
         // The close button only shows where it is unambiguous what it closes: on the selected
-        // tab, or on the tab under the pointer.
-        let action_slot = self.end_slot.map(|end_slot| {
+        // tab, or on the tab under the pointer. An indicator owns the slot until the pointer
+        // arrives, even on the selected tab, or a modified file would never show its dot.
+        let has_end_slot = self.end_slot.is_some();
+        let has_indicator = self.end_slot_indicator.is_some();
+        let end_slot_on_hover_only = has_indicator || (!selected && !self.end_slot_always_visible);
+        let action_slot = (has_end_slot || has_indicator).then(|| {
             h_flex()
-                .size(TAB_SLOT_SIZE)
+                .relative()
+                .size(if document {
+                    DOCUMENT_TAB_CLOSE_SLOT_SIZE
+                } else {
+                    TAB_SLOT_SIZE
+                })
                 .flex_none()
                 .justify_center()
-                .when(!selected, |this| this.visible_on_hover(""))
-                .child(end_slot)
+                .when_some(self.end_slot_indicator, |this, indicator| {
+                    this.child(
+                        h_flex()
+                            .absolute()
+                            .inset_0()
+                            .justify_center()
+                            .when(has_end_slot, |this| {
+                                this.group_hover("", |style| style.invisible())
+                            })
+                            .child(indicator),
+                    )
+                })
+                .when_some(self.end_slot, |this, end_slot| {
+                    this.child(
+                        h_flex()
+                            .size_full()
+                            .justify_center()
+                            .when(end_slot_on_hover_only, |this| this.visible_on_hover(""))
+                            .child(end_slot),
+                    )
+                })
         });
         let icon_slot = self.start_slot.map(|start_slot| {
             h_flex()
@@ -179,13 +286,22 @@ impl Tab {
         };
 
         self.div
+            .when_some(self.hover_group, |this, group| this.group(group))
+            .relative()
             .flex_none()
             .h(Tab::pill_height(cx))
             .when(full_width, |this| this.w_full())
+            .when(document, |this| {
+                this.min_w(DOCUMENT_TAB_MIN_WIDTH)
+                    .max_w(DOCUMENT_TAB_MAX_WIDTH)
+            })
             .rounded(TAB_PILL_RADIUS)
             .border_1()
             .map(|this| {
-                if selected {
+                if selected && capsule {
+                    this.bg(colors.element_selected)
+                        .border_color(gpui::transparent_black())
+                } else if selected {
                     this.bg(colors.elevated_surface_background)
                         .border_color(colors.border_selected)
                         .shadow(vec![
@@ -199,6 +315,7 @@ impl Tab {
                 }
             })
             .cursor_pointer()
+            .children(leading_divider)
             .child(
                 h_flex()
                     .group("")
@@ -207,10 +324,31 @@ impl Tab {
                     .px(DynamicSpacing::Base10.px(cx))
                     .gap(DynamicSpacing::Base06.px(cx))
                     .when(full_width, |this| this.w_full().justify_center())
+                    .when(document, |this| {
+                        // The close square already has air around its glyph, so the full
+                        // inset on its side would push the glyph away from the edge.
+                        let (start, end) = match close_side {
+                            TabCloseSide::Start => (DynamicSpacing::Base04, DynamicSpacing::Base10),
+                            TabCloseSide::End => (DynamicSpacing::Base10, DynamicSpacing::Base04),
+                        };
+                        this.w_full().pl(start.px(cx)).pr(end.px(cx))
+                    })
                     .text_color(text_color)
                     .children(leading_action)
                     .children(icon_slot)
-                    .children(self.children)
+                    .map(|this| {
+                        if document {
+                            this.child(
+                                h_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .overflow_hidden()
+                                    .children(self.children),
+                            )
+                        } else {
+                            this.children(self.children)
+                        }
+                    })
                     .children(trailing_action),
             )
     }
@@ -240,7 +378,7 @@ impl ParentElement for Tab {
 impl RenderOnce for Tab {
     #[allow(refining_impl_trait)]
     fn render(self, _: &mut Window, cx: &mut App) -> Stateful<Div> {
-        if self.style == TabStyle::Pill {
+        if matches!(self.style, TabStyle::Pill | TabStyle::Capsule) {
             return self.render_pill(cx);
         }
 

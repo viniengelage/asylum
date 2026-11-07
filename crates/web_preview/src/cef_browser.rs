@@ -1615,6 +1615,15 @@ impl CefBrowserInstance {
         self.with_browser(|browser| browser.reload());
     }
 
+    pub fn execute_javascript(&self, code: &str) {
+        self.with_browser(|browser| {
+            if let Some(frame) = browser.main_frame() {
+                frame.execute_java_script(Some(&CefString::from(code)), None, 0);
+            }
+        });
+        request_pump();
+    }
+
     pub fn stop(&self) {
         self.with_browser(|browser| browser.stop_load());
     }

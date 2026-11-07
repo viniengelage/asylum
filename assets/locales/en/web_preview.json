@@ -69,6 +69,7 @@
   "install.heading_missing": "Web Preview needs Chromium",
   "install.install": "Install",
   "install.try_again": "Try Again",
+  "tab_label": "Browser",
   "toolbar.back": "Back",
   "toolbar.forward": "Forward",
   "toolbar.loading": "Loading…",

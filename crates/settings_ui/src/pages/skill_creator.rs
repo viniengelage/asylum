@@ -10,7 +10,7 @@ use fs::Fs;
 use futures::AsyncReadExt;
 use gpui::{
     App, Entity, EventEmitter, FocusHandle, Focusable, ScrollHandle, Subscription, Task, TextStyle,
-    WeakEntity, WindowHandle, actions,
+    WeakEntity, actions,
 };
 use http_client::{AsyncBody, HttpClient, HttpRequestExt, Request, StatusCode, Url};
 use language::{Buffer, language_settings::SoftWrap};
@@ -22,7 +22,6 @@ use theme_settings::ThemeSettings;
 use ui::{Banner, Divider, SwitchField, WithScrollbar, prelude::*};
 use ui_input::{ErasedEditorEvent, InputField};
 use util::ResultExt;
-use workspace::MultiWorkspace;
 
 use crate::{SettingsUiFile, SettingsWindow, all_projects};
 
@@ -102,13 +101,9 @@ impl ScopeChoice {
     }
 }
 
-fn scope_for_settings_file(
-    current_file: &SettingsUiFile,
-    original_window: Option<&WindowHandle<MultiWorkspace>>,
-    cx: &App,
-) -> ScopeChoice {
+fn scope_for_settings_file(current_file: &SettingsUiFile, cx: &App) -> ScopeChoice {
     if let SettingsUiFile::Project((worktree_id, _)) = current_file {
-        for project in all_projects(original_window, cx) {
+        for project in all_projects(cx) {
             if let Some(worktree) = project.read(cx).worktree_for_id(*worktree_id, cx) {
                 let worktree = worktree.read(cx);
                 return ScopeChoice::Project {
@@ -734,11 +729,7 @@ impl SkillCreatorPage {
         let scope = self
             .settings_window
             .read_with(cx, |settings_window, cx| {
-                scope_for_settings_file(
-                    &settings_window.current_file,
-                    settings_window.original_window.as_ref(),
-                    cx,
-                )
+                scope_for_settings_file(&settings_window.current_file, cx)
             })
             .unwrap_or(ScopeChoice::Global);
         let name = self.current_name(cx);

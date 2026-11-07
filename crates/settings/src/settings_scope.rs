@@ -12,6 +12,7 @@ pub const PROFILE_SCOPED_SETTINGS: &[&str] = &[
     "agent_servers",
     "context_servers",
     "agent_toolkits",
+    "toolkit",
     "edit_predictions.provider",
     "agent.default_model",
     "agent.subagent_model",

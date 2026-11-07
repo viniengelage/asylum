@@ -1607,9 +1607,6 @@
     "context": "SettingsWindow",
     "use_key_equivalents": true,
     "bindings": {
-      "ctrl-w": "workspace::CloseWindow",
-      "escape": "workspace::CloseWindow",
-      "ctrl-m": "settings_editor::Minimize",
       "ctrl-f": "search::FocusSearch",
       "ctrl-,": "settings_editor::OpenCurrentFile",
       "left": "settings_editor::ToggleFocusNav",
@@ -1669,6 +1666,19 @@
       "ctrl-alt-shift-backspace": "branch_picker::ForceDeleteBranch",
       "ctrl-shift-i": "branch_picker::CycleBranchFilter",
       "ctrl-k": "branch_picker::ToggleFilterMenu",
+    },
+  },
+  {
+    "context": "DesignViewer",
+    "bindings": {
+      "ctrl-=": "design::ZoomIn",
+      "ctrl-+": "design::ZoomIn",
+      "ctrl--": "design::ZoomOut",
+      "ctrl-0": "design::FitToScreen",
+      "ctrl-f": "design::FocusSearch",
+      "left": "design::PreviousScreen",
+      "right": "design::NextScreen",
+      "escape": "design::ExitFocus",
     },
   },
   {

@@ -103,8 +103,8 @@ use {
     feature_flags::FeatureFlagAppExt as _,
     git_ui::project_diff::ProjectDiff,
     gpui::{
-        App, AppContext as _, Bounds, Entity, KeyBinding, Modifiers, VisualTestAppContext,
-        WindowBounds, WindowHandle, WindowOptions, point, px, size,
+        AnyWindowHandle, App, AppContext as _, Bounds, Entity, KeyBinding, Modifiers,
+        VisualTestAppContext, WindowBounds, WindowHandle, WindowOptions, point, px, size,
     },
     image::RgbaImage,
     project::{AgentId, Project},
@@ -1294,6 +1294,22 @@ fn run_breakpoint_hover_visual_tests(
     }
 }
 
+#[cfg(target_os = "macos")]
+fn settings_tab(
+    workspace_window: WindowHandle<MultiWorkspace>,
+    cx: &mut VisualTestAppContext,
+) -> Option<Entity<SettingsWindow>> {
+    workspace_window
+        .read_with(cx, |multi_workspace, cx| {
+            multi_workspace
+                .workspace()
+                .read(cx)
+                .item_of_type::<SettingsWindow>(cx)
+        })
+        .ok()
+        .flatten()
+}
+
 /// Runs visual tests for the settings UI sub-page auto-open feature.
 ///
 /// This test verifies that when opening settings via OpenSettingsAt with a path
@@ -1368,34 +1384,18 @@ fn run_settings_ui_subpage_visual_tests(
 
     cx.run_until_parked();
 
-    // Find the settings window
-    let settings_window_1 = cx
-        .update(|cx| {
-            cx.windows()
-                .into_iter()
-                .find_map(|window| window.downcast::<SettingsWindow>())
-        })
-        .context("Settings window not found")?;
-
-    // Refresh and capture screenshot
-    cx.update_window(settings_window_1.into(), |_, window, _cx| {
+    settings_tab(workspace_window, cx).context("Settings tab not found")?;
+    cx.update_window(workspace_window.into(), |_, window, _cx| {
         window.refresh();
     })?;
     cx.run_until_parked();
 
     let test1_result = run_visual_test(
         "settings_ui_no_auto_open",
-        settings_window_1.into(),
+        workspace_window.into(),
         cx,
         update_baseline,
     )?;
-
-    // Close the settings window
-    cx.update_window(settings_window_1.into(), |_, window, _cx| {
-        window.remove_window();
-    })
-    .log_err();
-    cx.run_until_parked();
 
     // Test 2: Open settings with a path that maps to a single SubPageLink
     // "edit_predictions.providers" maps to the "Configure Providers" SubPageLink
@@ -1414,34 +1414,18 @@ fn run_settings_ui_subpage_visual_tests(
 
     cx.run_until_parked();
 
-    // Find the new settings window
-    let settings_window_2 = cx
-        .update(|cx| {
-            cx.windows()
-                .into_iter()
-                .find_map(|window| window.downcast::<SettingsWindow>())
-        })
-        .context("Settings window not found for sub-page test")?;
-
-    // Refresh and capture screenshot
-    cx.update_window(settings_window_2.into(), |_, window, _cx| {
+    settings_tab(workspace_window, cx).context("Settings tab not found for sub-page test")?;
+    cx.update_window(workspace_window.into(), |_, window, _cx| {
         window.refresh();
     })?;
     cx.run_until_parked();
 
     let test2_result = run_visual_test(
         "settings_ui_subpage_auto_open",
-        settings_window_2.into(),
+        workspace_window.into(),
         cx,
         update_baseline,
     )?;
-
-    // Clean up: close the settings window
-    cx.update_window(settings_window_2.into(), |_, window, _cx| {
-        window.remove_window();
-    })
-    .log_err();
-    cx.run_until_parked();
 
     // Clean up: close the workspace window
     cx.update_window(workspace_window.into(), |_, window, _cx| {
@@ -2409,22 +2393,18 @@ fn run_tool_permissions_visual_tests(
         cx.run_until_parked();
     }
 
-    // Find the settings window - it should be the newest window (last in the list)
-    let all_windows = cx.update(|cx| cx.windows());
-    let settings_window = all_windows.last().copied().context("No windows found")?;
+    let settings_window: AnyWindowHandle = workspace_window.into();
+    let settings_tab = settings_tab(workspace_window, cx).context("Settings tab not found")?;
 
     let output_dir = std::env::var("VISUAL_TEST_OUTPUT_DIR")
         .unwrap_or_else(|_| "target/visual_tests".to_string());
     std::fs::create_dir_all(&output_dir).log_err();
 
-    // Navigate to the tool permissions sub-page using the public API
-    let settings_window_handle = settings_window
-        .downcast::<settings_ui::SettingsWindow>()
-        .context("Failed to downcast to SettingsWindow")?;
-
-    settings_window_handle
-        .update(cx, |settings_window, window, cx| {
-            settings_window.navigate_to_sub_page("agent.tool_permissions", window, cx);
+    workspace_window
+        .update(cx, |_, window, cx| {
+            settings_tab.update(cx, |settings_window, cx| {
+                settings_window.navigate_to_sub_page("agent.tool_permissions", window, cx);
+            })
         })
         .context("Failed to navigate to tool permissions sub-page")?;
 
@@ -2437,17 +2417,19 @@ fn run_tool_permissions_visual_tests(
     }
 
     // Now navigate into a specific tool (Terminal) to show the tool config page
-    settings_window_handle
-        .update(cx, |settings_window, window, cx| {
-            settings_window.push_dynamic_sub_page(
-                "Terminal",
-                "Configure Tool Rules",
-                None,
-                true,
-                settings_ui::pages::render_terminal_tool_config,
-                window,
-                cx,
-            );
+    workspace_window
+        .update(cx, |_, window, cx| {
+            settings_tab.update(cx, |settings_window, cx| {
+                settings_window.push_dynamic_sub_page(
+                    "Terminal",
+                    "Configure Tool Rules",
+                    None,
+                    true,
+                    settings_ui::pages::render_terminal_tool_config,
+                    window,
+                    cx,
+                );
+            })
         })
         .context("Failed to navigate to Terminal tool config")?;
 
@@ -2512,12 +2494,6 @@ fn run_tool_permissions_visual_tests(
             tool_config_output_path.display()
         );
     }
-
-    // Clean up - close the settings window
-    cx.update_window(settings_window, |_, window, _cx| {
-        window.remove_window();
-    })
-    .log_err();
 
     // Close the workspace window
     cx.update_window(workspace_window.into(), |_, window, _cx| {

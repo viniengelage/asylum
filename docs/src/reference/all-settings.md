@@ -1676,7 +1676,7 @@ or
 {
   "tabs": {
     "close_position": "right",
-    "file_icons": false,
+    "file_icons": true,
     "git_status": false,
     "activate_on_close": "history",
     "show_close_button": "hover",
@@ -1717,7 +1717,7 @@ or
 
 - Description: Whether to show the file icon for a tab.
 - Setting: `file_icons`
-- Default: `false`
+- Default: `true`
 
 ### Git Status
 

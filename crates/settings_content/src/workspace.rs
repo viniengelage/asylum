@@ -204,7 +204,7 @@ pub struct ItemSettingsContent {
     pub close_position: Option<ClosePosition>,
     /// Whether to show the file icon for a tab.
     ///
-    /// Default: false
+    /// Default: true
     pub file_icons: Option<bool>,
     /// What to do after closing the current tab.
     ///
@@ -604,6 +604,39 @@ pub struct StatusBarSettingsContent {
     ///
     /// Default: true
     pub pending_keystrokes_indicator: Option<bool>,
+}
+
+#[with_fallible_options]
+#[derive(Clone, Default, Serialize, Deserialize, JsonSchema, MergeFrom, Debug, PartialEq, Eq)]
+pub struct ToolkitSettingsContent {
+    /// How the toolkits show in the status bar: one toolbox button with a menu, or one
+    /// button per toolkit.
+    ///
+    /// Default: menu
+    pub display: Option<ToolkitDisplay>,
+    /// The ids of the toolkits left out of the status bar. They stay in the command palette.
+    ///
+    /// Default: []
+    pub hidden: Option<Vec<std::sync::Arc<str>>>,
+}
+
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Default,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    MergeFrom,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolkitDisplay {
+    #[default]
+    Menu,
+    Inline,
 }
 
 #[derive(

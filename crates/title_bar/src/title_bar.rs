@@ -43,8 +43,8 @@ use theme::ActiveTheme;
 use title_bar_settings::TitleBarSettings;
 use ui::{
     Avatar, ButtonLike, ContextMenu, ContextMenuEntry, HeaderBar, IconWithIndicator, Indicator,
-    PopoverMenu, PopoverMenuHandle, TintColor, Tooltip, prelude::*,
-    utils::platform_title_bar_height,
+    PopoverMenu, PopoverMenuHandle, TintColor, Tooltip, button_group, group_icon_button,
+    prelude::*, utils::platform_title_bar_height,
 };
 use update_version::UpdateVersion;
 use util::ResultExt;
@@ -58,36 +58,6 @@ use zed_actions::OpenRemote;
 pub use onboarding_banner::restore_banner;
 
 const MAX_PROJECT_NAME_LENGTH: usize = 40;
-
-/// The project switcher at the head of the left island: the project name set in the header's
-/// weight with a chevron that always shows, since the menu opens on any project count.
-fn project_name_trigger(display_name: String, is_project_selected: bool, cx: &App) -> ButtonLike {
-    ButtonLike::new("project_name_trigger")
-        .size(ButtonSize::Medium)
-        .tab_index(0isize)
-        .selected_style(ButtonStyle::Tinted(TintColor::Accent))
-        .child(
-            h_flex()
-                .pl(DynamicSpacing::Base08.px(cx))
-                .pr(DynamicSpacing::Base06.px(cx))
-                .gap(DynamicSpacing::Base04.px(cx))
-                .child(
-                    Label::new(display_name)
-                        .size(LabelSize::Small)
-                        .weight(gpui::FontWeight::SEMIBOLD)
-                        .color(if is_project_selected {
-                            Color::Default
-                        } else {
-                            Color::Muted
-                        }),
-                )
-                .child(
-                    Icon::new(IconName::ChevronDown)
-                        .size(IconSize::Small)
-                        .color(Color::Muted),
-                ),
-        )
-}
 
 actions!(
     collab,
@@ -231,6 +201,7 @@ pub struct TitleBar {
     banner: Option<Entity<OnboardingBanner>>,
     update_version: Entity<UpdateVersion>,
     screen_share_popover_handle: PopoverMenuHandle<ContextMenu>,
+    project_selector_handle: PopoverMenuHandle<recent_projects::RecentProjects>,
     _diagnostics_subscription: Option<gpui::Subscription>,
 }
 
@@ -256,13 +227,7 @@ impl Render for TitleBar {
 
         let mut children = <ArrayVec<_, 5>>::new();
 
-        let project_name = self.effective_active_worktree(cx).and_then(|worktree| {
-            worktree
-                .read(cx)
-                .root_name()
-                .file_name()
-                .map(|name| SharedString::from(name.to_string()))
-        });
+        let project_name = recent_projects::project_selector_name(self.project.read(cx), cx);
 
         children.push(
             h_flex()
@@ -282,7 +247,7 @@ impl Render for TitleBar {
                         )
                         .children(self.render_restricted_mode(cx))
                         .when(render_project_name, |title_bar| {
-                            title_bar.child(self.render_project_name(project_name, window, cx))
+                            title_bar.children(self.render_project_name(project_name, cx))
                         })
                 })
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -333,13 +298,16 @@ impl Render for TitleBar {
                             ),
                     )
                 })
-                .when(TitleBarSettings::get_global(cx).show_user_menu, |this| {
-                    this.child(self.render_user_menu_button(cx))
-                })
-                .child(
-                    IconButton::new("title-bar-search", IconName::MagnifyingGlass)
-                        .icon_size(IconSize::Medium)
-                        .icon_color(Color::Muted)
+                .child(button_group(
+                    TitleBarSettings::get_global(cx)
+                        .show_user_menu
+                        .then(|| self.render_user_menu_button(cx).into_any_element())
+                        .into_iter()
+                        .chain([group_icon_button(
+                            "title-bar-search",
+                            IconName::MagnifyingGlass,
+                            24.0,
+                        )
                         .tooltip(|_window, cx| {
                             Tooltip::for_action(
                                 i18n::t!("title_bar.search_files"),
@@ -352,8 +320,10 @@ impl Render for TitleBar {
                                 workspace::ToggleFileFinder::default().boxed_clone(),
                                 cx,
                             );
-                        }),
-                )
+                        })
+                        .into_any_element()]),
+                    cx,
+                ))
                 .into_any_element(),
         );
 
@@ -487,6 +457,7 @@ impl TitleBar {
             banner,
             update_version,
             screen_share_popover_handle: PopoverMenuHandle::default(),
+            project_selector_handle: PopoverMenuHandle::default(),
             _diagnostics_subscription: None,
         };
 
@@ -499,27 +470,6 @@ impl TitleBar {
         self.update_version
             .update(cx, |banner, cx| banner.update_simulation(cx));
         cx.notify();
-    }
-
-    /// Returns the worktree to display in the title bar.
-    /// - Prefer the worktree owning the project's active repository
-    /// - Fall back to the first visible worktree
-    pub fn effective_active_worktree(&self, cx: &App) -> Option<Entity<project::Worktree>> {
-        let project = self.project.read(cx);
-
-        if let Some(repo) = project.active_repository(cx) {
-            let repo = repo.read(cx);
-            let repo_path = &repo.work_directory_abs_path;
-
-            for worktree in project.visible_worktrees(cx) {
-                let worktree_path = worktree.read(cx).abs_path();
-                if worktree_path == *repo_path || worktree_path.starts_with(repo_path.as_ref()) {
-                    return Some(worktree);
-                }
-            }
-        }
-
-        project.visible_worktrees(cx).next()
     }
 
     fn render_remote_project_connection(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -711,111 +661,63 @@ impl TitleBar {
     fn render_project_name(
         &self,
         name: Option<SharedString>,
-        _: &mut Window,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let workspace = self.workspace.clone();
+    ) -> Option<impl IntoElement + use<>> {
+        let multi_workspace = self.multi_workspace.as_ref().and_then(|mw| mw.upgrade());
 
-        let is_project_selected = name.is_some();
-
-        let display_name = if let Some(ref name) = name {
-            util::truncate_and_trailoff(name, MAX_PROJECT_NAME_LENGTH)
-        } else {
-            "Open Recent Project".to_string()
-        };
-
-        let is_sidebar_open = self
-            .multi_workspace
+        let is_sidebar_open = multi_workspace
             .as_ref()
-            .and_then(|mw| mw.upgrade())
-            .map(|mw| mw.read(cx).sidebar_open())
-            .unwrap_or(false)
+            .is_some_and(|mw| mw.read(cx).sidebar_open())
             && PlatformTitleBar::is_multi_workspace_enabled(cx);
-
-        let is_threads_list_view_active = self
-            .multi_workspace
+        let is_threads_list_view_active = multi_workspace
             .as_ref()
-            .and_then(|mw| mw.upgrade())
-            .map(|mw| mw.read(cx).is_threads_list_view_active(cx))
-            .unwrap_or(false);
+            .is_some_and(|mw| mw.read(cx).is_threads_list_view_active(cx));
 
+        // The sidebar header shows the full selector in this state.
         if is_sidebar_open && is_threads_list_view_active {
-            return self
-                .render_recent_projects_popover(display_name, is_project_selected, cx)
-                .into_any_element();
+            return None;
         }
 
-        let focus_handle = workspace
-            .upgrade()
-            .map(|w| w.read(cx).focus_handle(cx))
-            .unwrap_or_else(|| cx.focus_handle());
-
-        let window_project_groups: Vec<_> = self
-            .multi_workspace
-            .as_ref()
-            .and_then(|mw| mw.upgrade())
-            .map(|mw| mw.read(cx).project_group_keys())
-            .unwrap_or_default();
-
-        PopoverMenu::new("recent-projects-menu")
-            .menu(move |window, cx| {
-                Some(recent_projects::RecentProjects::popover(
-                    workspace.clone(),
-                    window_project_groups.clone(),
-                    None,
-                    focus_handle.clone(),
-                    window,
-                    cx,
-                ))
-            })
-            .trigger_with_tooltip(
-                project_name_trigger(display_name, is_project_selected, cx),
-                move |_window, cx| {
-                    Tooltip::for_action("Recent Projects", &zed_actions::OpenRecent::default(), cx)
-                },
-            )
-            .anchor(gpui::Anchor::TopLeft)
-            .into_any_element()
-    }
-
-    fn render_recent_projects_popover(
-        &self,
-        display_name: String,
-        is_project_selected: bool,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
         let workspace = self.workspace.clone();
-
         let focus_handle = workspace
             .upgrade()
             .map(|w| w.read(cx).focus_handle(cx))
             .unwrap_or_else(|| cx.focus_handle());
-
-        let window_project_groups: Vec<_> = self
-            .multi_workspace
-            .as_ref()
-            .and_then(|mw| mw.upgrade())
+        let window_project_groups: Vec<_> = multi_workspace
             .map(|mw| mw.read(cx).project_group_keys())
             .unwrap_or_default();
 
-        PopoverMenu::new("sidebar-title-recent-projects-menu")
-            .menu(move |window, cx| {
-                Some(recent_projects::RecentProjects::popover(
-                    workspace.clone(),
-                    window_project_groups.clone(),
-                    None,
-                    focus_handle.clone(),
-                    window,
-                    cx,
-                ))
-            })
-            .trigger_with_tooltip(
-                project_name_trigger(display_name, is_project_selected, cx),
-                move |_window, cx| {
-                    Tooltip::for_action("Recent Projects", &zed_actions::OpenRecent::default(), cx)
-                },
-            )
-            .anchor(gpui::Anchor::TopLeft)
+        let display_name = name.map(|name| {
+            SharedString::from(util::truncate_and_trailoff(&name, MAX_PROJECT_NAME_LENGTH))
+        });
+        let is_open = self.project_selector_handle.is_deployed();
+
+        Some(
+            PopoverMenu::new("recent-projects-menu")
+                .with_handle(self.project_selector_handle.clone())
+                .menu(move |window, cx| {
+                    Some(recent_projects::RecentProjects::popover(
+                        workspace.clone(),
+                        window_project_groups.clone(),
+                        None,
+                        focus_handle.clone(),
+                        window,
+                        cx,
+                    ))
+                })
+                .trigger(
+                    recent_projects::project_selector(
+                        "project-selector",
+                        display_name,
+                        None,
+                        is_open,
+                        true,
+                        cx,
+                    )
+                    .w(px(220.)),
+                )
+                .anchor(gpui::Anchor::TopLeft),
+        )
     }
 
     fn active_call_changed(&mut self, cx: &mut Context<Self>) {

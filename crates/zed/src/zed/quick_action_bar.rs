@@ -12,8 +12,8 @@ use editor::code_context_menus::{CodeContextMenu, ContextMenuOrigin};
 use editor::{Editor, EditorSettings};
 use gpui::{
     Action, Anchor, AnchoredPositionMode, ClickEvent, Context, ElementId, Entity, EventEmitter,
-    FocusHandle, Focusable, InteractiveElement, ParentElement, Render, Styled, Subscription,
-    WeakEntity, Window, anchored, deferred, point,
+    FocusHandle, Focusable, InteractiveElement, ParentElement, Render, Subscription, WeakEntity,
+    Window, anchored, deferred, point,
 };
 use project::{
     DisableAiSettings,
@@ -22,8 +22,8 @@ use project::{
 use search::{BufferSearchBar, buffer_search};
 use settings::{GitDiffBaseSetting, Settings, SettingsStore, update_settings_file};
 use ui::{
-    ButtonStyle, ContextMenu, ContextMenuEntry, DocumentationSide, IconButton, IconName, IconSize,
-    PopoverMenu, PopoverMenuHandle, Tooltip, prelude::*,
+    ButtonStyle, ContextMenu, ContextMenuEntry, DocumentationSide, IconName, PopoverMenu,
+    PopoverMenuHandle, Tooltip, button_row, group_icon_button, prelude::*,
 };
 use vim_mode_setting::{HelixModeSetting, VimModeSetting};
 use workspace::item::ItemBufferKind;
@@ -191,8 +191,7 @@ impl Render for QuickActionBar {
                 .flatten();
             v_flex()
                 .child(
-                    IconButton::new("toggle_code_actions_icon", IconName::BoltOutlined)
-                        .icon_size(IconSize::Small)
+                    group_icon_button("toggle_code_actions_icon", IconName::BoltOutlined, 24.0)
                         .style(ButtonStyle::Subtle)
                         .disabled(!has_available_code_actions)
                         .toggle_state(is_deployed)
@@ -257,8 +256,7 @@ impl Render for QuickActionBar {
 
             PopoverMenu::new("editor-selections-dropdown")
                 .trigger_with_tooltip(
-                    IconButton::new("toggle_editor_selections_icon", IconName::CursorIBeam)
-                        .icon_size(IconSize::Small)
+                    group_icon_button("toggle_editor_selections_icon", IconName::CursorIBeam, 24.0)
                         .style(ButtonStyle::Subtle)
                         .toggle_state(self.toggle_selections_handle.is_deployed()),
                     Tooltip::text("Selection Controls"),
@@ -336,8 +334,8 @@ impl Render for QuickActionBar {
 
             PopoverMenu::new("editor-settings")
                 .trigger_with_tooltip(
-                    IconButton::new("toggle_editor_settings_icon", IconName::Filter)
-                        .icon_size(IconSize::Small)
+                    group_icon_button("toggle_editor_settings_icon", IconName::Filter, 24.0)
+                        .style(ButtonStyle::Subtle)
                         .toggle_state(self.toggle_settings_handle.is_deployed()),
                     Tooltip::text("Editor Controls"),
                 )
@@ -703,19 +701,19 @@ impl Render for QuickActionBar {
                 })
         };
 
-        h_flex()
-            .id("quick action bar")
-            .gap(DynamicSpacing::Base01.rems(cx))
-            .children(self.render_repl_menu(cx))
-            .children(self.render_preview_button(cx))
-            .children(search_button)
-            .when(
-                AgentSettings::get_global(cx).enabled(cx) && AgentSettings::get_global(cx).button,
-                |bar| bar.child(assistant_button),
-            )
-            .children(code_actions_dropdown)
-            .children(editor_selections_dropdown)
-            .child(editor_settings_dropdown)
+        let show_assistant_button =
+            AgentSettings::get_global(cx).enabled(cx) && AgentSettings::get_global(cx).button;
+        let tools = self
+            .render_repl_menu(cx)
+            .into_iter()
+            .chain(self.render_preview_button(cx))
+            .chain(search_button.map(IntoElement::into_any_element))
+            .chain(show_assistant_button.then(|| assistant_button.into_any_element()))
+            .chain(code_actions_dropdown.map(IntoElement::into_any_element))
+            .chain(editor_selections_dropdown.map(IntoElement::into_any_element))
+            .chain([editor_settings_dropdown.into_any_element()]);
+
+        button_row(tools, cx).id("quick action bar")
     }
 }
 
@@ -759,8 +757,7 @@ impl RenderOnce for QuickActionBarButton {
         let tooltip = self.tooltip.clone();
         let action = self.action.boxed_clone();
 
-        IconButton::new(self.id.clone(), self.icon)
-            .icon_size(IconSize::Small)
+        group_icon_button(self.id.clone(), self.icon, 24.0)
             .style(ButtonStyle::Subtle)
             .toggle_state(self.toggled)
             .tooltip(move |_window, cx| {

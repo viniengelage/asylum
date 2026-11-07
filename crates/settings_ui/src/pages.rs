@@ -9,6 +9,7 @@ mod sandbox_settings;
 mod skill_creator;
 mod skills_setup;
 mod tool_permissions_setup;
+mod toolkit_page;
 
 pub(crate) use audio_input_output_setup::{
     render_input_audio_device_dropdown, render_output_audio_device_dropdown,
@@ -34,6 +35,7 @@ pub use skill_creator::{SkillCreatorOpenMode, SubcommandTarget};
 pub(crate) use skills_setup::displayed_skills;
 pub(crate) use skills_setup::render_skills_setup_page;
 pub(crate) use tool_permissions_setup::render_tool_permissions_setup_page;
+pub(crate) use toolkit_page::render_toolkit_page;
 
 pub use tool_permissions_setup::{
     render_copy_path_tool_config, render_create_directory_tool_config,

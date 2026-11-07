@@ -1,136 +1,158 @@
-//! Loopback OAuth 2.0 callback server and shared HTML response page.
-//!
-//! Used by Zed's OAuth-based sign-in flows (e.g. MCP servers, ChatGPT
-//! Subscription) to receive the authorization code redirect from the user's
-//! browser. The HTML response page rendered to the browser is kept alongside
-//! the server so all OAuth callback presentation lives in one place.
+//! Loopback OAuth 2.0 callback server and the HTML page the browser shows after authorizing.
 
-/// Generate a styled HTML page for OAuth callback responses.
-///
-/// Returns a complete HTML document (no HTTP headers) with a centered card
-/// layout styled to match Zed's dark theme. The `title` is rendered as a
-/// heading and `message` as body text below it.
-///
-/// When `is_error` is true, a red X icon is shown instead of the green
-/// checkmark.
-pub fn oauth_callback_page(title: &str, message: &str, is_error: bool) -> String {
-    let title = html_escape(title);
-    let message = html_escape(message);
-    let (icon_bg, icon_svg) = if is_error {
-        (
-            "#f38ba8",
-            r#"<svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>"#,
-        )
-    } else {
-        (
-            "#a6e3a1",
-            r#"<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>"#,
-        )
-    };
-    format!(
-        r#"<!DOCTYPE html>
-<html lang="en">
+#[cfg(not(target_family = "wasm"))]
+mod server {
+    use anyhow::{Context as _, Result, anyhow};
+    use i18n::t;
+    use std::str::FromStr;
+    use std::time::Duration;
+    use url::Url;
+
+    enum CallbackOutcome<'a> {
+        Success,
+        Failure { detail: &'a str },
+    }
+
+    // The browser renders this outside the app, so the Polar v2 values are CSS literals
+    // rather than theme tokens.
+    fn oauth_callback_page(outcome: CallbackOutcome) -> String {
+        let lang = i18n::current_language().code();
+        let (tile_class, tile_svg, title, body, detail) = match outcome {
+            CallbackOutcome::Success => (
+                "tile success",
+                r#"<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>"#,
+                t!("oauth_callback.success.title"),
+                t!("oauth_callback.success.body").to_string(),
+                String::new(),
+            ),
+            CallbackOutcome::Failure { detail } => (
+                "tile failure",
+                r#"<svg viewBox="0 0 24 24"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>"#,
+                t!("oauth_callback.failure.title"),
+                t!("oauth_callback.failure.body").to_string(),
+                format!(r#"<div class="detail">{}</div>"#, html_escape(detail)),
+            ),
+        };
+        let title = html_escape(&title);
+        let body = html_escape(&body);
+        format!(
+            r#"<!DOCTYPE html>
+<html lang="{lang}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{title} — Zed</title>
+<title>{title} — Asylum</title>
 <style>
   * {{ margin: 0; padding: 0; box-sizing: border-box; }}
   body {{
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-    background: #1e1e2e;
-    color: #cdd6f4;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Ubuntu, sans-serif;
+    background: #060509;
+    color: #edeaf5;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
+    gap: 20px;
     min-height: 100vh;
-    padding: 1rem;
+    padding: 16px;
   }}
   .card {{
-    background: #313244;
-    border-radius: 12px;
-    padding: 2.5rem;
-    max-width: 420px;
-    width: 100%;
+    background: #100e17;
+    border: 1px solid #ffffff0f;
+    border-radius: 16px;
+    padding: 28px 32px;
+    width: 340px;
+    max-width: 100%;
     text-align: center;
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
   }}
-  .icon {{
-    width: 48px;
-    height: 48px;
-    margin: 0 auto 1.5rem;
-    background: {icon_bg};
-    border-radius: 50%;
+  .tile {{
+    width: 44px;
+    height: 44px;
+    margin: 0 auto 18px;
+    border-radius: 12px;
     display: flex;
     align-items: center;
     justify-content: center;
   }}
-  .icon svg {{
-    width: 24px;
-    height: 24px;
-    stroke: #1e1e2e;
-    stroke-width: 3;
+  .tile svg {{
+    width: 22px;
+    height: 22px;
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
     fill: none;
   }}
+  .tile.success {{ background: rgba(190, 242, 100, 0.12); }}
+  .tile.success svg {{ stroke: #bef264; }}
+  .tile.failure {{ background: rgba(251, 113, 133, 0.12); }}
+  .tile.failure svg {{ stroke: #fb7185; }}
   h1 {{
-    font-size: 1.25rem;
+    font-size: 17px;
     font-weight: 600;
-    margin-bottom: 0.75rem;
-    color: #cdd6f4;
+    margin-bottom: 8px;
+    color: #edeaf5;
   }}
   p {{
-    font-size: 0.925rem;
+    font-size: 13px;
     line-height: 1.5;
-    color: #a6adc8;
+    color: #9c96ae;
+  }}
+  .detail {{
+    margin-top: 16px;
+    padding: 10px 12px;
+    font-family: ui-monospace, 'IBM Plex Mono', Menlo, monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #edeaf5;
+    text-align: left;
+    word-break: break-word;
+    background: rgba(251, 113, 133, 0.06);
+    border: 1px solid rgba(251, 113, 133, 0.20);
+    border-radius: 8px;
   }}
   .brand {{
-    margin-top: 1.5rem;
-    font-size: 0.8rem;
-    color: #585b70;
-    letter-spacing: 0.05em;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #9c96ae;
+  }}
+  .brand .dot {{
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #7c3aed;
   }}
 </style>
 </head>
 <body>
 <div class="card">
-  <div class="icon">
-    {icon_svg}
-  </div>
+  <div class="{tile_class}">{tile_svg}</div>
   <h1>{title}</h1>
-  <p>{message}</p>
-  <div class="brand">Zed</div>
+  <p>{body}</p>
+  {detail}
 </div>
+<div class="brand"><span class="dot"></span>Asylum</div>
 </body>
-</html>"#,
-        title = title,
-        message = message,
-        icon_bg = icon_bg,
-        icon_svg = icon_svg,
-    )
-}
-
-fn html_escape(input: &str) -> String {
-    let mut output = String::with_capacity(input.len());
-    for ch in input.chars() {
-        match ch {
-            '&' => output.push_str("&amp;"),
-            '<' => output.push_str("&lt;"),
-            '>' => output.push_str("&gt;"),
-            '"' => output.push_str("&quot;"),
-            '\'' => output.push_str("&#x27;"),
-            _ => output.push(ch),
-        }
+</html>"#
+        )
     }
-    output
-}
 
-#[cfg(not(target_family = "wasm"))]
-mod server {
-    use super::oauth_callback_page;
-    use anyhow::{Context as _, Result, anyhow};
-    use std::str::FromStr;
-    use std::time::Duration;
-    use url::Url;
+    fn html_escape(input: &str) -> String {
+        let mut output = String::with_capacity(input.len());
+        for ch in input.chars() {
+            match ch {
+                '&' => output.push_str("&amp;"),
+                '<' => output.push_str("&lt;"),
+                '>' => output.push_str("&gt;"),
+                '"' => output.push_str("&quot;"),
+                '\'' => output.push_str("&#x27;"),
+                _ => output.push(ch),
+            }
+        }
+        output
+    }
 
     /// Parsed OAuth callback parameters from the authorization server redirect.
     pub struct OAuthCallbackParams {
@@ -306,21 +328,15 @@ mod server {
                 let (status_code, body) = match &result {
                     Ok(_) => (
                         200,
-                        oauth_callback_page(
-                            "Authorization Successful",
-                            "You can close this tab and return to Asylum.",
-                            false,
-                        ),
+                        oauth_callback_page(CallbackOutcome::Success),
                     ),
                     Err(err) => {
                         log::error!("OAuth callback error: {}", err);
                         (
                             400,
-                            oauth_callback_page(
-                                "Authorization Failed",
-                                "Something went wrong. Please try again from Asylum.",
-                                true,
-                            ),
+                            oauth_callback_page(CallbackOutcome::Failure {
+                                detail: &format!("{err}"),
+                            }),
                         )
                     }
                 };
@@ -328,7 +344,7 @@ mod server {
                 let response = tiny_http::Response::from_string(body)
                     .with_status_code(status_code)
                     .with_header(
-                        tiny_http::Header::from_str("Content-Type: text/html")
+                        tiny_http::Header::from_str("Content-Type: text/html; charset=utf-8")
                             .expect("failed to construct response header"),
                     )
                     .with_header(

@@ -5,7 +5,7 @@ use collections::HashMap;
 use editor::{Editor, MultiBufferOffset, SelectionEffects, scroll::Autoscroll};
 use gpui::{
     AsyncWindowContext, Entity, FocusHandle, Focusable as _, ReadGlobal as _, ScrollHandle,
-    WeakEntity, WindowHandle, prelude::*,
+    WeakEntity, prelude::*,
 };
 use itertools::Itertools as _;
 use project::agent_server_store::{AgentId, AgentServerStore, ExternalAgentSource};
@@ -17,7 +17,7 @@ use ui::{
     Divider, PopoverMenu, Tooltip, prelude::*,
 };
 use util::ResultExt as _;
-use workspace::{MultiWorkspace, Workspace, create_and_open_local_file};
+use workspace::{Workspace, create_and_open_local_file};
 
 use crate::SettingsWindow;
 
@@ -272,7 +272,6 @@ pub(crate) fn render_add_agent_popover(
     window: &mut Window,
     cx: &mut Context<SettingsWindow>,
 ) -> impl IntoElement {
-    let original_window = settings_window.original_window;
     // Stable handle so the button keeps focus state across renders and can show a
     // focus ring even when the page is opened (and the button auto-focused) via a
     // mouse click, where `focus_visible` styling is suppressed.
@@ -306,16 +305,8 @@ pub(crate) fn render_add_agent_popover(
                 menu.entry(
                     i18n::translate_text("settings_ui_text", "Install from Registry"),
                     None,
-                    move |_window, cx| {
-                        if let Some(original_window) = original_window {
-                            cx.activate(true);
-                            original_window
-                                .update(cx, |_, window, cx| {
-                                    window.activate_window();
-                                    window.dispatch_action(Box::new(zed_actions::AcpRegistry), cx);
-                                })
-                                .log_err();
-                        }
+                    move |window, cx| {
+                        window.dispatch_action(Box::new(zed_actions::AcpRegistry), cx);
                     },
                 )
                 .entry(
@@ -933,23 +924,20 @@ fn collect_kv(
 // Retained for an upcoming "Edit in settings.json" affordance that jumps the
 // user to the relevant `agent_servers` entry. Not currently wired to any UI.
 
-/// Opens the user's `settings.json` in the original (editor) window, inserts a
-/// scaffold `agent_servers` entry, and selects its name so the user can fill in
-/// the executable path.
+/// Opens the user's `settings.json` in the workspace that holds the settings tab, inserts a
+/// scaffold `agent_servers` entry, and selects its name so the user can fill in the executable
+/// path.
 #[allow(dead_code)]
-fn open_new_custom_agent_in_settings(original_window: WindowHandle<MultiWorkspace>, cx: &mut App) {
-    cx.activate(true);
-    original_window
-        .update(cx, |multi_workspace, window, cx| {
-            let workspace = multi_workspace.workspace().downgrade();
-            window.activate_window();
-            window
-                .spawn(cx, async move |cx| {
-                    add_custom_agent_settings_entry(workspace, cx).await
-                })
-                .detach_and_log_err(cx);
+fn open_new_custom_agent_in_settings(
+    workspace: WeakEntity<Workspace>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    window
+        .spawn(cx, async move |cx| {
+            add_custom_agent_settings_entry(workspace, cx).await
         })
-        .log_err();
+        .detach_and_log_err(cx);
 }
 
 #[allow(dead_code)]

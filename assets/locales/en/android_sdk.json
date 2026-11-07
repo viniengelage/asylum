@@ -79,7 +79,7 @@
   "prepare.step_disk_checked": "Disk space checked",
   "prepare.step_download_component": "Downloading {component}",
   "prepare.step_download_image": "Downloading system image",
-  "prepare.step_first_boot": "First boot",
+  "prepare.step_first_boot": "First start",
   "prepare.step_licenses": "SDK licenses accepted",
   "prepare.step_wipe_and_apply": "Wiping the data and applying the settings",
   "prepare.title_create": "Creating {name}",

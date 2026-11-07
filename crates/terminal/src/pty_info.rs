@@ -70,6 +70,8 @@ pub(crate) struct ProcessInfo {
     pub(crate) name: String,
     pub(crate) cwd: PathBuf,
     pub(crate) argv: Vec<String>,
+    pub(crate) is_shell: bool,
+    pub(crate) shell_name: Option<String>,
 }
 
 /// Fetches Zed-relevant Pseudo-Terminal (PTY) process information
@@ -177,15 +179,28 @@ impl PtyProcessInfo {
     fn load(&self) -> Option<ProcessInfo> {
         let process = self.refresh()?;
         let cwd = process.cwd().map_or(PathBuf::new(), |p| p.to_owned());
+        let is_shell = process.pid() == self.pid_getter.fallback_pid();
+        let name = process.name().to_str()?.to_owned();
+        let argv = process
+            .cmd()
+            .iter()
+            .filter_map(|s| s.to_str().map(ToOwned::to_owned))
+            .collect();
+        drop(process);
+        // Login shells report their name with a leading dash, e.g. `-zsh`.
+        let shell_name = self.get_child().and_then(|shell| {
+            shell
+                .name()
+                .to_str()
+                .map(|name| name.trim_start_matches('-').to_owned())
+        });
 
         let info = ProcessInfo {
-            name: process.name().to_str()?.to_owned(),
+            name,
             cwd,
-            argv: process
-                .cmd()
-                .iter()
-                .filter_map(|s| s.to_str().map(ToOwned::to_owned))
-                .collect(),
+            argv,
+            is_shell,
+            shell_name,
         };
         *self.current.write() = Some(info.clone());
         Some(info)
@@ -207,7 +222,12 @@ impl PtyProcessInfo {
             let current = this.load();
             let has_changed = match (previous.as_ref(), current.as_ref()) {
                 (None, None) => false,
-                (Some(prev), Some(now)) => prev.cwd != now.cwd || prev.name != now.name,
+                (Some(prev), Some(now)) => {
+                    prev.cwd != now.cwd
+                        || prev.name != now.name
+                        || prev.argv != now.argv
+                        || prev.is_shell != now.is_shell
+                }
                 _ => true,
             };
             if has_changed {

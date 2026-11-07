@@ -10,9 +10,9 @@ use editor::{
 };
 use gpui::{
     Action, AnyElement, App, ClipboardEntry, Corners, DismissEvent, Entity, EventEmitter,
-    ExternalPaths, FocusHandle, Focusable, Font, KeyContext, KeyDownEvent, Keystroke, MouseButton,
-    MouseDownEvent, Pixels, Point as GpuiPoint, Rems, Render, ScrollEvent, Styled, Subscription,
-    Task, TaskExt, WeakEntity, actions, anchored, deferred, div,
+    ExternalPaths, FocusHandle, Focusable, Font, FontWeight, KeyContext, KeyDownEvent, Keystroke,
+    MouseButton, MouseDownEvent, Pixels, Point as GpuiPoint, Rems, Render, ScrollEvent, Styled,
+    Subscription, Task, TaskExt, WeakEntity, actions, anchored, deferred, div,
 };
 use menu;
 use persistence::TerminalDb;
@@ -44,11 +44,11 @@ use terminal_panel::TerminalPanel;
 use terminal_path_like_target::{hover_path_like_target, open_path_like_target};
 use terminal_scrollbar::TerminalScrollHandle;
 use ui::{
-    ContextMenu, Divider, ScrollAxes, Scrollbars, Tooltip, WithScrollbar,
+    ContextMenu, Divider, Indicator, ScrollAxes, Scrollbars, Tooltip, WithScrollbar,
     prelude::*,
     scrollbars::{self, ScrollbarVisibility},
 };
-use util::ResultExt;
+use util::{ResultExt, truncate_and_trailoff};
 use workspace::{
     CloseActiveItem, DraggedSelection, DraggedTab, NewCenterTerminal, NewTerminal, Pane,
     ToolbarItemLocation, Workspace, WorkspaceId, delete_unloaded_items,
@@ -1388,6 +1388,36 @@ impl ScrollbarVisibility for TerminalScrollbarSettingsWrapper {
 }
 
 impl TerminalView {
+    fn tab_title(&self, truncate: bool, cx: &App) -> String {
+        const TITLE_MAX_CHARS: usize = 25;
+        if let Some(custom_title) = self
+            .custom_title
+            .as_ref()
+            .filter(|title| !title.trim().is_empty())
+        {
+            return custom_title.clone();
+        }
+        let terminal = self.terminal().read(cx);
+        if terminal.task().is_some() || terminal.title_override().is_some() {
+            return terminal.title(truncate);
+        }
+        terminal
+            .running_foreground_command()
+            .or_else(|| {
+                terminal.working_directory().and_then(|directory| {
+                    Some(directory.file_name()?.to_string_lossy().into_owned())
+                })
+            })
+            .map(|title| {
+                if truncate {
+                    truncate_and_trailoff(&title, TITLE_MAX_CHARS)
+                } else {
+                    title
+                }
+            })
+            .unwrap_or_else(|| terminal.title(truncate))
+    }
+
     /// Attempts to process a keystroke in the terminal. Returns true if handled.
     ///
     /// In vi mode, explicitly triggers a re-render because vi navigation (like j/k)
@@ -1637,12 +1667,13 @@ impl Item for TerminalView {
 
     fn tab_content(&self, params: TabContentParams, _window: &Window, cx: &App) -> AnyElement {
         let terminal = self.terminal().read(cx);
-        let title = self
-            .custom_title
-            .as_ref()
-            .filter(|title| !title.trim().is_empty())
-            .cloned()
-            .unwrap_or_else(|| terminal.title(true));
+        let has_task = terminal.task().is_some();
+        let title = self.tab_title(true, cx);
+        let shell_name = if has_task {
+            None
+        } else {
+            terminal.shell_name()
+        };
 
         let (icon, icon_color, rerun_button) = match terminal.task() {
             Some(terminal_task) => match &terminal_task.status {
@@ -1676,10 +1707,6 @@ impl Item for TerminalView {
                 None,
             ),
         };
-        let task_is_running = terminal
-            .task()
-            .is_some_and(|task| task.status == TaskStatus::Running);
-
         let self_handle = self.self_handle.clone();
         h_flex()
             .gap_1()
@@ -1717,6 +1744,7 @@ impl Item for TerminalView {
                     .child(
                         Label::new(title)
                             .single_line()
+                            .weight(FontWeight::MEDIUM)
                             .color(params.text_color())
                             .when(self.is_renaming(), |this| this.alpha(0.)),
                     )
@@ -1747,24 +1775,28 @@ impl Item for TerminalView {
                         )
                     }),
             )
-            .when(task_is_running, |this| {
+            .when_some(shell_name, |this, shell_name| {
                 this.child(
-                    div()
-                        .flex_none()
-                        .size(px(6.))
-                        .rounded_full()
-                        .bg(Color::Success.color(cx)),
+                    Label::new(shell_name)
+                        .single_line()
+                        .color(Color::Muted)
+                        .size(LabelSize::Small),
                 )
             })
             .into_any()
     }
 
-    fn tab_content_text(&self, detail: usize, cx: &App) -> SharedString {
-        if let Some(custom_title) = self.custom_title.as_ref().filter(|l| !l.trim().is_empty()) {
-            return custom_title.clone().into();
-        }
+    fn tab_indicator(&self, cx: &App) -> Option<AnyElement> {
         let terminal = self.terminal().read(cx);
-        terminal.title(detail == 0).into()
+        let is_running = match terminal.task() {
+            Some(task) => task.status == TaskStatus::Running,
+            None => terminal.running_foreground_command().is_some(),
+        };
+        is_running.then(|| Indicator::dot().color(Color::Success).into_any_element())
+    }
+
+    fn tab_content_text(&self, detail: usize, cx: &App) -> SharedString {
+        self.tab_title(detail == 0, cx).into()
     }
 
     fn telemetry_event_text(&self) -> Option<&'static str> {

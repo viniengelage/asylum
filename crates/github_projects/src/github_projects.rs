@@ -925,8 +925,7 @@ impl StatusItemView for ProjectsToolkitButton {
             .is_some_and(|workspace| panel_is_visible(workspace.read(cx), cx));
         let workspace = self.workspace.clone();
         Some(ToolkitEntry {
-            icon: IconName::Blocks,
-            label: t!("github_projects.dock.title"),
+            id: task_agents::toolkit_ids::GITHUB_PROJECTS,
             is_open,
             action: Box::new(ToggleFocus),
             toggle: Rc::new(move |window, cx| {

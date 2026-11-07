@@ -415,8 +415,7 @@ impl StatusItemView for DatabaseToolkitButton {
             .is_some_and(|workspace| panel_is_visible(workspace.read(cx), cx));
         let workspace = self.workspace.clone();
         Some(ToolkitEntry {
-            icon: IconName::Database,
-            label: t!("database_client.toolkit.name"),
+            id: task_agents::toolkit_ids::DATABASE,
             is_open,
             action: Box::new(ToggleFocus),
             toggle: Rc::new(move |window, cx| {

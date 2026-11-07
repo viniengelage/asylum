@@ -203,6 +203,12 @@ pub trait Item: Focusable + EventEmitter<Self::Event> + Render + Sized {
         None
     }
 
+    /// A status mark shown in the tab's close slot until the pointer reaches the tab; falls back
+    /// to the dirty/conflict dot.
+    fn tab_indicator(&self, _cx: &App) -> Option<AnyElement> {
+        None
+    }
+
     /// Returns the tab tooltip content.
     ///
     /// By default this returns a Tooltip text from
@@ -361,15 +367,6 @@ pub trait Item: Focusable + EventEmitter<Self::Event> + Render + Sized {
         None
     }
 
-    /// Returns optional elements to render to the left of the breadcrumb.
-    fn breadcrumb_prefix(
-        &self,
-        _window: &mut Window,
-        _cx: &mut Context<Self>,
-    ) -> Option<gpui::AnyElement> {
-        None
-    }
-
     fn added_to_workspace(
         &mut self,
         _workspace: &mut Workspace,
@@ -507,6 +504,7 @@ pub trait ItemHandle: 'static + Send {
     fn tab_icon(&self, window: &Window, cx: &App) -> Option<Icon>;
     fn tab_tooltip_text(&self, cx: &App) -> Option<SharedString>;
     fn tab_tooltip_content(&self, cx: &App) -> Option<TabTooltipContent>;
+    fn tab_indicator(&self, cx: &App) -> Option<AnyElement>;
     fn telemetry_event_text(&self, cx: &App) -> Option<&'static str>;
     fn dragged_tab_content(
         &self,
@@ -585,7 +583,6 @@ pub trait ItemHandle: 'static + Send {
     fn to_searchable_item_handle(&self, cx: &App) -> Option<Box<dyn SearchableItemHandle>>;
     fn breadcrumb_location(&self, cx: &App) -> ToolbarItemLocation;
     fn breadcrumbs(&self, cx: &App) -> Option<(Vec<HighlightedText>, Option<Font>)>;
-    fn breadcrumb_prefix(&self, window: &mut Window, cx: &mut App) -> Option<gpui::AnyElement>;
     fn show_toolbar(&self, cx: &App) -> bool;
     fn content_background(&self, cx: &App) -> Option<Hsla>;
     fn pixel_position_of_cursor(&self, cx: &App) -> Option<Point<Pixels>>;
@@ -666,6 +663,10 @@ impl<T: Item> ItemHandle for Entity<T> {
 
     fn tab_tooltip_content(&self, cx: &App) -> Option<TabTooltipContent> {
         self.read(cx).tab_tooltip_content(cx)
+    }
+
+    fn tab_indicator(&self, cx: &App) -> Option<AnyElement> {
+        self.read(cx).tab_indicator(cx)
     }
 
     fn tab_tooltip_text(&self, cx: &App) -> Option<SharedString> {
@@ -1151,10 +1152,6 @@ impl<T: Item> ItemHandle for Entity<T> {
 
     fn breadcrumbs(&self, cx: &App) -> Option<(Vec<HighlightedText>, Option<Font>)> {
         self.read(cx).breadcrumbs(cx)
-    }
-
-    fn breadcrumb_prefix(&self, window: &mut Window, cx: &mut App) -> Option<gpui::AnyElement> {
-        self.update(cx, |item, cx| item.breadcrumb_prefix(window, cx))
     }
 
     fn show_toolbar(&self, cx: &App) -> bool {

@@ -78,8 +78,7 @@ impl StatusItemView for ToolboxButton {
             .is_some_and(|workspace| panel_is_visible::<JsonPrettierPanel>(workspace.read(cx), cx));
         let workspace = self.workspace.clone();
         Some(ToolkitEntry {
-            icon: IconName::Json,
-            label: "JSON Prettier".into(),
+            id: workspace::toolkit_ids::JSON_PRETTIER,
             is_open,
             action: Box::new(OpenJsonPrettier),
             toggle: Rc::new(move |window, cx| {

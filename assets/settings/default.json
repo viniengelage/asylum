@@ -115,6 +115,12 @@
     // The unit for image file sizes: "binary" (KiB, MiB) or decimal (KB, MB)
     "unit": "binary",
   },
+  // Design viewer (.fig) settings
+  "design": {
+    // What the canvas behind the screens is painted with: "theme" (the app's own surface)
+    // or "document" (the page color set in the file)
+    "canvas_background": "theme",
+  },
   // Markdown preview settings
   "markdown_preview": {
     // The default font size for the markdown preview. Falls back to the UI font size if unset.
@@ -1613,7 +1619,7 @@
     // One of: ["right", "left"]
     "close_position": "right",
     // Whether to show the file icon for a tab.
-    "file_icons": false,
+    "file_icons": true,
     // Controls the appearance behavior of the tab's close button.
     //
     // 1. Show it just upon hovering the tab. (default)
@@ -2150,6 +2156,13 @@
     // If the input has a timeout, a countdown is shown and hovering pauses it.
     // Its binding preview popover is disabled when "which_key.enabled" is true.
     "pending_keystrokes_indicator": true,
+  },
+  // The developer tools in the status bar.
+  "toolkit": {
+    // "menu" shows one toolbox button with a menu; "inline" shows a button per toolkit.
+    "display": "menu",
+    // Ids of the toolkits left out of the status bar. They stay in the command palette.
+    "hidden": [],
   },
   // Settings specific to the terminal
   "terminal": {

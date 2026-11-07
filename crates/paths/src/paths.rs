@@ -789,6 +789,12 @@ pub fn devcontainer_dir() -> &'static PathBuf {
     DEVCONTAINER_DIR.get_or_init(|| data_dir().join("devcontainer"))
 }
 
+/// Returns the path to the cache of HTML pages converted from design files.
+pub fn design_cache_dir() -> &'static PathBuf {
+    static DESIGN_CACHE_DIR: OnceLock<PathBuf> = OnceLock::new();
+    DESIGN_CACHE_DIR.get_or_init(|| temp_dir().join("design"))
+}
+
 /// Returns the relative path to a `.zed` folder within a project.
 pub fn local_settings_folder_name() -> &'static str {
     ".zed"

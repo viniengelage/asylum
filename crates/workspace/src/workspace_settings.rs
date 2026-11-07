@@ -7,7 +7,7 @@ use serde::Deserialize;
 pub use settings::{
     AutosaveSetting, BottomDockLayout, EncodingDisplayOptions, InactiveOpacity,
     PaneSplitDirectionHorizontal, PaneSplitDirectionVertical, RegisterSetting,
-    RestoreOnStartupBehavior, Settings,
+    RestoreOnStartupBehavior, Settings, ToolkitDisplay,
 };
 use settings::{CommandAliasTarget, SettingsStore};
 
@@ -248,6 +248,22 @@ impl Settings for StatusBarSettings {
             line_endings_button: status_bar.line_endings_button.unwrap(),
             active_encoding_button: status_bar.active_encoding_button.unwrap(),
             pending_keystrokes_indicator: status_bar.pending_keystrokes_indicator.unwrap(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, RegisterSetting)]
+pub struct ToolkitSettings {
+    pub display: ToolkitDisplay,
+    pub hidden: collections::HashSet<std::sync::Arc<str>>,
+}
+
+impl Settings for ToolkitSettings {
+    fn from_settings(content: &settings::SettingsContent) -> Self {
+        let toolkit = content.toolkit.clone().unwrap();
+        ToolkitSettings {
+            display: toolkit.display.unwrap(),
+            hidden: toolkit.hidden.unwrap().into_iter().collect(),
         }
     }
 }

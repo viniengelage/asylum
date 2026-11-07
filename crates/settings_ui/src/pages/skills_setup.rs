@@ -408,26 +408,21 @@ fn render_skill_row(
         .into_any_element()
 }
 
-/// Opens `path` in the workspace the settings window was opened from and
-/// closes the settings window.
+/// Opens `path` in the workspace that holds the settings tab.
 fn open_in_original_workspace(
     settings_window: &SettingsWindow,
     path: std::path::PathBuf,
     window: &mut Window,
     cx: &mut Context<SettingsWindow>,
 ) {
-    let Some(original_window) = settings_window.original_window else {
-        return;
-    };
-    original_window
-        .update(cx, |multi_workspace, original_window, cx| {
-            let workspace = multi_workspace.workspace().clone();
-            workspace.update(cx, |workspace, cx| {
+    let workspace = settings_window.workspace.clone();
+    window.defer(cx, move |window, cx| {
+        workspace
+            .update(cx, |workspace, cx| {
                 workspace
-                    .open_abs_path(path, Default::default(), original_window, cx)
+                    .open_abs_path(path, Default::default(), window, cx)
                     .detach_and_log_err(cx);
-            });
-        })
-        .log_err();
-    window.remove_window();
+            })
+            .log_err();
+    });
 }
