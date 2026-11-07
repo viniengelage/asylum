@@ -54,6 +54,7 @@ use settings::{BaseKeymap, Settings, SettingsStore, watch_config_file};
 use smol::future::poll_once;
 use std::{
     cell::RefCell,
+    collections::HashSet,
     env,
     io::{self, IsTerminal},
     path::{Path, PathBuf},
@@ -1582,6 +1583,80 @@ async fn installation_id(db: KeyValueStore) -> Result<IdType> {
 }
 
 pub(crate) async fn restore_or_create_workspace(
+    app_state: Arc<AppState>,
+    cx: &mut AsyncApp,
+) -> Result<()> {
+    let launch_folders = cx
+        .background_spawn(async { zed::app_profiles::launch_folders() })
+        .await;
+    if launch_folders.is_empty() {
+        return restore_session_or_create_workspace(app_state, cx).await;
+    }
+    // The profile names the folders it starts in: restore whatever else the last session
+    // had, then open those folders, instead of the empty window a launch without a session
+    // would otherwise show.
+    if restorable_workspace_locations(cx, &app_state)
+        .await
+        .is_some()
+    {
+        restore_session_or_create_workspace(app_state.clone(), cx).await?;
+    }
+    open_launch_folders(launch_folders, app_state, cx).await
+}
+
+/// Opens each of the profile's launch folders that no window has open yet. One call per
+/// folder, so each becomes its own project in the window's sidebar rather than one project
+/// with several roots.
+async fn open_launch_folders(
+    folders: Vec<PathBuf>,
+    app_state: Arc<AppState>,
+    cx: &mut AsyncApp,
+) -> Result<()> {
+    let open_roots: HashSet<PathBuf> = cx.update(|cx| {
+        cx.windows()
+            .into_iter()
+            .filter_map(|window| window.downcast::<MultiWorkspace>())
+            .filter_map(|window| window.read(cx).ok())
+            .flat_map(|multi_workspace| multi_workspace.workspaces())
+            .flat_map(|workspace| {
+                workspace
+                    .read(cx)
+                    .project()
+                    .read(cx)
+                    .visible_worktrees(cx)
+                    .map(|worktree| worktree.read(cx).abs_path().to_path_buf())
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    });
+    for folder in folders {
+        if open_roots.contains(&folder) {
+            continue;
+        }
+        if let Err(error) = cx
+            .update(|cx| {
+                workspace::open_paths(
+                    std::slice::from_ref(&folder),
+                    app_state.clone(),
+                    workspace::OpenOptions::default(),
+                    cx,
+                )
+            })
+            .await
+        {
+            log::error!(
+                "Failed to open the profile's launch folder {}: {error:#}",
+                folder.display()
+            );
+        }
+    }
+    if cx.update(|cx| cx.windows().is_empty()) {
+        return restore_session_or_create_workspace(app_state, cx).await;
+    }
+    Ok(())
+}
+
+async fn restore_session_or_create_workspace(
     app_state: Arc<AppState>,
     cx: &mut AsyncApp,
 ) -> Result<()> {

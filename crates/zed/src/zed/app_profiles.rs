@@ -111,6 +111,10 @@ pub struct AppProfile {
     /// start with `~` and may be a glob, such as `~/Projects/trix/**`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub folders: Vec<String>,
+    /// The entries of `folders` that open by themselves when this profile starts, so the
+    /// user lands in their project instead of an empty window.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub open_on_launch: Vec<String>,
 }
 
 impl AppProfile {
@@ -142,6 +146,7 @@ fn default_profile() -> AppProfile {
         // Matches the app's own icon, so the default profile doesn't recolor it.
         color: ProfileColor::Purple,
         folders: Vec::new(),
+        open_on_launch: Vec::new(),
     }
 }
 
@@ -236,12 +241,36 @@ fn expand_home(entry: &str) -> PathBuf {
     }
 }
 
+fn is_glob(entry: &str) -> bool {
+    entry.contains(['*', '?', '[', '{'])
+}
+
+/// The folders the running profile opens when the app starts, resolved to directories that
+/// still exist. A folder that was moved or deleted is skipped rather than failing the launch.
+pub fn launch_folders() -> Vec<PathBuf> {
+    let Some(profiles) = load_profiles().log_err() else {
+        return Vec::new();
+    };
+    profiles
+        .into_iter()
+        .find(|profile| profile.id == active_profile_id())
+        .map(|profile| {
+            profile
+                .open_on_launch
+                .iter()
+                .filter(|entry| !is_glob(entry))
+                .map(|entry| expand_home(entry.trim()))
+                .filter(|path| path.is_dir())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// How specifically `entry` claims `path`: the length of the entry when it does, so that
 /// `~/Projects/trix/app` wins over `~/Projects/trix` for a file inside the app.
 fn folder_match_len(entry: &str, path: &Path) -> Option<usize> {
     let expanded = expand_home(entry.trim());
-    let is_glob = entry.contains(['*', '?', '[', '{']);
-    let matches = if is_glob {
+    let matches = if is_glob(entry) {
         let Some(glob) = expanded.to_str() else {
             return None;
         };
@@ -963,6 +992,7 @@ impl ProfileStore {
                 name: active_profile_id().to_string(),
                 color: ProfileColor::Teal,
                 folders: Vec::new(),
+                open_on_launch: Vec::new(),
             })
     }
 
@@ -1382,6 +1412,7 @@ impl ProfileStore {
                         name,
                         color,
                         folders: Vec::new(),
+                        open_on_launch: Vec::new(),
                     };
                     profiles.push(profile.clone());
                     save_profiles(&profiles)?;
@@ -2141,7 +2172,27 @@ impl ManageProfilesModal {
         let task = self.store.update(cx, |store, cx| {
             store.update_profile(
                 self.selected_id.clone(),
-                move |profile| profile.folders.retain(|entry| *entry != folder),
+                move |profile| {
+                    profile.folders.retain(|entry| *entry != folder);
+                    profile.open_on_launch.retain(|entry| *entry != folder);
+                },
+                cx,
+            )
+        });
+        self.report(task, cx);
+    }
+
+    fn toggle_open_on_launch(&mut self, folder: String, cx: &mut Context<Self>) {
+        let task = self.store.update(cx, |store, cx| {
+            store.update_profile(
+                self.selected_id.clone(),
+                move |profile| {
+                    if profile.open_on_launch.contains(&folder) {
+                        profile.open_on_launch.retain(|entry| *entry != folder);
+                    } else {
+                        profile.open_on_launch.push(folder);
+                    }
+                },
                 cx,
             )
         });
@@ -3151,19 +3202,45 @@ impl ManageProfilesModal {
             .enumerate()
             .map(|(index, folder)| {
                 let removed = folder.clone();
+                let toggled = folder.clone();
+                let opens_on_launch = profile.open_on_launch.contains(folder);
+                // A glob names many folders, so there's no single one to open.
+                let launch_toggle = (!is_glob(folder)).then(|| {
+                    IconButton::new(("open-on-launch", index), IconName::PlayOutlined)
+                        .icon_size(IconSize::XSmall)
+                        .icon_color(if opens_on_launch {
+                            Color::Accent
+                        } else {
+                            Color::Muted
+                        })
+                        .toggle_state(opens_on_launch)
+                        .tooltip(Tooltip::text(if opens_on_launch {
+                            t!("zed.folders.open_on_launch_off")
+                        } else {
+                            t!("zed.folders.open_on_launch_on")
+                        }))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.toggle_open_on_launch(toggled.clone(), cx)
+                        }))
+                });
                 Self::render_row(
                     IconName::Folder,
                     Color::Custom(profile.color.hsla()),
                     folder.clone(),
-                    None,
+                    opens_on_launch.then(|| t!("zed.folders.opens_on_launch")),
                     Some(
-                        IconButton::new(("remove-folder", index), IconName::Close)
-                            .icon_size(IconSize::XSmall)
-                            .icon_color(Color::Muted)
-                            .tooltip(Tooltip::text(t!("zed.folders.unlink")))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.remove_folder(removed.clone(), cx)
-                            }))
+                        h_flex()
+                            .gap_0p5()
+                            .children(launch_toggle)
+                            .child(
+                                IconButton::new(("remove-folder", index), IconName::Close)
+                                    .icon_size(IconSize::XSmall)
+                                    .icon_color(Color::Muted)
+                                    .tooltip(Tooltip::text(t!("zed.folders.unlink")))
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.remove_folder(removed.clone(), cx)
+                                    })),
+                            )
                             .into_any_element(),
                     ),
                     true,
@@ -3873,6 +3950,7 @@ mod tests {
             name: id.to_string(),
             color: ProfileColor::Teal,
             folders: Vec::new(),
+            open_on_launch: Vec::new(),
         }
     }
 
