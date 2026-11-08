@@ -3,11 +3,13 @@
 
 use crate::{
     config::{
-        self, CaptureRule, CollectionFile, Environment, LoginConfig, RequestDraft, SavedRequest,
+        self, CaptureRule, CollectionFile, Environment, ImportedScript, LoginConfig, MergeOutcome,
+        PostmanImport, RequestDraft, SavedRequest,
     },
     cookies::{Cookie, CookieJar},
     jsonpath,
     schema::{self, Validation},
+    script,
     send::{
         self, PreparedRequest, REFRESH_TOKEN_VARIABLE, ReceivedResponse, TOKEN_VARIABLE, jwt_expiry,
     },
@@ -116,6 +118,7 @@ pub struct Exchange {
     pub captures: Vec<Capture>,
     /// Set when this was the collection's login request and its token went into the session.
     pub login_capture: Option<LoginCapture>,
+    pub tests: Vec<script::TestResult>,
 }
 
 pub struct Collection {
@@ -138,7 +141,12 @@ pub struct Collection {
     pub storage_error: Option<SharedString>,
     pub cookies: CookieJar,
     captured: BTreeMap<String, String>,
+    failing_tests: HashMap<String, usize>,
     drafts: HashMap<String, RequestDraft>,
+    /// The file and the keychain have been read; an import waits for this so loading doesn't
+    /// overwrite it.
+    loaded: bool,
+    pending_import: Option<(PostmanImport, bool)>,
     fs: Arc<dyn Fs>,
     http_client: Arc<dyn HttpClient>,
     credentials_provider: Arc<dyn CredentialsProvider>,
@@ -176,7 +184,10 @@ impl Collection {
             storage_error: None,
             cookies: CookieJar::default(),
             captured: BTreeMap::default(),
+            failing_tests: HashMap::default(),
             drafts: HashMap::default(),
+            loaded: false,
+            pending_import: None,
             fs,
             http_client: cx.http_client(),
             credentials_provider: zed_credentials_provider::global(cx),
@@ -254,6 +265,10 @@ impl Collection {
                 {
                     this.session = session;
                 }
+                this.loaded = true;
+                if let Some((import, match_spec)) = this.pending_import.take() {
+                    this.apply_postman_import(import, match_spec, cx);
+                }
                 cx.notify();
             })
             .log_err();
@@ -261,6 +276,12 @@ impl Collection {
     }
 
     pub fn reload_spec(&mut self, cx: &mut Context<Self>) {
+        if self.file.spec.is_empty() {
+            self.spec = None;
+            self.spec_error = None;
+            self.spec_task = None;
+            return;
+        }
         let fs = self.fs.clone();
         let path = self.spec_path();
         self.spec_task = Some(cx.spawn(async move |this, cx| {
@@ -304,7 +325,12 @@ impl Collection {
     /// branches and a teammate's change pulled from git all show up without reopening.
     fn watch(&mut self, cx: &mut Context<Self>) {
         let fs = self.fs.clone();
-        let spec_path = self.spec_path();
+        // Without a spec, `spec_path` is the project folder; watching it would rescan the tree.
+        let spec_path = if self.file.spec.is_empty() {
+            self.file_path.clone()
+        } else {
+            self.spec_path()
+        };
         let file_path = self.file_path.clone();
         self._watch_task = cx.spawn(async move |this, cx| {
             let Some(spec_dir) = spec_path.parent() else {
@@ -458,6 +484,10 @@ impl Collection {
         } else {
             self.secrets.insert(name.to_string(), value);
         }
+        self.write_secrets(cx);
+    }
+
+    fn write_secrets(&mut self, cx: &mut Context<Self>) {
         cx.notify();
         let secrets = self.secrets.clone();
         let url = secrets_url(&self.id);
@@ -523,6 +553,7 @@ impl Collection {
             name,
             operation: operation_key,
             draft,
+            ..SavedRequest::default()
         };
         self.update_file(|file| file.saved.push(saved), cx);
         id
@@ -541,6 +572,111 @@ impl Collection {
 
     pub fn delete_saved_request(&mut self, id: &str, cx: &mut Context<Self>) {
         self.update_file(|file| file.saved.retain(|saved| saved.id != id), cx);
+    }
+
+    /// Brings Postman files in, merging by Postman id. Secret values go to the keychain.
+    pub fn apply_postman_import(
+        &mut self,
+        import: PostmanImport,
+        match_spec: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.loaded {
+            self.pending_import = Some((import, match_spec));
+            return;
+        }
+        let spec = if match_spec { self.spec.clone() } else { None };
+        let mut outcome = MergeOutcome::default();
+        self.update_file(
+            |file| outcome = config::merge_postman(file, &import, spec.as_deref()),
+            cx,
+        );
+        self.store_secrets(outcome.secrets, cx);
+    }
+
+    /// Points saved requests outside the spec at the operation with their method and path.
+    pub fn match_saved_with_spec(&mut self, cx: &mut Context<Self>) -> Option<MergeOutcome> {
+        let spec = self.spec.clone()?;
+        let mut outcome = MergeOutcome::default();
+        self.update_file(
+            |file| outcome = config::match_saved_with_spec(file, &spec),
+            cx,
+        );
+        Some(outcome)
+    }
+
+    fn store_secrets(&mut self, entries: Vec<(String, String)>, cx: &mut Context<Self>) {
+        let mut changed = false;
+        for (name, value) in entries {
+            if !value.is_empty() && self.secrets.get(&name) != Some(&value) {
+                self.secrets.insert(name, value);
+                changed = true;
+            }
+        }
+        if changed {
+            self.write_secrets(cx);
+        }
+    }
+
+    pub fn postman_collection_text(&self) -> Result<String> {
+        config::serialize(&config::to_postman_collection(
+            &self.title(),
+            &self.file,
+            self.spec.as_deref(),
+        ))
+    }
+
+    pub fn postman_environment_texts(&self) -> Result<Vec<(String, String)>> {
+        let secret_names = config::secret_names(&self.file);
+        self.file
+            .environments
+            .iter()
+            .map(|environment| {
+                let text =
+                    config::serialize(&config::to_postman_environment(environment, &secret_names))?;
+                Ok((
+                    format!(
+                        "{}.postman_environment.json",
+                        config::slug(&environment.name)
+                    ),
+                    text,
+                ))
+            })
+            .collect()
+    }
+
+    /// Deletes the collection file, and the credentials, session and cookies this profile
+    /// keeps for it.
+    pub fn remove(&mut self, cx: &mut Context<Self>) -> Task<Result<()>> {
+        let fs = self.fs.clone();
+        let file_path = self.file_path.clone();
+        let state_path = state_file_path(&self.id);
+        let credentials_provider = self.credentials_provider.clone();
+        let urls = [
+            secrets_url(&self.id),
+            session_url(&self.id),
+            state_url(&self.id),
+        ];
+        self._watch_task = Task::ready(());
+        cx.spawn(async move |_, cx| {
+            let options = fs::RemoveOptions {
+                recursive: false,
+                ignore_if_not_exists: true,
+            };
+            fs.remove_file(&file_path, options).await?;
+            fs.remove_file(&state_path, options).await?;
+            for url in urls {
+                // Deleting an entry that was never written fails on some keychains.
+                if credentials_provider
+                    .read_credentials(&url, cx)
+                    .await?
+                    .is_some()
+                {
+                    credentials_provider.delete_credentials(&url, cx).await?;
+                }
+            }
+            Ok(())
+        })
     }
 
     pub fn prepare(&self, operation_key: &str, draft: &RequestDraft) -> Result<PreparedRequest> {
@@ -945,6 +1081,16 @@ impl Collection {
         draft: RequestDraft,
         cx: &mut Context<Self>,
     ) -> Task<Exchange> {
+        self.send_saved(operation_key, draft, None, cx)
+    }
+
+    pub fn send_saved(
+        &mut self,
+        operation_key: String,
+        draft: RequestDraft,
+        saved_id: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> Task<Exchange> {
         let sent_at = Local::now();
         cx.spawn(async move |this, cx| {
             let mut timeline = Vec::new();
@@ -993,6 +1139,14 @@ impl Collection {
                     .ok()
                 })
                 .flatten();
+            let tests = response
+                .as_ref()
+                .zip(saved_id.as_deref())
+                .and_then(|(response, saved_id)| {
+                    this.update(cx, |this, cx| this.run_tests(saved_id, response, cx))
+                        .ok()
+                })
+                .unwrap_or_default();
             Exchange {
                 request: request.map(|request| request.masked()),
                 response,
@@ -1004,8 +1158,48 @@ impl Collection {
                 cookies_set,
                 captures,
                 login_capture,
+                tests,
             }
         })
+    }
+
+    pub fn saved_scripts(&self, saved_id: &str) -> &[ImportedScript] {
+        self.file
+            .saved
+            .iter()
+            .find(|saved| saved.id == saved_id)
+            .map_or(&[], |saved| saved.scripts.as_slice())
+    }
+
+    pub fn failing_tests(&self, saved_id: &str) -> usize {
+        self.failing_tests.get(saved_id).copied().unwrap_or(0)
+    }
+
+    fn run_tests(
+        &mut self,
+        saved_id: &str,
+        response: &ReceivedResponse,
+        cx: &mut Context<Self>,
+    ) -> Vec<script::TestResult> {
+        let results: Vec<script::TestResult> = self
+            .saved_scripts(saved_id)
+            .iter()
+            .filter(|script| script.listen == "test")
+            .flat_map(|script| script::run(&script::parse(&script.source, true), response))
+            .collect();
+        let failing = results
+            .iter()
+            .filter(|result| matches!(result.outcome, script::Outcome::Failed(_)))
+            .count();
+        let previous = if failing == 0 {
+            self.failing_tests.remove(saved_id)
+        } else {
+            self.failing_tests.insert(saved_id.to_string(), failing)
+        };
+        if previous.unwrap_or(0) != failing {
+            cx.notify();
+        }
+        results
     }
 
     /// Sending the login request by hand logs in too, so the token isn't left only in the body.
@@ -1417,15 +1611,33 @@ pub async fn create(
     }
     let directory = root.join(config::COLLECTIONS_DIR);
     fs.create_dir(&directory).await?;
+    let file_path = unique_file_path(&fs, &directory, &slug).await;
+    fs.atomic_write(file_path.clone(), config::serialize(&file)?)
+        .await?;
+    Ok(file_path)
+}
+
+/// An empty collection file with no spec, for an import, named after what is imported.
+pub async fn create_for_import(fs: Arc<dyn Fs>, root: PathBuf, name: &str) -> Result<PathBuf> {
+    let directory = root.join(config::COLLECTIONS_DIR);
+    fs.create_dir(&directory).await?;
+    let file_path = unique_file_path(&fs, &directory, &config::slug(name)).await;
+    fs.atomic_write(
+        file_path.clone(),
+        config::serialize(&CollectionFile::default())?,
+    )
+    .await?;
+    Ok(file_path)
+}
+
+async fn unique_file_path(fs: &Arc<dyn Fs>, directory: &Path, slug: &str) -> PathBuf {
     let mut file_path = directory.join(format!("{slug}.json"));
     let mut suffix = 2;
     while fs.is_file(&file_path).await {
         file_path = directory.join(format!("{slug}-{suffix}.json"));
         suffix += 1;
     }
-    fs.atomic_write(file_path.clone(), config::serialize(&file)?)
-        .await?;
-    Ok(file_path)
+    file_path
 }
 
 /// The collection files in a folder's `.asylum/api`.

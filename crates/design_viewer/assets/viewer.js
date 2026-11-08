@@ -55,19 +55,23 @@
   }
 
   let reportTimer = null
+  let reportFrame = null
   function report(immediate) {
     clearTimeout(reportTimer)
+    cancelAnimationFrame(reportFrame)
     const write = () => {
       const next = new URLSearchParams(location.hash.slice(1))
       if (focused) next.set('screen', focused.id)
       else next.delete('screen')
-      next.set('zoom', String(Math.round(zoom * 1000) / 10))
-      next.set('x', String(Math.round(x)))
-      next.set('y', String(Math.round(y)))
+      next.set('zoom', String(Math.round(zoom * 100000) / 1000))
+      next.set('x', String(Math.round(x * 100) / 100))
+      next.set('y', String(Math.round(y * 100) / 100))
       history.replaceState(null, '', '#' + next.toString())
     }
-    // Panning reports on every wheel tick otherwise, and each report repaints Asylum's toolbar.
+    // Asylum draws the layer overlay of a focused screen from these, so it has to follow every
+    // frame; otherwise each report only repaints the toolbar, and a pan reports on every tick.
     if (immediate) write()
+    else if (focused) reportFrame = requestAnimationFrame(write)
     else reportTimer = setTimeout(write, 150)
   }
 
@@ -135,18 +139,22 @@
     report(false)
   }
 
-  function screenAt(clientX, clientY) {
+  function contains(screen, clientX, clientY) {
     const pageX = (clientX - x) / zoom
     const pageY = (clientY - y) / zoom
+    return (
+      pageX >= screen.x &&
+      pageY >= screen.y &&
+      pageX <= screen.x + screen.width &&
+      pageY <= screen.y + screen.height
+    )
+  }
+
+  function screenAt(clientX, clientY) {
     let best = null
     for (const screen of screens) {
-      const inside =
-        pageX >= screen.x &&
-        pageY >= screen.y &&
-        pageX <= screen.x + screen.width &&
-        pageY <= screen.y + screen.height
       // Screens nest inside sections, so the innermost (smallest) one is the one meant.
-      if (inside && (!best || screen.width * screen.height < best.width * best.height)) best = screen
+      if (contains(screen, clientX, clientY) && (!best || screen.width * screen.height < best.width * best.height)) best = screen
     }
     return best
   }
@@ -178,6 +186,8 @@
     pointer = null
     document.body.style.cursor = ''
     if (wasDrag || event.button !== 0) return
+    // Inside the focused screen a click selects a layer, which Asylum hit-tests itself.
+    if (focused && contains(focused, event.clientX, event.clientY)) return
     const screen = screenAt(event.clientX, event.clientY)
     if (screen) focus(screen.id)
   })

@@ -4,7 +4,7 @@ use crate::{
     connect_view::{self, Prefill},
     connection::{self, Environment, SavedConnection, Scope},
     discovery::{self, Source, Suggestion},
-    query_view,
+    import_view, query_view,
     session::Session,
     table_view,
 };
@@ -16,7 +16,7 @@ use fs::Fs;
 use futures::StreamExt as _;
 use gpui::{
     Action as _, AnyElement, AsyncApp, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
-    Pixels, Subscription, Task, WeakEntity, px, uniform_list,
+    Pixels, Stateful, Subscription, Task, WeakEntity, px, uniform_list,
 };
 use i18n::t;
 use project::Project;
@@ -26,10 +26,10 @@ use std::{
     sync::Arc,
     time::{Duration, Instant, SystemTime},
 };
-use ui::section_label;
 use ui::{
-    ContextMenu, Indicator, KeyBinding, PopoverMenu, PopoverTriggerArea, Tooltip, prelude::*,
-    primary_button,
+    ContextMenu, EmptyState, EmptyStateTone, PopoverMenu, PopoverTriggerArea, StatusTone, Tooltip,
+    capsule_button, choice_card, choice_card_with_body, navigator_footer, prelude::*,
+    primary_button, secondary_button, section_header, segmented_control, select_field, status_pill,
 };
 use ui_input::{ErasedEditorEvent, InputField};
 use util::ResultExt as _;
@@ -65,6 +65,8 @@ pub enum ActiveState {
 
 pub struct Active {
     pub connection: SavedConnection,
+    /// The dock's Leitura/Escrita switch, for the tabs opened from now on.
+    pub read_only: bool,
     pub state: ActiveState,
 }
 
@@ -94,8 +96,12 @@ enum TreeRow {
         kind: RelationKind,
         estimated_rows: Option<i64>,
         expanded: bool,
+        indent: Pixels,
     },
-    Column(ColumnInfo),
+    Column {
+        column: ColumnInfo,
+        indent: Pixels,
+    },
     Object {
         kind: ObjectKind,
         name: String,
@@ -235,12 +241,15 @@ impl DatabasePanel {
         self.active.as_ref()
     }
 
-    /// The session of the active connection, for the views that browse it.
+    /// The session of the active connection, for the views that browse it. The connection
+    /// carries the dock's read mode, so the tabs opened from it follow the switch.
     pub fn session(&self) -> Option<(SavedConnection, Arc<Session>)> {
         let active = self.active.as_ref()?;
         match &active.state {
             ActiveState::Connected { session, .. } => {
-                Some((active.connection.clone(), session.clone()))
+                let mut connection = active.connection.clone();
+                connection.read_only = active.read_only || active.connection.read_only;
+                Some((connection, session.clone()))
             }
             _ => None,
         }
@@ -328,8 +337,18 @@ impl DatabasePanel {
     pub fn connect(&mut self, connection: SavedConnection, cx: &mut Context<Self>) {
         self.columns.clear();
         self.column_tasks.clear();
+        let read_only = match &self.active {
+            Some(active)
+                if active.connection.id == connection.id
+                    && active.connection.environment == connection.environment =>
+            {
+                active.read_only
+            }
+            _ => connection.read_only || connection.environment == Environment::Prod,
+        };
         self.active = Some(Active {
             connection: connection.clone(),
+            read_only,
             state: ActiveState::Connecting,
         });
         cx.notify();
@@ -354,7 +373,6 @@ impl DatabasePanel {
                     Ok(opened) => {
                         if this.expanded.is_empty() {
                             this.expanded.insert(schema_key("public"));
-                            this.expanded.insert(group_key("public", "tables"));
                         }
                         let mut column_names: HashMap<String, Vec<String>> = HashMap::default();
                         for (schema, relation, column, _) in opened.columns {
@@ -389,6 +407,52 @@ impl DatabasePanel {
         cx.notify();
     }
 
+    fn set_read_only(&mut self, read_only: bool, cx: &mut Context<Self>) {
+        if let Some(active) = self.active.as_mut() {
+            active.read_only = read_only || active.connection.read_only;
+            cx.notify();
+        }
+    }
+
+    fn set_environment(&mut self, environment: Environment, cx: &mut Context<Self>) {
+        let Some(active) = &self.active else {
+            return;
+        };
+        if active.connection.environment == environment {
+            return;
+        }
+        let Some(scope) = self
+            .stored(&active.connection.id)
+            .map(|stored| stored.scope)
+        else {
+            return;
+        };
+        let mut connection = active.connection.clone();
+        connection.environment = environment;
+        let previous = Some((connection.id.clone(), scope));
+        self.save_connection(connection, scope, String::new(), previous, cx)
+            .detach_and_log_err(cx);
+    }
+
+    fn tables_with_pending_edits(&self, cx: &App) -> HashSet<String> {
+        let Some(workspace) = self.workspace.upgrade() else {
+            return HashSet::default();
+        };
+        let Some(connection_id) = self.active.as_ref().map(|active| &active.connection.id) else {
+            return HashSet::default();
+        };
+        workspace
+            .read(cx)
+            .items_of_type::<table_view::TableView>(cx)
+            .filter_map(|view| {
+                let view = view.read(cx);
+                let (view_connection, schema, name) = view.relation();
+                (view_connection == connection_id && view.has_pending_edits())
+                    .then(|| relation_key(schema, name))
+            })
+            .collect()
+    }
+
     fn refresh(&mut self, cx: &mut Context<Self>) {
         if let Some(active) = &self.active {
             let connection = active.connection.clone();
@@ -407,6 +471,44 @@ impl DatabasePanel {
         previous: Option<(String, Scope)>,
         cx: &mut Context<Self>,
     ) -> Task<anyhow::Result<()>> {
+        let password = (!password.is_empty()).then_some(password);
+        let persist = self.persist(vec![(connection.clone(), password)], scope, previous, cx);
+        cx.spawn(async move |this, cx| {
+            persist.await?;
+            this.update(cx, |this, cx| this.connect(connection, cx))
+        })
+    }
+
+    pub(crate) fn import_connections(
+        &mut self,
+        connections: Vec<(SavedConnection, Option<String>)>,
+        scope: Scope,
+        cx: &mut Context<Self>,
+    ) -> Task<anyhow::Result<()>> {
+        self.persist(connections, scope, None, cx)
+    }
+
+    pub(crate) fn has_connection_like(
+        &self,
+        host: &str,
+        port: u16,
+        database: &str,
+        user: &str,
+    ) -> bool {
+        self.connections
+            .iter()
+            .any(|stored| stored.connection.same_target(host, port, database, user))
+    }
+
+    /// Writes `additions` to `scope` (replacing `previous` when editing) in one save per list and
+    /// stores the passwords that came with them.
+    fn persist(
+        &mut self,
+        additions: Vec<(SavedConnection, Option<String>)>,
+        scope: Scope,
+        previous: Option<(String, Scope)>,
+        cx: &mut Context<Self>,
+    ) -> Task<anyhow::Result<()>> {
         let Some(root) = self.root.clone() else {
             return Task::ready(Err(anyhow::anyhow!(
                 "{}",
@@ -422,9 +524,13 @@ impl DatabasePanel {
             };
             list.retain(|existing| existing.id != *previous_id);
         }
+        let added = additions
+            .iter()
+            .map(|(connection, _)| connection.clone())
+            .collect::<Vec<_>>();
         match scope {
-            Scope::Project => project.push(connection.clone()),
-            Scope::Profile => profile.push(connection.clone()),
+            Scope::Project => project.extend(added.iter().cloned()),
+            Scope::Profile => profile.extend(added.iter().cloned()),
         }
         let project_changed =
             scope == Scope::Project || previous.as_ref().is_some_and(|(_, s)| *s == Scope::Project);
@@ -436,7 +542,11 @@ impl DatabasePanel {
                 connection::save_project(fs.as_ref(), &root, project).await?;
             }
             connection::save_profile(store, &root, profile).await?;
-            if !password.is_empty() {
+            for (connection, password) in &additions {
+                let Some(password) = password.as_ref().filter(|password| !password.is_empty())
+                else {
+                    continue;
+                };
                 credentials_provider
                     .write_credentials(
                         &connection.keychain_url(),
@@ -449,13 +559,16 @@ impl DatabasePanel {
             this.update(cx, |this, cx| {
                 this.connections.retain(|stored| {
                     Some(&stored.connection.id) != previous.as_ref().map(|(id, _)| id)
-                        && stored.connection.id != connection.id
+                        && !added
+                            .iter()
+                            .any(|connection| connection.id == stored.connection.id)
                 });
-                this.connections.push(Stored {
-                    connection: connection.clone(),
-                    scope,
-                });
-                this.connect(connection, cx);
+                this.connections.extend(
+                    added
+                        .into_iter()
+                        .map(|connection| Stored { connection, scope }),
+                );
+                cx.notify();
             })
         })
     }
@@ -476,6 +589,18 @@ impl DatabasePanel {
 
     fn open_connect_view(&mut self, prefill: Prefill, window: &mut Window, cx: &mut Context<Self>) {
         connect_view::open(self.workspace.clone(), cx.entity(), prefill, window, cx);
+    }
+
+    fn open_import(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let panel = cx.weak_entity();
+        let fs = self.fs.clone();
+        self.workspace
+            .update(cx, |workspace, cx| {
+                workspace.toggle_modal(window, cx, move |window, cx| {
+                    import_view::ImportConnections::new(panel, fs, window, cx)
+                })
+            })
+            .log_err();
     }
 
     /// Opens the file against the active connection; without one it opens as plain text.
@@ -663,6 +788,40 @@ impl DatabasePanel {
         self.column_tasks.insert(key, task);
     }
 
+    fn push_relations<'a>(
+        &self,
+        schema: &str,
+        relations: impl Iterator<Item = &'a &'a Relation>,
+        indent: Pixels,
+        rows: &mut Vec<TreeRow>,
+    ) {
+        for relation in relations {
+            let key = relation_key(schema, &relation.name);
+            let expanded = self.expanded.contains(&key);
+            rows.push(TreeRow::Relation {
+                schema: schema.to_owned(),
+                name: relation.name.clone(),
+                kind: relation.kind,
+                estimated_rows: relation.estimated_rows,
+                expanded,
+                indent,
+            });
+            if !expanded {
+                continue;
+            }
+            match self.columns.get(&key) {
+                Some(Columns::Loaded(columns)) => {
+                    rows.extend(columns.iter().cloned().map(|column| TreeRow::Column {
+                        column,
+                        indent: indent + px(36.),
+                    }));
+                }
+                Some(Columns::Failed(error)) => rows.push(TreeRow::ColumnsFailed(error.clone())),
+                Some(Columns::Loading) | None => rows.push(TreeRow::ColumnsLoading),
+            }
+        }
+    }
+
     fn tree_rows(&self, cx: &App) -> Vec<TreeRow> {
         let mut rows = Vec::new();
         let Some(Active {
@@ -721,69 +880,27 @@ impl DatabasePanel {
             if !expanded {
                 continue;
             }
-            let groups: [(&str, SharedString, IconName, fn(RelationKind) -> bool); 2] = [
-                (
-                    "tables",
-                    t!("database_client.panel.group_tables"),
-                    IconName::Table,
-                    |kind| {
-                        matches!(
-                            kind,
-                            RelationKind::Table
-                                | RelationKind::PartitionedTable
-                                | RelationKind::ForeignTable
-                        )
-                    },
-                ),
-                (
-                    "views",
-                    t!("database_client.panel.group_views"),
-                    IconName::Eye,
-                    |kind| matches!(kind, RelationKind::View | RelationKind::MaterializedView),
-                ),
-            ];
-            for (group, label, icon, belongs) in groups {
-                let members: Vec<&&Relation> = list
-                    .iter()
-                    .filter(|relation| belongs(relation.kind))
-                    .collect();
-                if members.is_empty() {
-                    continue;
-                }
-                let key = group_key(schema, group);
+            let is_view = |kind: RelationKind| {
+                matches!(kind, RelationKind::View | RelationKind::MaterializedView)
+            };
+            let tables = list.iter().filter(|relation| !is_view(relation.kind));
+            self.push_relations(schema, tables, px(20.), &mut rows);
+            let views: Vec<&&Relation> = list
+                .iter()
+                .filter(|relation| is_view(relation.kind))
+                .collect();
+            if !views.is_empty() {
+                let key = group_key(schema, "views");
                 let expanded = filtering || self.expanded.contains(&key);
                 rows.push(TreeRow::Group {
                     key,
-                    label,
-                    icon,
-                    count: members.len(),
+                    label: t!("database_client.panel.group_views"),
+                    icon: IconName::Eye,
+                    count: views.len(),
                     expanded,
                 });
-                if !expanded {
-                    continue;
-                }
-                for relation in members {
-                    let key = relation_key(schema, &relation.name);
-                    let expanded = self.expanded.contains(&key);
-                    rows.push(TreeRow::Relation {
-                        schema: schema.to_owned(),
-                        name: relation.name.clone(),
-                        kind: relation.kind,
-                        estimated_rows: relation.estimated_rows,
-                        expanded,
-                    });
-                    if !expanded {
-                        continue;
-                    }
-                    match self.columns.get(&key) {
-                        Some(Columns::Loaded(columns)) => {
-                            rows.extend(columns.iter().cloned().map(TreeRow::Column));
-                        }
-                        Some(Columns::Failed(error)) => {
-                            rows.push(TreeRow::ColumnsFailed(error.clone()))
-                        }
-                        Some(Columns::Loading) | None => rows.push(TreeRow::ColumnsLoading),
-                    }
+                if expanded {
+                    self.push_relations(schema, views.into_iter(), px(36.), &mut rows);
                 }
             }
             let object_groups = [
@@ -846,7 +963,13 @@ impl DatabasePanel {
         rows
     }
 
-    fn render_row(&self, index: usize, row: TreeRow, cx: &mut Context<Self>) -> AnyElement {
+    fn render_row(
+        &self,
+        index: usize,
+        row: TreeRow,
+        pending_tables: &HashSet<String>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let hover = cx.theme().colors().element_hover;
         let accent = cx.theme().colors().border_focused;
         let base = h_flex()
@@ -855,13 +978,9 @@ impl DatabasePanel {
             .h(px(26.))
             .pr_2()
             .gap_1p5()
-            .rounded_md()
-            .border_1()
-            .border_color(gpui::transparent_black());
-        let clickable =
-            |base: gpui::Stateful<gpui::Div>| base.cursor_pointer().hover(|style| style.bg(hover));
-        let selected =
-            |base: gpui::Stateful<gpui::Div>| base.bg(accent.opacity(0.18)).border_color(accent);
+            .rounded(Radius::Sm.rems());
+        let clickable = |base: Stateful<Div>| base.cursor_pointer().hover(|style| style.bg(hover));
+        let selected = |base: Stateful<Div>| base.bg(accent.opacity(0.16));
         let chevron = |expanded: bool| {
             Icon::new(if expanded {
                 IconName::ChevronDown
@@ -895,10 +1014,12 @@ impl DatabasePanel {
                         .color(Color::Muted),
                 )
                 .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .child(Label::new(name.clone()).size(LabelSize::Small).truncate()),
+                    div().flex_1().min_w_0().child(
+                        Label::new(name.clone())
+                            .size(LabelSize::Small)
+                            .weight(FontWeight::MEDIUM)
+                            .truncate(),
+                    ),
                 )
                 .child(count(total.to_string()))
                 .on_click(cx.listener(move |this, _, _, cx| this.toggle(schema_key(&name), cx)))
@@ -927,6 +1048,7 @@ impl DatabasePanel {
                 kind,
                 estimated_rows,
                 expanded,
+                indent,
             } => {
                 let is_selected = matches!(
                     &self.active_item,
@@ -935,8 +1057,9 @@ impl DatabasePanel {
                             && *s == schema
                             && *n == name
                 );
+                let has_pending_edits = pending_tables.contains(&relation_key(&schema, &name));
                 clickable(base)
-                    .pl(px(36.))
+                    .pl(indent)
                     .when(is_selected, selected)
                     .child(
                         div()
@@ -967,12 +1090,16 @@ impl DatabasePanel {
                         div().flex_1().min_w_0().child(
                             Label::new(name.clone())
                                 .size(LabelSize::Small)
+                                .buffer_font(cx)
                                 .when(is_selected, |label| label.weight(FontWeight::SEMIBOLD))
                                 .truncate(),
                         ),
                     )
+                    .when(has_pending_edits, |this| {
+                        this.child(StatusTone::Warning.dot(cx))
+                    })
                     .when_some(estimated_rows, |this, rows| {
-                        this.child(count(format_count(rows)))
+                        this.child(count(format_count_compact(rows)))
                     })
                     .tooltip(Tooltip::text(t!("database_client.panel.open_table")))
                     .on_click(cx.listener(move |this, _, window, cx| {
@@ -987,17 +1114,8 @@ impl DatabasePanel {
                     }))
                     .into_any_element()
             }
-            TreeRow::Column(column) => base
-                .pl(px(70.))
-                .child(div().w(px(18.)).when(column.primary_key, |this| {
-                    this.child(
-                        Label::new("PK")
-                            .size(LabelSize::XSmall)
-                            .buffer_font(cx)
-                            .weight(FontWeight::SEMIBOLD)
-                            .color(Color::Warning),
-                    )
-                }))
+            TreeRow::Column { column, indent } => base
+                .pl(indent)
                 .child(
                     h_flex()
                         .flex_1()
@@ -1006,7 +1124,8 @@ impl DatabasePanel {
                         .child(
                             Label::new(column.name)
                                 .size(LabelSize::Small)
-                                .buffer_font(cx),
+                                .buffer_font(cx)
+                                .when(column.primary_key, |label| label.color(Color::Warning)),
                         )
                         .child(
                             Label::new(column.type_name)
@@ -1016,19 +1135,19 @@ impl DatabasePanel {
                                 .truncate(),
                         ),
                 )
-                .when(column.unique, |this| {
+                .when(column.primary_key, |this| {
+                    this.child(
+                        Label::new("PK")
+                            .size(LabelSize::XSmall)
+                            .buffer_font(cx)
+                            .weight(FontWeight::SEMIBOLD)
+                            .color(Color::Warning),
+                    )
+                })
+                .when(column.unique && !column.primary_key, |this| {
                     this.child(
                         Label::new(t!("database_client.panel.unique"))
                             .size(LabelSize::XSmall)
-                            .buffer_font(cx)
-                            .color(Color::Accent),
-                    )
-                })
-                .when(!column.not_null && !column.primary_key, |this| {
-                    this.child(
-                        Label::new("null")
-                            .size(LabelSize::XSmall)
-                            .buffer_font(cx)
                             .color(Color::Muted),
                     )
                 })
@@ -1055,7 +1174,7 @@ impl DatabasePanel {
                 )
                 .into_any_element(),
             TreeRow::ColumnsLoading => base
-                .pl(px(90.))
+                .pl(px(72.))
                 .child(
                     Label::new(t!("database_client.panel.reading_columns"))
                         .size(LabelSize::XSmall)
@@ -1063,7 +1182,7 @@ impl DatabasePanel {
                 )
                 .into_any_element(),
             TreeRow::ColumnsFailed(error) => base
-                .pl(px(90.))
+                .pl(px(72.))
                 .child(
                     Label::new(error)
                         .size(LabelSize::XSmall)
@@ -1071,21 +1190,13 @@ impl DatabasePanel {
                         .truncate(),
                 )
                 .into_any_element(),
-            TreeRow::QueriesHeader => h_flex()
-                .h(px(26.))
-                .mt_1()
-                .px_2()
-                .gap_1p5()
-                .border_t_1()
-                .border_color(cx.theme().colors().border)
-                .child(section_label(t!("database_client.panel.saved_queries")))
-                .child(div().flex_1())
-                .child(
-                    Label::new(QUERIES_DIR)
-                        .size(LabelSize::XSmall)
-                        .buffer_font(cx)
-                        .color(Color::Muted),
-                )
+            TreeRow::QueriesHeader => div()
+                .pt_3()
+                .px_1()
+                .child(section_header(
+                    t!("database_client.panel.saved_queries"),
+                    None,
+                ))
                 .into_any_element(),
             TreeRow::Query { path, name } => {
                 let is_selected =
@@ -1095,7 +1206,7 @@ impl DatabasePanel {
                     .get(&path)
                     .map(|modified| relative_age(*modified));
                 clickable(base)
-                    .pl(px(16.))
+                    .pl_1()
                     .when(is_selected, selected)
                     .child(Icon::new(IconName::FileCode).size(IconSize::Small).color(
                         if is_selected {
@@ -1108,6 +1219,7 @@ impl DatabasePanel {
                         div().flex_1().min_w_0().child(
                             Label::new(name)
                                 .size(LabelSize::Small)
+                                .buffer_font(cx)
                                 .when(is_selected, |label| label.weight(FontWeight::SEMIBOLD))
                                 .truncate(),
                         ),
@@ -1121,18 +1233,21 @@ impl DatabasePanel {
         }
     }
 
-    fn render_connection_card(&self, active: &Active, cx: &mut Context<Self>) -> AnyElement {
+    fn render_connection_selector(&self, active: &Active, cx: &mut Context<Self>) -> AnyElement {
         let connection = &active.connection;
-        let version = match &active.state {
-            ActiveState::Connected { session, .. } => short_version(&session.server_version),
-            _ => None,
-        };
-        let subtitle = match version {
-            Some(version) => format!(
-                "{} · PostgreSQL {version}",
-                connection.address_with_tunnel()
-            ),
-            None => connection.address_with_tunnel(),
+        let subtitle = match &active.state {
+            ActiveState::Connected { session, .. } => {
+                match short_version(&session.server_version) {
+                    Some(version) => t!(
+                        "database_client.panel.connection_subtitle",
+                        version = version,
+                        address = connection.address_with_tunnel()
+                    )
+                    .to_string(),
+                    None => connection.address_with_tunnel(),
+                }
+            }
+            _ => connection.address_with_tunnel(),
         };
         let this = cx.weak_entity();
         let others: Vec<SavedConnection> = self
@@ -1143,31 +1258,27 @@ impl DatabasePanel {
             .collect();
         let current = connection.clone();
         let scope = self.stored(&connection.id).map(|stored| stored.scope);
-        let colors = cx.theme().colors();
-        let focused = colors.border_focused;
-        let card = h_flex()
-            .id("db-connection-card")
+        let hover = cx.theme().colors().element_hover;
+        let selector = h_flex()
+            .id("db-connection-selector")
             .w_full()
-            .p_3()
-            .gap_3()
-            .rounded_lg()
-            .bg(colors.element_background)
-            .border_1()
-            .border_color(colors.border_selected)
-            .hover(move |style| style.border_color(focused))
+            .p_1p5()
+            .gap_2p5()
+            .rounded(Radius::Md.rems())
+            .hover(move |style| style.bg(hover))
             .child(
                 div()
-                    .size_9()
+                    .size(px(32.))
                     .flex()
                     .flex_none()
                     .items_center()
                     .justify_center()
-                    .rounded_lg()
-                    .bg(focused.opacity(0.22))
+                    .rounded(Radius::Md.rems())
+                    .bg(Color::Info.color(cx).opacity(0.16))
                     .child(
                         Icon::new(IconName::Database)
                             .size(IconSize::Small)
-                            .color(Color::Accent),
+                            .color(Color::Info),
                     ),
             )
             .child(
@@ -1176,14 +1287,9 @@ impl DatabasePanel {
                     .min_w_0()
                     .gap_0p5()
                     .child(
-                        h_flex()
-                            .gap_2()
-                            .child(
-                                Label::new(connection.name.clone())
-                                    .weight(FontWeight::SEMIBOLD)
-                                    .truncate(),
-                            )
-                            .child(environment_chip(connection.environment, cx)),
+                        Label::new(connection.name.clone())
+                            .weight(FontWeight::BOLD)
+                            .truncate(),
                     )
                     .child(
                         Label::new(subtitle)
@@ -1200,7 +1306,7 @@ impl DatabasePanel {
             );
         PopoverMenu::new("db-connection-menu")
             .full_width(true)
-            .trigger(PopoverTriggerArea::new(card))
+            .trigger(PopoverTriggerArea::new(selector))
             .anchor(gpui::Anchor::TopRight)
             .menu(move |window, cx| {
                 let this = this.clone();
@@ -1219,8 +1325,8 @@ impl DatabasePanel {
                         }
                         menu = menu.separator();
                     }
-                    let edit = current.clone();
                     let reconnect = current.clone();
+                    let edit = current.clone();
                     menu.entry(t!("database_client.panel.reconnect"), None, {
                         let this = this.clone();
                         move |_, cx| {
@@ -1267,57 +1373,58 @@ impl DatabasePanel {
             .into_any_element()
     }
 
-    fn render_status_row(&self, active: &Active, cx: &mut Context<Self>) -> AnyElement {
-        let (dot, status) = match &active.state {
-            ActiveState::Connecting => {
-                (Color::Muted, t!("database_client.panel.status_connecting"))
-            }
-            ActiveState::Connected { latency, .. } => (
-                Color::Success,
-                t!(
-                    "database_client.panel.status_connected",
-                    milliseconds = latency.as_millis()
-                ),
-            ),
-            ActiveState::Failed(_) => (Color::Error, t!("database_client.panel.status_failed")),
-        };
-        let read_only = active.connection.read_only;
+    fn render_mode_row(&self, active: &Active, cx: &mut Context<Self>) -> AnyElement {
+        let current = active.connection.environment;
+        let can_change_environment = self.stored(&active.connection.id).is_some();
+        let this = cx.weak_entity();
+        let environment_select = environment_select(
+            "db-environment",
+            current,
+            can_change_environment,
+            move |environment, cx| {
+                this.update(cx, |this, cx| this.set_environment(environment, cx))
+                    .log_err();
+            },
+            cx,
+        );
+        let read_only = active.read_only;
+        let locked_read_only = active.connection.read_only;
         h_flex()
-            .px_3()
-            .pt_3()
-            .gap_1p5()
-            .flex_wrap()
+            .w_full()
+            .gap_2()
+            .child(div().flex_1().min_w_0().child(environment_select))
             .child(
-                chip(cx)
-                    .bg(dot.color(cx).opacity(0.08))
-                    .border_color(dot.color(cx).opacity(0.2))
-                    .child(Indicator::dot().color(dot))
-                    .child(Label::new(status).size(LabelSize::XSmall).color(dot)),
-            )
-            .child(chip(cx).child(Label::new("auto-commit").size(LabelSize::XSmall)))
-            .child(
-                chip(cx)
+                segmented_control(cx)
+                    .flex_none()
                     .child(
-                        Icon::new(IconName::Lock)
-                            .size(IconSize::XSmall)
-                            .color(Color::Muted),
+                        segment(
+                            "db-mode-read",
+                            t!("database_client.panel.mode_read"),
+                            read_only,
+                            cx,
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| this.set_read_only(true, cx))),
                     )
                     .child(
-                        Label::new(if read_only {
-                            t!("database_client.panel.read_only")
-                        } else {
-                            t!("database_client.panel.read_write")
+                        ui::segment_option(
+                            "db-mode-write",
+                            t!("database_client.panel.mode_write"),
+                            !read_only,
+                            !locked_read_only,
+                            cx,
+                        )
+                        .flex_initial()
+                        .px_2p5()
+                        .h(px(26.))
+                        .when(locked_read_only, |this| {
+                            this.tooltip(Tooltip::text(t!("database_client.panel.read_only")))
                         })
-                        .size(LabelSize::XSmall),
+                        .when(!locked_read_only, |this| {
+                            this.on_click(
+                                cx.listener(|this, _, _, cx| this.set_read_only(false, cx)),
+                            )
+                        }),
                     ),
-            )
-            .child(div().flex_1())
-            .child(
-                IconButton::new("db-refresh", IconName::RotateCw)
-                    .icon_size(IconSize::Small)
-                    .icon_color(Color::Muted)
-                    .tooltip(Tooltip::text(t!("database_client.panel.reload_catalog")))
-                    .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
             )
             .into_any_element()
     }
@@ -1325,132 +1432,64 @@ impl DatabasePanel {
     fn render_connected(&self, active: &Active, cx: &mut Context<Self>) -> AnyElement {
         let rows = self.tree_rows(cx);
         let row_count = rows.len();
-        let (summary, schema_count) = match &active.state {
-            ActiveState::Connected {
-                relations,
-                database_size,
-                ..
-            } => {
-                let schemas = relations
-                    .iter()
-                    .map(|relation| relation.schema.as_str())
-                    .collect::<HashSet<_>>()
-                    .len();
-                let tables = relations
-                    .iter()
-                    .filter(|relation| {
-                        !matches!(
-                            relation.kind,
-                            RelationKind::View | RelationKind::MaterializedView
-                        )
-                    })
-                    .count();
-                let tables_text = if tables == 1 {
-                    t!("database_client.panel.table_count.one")
-                } else {
-                    t!("database_client.panel.table_count.other", count = tables)
-                };
-                let schemas_text = if schemas == 1 {
-                    t!("database_client.panel.schema_count.one")
-                } else {
-                    t!("database_client.panel.schema_count.other", count = schemas)
-                };
-                let mut summary = format!("{tables_text} · {schemas_text}");
-                if let Some(size) = database_size {
-                    summary.push_str(&format!(" · {size}"));
-                }
-                (Some(summary), schemas)
-            }
-            _ => (None, 0),
-        };
         v_flex()
             .size_full()
             .child(
-                div()
+                v_flex()
                     .px_3()
                     .pt_3()
-                    .child(self.render_connection_card(active, cx)),
+                    .gap_2()
+                    .child(self.render_connection_selector(active, cx))
+                    .child(self.render_mode_row(active, cx)),
             )
-            .child(self.render_status_row(active, cx))
             .map(|this| match &active.state {
                 ActiveState::Connecting => this.child(
-                    div().flex_1().flex().items_center().justify_center().child(
-                        Label::new(t!("database_client.panel.connecting"))
-                            .size(LabelSize::Small)
-                            .color(Color::Muted),
-                    ),
+                    EmptyState::new(IconName::LoadCircle, t!("database_client.panel.connecting"))
+                        .spinning(true),
                 ),
                 ActiveState::Failed(error) => {
                     let retry = active.connection.clone();
                     let edit = active.connection.clone();
                     let scope = self.stored(&edit.id).map(|stored| stored.scope);
                     this.child(
-                        v_flex()
-                            .m_3()
-                            .p_3()
-                            .gap_2()
-                            .rounded_lg()
-                            .bg(Color::Error.color(cx).opacity(0.08))
-                            .border_1()
-                            .border_color(Color::Error.color(cx).opacity(0.3))
-                            .child(
-                                h_flex()
-                                    .gap_1p5()
-                                    .child(
-                                        Icon::new(IconName::XCircle)
-                                            .size(IconSize::Small)
-                                            .color(Color::Error),
-                                    )
-                                    .child(
-                                        Label::new(t!("database_client.panel.connect_failed"))
-                                            .size(LabelSize::Small)
-                                            .weight(FontWeight::SEMIBOLD),
-                                    ),
+                        EmptyState::new(
+                            IconName::XCircle,
+                            t!("database_client.panel.connect_failed"),
+                        )
+                        .tone(EmptyStateTone::Error)
+                        .detail(error.clone())
+                        .action(
+                            primary_button(
+                                "db-retry",
+                                Some(IconName::RotateCw),
+                                t!("database_client.panel.retry"),
+                                None,
+                                cx,
                             )
-                            .child(
-                                Label::new(error.clone())
-                                    .size(LabelSize::XSmall)
-                                    .buffer_font(cx)
-                                    .color(Color::Muted),
-                            )
-                            .child(
-                                h_flex()
-                                    .gap_2()
-                                    .child(
-                                        primary_button(
-                                            "db-retry",
-                                            Some(IconName::RotateCw),
-                                            t!("database_client.panel.retry"),
-                                            None,
+                            .on_click(
+                                cx.listener(move |this, _, _, cx| this.connect(retry.clone(), cx)),
+                            ),
+                        )
+                        .when_some(scope, |this, scope| {
+                            this.action(
+                                secondary_button(
+                                    "db-edit",
+                                    None,
+                                    t!("database_client.connect.edit_title"),
+                                    true,
+                                    cx,
+                                )
+                                .on_click(cx.listener(
+                                    move |this, _, window, cx| {
+                                        this.open_connect_view(
+                                            Prefill::Edit(edit.clone(), scope),
+                                            window,
                                             cx,
                                         )
-                                        .on_click(
-                                            cx.listener(move |this, _, _, cx| {
-                                                this.connect(retry.clone(), cx)
-                                            }),
-                                        ),
-                                    )
-                                    .when_some(scope, |this, scope| {
-                                        this.child(
-                                            ui::secondary_button(
-                                                "db-edit",
-                                                None,
-                                                t!("database_client.connect.edit_title"),
-                                                true,
-                                                cx,
-                                            )
-                                            .on_click(
-                                                cx.listener(move |this, _, window, cx| {
-                                                    this.open_connect_view(
-                                                        Prefill::Edit(edit.clone(), scope),
-                                                        window,
-                                                        cx,
-                                                    )
-                                                }),
-                                            ),
-                                        )
-                                    }),
-                            ),
+                                    },
+                                )),
+                            )
+                        }),
                     )
                 }
                 ActiveState::Connected {
@@ -1458,34 +1497,39 @@ impl DatabasePanel {
                     other_databases,
                     ..
                 } if relations.is_empty() => this
-                    .child(self.render_empty_database(
-                        &active.connection.database,
-                        other_databases,
-                        cx,
-                    ))
-                    .child(self.render_tree(row_count, cx)),
-                ActiveState::Connected { .. } => this
-                    .child(div().px_3().pt_3().child(self.filter_input.clone()))
                     .child(
-                        h_flex()
-                            .px_3()
-                            .pt_3()
-                            .pb_1()
-                            .gap_2()
-                            .child(section_label("SCHEMAS"))
-                            .child(
-                                Label::new(schema_count.to_string())
-                                    .size(LabelSize::XSmall)
-                                    .color(Color::Muted),
+                        EmptyState::new(
+                            IconName::Database,
+                            t!(
+                                "database_client.panel.no_tables",
+                                database = active.connection.database
                             ),
+                        )
+                        .description(if other_databases.is_empty() {
+                            t!("database_client.panel.no_tables_description")
+                        } else {
+                            t!(
+                                "database_client.panel.other_databases",
+                                databases = other_databases.join(", ")
+                            )
+                        }),
                     )
                     .child(self.render_tree(row_count, cx)),
+                ActiveState::Connected { relations, .. } => {
+                    let schema_count = relations
+                        .iter()
+                        .map(|relation| relation.schema.as_str())
+                        .collect::<HashSet<_>>()
+                        .len();
+                    this.child(div().px_3().pt_3().child(self.filter_input.clone()))
+                        .child(div().px_4().pt_3().pb_1().child(section_header(
+                            t!("database_client.panel.schemas_header", count = schema_count),
+                            None,
+                        )))
+                        .child(self.render_tree(row_count, cx))
+                }
             })
-            .when(
-                !matches!(active.state, ActiveState::Connected { .. }),
-                |this| this.child(div().flex_1()),
-            )
-            .child(self.render_footer(summary, cx))
+            .child(self.render_footer(active, cx))
             .into_any_element()
     }
 
@@ -1496,11 +1540,12 @@ impl DatabasePanel {
                 row_count,
                 cx.processor(move |this, range: Range<usize>, _window, cx| {
                     let rows = this.tree_rows(cx);
+                    let pending_tables = this.tables_with_pending_edits(cx);
                     range
                         .filter_map(|index| {
                             rows.get(index)
                                 .cloned()
-                                .map(|row| this.render_row(index, row, cx))
+                                .map(|row| this.render_row(index, row, &pending_tables, cx))
                         })
                         .collect()
                 }),
@@ -1509,84 +1554,106 @@ impl DatabasePanel {
         )
     }
 
-    fn render_empty_database(
-        &self,
-        database: &str,
-        other_databases: &[String],
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        v_flex()
-            .m_3()
-            .p_3()
-            .gap_1p5()
-            .rounded_lg()
-            .border_1()
-            .border_color(cx.theme().colors().border)
-            .child(
+    fn render_footer(&self, active: &Active, cx: &mut Context<Self>) -> AnyElement {
+        let (tone, text) = match &active.state {
+            ActiveState::Connecting => (
+                StatusTone::Neutral,
+                t!("database_client.panel.status_connecting"),
+            ),
+            ActiveState::Connected { latency, .. } => (
+                StatusTone::Success,
+                t!(
+                    "database_client.panel.status_connected",
+                    milliseconds = latency.as_millis()
+                ),
+            ),
+            ActiveState::Failed(_) => {
+                (StatusTone::Error, t!("database_client.panel.status_failed"))
+            }
+        };
+        let this = cx.weak_entity();
+        let current = active.connection.clone();
+        let scope = self.stored(&current.id).map(|stored| stored.scope);
+        let more_menu = PopoverMenu::new("db-footer-menu")
+            .trigger_with_tooltip(
+                IconButton::new("db-footer-menu-button", IconName::Ellipsis)
+                    .icon_size(IconSize::Small)
+                    .icon_color(Color::Muted),
+                Tooltip::text(t!("database_client.panel.more_actions")),
+            )
+            .anchor(gpui::Anchor::BottomRight)
+            .menu(move |window, cx| {
+                let this = this.clone();
+                let current = current.clone();
+                Some(ContextMenu::build(window, cx, move |menu, _, _| {
+                    let reconnect = current.clone();
+                    let edit = current.clone();
+                    menu.entry(t!("database_client.panel.reload_catalog"), None, {
+                        let this = this.clone();
+                        move |_, cx| {
+                            this.update(cx, |this, cx| this.refresh(cx)).log_err();
+                        }
+                    })
+                    .entry(t!("database_client.panel.reconnect"), None, {
+                        let this = this.clone();
+                        move |_, cx| {
+                            this.update(cx, |this, cx| this.connect(reconnect.clone(), cx))
+                                .log_err();
+                        }
+                    })
+                    .when_some(scope, |menu, scope| {
+                        let this = this.clone();
+                        menu.entry(
+                            t!("database_client.panel.edit_connection_ellipsis"),
+                            None,
+                            move |window, cx| {
+                                this.update(cx, |this, cx| {
+                                    this.open_connect_view(
+                                        Prefill::Edit(edit.clone(), scope),
+                                        window,
+                                        cx,
+                                    )
+                                })
+                                .log_err();
+                            },
+                        )
+                    })
+                    .separator()
+                    .entry(
+                        t!("database_client.panel.disconnect"),
+                        None,
+                        move |_, cx| {
+                            this.update(cx, |this, cx| this.disconnect(cx)).log_err();
+                        },
+                    )
+                }))
+            });
+        navigator_footer(
+            Some(tone),
+            text,
+            Some(
                 h_flex()
-                    .gap_1p5()
-                    .child(
-                        Icon::new(IconName::Info)
-                            .size(IconSize::Small)
-                            .color(Color::Muted),
-                    )
-                    .child(
-                        Label::new(t!("database_client.panel.no_tables", database = database))
-                            .size(LabelSize::Small)
-                            .weight(FontWeight::SEMIBOLD),
-                    ),
-            )
-            .child(
-                Label::new(if other_databases.is_empty() {
-                    t!("database_client.panel.no_tables_description")
-                } else {
-                    t!(
-                        "database_client.panel.other_databases",
-                        databases = other_databases.join(", ")
-                    )
-                })
-                .size(LabelSize::XSmall)
-                .color(Color::Muted),
-            )
-            .into_any_element()
-    }
-
-    fn render_footer(&self, summary: Option<String>, cx: &mut Context<Self>) -> AnyElement {
-        h_flex()
-            .h(px(44.))
-            .flex_none()
-            .px_3()
-            .gap_2()
-            .border_t_1()
-            .border_color(cx.theme().colors().border)
-            .when_some(summary, |this, summary| {
-                this.child(
-                    Label::new(summary)
-                        .size(LabelSize::XSmall)
-                        .color(Color::Muted),
-                )
-            })
-            .child(div().flex_1())
-            .when(self.session().is_some(), |this| {
-                this.child(
-                    h_flex()
-                        .id("db-new-query")
-                        .gap_1p5()
-                        .cursor_pointer()
-                        .child(
-                            Label::new(t!("database_client.panel.new_query"))
-                                .size(LabelSize::XSmall)
-                                .weight(FontWeight::MEDIUM)
-                                .color(Color::Accent),
+                    .gap_1()
+                    .when(self.session().is_some(), |this| {
+                        this.child(
+                            capsule_button(
+                                "db-new-query",
+                                Some(IconName::Plus),
+                                t!("database_client.panel.new_query"),
+                                cx,
+                            )
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.new_query(window, cx)),
+                            ),
                         )
-                        .child(
-                            KeyBinding::for_action_in(&NewQuery, &self.focus_handle, cx)
-                                .size(rems_from_px(11_f32)),
-                        )
-                        .on_click(cx.listener(|this, _, window, cx| this.new_query(window, cx))),
-                )
-            })
-            .into_any_element()
+                    })
+                    .child(more_menu)
+                    .into_any_element(),
+            ),
+            cx,
+        )
+        .h(px(44.))
+        .into_any_element()
     }
 
     fn render_suggestion(
@@ -1615,25 +1682,22 @@ impl DatabasePanel {
             }
         };
         let chosen = suggestion.clone();
-        let accent = cx.theme().colors().border_focused;
+        let hover = cx.theme().colors().element_hover;
         v_flex()
             .id(("db-suggestion", index))
-            .px_3p5()
-            .py_3()
-            .gap_1()
-            .rounded_lg()
-            .border_1()
-            .border_color(cx.theme().colors().border)
-            .bg(cx.theme().colors().element_background)
+            .px_1p5()
+            .py_1()
+            .gap_0p5()
+            .rounded(Radius::Sm.rems())
             .cursor_pointer()
-            .hover(move |style| style.border_color(accent).bg(accent.opacity(0.18)))
+            .hover(move |style| style.bg(hover))
             .child(
                 h_flex()
-                    .gap_2()
-                    .child(Icon::new(icon).size(IconSize::Small).color(Color::Muted))
+                    .gap_1p5()
+                    .child(Icon::new(icon).size(IconSize::XSmall).color(Color::Muted))
                     .child(
                         Label::new(file)
-                            .size(LabelSize::Small)
+                            .size(LabelSize::XSmall)
                             .buffer_font(cx)
                             .weight(FontWeight::SEMIBOLD),
                     )
@@ -1644,110 +1708,31 @@ impl DatabasePanel {
                                 .color(Color::Muted)
                                 .truncate(),
                         ),
-                    )
-                    .child(
-                        Label::new(t!("database_client.panel.use_suggestion"))
-                            .size(LabelSize::XSmall)
-                            .weight(FontWeight::MEDIUM)
-                            .color(Color::Accent),
                     ),
             )
             .child(
-                Label::new(suggestion.address())
+                Label::new(format!("{} · {password}", suggestion.address()))
                     .size(LabelSize::XSmall)
                     .buffer_font(cx)
                     .color(Color::Muted)
                     .truncate(),
             )
-            .child(
-                Label::new(password)
-                    .size(LabelSize::XSmall)
-                    .color(Color::Muted),
-            )
             .on_click(cx.listener(move |this, _, window, cx| {
+                cx.stop_propagation();
                 this.open_connect_view(Prefill::Suggestion(chosen.clone()), window, cx)
             }))
             .into_any_element()
     }
 
     fn render_idle(&self, cx: &mut Context<Self>) -> AnyElement {
-        let has_connections = !self.connections.is_empty();
-        let section = |title: SharedString, count: usize| {
-            h_flex()
-                .pt_1()
-                .pb_1p5()
-                .gap_2()
-                .child(section_label(title))
-                .child(
-                    Label::new(count.to_string())
-                        .size(LabelSize::XSmall)
-                        .color(Color::Muted),
-                )
-        };
-        let divider = || div().h_px().w_full().bg(cx.theme().colors().border);
+        let first_suggestion = self.suggestions.first().cloned();
         v_flex()
             .id("db-idle")
             .size_full()
             .overflow_y_scroll()
             .px_3()
-            .pt_10()
-            .pb_3()
-            .gap_4()
-            .child(
-                v_flex()
-                    .items_center()
-                    .gap_2p5()
-                    .px_4()
-                    .pb_2()
-                    .child(
-                        div()
-                            .size(px(56.))
-                            .mb_2()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded_xl()
-                            .bg(cx.theme().colors().border_focused.opacity(0.22))
-                            .child(
-                                Icon::new(IconName::Database)
-                                    .size(IconSize::Medium)
-                                    .color(Color::Accent),
-                            ),
-                    )
-                    .child(
-                        Label::new(if has_connections {
-                            t!("database_client.panel.no_open_connection")
-                        } else {
-                            t!("database_client.panel.no_project_connection")
-                        })
-                        .weight(FontWeight::SEMIBOLD),
-                    )
-                    .child(
-                        div().max_w(px(320.)).text_center().child(
-                            Label::new(t!("database_client.panel.idle_description"))
-                                .size(LabelSize::Small)
-                                .color(Color::Muted),
-                        ),
-                    )
-                    .child(
-                        div().pt_1p5().child(
-                            primary_button(
-                                "db-new-connection",
-                                Some(IconName::Plus),
-                                t!("database_client.connect.new_title"),
-                                None,
-                                cx,
-                            )
-                            .w(px(168.))
-                            .justify_center()
-                            .on_click(cx.listener(
-                                |this, _, window, cx| {
-                                    this.open_connect_view(Prefill::New, window, cx)
-                                },
-                            )),
-                        ),
-                    ),
-            )
+            .py_3()
+            .gap_2()
             .when_some(self.load_error.clone(), |this, error| {
                 this.child(
                     Label::new(error)
@@ -1755,77 +1740,122 @@ impl DatabasePanel {
                         .color(Color::Error),
                 )
             })
-            .when(has_connections || !self.suggestions.is_empty(), |this| {
-                this.child(divider())
+            .when_some(first_suggestion, |this, first| {
+                let body = v_flex()
+                    .gap_0p5()
+                    .children(
+                        self.suggestions
+                            .iter()
+                            .enumerate()
+                            .map(|(index, suggestion)| {
+                                self.render_suggestion(index, suggestion, cx)
+                            }),
+                    )
+                    .child(
+                        div().pt_1p5().child(
+                            primary_button(
+                                "db-connect-found",
+                                None,
+                                t!(
+                                    "database_client.panel.connect_named",
+                                    name = first.database.clone()
+                                ),
+                                None,
+                                cx,
+                            )
+                            .on_click(cx.listener(
+                                move |this, _, window, cx| {
+                                    this.open_connect_view(
+                                        Prefill::Suggestion(first.clone()),
+                                        window,
+                                        cx,
+                                    )
+                                },
+                            )),
+                        ),
+                    );
+                this.child(choice_card_with_body(
+                    "db-found-card",
+                    IconName::MagnifyingGlass,
+                    t!("database_client.panel.found_card_title"),
+                    t!("database_client.panel.found_card_description"),
+                    Some(t!("database_client.panel.recommended")),
+                    Some(body.into_any_element()),
+                    true,
+                    cx,
+                ))
             })
-            .when(has_connections, |this| {
-                this.child(
-                    v_flex()
-                        .child(section(
-                            t!("database_client.panel.saved_connections"),
-                            self.connections.len(),
-                        ))
-                        .children(self.connections.iter().enumerate().map(|(index, stored)| {
-                            let connection = stored.connection.clone();
-                            h_flex()
-                                .id(("db-saved", index))
-                                .h(px(30.))
-                                .px_2()
-                                .gap_1p5()
-                                .rounded_md()
-                                .cursor_pointer()
-                                .hover(|style| style.bg(cx.theme().colors().element_hover))
-                                .child(
-                                    Icon::new(IconName::Database)
-                                        .size(IconSize::Small)
-                                        .color(Color::Muted),
-                                )
-                                .child(Label::new(connection.name.clone()).size(LabelSize::Small))
-                                .child(environment_chip(connection.environment, cx))
-                                .child(
-                                    div().flex_1().min_w_0().child(
-                                        Label::new(connection.address())
-                                            .size(LabelSize::XSmall)
-                                            .buffer_font(cx)
-                                            .color(Color::Muted)
-                                            .truncate(),
-                                    ),
-                                )
-                                .child(
-                                    Label::new(t!("database_client.panel.connect"))
-                                        .size(LabelSize::XSmall)
-                                        .color(Color::Accent),
-                                )
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.connect(connection.clone(), cx)
-                                }))
-                        })),
+            .child(
+                choice_card(
+                    "db-new-connection-card",
+                    IconName::Plus,
+                    t!("database_client.connect.new_title"),
+                    t!("database_client.panel.new_connection_card_description"),
+                    None,
+                    true,
+                    cx,
                 )
-            })
-            .when(!self.suggestions.is_empty(), |this| {
-                this.child(
-                    v_flex()
-                        .child(section(
-                            t!("database_client.panel.found_in_project"),
-                            self.suggestions.len(),
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.open_connect_view(Prefill::New, window, cx)
+                })),
+            )
+            .child(
+                choice_card(
+                    "db-import-card",
+                    IconName::Download,
+                    t!("database_client.panel.import_card_title"),
+                    t!("database_client.panel.import_card_description"),
+                    None,
+                    true,
+                    cx,
+                )
+                .on_click(cx.listener(|this, _, window, cx| this.open_import(window, cx))),
+            )
+            .when(!self.connections.is_empty(), |this| {
+                let hover = cx.theme().colors().element_hover;
+                this.child(div().pt_3().px_1().child(section_header(
+                    t!("database_client.panel.saved_connections"),
+                    None,
+                )))
+                .children(self.connections.iter().enumerate().map(|(index, stored)| {
+                    let connection = stored.connection.clone();
+                    h_flex()
+                        .id(("db-saved", index))
+                        .h(px(30.))
+                        .px_1p5()
+                        .gap_1p5()
+                        .rounded(Radius::Sm.rems())
+                        .cursor_pointer()
+                        .hover(move |style| style.bg(hover))
+                        .child(
+                            Icon::new(IconName::Database)
+                                .size(IconSize::Small)
+                                .color(Color::Muted),
+                        )
+                        .child(Label::new(connection.name.clone()).size(LabelSize::Small))
+                        .child(status_pill(
+                            connection.environment.label(),
+                            environment_tone(connection.environment),
+                            cx,
                         ))
                         .child(
-                            v_flex()
-                                .gap_2()
-                                .children(self.suggestions.iter().enumerate().map(
-                                    |(index, suggestion)| {
-                                        self.render_suggestion(index, suggestion, cx)
-                                    },
-                                )),
+                            div().flex_1().min_w_0().child(
+                                Label::new(connection.address())
+                                    .size(LabelSize::XSmall)
+                                    .buffer_font(cx)
+                                    .color(Color::Muted)
+                                    .truncate(),
+                            ),
                         )
                         .child(
-                            div().pt_3().child(
-                                Label::new(t!("database_client.panel.suggestions_note"))
-                                    .size(LabelSize::XSmall)
-                                    .color(Color::Muted),
-                            ),
-                        ),
-                )
+                            Label::new(t!("database_client.panel.connect"))
+                                .size(LabelSize::XSmall)
+                                .color(Color::Accent),
+                        )
+                        .on_click(
+                            cx.listener(move |this, _, _, cx| this.connect(connection.clone(), cx)),
+                        )
+                }))
             })
             .into_any_element()
     }
@@ -1957,6 +1987,18 @@ pub(crate) fn number_separators() -> (char, char) {
     match i18n::current_language() {
         i18n::Language::PortugueseBrazil => (',', '.'),
         i18n::Language::English => ('.', ','),
+    }
+}
+
+fn format_count_compact(count: i64) -> String {
+    match count {
+        1_000_000.. => format_count(count),
+        1_000.. => t!(
+            "database_client.panel.rows_compact_thousands",
+            count = count / 1_000
+        )
+        .to_string(),
+        _ => count.to_string(),
     }
 }
 
@@ -2143,68 +2185,142 @@ pub(crate) fn segment(
         .h(px(26.))
 }
 
-/// The small bordered pill of the boards (`auto-commit`, `limite 1000`).
-pub(crate) fn chip(cx: &App) -> Div {
-    h_flex()
-        .flex_none()
-        .h(px(24.))
-        .px_2()
-        .gap_1p5()
-        .rounded_md()
-        .border_1()
-        .border_color(cx.theme().colors().border_selected)
-}
-
-pub fn environment_color(environment: Environment) -> Color {
+pub(crate) fn environment_tone(environment: Environment) -> StatusTone {
     match environment {
-        Environment::Local => Color::Muted,
-        Environment::Dev => Color::Success,
-        Environment::Staging => Color::Warning,
-        Environment::Prod => Color::Error,
+        Environment::Local => StatusTone::Neutral,
+        Environment::Dev => StatusTone::Success,
+        Environment::Staging => StatusTone::Warning,
+        Environment::Prod => StatusTone::Error,
     }
 }
 
-pub fn environment_chip(environment: Environment, cx: &App) -> impl IntoElement {
-    let color = environment_color(environment);
+pub(crate) fn environment_select(
+    id: impl Into<gpui::ElementId>,
+    current: Environment,
+    enabled: bool,
+    on_select: impl Fn(Environment, &mut App) + Clone + 'static,
+    cx: &App,
+) -> PopoverMenu<ContextMenu> {
+    let id = id.into();
+    let trigger_id = gpui::ElementId::NamedChild(Arc::new(id.clone()), "trigger".into());
+    PopoverMenu::new(id)
+        .full_width(true)
+        .trigger(PopoverTriggerArea::new(
+            select_field(trigger_id, current.label(), cx).child(
+                div()
+                    .flex()
+                    .flex_none()
+                    .child(environment_tone(current).dot(cx)),
+            ),
+        ))
+        .anchor(gpui::Anchor::TopLeft)
+        .menu(move |window, cx| {
+            if !enabled {
+                return None;
+            }
+            let on_select = on_select.clone();
+            Some(ContextMenu::build(window, cx, move |mut menu, _, _| {
+                for environment in Environment::ALL {
+                    let on_select = on_select.clone();
+                    menu = menu.toggleable_entry(
+                        environment.label(),
+                        environment == current,
+                        IconPosition::End,
+                        None,
+                        move |_, cx| on_select(environment, cx),
+                    );
+                }
+                menu
+            }))
+        })
+}
+
+pub(crate) fn scope_control(
+    id_prefix: &'static str,
+    current: Scope,
+    on_select: impl Fn(&Scope, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> Div {
+    let on_select = std::rc::Rc::new(on_select);
+    let option = |scope: Scope, label: SharedString| {
+        let on_select = on_select.clone();
+        segment(
+            gpui::ElementId::NamedChild(
+                Arc::new(id_prefix.into()),
+                match scope {
+                    Scope::Profile => "profile".into(),
+                    Scope::Project => "project".into(),
+                },
+            ),
+            label,
+            current == scope,
+            cx,
+        )
+        .on_click(move |_, window, cx| on_select(&scope, window, cx))
+    };
+    segmented_control(cx)
+        .child(option(
+            Scope::Profile,
+            t!("database_client.connect.scope_profile"),
+        ))
+        .child(option(
+            Scope::Project,
+            t!(
+                "database_client.connect.scope_project",
+                file = connection::PROJECT_FILE
+            ),
+        ))
+}
+
+pub(crate) fn connection_chip(
+    id: impl Into<gpui::ElementId>,
+    connection: &SavedConnection,
+    cx: &App,
+) -> Stateful<Div> {
+    let colors = cx.theme().colors();
     h_flex()
+        .id(id)
         .flex_none()
-        .h(px(18.))
-        .px_1p5()
-        .gap_1()
-        .rounded_full()
-        .bg(color.color(cx).opacity(0.12))
-        .child(Indicator::dot().color(color))
+        .h(px(30.))
+        .px_2p5()
+        .gap_2()
+        .rounded(Radius::Sm.rems())
+        .border_1()
+        .border_color(colors.border_selected)
+        .bg(colors.element_background)
         .child(
-            Label::new(environment.label())
-                .size(LabelSize::XSmall)
-                .color(color),
+            Icon::new(IconName::Database)
+                .size(IconSize::XSmall)
+                .color(Color::Muted),
+        )
+        .child(
+            Label::new(connection.name.clone())
+                .size(LabelSize::Small)
+                .weight(FontWeight::SEMIBOLD),
+        )
+        .child(environment_tone(connection.environment).dot(cx))
+        .child(
+            Icon::new(IconName::ChevronDown)
+                .size(IconSize::XSmall)
+                .color(Color::Muted),
         )
 }
 
 impl Render for DatabasePanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let content = if !self.loaded {
-            v_flex()
-                .size_full()
-                .items_center()
-                .justify_center()
-                .child(
-                    Label::new(t!("database_client.panel.searching_connections"))
-                        .size(LabelSize::Small)
-                        .color(Color::Muted),
-                )
-                .into_any_element()
+            EmptyState::new(
+                IconName::LoadCircle,
+                t!("database_client.panel.searching_connections"),
+            )
+            .spinning(true)
+            .into_any_element()
         } else if self.root.is_none() {
-            v_flex()
-                .size_full()
-                .items_center()
-                .justify_center()
-                .child(
-                    Label::new(t!("database_client.panel.open_project_folder"))
-                        .size(LabelSize::Small)
-                        .color(Color::Muted),
-                )
-                .into_any_element()
+            EmptyState::new(
+                IconName::Folder,
+                t!("database_client.panel.open_project_folder"),
+            )
+            .into_any_element()
         } else {
             match &self.active {
                 Some(active) => self.render_connected(active, cx),

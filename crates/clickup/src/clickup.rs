@@ -4,6 +4,7 @@
 mod agent_toolkit;
 mod api;
 mod panel;
+mod sprint_board;
 
 pub use agent_toolkit::register_toolkit as register_agent_toolkit;
 pub use panel::ClickUpPanel;
@@ -35,6 +36,8 @@ actions!(
         ToggleFocus,
         /// Forgets the ClickUp token saved in the keychain.
         Disconnect,
+        /// Opens the current sprint as a board in a tab.
+        OpenSprintBoard,
     ]
 );
 
@@ -76,6 +79,11 @@ pub fn init(cx: &mut App) {
     cx.observe_new(|workspace: &mut Workspace, _window, _cx| {
         workspace.register_action(|workspace, _: &ToggleFocus, window, cx| {
             toggle_focus(workspace, window, cx);
+        });
+        workspace.register_action(|workspace, _: &OpenSprintBoard, window, cx| {
+            if toolkit_allowed(workspace, cx) {
+                sprint_board::open(workspace, None, window, cx);
+            }
         });
         workspace.register_action(|_workspace, _: &Disconnect, _window, cx| {
             ClickUpStore::global(cx)

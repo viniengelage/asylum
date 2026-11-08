@@ -1,14 +1,17 @@
 //! The Repo panel: the pull requests of the repository the project's `origin` points at, with
 //! the one for the checked-out branch on top. Bitbucket Cloud authenticates with an Atlassian
-//! API token and GitHub with the `gh` CLI's token or a fine-grained one, both kept in the
-//! keychain, which is already scoped to the active profile.
+//! API token, GitHub with the `gh` CLI's token or a fine-grained one and GitLab with the `glab`
+//! CLI's token or a personal access one, all kept in the keychain, which is already scoped to the
+//! active profile.
 
 mod agent_toolkit;
 pub mod api;
 mod bitbucket;
 pub mod github;
+mod gitlab;
 pub mod host;
 mod panel;
+mod pull_request_changes;
 
 pub use agent_toolkit::register_toolkit as register_agent_toolkit;
 use panel::PullRequestFollowup;
@@ -38,6 +41,8 @@ actions!(
         DisconnectBitbucket,
         /// Forgets the GitHub token saved in the keychain.
         DisconnectGitHub,
+        /// Forgets the GitLab token saved in the keychain.
+        DisconnectGitLab,
     ]
 );
 
@@ -45,6 +50,14 @@ actions!(
 const BITBUCKET_CREDENTIALS_URL: &str = "https://bitbucket.org/asylum";
 /// Ours alone, so it never collides with what git credential helpers keep for github.com.
 const GITHUB_CREDENTIALS_URL: &str = "https://github.com/asylum";
+/// Saved in place of a token when the account reads its token from `gh`, so the token itself is
+/// never copied into the Keychain.
+const GH_CLI_SENTINEL: &str = "gh-cli";
+/// Ours alone, so it never collides with what git credential helpers keep for gitlab.com. The
+/// keychain username holds the instance's host, which is how a self-hosted GitLab is remembered.
+const GITLAB_CREDENTIALS_URL: &str = "https://gitlab.com/asylum";
+/// Saved in place of a token when the account reads its token from `glab`.
+const GLAB_CLI_SENTINEL: &str = "glab-cli";
 
 pub fn init(cx: &mut App) {
     workspace::register_panel_item::<RepoPanel>(cx);
@@ -115,6 +128,11 @@ pub fn init(cx: &mut App) {
         workspace.register_action(|_workspace, _: &DisconnectGitHub, _window, cx| {
             RepoStore::global(cx)
                 .update(cx, |store, cx| store.disconnect(api::Hosting::GitHub, cx))
+                .detach_and_log_err(cx);
+        });
+        workspace.register_action(|_workspace, _: &DisconnectGitLab, _window, cx| {
+            RepoStore::global(cx)
+                .update(cx, |store, cx| store.disconnect(api::Hosting::GitLab, cx))
                 .detach_and_log_err(cx);
         });
     })
@@ -218,6 +236,7 @@ pub struct RepoStore {
     credentials_provider: Arc<dyn CredentialsProvider>,
     bitbucket: Connection,
     github: Connection,
+    gitlab: Connection,
     load_tasks: HashMap<api::Hosting, Task<()>>,
     /// The open pull requests each repository had when last listed, which the agent's `@` menu
     /// offers without asking the host again.
@@ -232,6 +251,7 @@ fn credentials_url(hosting: api::Hosting) -> &'static str {
     match hosting {
         api::Hosting::Bitbucket => BITBUCKET_CREDENTIALS_URL,
         api::Hosting::GitHub => GITHUB_CREDENTIALS_URL,
+        api::Hosting::GitLab => GITLAB_CREDENTIALS_URL,
     }
 }
 
@@ -247,11 +267,13 @@ impl RepoStore {
                 credentials_provider: zed_credentials_provider::global(cx),
                 bitbucket: Connection::Loading,
                 github: Connection::Loading,
+                gitlab: Connection::Loading,
                 load_tasks: HashMap::default(),
                 pull_requests: HashMap::default(),
             };
             store.load(api::Hosting::Bitbucket, cx);
             store.load(api::Hosting::GitHub, cx);
+            store.load(api::Hosting::GitLab, cx);
             store
         });
         cx.set_global(GlobalRepoStore(store.clone()));
@@ -262,6 +284,7 @@ impl RepoStore {
         match hosting {
             api::Hosting::Bitbucket => &self.bitbucket,
             api::Hosting::GitHub => &self.github,
+            api::Hosting::GitLab => &self.gitlab,
         }
     }
 
@@ -269,6 +292,7 @@ impl RepoStore {
         match hosting {
             api::Hosting::Bitbucket => &mut self.bitbucket,
             api::Hosting::GitHub => &mut self.github,
+            api::Hosting::GitLab => &mut self.gitlab,
         }
     }
 
@@ -281,6 +305,25 @@ impl RepoStore {
             )),
             _ => None,
         }
+    }
+
+    /// The connected account when it can reach `repository`.
+    pub fn account_for(&self, repository: &api::RemoteRepository) -> Option<&Account> {
+        match self.connection(repository.hosting) {
+            Connection::Connected(account) if account.credentials.serves(repository) => {
+                Some(account)
+            }
+            _ => None,
+        }
+    }
+
+    /// A client for `repository` when an account that can reach it is connected.
+    pub fn client_for(&self, repository: &api::RemoteRepository) -> Option<host::Client> {
+        let account = self.account_for(repository)?;
+        Some(host::Client::new(
+            self.http_client.clone(),
+            account.credentials.clone(),
+        ))
     }
 
     /// The GitHub token, for what the Repo panel doesn't cover (GitHub Projects).
@@ -332,9 +375,8 @@ impl RepoStore {
     /// Checks a GitHub token without saving it.
     pub fn validate_github(&self, token: String, cx: &App) -> Task<Result<Account>> {
         let http_client = self.http_client.clone();
-        let credentials = host::Credentials::GitHub(github::Credentials {
-            token: token.trim().to_string(),
-        });
+        let credentials =
+            host::Credentials::GitHub(github::Credentials::from_token(token.trim().to_string()));
         cx.background_spawn(async move { validate(&http_client, credentials).await })
     }
 
@@ -342,18 +384,44 @@ impl RepoStore {
     pub fn validate_github_cli(&self, cx: &App) -> Task<Result<Account>> {
         let http_client = self.http_client.clone();
         cx.background_spawn(async move {
-            let token = github::token_from_gh_cli().await?;
             validate(
                 &http_client,
-                host::Credentials::GitHub(github::Credentials { token }),
+                host::Credentials::GitHub(github::Credentials::gh_cli()),
             )
             .await
         })
     }
 
-    /// Saves the token `gh` holds now when it belongs to the connected account and differs from
-    /// the saved one. `gh auth refresh` issues a new token, so the copy saved when connecting
-    /// keeps the scopes it had back then. Returns whether the token was replaced.
+    /// Checks a GitLab token for `instance` without saving it.
+    pub fn validate_gitlab(
+        &self,
+        instance: String,
+        token: String,
+        cx: &App,
+    ) -> Task<Result<Account>> {
+        let http_client = self.http_client.clone();
+        let credentials = host::Credentials::GitLab(gitlab::Credentials::from_token(
+            instance,
+            token.trim().to_string(),
+        ));
+        cx.background_spawn(async move { validate(&http_client, credentials).await })
+    }
+
+    /// The account the `glab` CLI is logged into on `instance`, checked but not saved.
+    pub fn validate_gitlab_cli(&self, instance: String, cx: &App) -> Task<Result<Account>> {
+        let http_client = self.http_client.clone();
+        cx.background_spawn(async move {
+            validate(
+                &http_client,
+                host::Credentials::GitLab(gitlab::Credentials::glab_cli(instance)),
+            )
+            .await
+        })
+    }
+
+    /// Switches the connected account to reading its token from `gh` when `gh` is logged into
+    /// the same account with a different token, since `gh auth refresh` issues a new token and a
+    /// saved copy keeps the scopes it had back then. Returns whether the account switched.
     pub fn adopt_github_cli_token(&mut self, cx: &mut Context<Self>) -> Task<Result<bool>> {
         let Connection::Connected(current) = &self.github else {
             return Task::ready(Ok(false));
@@ -361,15 +429,19 @@ impl RepoStore {
         let host::Credentials::GitHub(current_credentials) = &current.credentials else {
             return Task::ready(Ok(false));
         };
+        let github::TokenSource::Token(current_token) = &current_credentials.source else {
+            return Task::ready(Ok(false));
+        };
         let current_login = current.user.id.clone();
-        let current_token = current_credentials.token.clone();
-        let validation = self.validate_github_cli(cx);
+        let current_token = current_token.clone();
         cx.spawn(async move |this, cx| {
-            let account = validation.await?;
-            let host::Credentials::GitHub(credentials) = &account.credentials else {
+            let token = github::token_from_gh_cli().await?;
+            if token == current_token {
                 return Ok(false);
-            };
-            if account.user.id != current_login || credentials.token == current_token {
+            }
+            let validation = this.update(cx, |this, cx| this.validate_github_cli(cx))?;
+            let account = validation.await?;
+            if account.user.id != current_login {
                 return Ok(false);
             }
             this.update(cx, |this, cx| this.save(account, cx))?.await?;
@@ -390,7 +462,17 @@ impl RepoStore {
                     .nickname
                     .clone()
                     .unwrap_or_else(|| account.user.id.clone()),
-                credentials.token.clone(),
+                match &credentials.source {
+                    github::TokenSource::Token(token) => token.clone(),
+                    github::TokenSource::GhCli => GH_CLI_SENTINEL.to_string(),
+                },
+            ),
+            host::Credentials::GitLab(credentials) => (
+                credentials.instance.clone(),
+                match &credentials.source {
+                    gitlab::TokenSource::Token(token) => token.clone(),
+                    gitlab::TokenSource::GlabCli => GLAB_CLI_SENTINEL.to_string(),
+                },
             ),
         };
         cx.spawn(async move |this, cx| {
@@ -446,9 +528,18 @@ impl RepoStore {
                                     token,
                                 })
                             }
-                            api::Hosting::GitHub => {
-                                host::Credentials::GitHub(github::Credentials { token })
+                            api::Hosting::GitHub if token == GH_CLI_SENTINEL => {
+                                host::Credentials::GitHub(github::Credentials::gh_cli())
                             }
+                            api::Hosting::GitHub => {
+                                host::Credentials::GitHub(github::Credentials::from_token(token))
+                            }
+                            api::Hosting::GitLab if token == GLAB_CLI_SENTINEL => {
+                                host::Credentials::GitLab(gitlab::Credentials::glab_cli(username))
+                            }
+                            api::Hosting::GitLab => host::Credentials::GitLab(
+                                gitlab::Credentials::from_token(username, token),
+                            ),
                         };
                         match validate(&http_client, credentials).await {
                             Ok(account) => Connection::Connected(account),
@@ -504,6 +595,14 @@ async fn validate(
                 user,
                 credentials,
                 scopes,
+            })
+        }
+        host::Credentials::GitLab(gitlab_credentials) => {
+            let user = gitlab::get_user(http_client, gitlab_credentials).await?;
+            Ok(Account {
+                user,
+                credentials,
+                scopes: Vec::new(),
             })
         }
     }

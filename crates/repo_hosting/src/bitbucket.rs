@@ -62,6 +62,7 @@ pub fn parse_remote(url: &str) -> Option<RemoteRepository> {
         hosting: Hosting::Bitbucket,
         owner: parsed.owner.to_string(),
         name: parsed.repo.to_string(),
+        instance: None,
     })
 }
 
@@ -719,6 +720,21 @@ pub async fn post_inline_comment(
     Ok(())
 }
 
+pub async fn resolve_comment(
+    client: &Arc<dyn HttpClient>,
+    credentials: &Credentials,
+    repository: &RemoteRepository,
+    number: u64,
+    comment_id: u64,
+) -> Result<()> {
+    let url = format!(
+        "{}/pullrequests/{number}/comments/{comment_id}/resolve",
+        repository_path(repository)
+    );
+    send::<serde_json::Value>(client, credentials, http_client::Method::POST, &url, None).await?;
+    Ok(())
+}
+
 /// Where new pull requests should go by default: the branching model's development branch
 /// when the repository uses one (usually `develop`), else its main branch.
 pub async fn get_default_destination(
@@ -1189,6 +1205,7 @@ mod tests {
             hosting: Hosting::Bitbucket,
             owner: "trix".to_string(),
             name: "trix_frontend_app".to_string(),
+            instance: None,
         }
     }
 

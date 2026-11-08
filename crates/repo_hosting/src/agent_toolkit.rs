@@ -1,4 +1,4 @@
-//! The Repo toolkit for agents: the pull requests of the project's Bitbucket or GitHub repository, their
+//! The Repo toolkit for agents: the pull requests of the project's Bitbucket, GitHub or GitLab repository, their
 //! diffs, comments and merges, with the account connected in the Repo dock. It also feeds the
 //! agent's `@` menu, so a pull request can be mentioned like a file.
 
@@ -44,9 +44,13 @@ async fn repo_context(project: &Entity<Project>, cx: &mut AsyncApp) -> Result<Re
     let started = Instant::now();
     loop {
         let loading = cx.update(|cx| {
-            [crate::api::Hosting::Bitbucket, crate::api::Hosting::GitHub]
-                .into_iter()
-                .any(|hosting| matches!(store.read(cx).connection(hosting), Connection::Loading))
+            [
+                crate::api::Hosting::Bitbucket,
+                crate::api::Hosting::GitHub,
+                crate::api::Hosting::GitLab,
+            ]
+            .into_iter()
+            .any(|hosting| matches!(store.read(cx).connection(hosting), Connection::Loading))
         });
         if !loading || started.elapsed() > CONNECTION_TIMEOUT {
             break;
@@ -61,11 +65,11 @@ async fn repo_context(project: &Entity<Project>, cx: &mut AsyncApp) -> Result<Re
             Target::Hosted { repository, .. } => repository,
             Target::NoRepository => anyhow::bail!("O projeto não tem repositório git."),
             Target::Unsupported { remote_url } => anyhow::bail!(
-                "O remoto {} não é do Bitbucket nem do GitHub; só esses dois são suportados.",
+                "O remoto {} não é do Bitbucket, do GitHub nem do GitLab; só esses três são suportados.",
                 remote_url.unwrap_or_else(|| "(nenhum)".into())
             ),
         };
-        let client = store.read(cx).client(repository.hosting).with_context(|| {
+        let client = store.read(cx).client_for(&repository).with_context(|| {
             format!(
                 "Nenhuma conta do {} conectada. Peça para conectar no dock Repo.",
                 repository.hosting.name()
@@ -361,7 +365,7 @@ fn pull_request_card(detail: &PullRequestDetail, branch: Option<&str>) -> PullRe
 }
 
 /// The part of a unified diff that changes `path`.
-fn file_section<'a>(diff: &'a str, path: &str) -> Option<&'a str> {
+pub(crate) fn file_section<'a>(diff: &'a str, path: &str) -> Option<&'a str> {
     let header_suffix = format!(" b/{path}");
     let mut start = None;
     let mut offset = 0;
@@ -835,12 +839,12 @@ fn strategy_matches(strategy: MergeStrategy, name: &str) -> bool {
     let normalize = |text: &str| text.trim().to_lowercase().replace([' ', '-'], "_");
     let name = normalize(name);
     name == strategy.api_name()
-        || [Hosting::Bitbucket, Hosting::GitHub]
+        || [Hosting::Bitbucket, Hosting::GitHub, Hosting::GitLab]
             .into_iter()
             .any(|hosting| name == normalize(strategy.label(hosting)))
 }
 
-const PREFER_OVER_MCP: &str = "Use this instead of any Bitbucket or GitHub MCP server tool: it \
+const PREFER_OVER_MCP: &str = "Use this instead of any Bitbucket, GitHub or GitLab MCP server tool: it \
      uses the account of the Repo dock.";
 
 pub fn register_toolkit(cx: &mut App) {
@@ -863,7 +867,7 @@ pub fn register_toolkit(cx: &mut App) {
                     "repo_pull_requests",
                     t!("repo_hosting.toolkit.listed_pull_requests"),
                     format!(
-                        "Lists the open pull requests of the project's Bitbucket repository, \
+                        "Lists the open pull requests of the project's hosted repository, \
                          marking the one opened from the current branch. {PREFER_OVER_MCP}"
                     ),
                     ToolAccess::Read,
@@ -938,7 +942,7 @@ pub fn register_toolkit(cx: &mut App) {
                 ToolkitTool::new(
                     REPO_MERGE_TOOL,
                     t!("repo_hosting.toolkit.merged"),
-                    "Merges a pull request on Bitbucket or GitHub. Only when the user asked for it: read \
+                    "Merges a pull request on Bitbucket, GitHub or GitLab. Only when the user asked for it: read \
                      the pull request first so they see its checks and reviews, and the user \
                      confirms every merge.",
                     ToolAccess::AlwaysConfirm,

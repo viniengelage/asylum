@@ -401,9 +401,42 @@ struct CommentsResponse {
     comments: Vec<Comment>,
 }
 
+/// A list with what the sprint board reads: sprint lists carry their dates, and the folder
+/// holds the other sprints.
+#[derive(Clone, Debug, Deserialize)]
+pub struct List {
+    pub id: String,
+    pub name: String,
+    pub folder: Option<ListFolder>,
+    /// Milliseconds since the epoch.
+    #[serde(default, deserialize_with = "deserialize_millis")]
+    pub start_date: Option<i64>,
+    #[serde(default, deserialize_with = "deserialize_millis")]
+    pub due_date: Option<i64>,
+    #[serde(default)]
+    pub statuses: Vec<TaskStatus>,
+}
+
+impl List {
+    pub fn is_running_at(&self, millis: i64) -> bool {
+        match (self.start_date, self.due_date) {
+            (Some(start), Some(due)) => start <= millis && millis <= due,
+            _ => false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct ListFolder {
+    pub id: String,
+    /// Lists created straight in a space live in a hidden folder that can't be listed.
+    #[serde(default)]
+    pub hidden: bool,
+}
+
 #[derive(Deserialize)]
-struct ListResponse {
-    statuses: Vec<TaskStatus>,
+struct FolderListsResponse {
+    lists: Vec<List>,
 }
 
 /// The timer running for the user, if any.
@@ -472,16 +505,49 @@ pub async fn create_task(
     .await
 }
 
+/// A list with its statuses in board order.
+pub async fn get_list(client: &Arc<dyn HttpClient>, token: &str, list_id: &str) -> Result<List> {
+    let mut list: List = get(client, token, &format!("/list/{list_id}")).await?;
+    list.statuses.sort_by_key(|status| status.orderindex);
+    Ok(list)
+}
+
 /// The statuses a task in `list_id` can move to, in board order.
 pub async fn get_list_statuses(
     client: &Arc<dyn HttpClient>,
     token: &str,
     list_id: &str,
 ) -> Result<Vec<TaskStatus>> {
-    let response: ListResponse = get(client, token, &format!("/list/{list_id}")).await?;
-    let mut statuses = response.statuses;
-    statuses.sort_by_key(|status| status.orderindex);
-    Ok(statuses)
+    Ok(get_list(client, token, list_id).await?.statuses)
+}
+
+pub async fn get_folder_lists(
+    client: &Arc<dyn HttpClient>,
+    token: &str,
+    folder_id: &str,
+) -> Result<Vec<List>> {
+    let response: FolderListsResponse =
+        get(client, token, &format!("/folder/{folder_id}/list")).await?;
+    Ok(response.lists)
+}
+
+/// Every task of a list, closed ones included, whoever they are assigned to.
+pub async fn get_list_tasks(
+    client: &Arc<dyn HttpClient>,
+    token: &str,
+    list_id: &str,
+) -> Result<Vec<Task>> {
+    let mut tasks = Vec::new();
+    for page in 0..MAX_TASK_PAGES {
+        let path = format!("/list/{list_id}/task?subtasks=true&include_closed=true&page={page}");
+        let response: TasksResponse = get(client, token, &path).await?;
+        let page_length = response.tasks.len();
+        tasks.extend(response.tasks);
+        if page_length < TASK_PAGE_SIZE {
+            break;
+        }
+    }
+    Ok(tasks)
 }
 
 pub async fn set_task_status(
@@ -872,6 +938,42 @@ mod tests {
             "sem token"
         );
         assert_eq!(read("https://evilclickup.com/x.png").await, "sem token");
+    }
+
+    #[test]
+    fn parses_sprint_lists() {
+        let list: List = serde_json::from_str(
+            r##"{
+                "id": "901", "name": "Sprint 34", "start_date": "1790000000000", "due_date": "1791000000000",
+                "folder": {"id": "77", "name": "Sprints", "hidden": false, "access": true},
+                "statuses": [
+                    {"id": "s2", "status": "em andamento", "orderindex": 1, "color": "#4194f6", "type": "custom"},
+                    {"id": "s1", "status": "a fazer", "orderindex": 0, "color": "#d3d3d3", "type": "open"}
+                ]
+            }"##,
+        )
+        .unwrap();
+        assert_eq!(
+            list.folder.as_ref().map(|folder| folder.id.as_str()),
+            Some("77")
+        );
+        assert!(list.is_running_at(1_790_500_000_000));
+        assert!(!list.is_running_at(1_792_000_000_000));
+        assert_eq!(list.statuses.len(), 2);
+
+        let lists: FolderListsResponse = serde_json::from_str(
+            r##"{"lists": [
+                {"id": "900", "name": "Sprint 33", "start_date": 1789000000000, "due_date": 1789900000000,
+                 "folder": {"id": "77", "name": "Sprints", "hidden": false}},
+                {"id": "902", "name": "Backlog", "start_date": null, "due_date": null,
+                 "folder": {"id": "77", "name": "Sprints", "hidden": false}}
+            ]}"##,
+        )
+        .unwrap();
+        assert_eq!(lists.lists.len(), 2);
+        assert!(lists.lists[0].is_running_at(1_789_500_000_000));
+        assert!(!lists.lists[1].is_running_at(1_789_500_000_000));
+        assert!(lists.lists[1].statuses.is_empty());
     }
 
     #[test]

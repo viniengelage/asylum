@@ -2,7 +2,7 @@ use crate::{
     SaveConnection, catalog,
     connection::{self, DEFAULT_PORT, Environment, SavedConnection, Scope, UrlFields},
     discovery::{Source, Suggestion},
-    panel::{DatabasePanel, environment_color, segment},
+    panel::{DatabasePanel, environment_tone, scope_control, segment},
     session::Session,
     tls::SslMode,
     tunnel::SshTunnel,
@@ -612,7 +612,7 @@ impl Render for ConnectView {
             t!("database_client.connect.new_title")
         };
         let colors = cx.theme().colors();
-        let environment_color = environment_color(self.environment).color(cx);
+        let environment_color = environment_tone(self.environment).color(cx);
         let two = |left: AnyElement, right: AnyElement| {
             h_flex()
                 .gap_4()
@@ -774,11 +774,7 @@ impl Render for ConnectView {
                             )),
                     )
                     .child(
-                        v_flex()
-                            .rounded_lg()
-                            .bg(colors.element_background)
-                            .border_1()
-                            .border_color(colors.border)
+                        ui::card(cx)
                             .child(
                                 h_flex()
                                     .id("db-ssh")
@@ -862,41 +858,16 @@ impl Render for ConnectView {
                             .child(field_label(t!("database_client.connect.save_to")))
                             .child(
                                 h_flex().child(
-                                    segmented_control(cx)
-                                        .h(px(36.))
-                                        .child(
-                                            segment(
-                                                "db-scope-profile",
-                                                t!("database_client.connect.scope_profile"),
-                                                self.scope == Scope::Profile,
-                                                cx,
-                                            )
-                                            .h(px(28.))
-                                            .on_click(
-                                                cx.listener(|this, _, _, cx| {
-                                                    this.scope = Scope::Profile;
-                                                    cx.notify();
-                                                }),
-                                            ),
-                                        )
-                                        .child(
-                                            segment(
-                                                "db-scope-project",
-                                                t!(
-                                                    "database_client.connect.scope_project",
-                                                    file = connection::PROJECT_FILE
-                                                ),
-                                                self.scope == Scope::Project,
-                                                cx,
-                                            )
-                                            .h(px(28.))
-                                            .on_click(
-                                                cx.listener(|this, _, _, cx| {
-                                                    this.scope = Scope::Project;
-                                                    cx.notify();
-                                                }),
-                                            ),
-                                        ),
+                                    scope_control(
+                                        "db-scope",
+                                        self.scope,
+                                        cx.listener(|this, scope: &Scope, _, cx| {
+                                            this.scope = *scope;
+                                            cx.notify();
+                                        }),
+                                        cx,
+                                    )
+                                    .h(px(36.)),
                                 ),
                             )
                             .child(

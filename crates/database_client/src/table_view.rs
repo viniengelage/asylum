@@ -24,7 +24,8 @@ use gpui::{
 use i18n::t;
 use std::{sync::Arc, time::Duration};
 use ui::{
-    Indicator, KeyBinding, Tooltip, prelude::*, primary_button, secondary_button, segmented_control,
+    Divider, KeyBinding, StatusTone, Tooltip, button_group, group_icon_button, prelude::*,
+    primary_button, secondary_button, segmented_control, status_chip,
 };
 use util::ResultExt as _;
 use workspace::{
@@ -217,6 +218,21 @@ impl TableView {
         (&self.connection.id, &self.schema, &self.name)
     }
 
+    pub(crate) fn has_pending_edits(&self) -> bool {
+        !self.pending.is_empty()
+    }
+
+    fn pending_changed(&mut self, cx: &mut Context<Self>) {
+        cx.emit(ItemEvent::UpdateTab);
+        self.workspace
+            .update(cx, |workspace, cx| {
+                if let Some(panel) = workspace.panel::<DatabasePanel>(cx) {
+                    panel.update(cx, |_, cx| cx.notify());
+                }
+            })
+            .log_err();
+    }
+
     fn open_session(&mut self, panel_session: Arc<Session>, cx: &mut Context<Self>) {
         let schema = self.schema.clone();
         let name = self.name.clone();
@@ -393,6 +409,7 @@ impl TableView {
         let pending = self.pending.clone();
         self.grid
             .update(cx, |grid, cx| grid.set_pending(pending, cx));
+        self.pending_changed(cx);
         cx.notify();
     }
 
@@ -402,6 +419,7 @@ impl TableView {
         self.notice = None;
         self.grid
             .update(cx, |grid, cx| grid.set_pending(PendingEdits::default(), cx));
+        self.pending_changed(cx);
         cx.notify();
     }
 
@@ -533,6 +551,7 @@ impl TableView {
                         this.show_sql = false;
                         this.grid
                             .update(cx, |grid, cx| grid.set_pending(PendingEdits::default(), cx));
+                        this.pending_changed(cx);
                         this.notice = Some((
                             if count == 1 {
                                 t!("database_client.table.rows_updated.one")
@@ -680,37 +699,17 @@ impl TableView {
             .h(px(52.))
             .flex_none()
             .px_3()
-            .gap_1p5()
-            .child(
-                Icon::new(if is_view {
+            .gap_2()
+            .child(status_chip(
+                Some(if is_view {
                     IconName::Eye
                 } else {
-                    IconName::Table
-                })
-                .size(IconSize::Small)
-                .color(Color::Muted),
-            )
-            .child(
-                Label::new(self.connection.name.clone())
-                    .size(LabelSize::Small)
-                    .color(Color::Muted),
-            )
-            .child(
-                Icon::new(IconName::ChevronRight)
-                    .size(IconSize::XSmall)
-                    .color(Color::Muted),
-            )
-            .child(
-                Label::new(self.schema.clone())
-                    .size(LabelSize::Small)
-                    .color(Color::Muted),
-            )
-            .child(
-                Icon::new(IconName::ChevronRight)
-                    .size(IconSize::XSmall)
-                    .color(Color::Muted),
-            )
-            .child(Label::new(self.name.clone()).weight(FontWeight::SEMIBOLD))
+                    IconName::Database
+                }),
+                format!("{} · {} · {}", self.connection.name, self.schema, self.name),
+                Color::Default,
+                cx,
+            ))
             .when(is_view, |this| {
                 this.child(
                     Label::new(t!("database_client.table.view_badge"))
@@ -720,19 +719,12 @@ impl TableView {
             })
             .when(!facts.is_empty(), |this| {
                 this.child(
-                    div()
-                        .ml_1()
-                        .h(px(22.))
-                        .px_2()
-                        .flex()
-                        .items_center()
-                        .rounded_md()
-                        .bg(cx.theme().colors().element_background)
-                        .child(
-                            Label::new(facts)
-                                .size(LabelSize::XSmall)
-                                .color(Color::Muted),
-                        ),
+                    div().min_w_0().child(
+                        Label::new(facts)
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted)
+                            .truncate(),
+                    ),
                 )
             })
             .child(div().flex_1())
@@ -749,12 +741,6 @@ impl TableView {
     }
 
     fn render_filters(&self, cx: &mut Context<Self>) -> AnyElement {
-        let divider = || {
-            div()
-                .w_px()
-                .h(px(20.))
-                .bg(cx.theme().colors().border_selected)
-        };
         h_flex()
             .key_context("DatabaseTableFilter")
             .h(px(40.))
@@ -766,49 +752,105 @@ impl TableView {
             .border_color(cx.theme().colors().border)
             .child(sql_tag("WHERE", cx))
             .child(div().flex_1().min_w_0().child(self.where_input.clone()))
-            .child(divider())
+            .child(Divider::vertical().h(px(20.)))
             .child(sql_tag("ORDER BY", cx))
             .child(div().w(px(180.)).child(self.order_input.clone()))
-            .child(divider())
-            .child(
-                Label::new(t!("database_client.table.limit"))
-                    .size(LabelSize::Small)
-                    .color(Color::Muted),
-            )
-            .child(
-                div()
-                    .h(px(22.))
-                    .px_2()
-                    .flex()
-                    .items_center()
-                    .rounded_sm()
-                    .bg(cx.theme().colors().element_background)
-                    .child(
-                        Label::new(PAGE_SIZE.to_string())
-                            .size(LabelSize::Small)
-                            .buffer_font(cx),
-                    ),
-            )
-            .child(
-                h_flex()
-                    .id("db-table-apply")
-                    .gap_1()
-                    .cursor_pointer()
-                    .child(KeyBinding::for_action_in(
-                        &ApplyTableFilter,
-                        &self.focus_handle,
-                        cx,
-                    ))
-                    .child(
-                        Label::new(t!("database_client.table.apply_hint"))
-                            .size(LabelSize::XSmall)
-                            .color(Color::Muted),
-                    )
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.apply_filter(&ApplyTableFilter, window, cx)
-                    })),
-            )
+            .child(Divider::vertical().h(px(20.)))
+            .child(status_chip(
+                None,
+                t!("database_client.query.limit_chip", limit = PAGE_SIZE),
+                Color::Muted,
+                cx,
+            ))
             .into_any_element()
+    }
+
+    fn render_pending_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let count = self.pending.len();
+        if count == 0 {
+            return None;
+        }
+        let warning = Color::Warning.color(cx);
+        Some(
+            h_flex()
+                .h(px(44.))
+                .flex_none()
+                .px_3()
+                .gap_3()
+                .bg(warning.opacity(0.08))
+                .border_t_1()
+                .border_color(warning.opacity(0.3))
+                .child(StatusTone::Warning.dot(cx))
+                .child(
+                    h_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .gap_1()
+                        .child(
+                            Label::new(if count == 1 {
+                                t!("database_client.table.pending_changes.one")
+                            } else {
+                                t!("database_client.table.pending_changes.other", count = count)
+                            })
+                            .size(LabelSize::Small)
+                            .weight(FontWeight::SEMIBOLD)
+                            .color(Color::Warning),
+                        )
+                        .child(
+                            Label::new(format!(
+                                "· {}",
+                                t!("database_client.table.pending_bar_note")
+                            ))
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted)
+                            .truncate(),
+                        ),
+                )
+                .child(
+                    Button::new("db-edits-sql", t!("database_client.table.view_sql"))
+                        .style(ButtonStyle::Subtle)
+                        .label_size(LabelSize::Small)
+                        .color(if self.show_sql {
+                            Color::Accent
+                        } else {
+                            Color::Default
+                        })
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.show_sql = !this.show_sql;
+                            cx.notify();
+                        })),
+                )
+                .child(
+                    Button::new("db-edits-discard", t!("database_client.table.discard"))
+                        .style(ButtonStyle::Subtle)
+                        .label_size(LabelSize::Small)
+                        .disabled(self.applying)
+                        .on_click(cx.listener(|this, _, _, cx| this.discard_edits(cx))),
+                )
+                .child(
+                    primary_button(
+                        "db-edits-apply",
+                        None,
+                        if self.applying {
+                            t!("database_client.table.applying")
+                        } else {
+                            t!("database_client.table.apply")
+                        },
+                        Some(KeyBinding::for_action_in(
+                            &ApplyEdits,
+                            &self.focus_handle,
+                            cx,
+                        )),
+                        cx,
+                    )
+                    .on_click(
+                        cx.listener(|this, _, window, cx| {
+                            this.apply_edits(&ApplyEdits, window, cx)
+                        }),
+                    ),
+                )
+                .into_any_element(),
+        )
     }
 
     fn render_footer(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -858,50 +900,40 @@ impl TableView {
             Load::Failed(_) => (String::new(), String::new(), "—".to_owned(), false),
         };
         let page = self.page;
-        let count = self.pending.len();
-        let colors = cx.theme().colors();
         h_flex()
             .h(px(56.))
             .flex_none()
             .px_3()
             .gap_3()
             .border_t_1()
-            .border_color(colors.border)
+            .border_color(cx.theme().colors().border)
             .child(Label::new(summary).size(LabelSize::Small))
             .child(
                 Label::new(detail)
                     .size(LabelSize::XSmall)
                     .color(Color::Muted),
             )
-            .child(
-                h_flex()
-                    .h(px(28.))
-                    .px_1()
-                    .gap_2()
-                    .rounded_md()
-                    .bg(colors.element_background)
-                    .border_1()
-                    .border_color(colors.border_selected)
-                    .child(
-                        IconButton::new("db-table-previous", IconName::ChevronLeft)
-                            .icon_size(IconSize::XSmall)
-                            .disabled(page == 0)
-                            .tooltip(Tooltip::text(t!("database_client.table.previous_page")))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.go_to_page(page.saturating_sub(1), cx)
-                            })),
-                    )
-                    .child(Label::new(range).size(LabelSize::Small).buffer_font(cx))
-                    .child(
-                        IconButton::new("db-table-next", IconName::ChevronRight)
-                            .icon_size(IconSize::XSmall)
-                            .disabled(!has_more)
-                            .tooltip(Tooltip::text(t!("database_client.table.next_page")))
-                            .on_click(
-                                cx.listener(move |this, _, _, cx| this.go_to_page(page + 1, cx)),
-                            ),
-                    ),
-            )
+            .child(button_group(
+                [
+                    group_icon_button("db-table-previous", IconName::ChevronLeft, 24.)
+                        .disabled(page == 0)
+                        .tooltip(Tooltip::text(t!("database_client.table.previous_page")))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.go_to_page(page.saturating_sub(1), cx)
+                        }))
+                        .into_any_element(),
+                    div()
+                        .px_2()
+                        .child(Label::new(range).size(LabelSize::Small).buffer_font(cx))
+                        .into_any_element(),
+                    group_icon_button("db-table-next", IconName::ChevronRight, 24.)
+                        .disabled(!has_more)
+                        .tooltip(Tooltip::text(t!("database_client.table.next_page")))
+                        .on_click(cx.listener(move |this, _, _, cx| this.go_to_page(page + 1, cx)))
+                        .into_any_element(),
+                ],
+                cx,
+            ))
             .child(div().flex_1())
             .when_some(self.notice.clone(), |this, (notice, color)| {
                 this.child(
@@ -911,85 +943,6 @@ impl TableView {
                             .color(color)
                             .truncate(),
                     ),
-                )
-            })
-            .when(count > 0, |this| {
-                let warning = Color::Warning.color(cx);
-                this.child(
-                    h_flex()
-                        .flex_none()
-                        .h(px(36.))
-                        .pl_3()
-                        .pr_1()
-                        .gap_3()
-                        .rounded_lg()
-                        .bg(warning.opacity(0.07))
-                        .border_1()
-                        .border_color(warning.opacity(0.4))
-                        .child(
-                            h_flex()
-                                .gap_1p5()
-                                .child(Indicator::dot().color(Color::Warning))
-                                .child(
-                                    Label::new(if count == 1 {
-                                        t!("database_client.table.pending_changes.one")
-                                    } else {
-                                        t!(
-                                            "database_client.table.pending_changes.other",
-                                            count = count
-                                        )
-                                    })
-                                    .size(LabelSize::Small)
-                                    .weight(FontWeight::SEMIBOLD)
-                                    .color(Color::Warning),
-                                ),
-                        )
-                        .child(
-                            Label::new(t!("database_client.table.in_a_transaction"))
-                                .size(LabelSize::XSmall)
-                                .color(Color::Muted),
-                        )
-                        .child(
-                            Button::new("db-edits-sql", t!("database_client.table.view_sql"))
-                                .style(ButtonStyle::Subtle)
-                                .label_size(LabelSize::Small)
-                                .color(if self.show_sql {
-                                    Color::Accent
-                                } else {
-                                    Color::Default
-                                })
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.show_sql = !this.show_sql;
-                                    cx.notify();
-                                })),
-                        )
-                        .child(
-                            Button::new("db-edits-discard", t!("database_client.table.discard"))
-                                .style(ButtonStyle::Subtle)
-                                .label_size(LabelSize::Small)
-                                .disabled(self.applying)
-                                .on_click(cx.listener(|this, _, _, cx| this.discard_edits(cx))),
-                        )
-                        .child(
-                            primary_button(
-                                "db-edits-apply",
-                                None,
-                                if self.applying {
-                                    t!("database_client.table.applying")
-                                } else {
-                                    t!("database_client.table.apply")
-                                },
-                                Some(KeyBinding::for_action_in(
-                                    &ApplyEdits,
-                                    &self.focus_handle,
-                                    cx,
-                                )),
-                                cx,
-                            )
-                            .on_click(cx.listener(
-                                |this, _, window, cx| this.apply_edits(&ApplyEdits, window, cx),
-                            )),
-                        ),
                 )
             })
             .into_any_element()
@@ -1057,6 +1010,7 @@ impl TableView {
                     .child(self.grid.clone())
                     .into_any_element(),
             })
+            .children(self.render_pending_bar(cx))
             .child(self.render_footer(cx))
             .children(self.render_sql_preview(cx))
             .into_any_element()
@@ -1285,10 +1239,7 @@ impl TableView {
                     ),
             )
             .child(
-                v_flex()
-                    .rounded_lg()
-                    .border_1()
-                    .border_color(colors.border)
+                ui::card(cx)
                     .overflow_hidden()
                     .child(h_flex().h(px(32.)).bg(colors.element_background).children(
                         headers.iter().enumerate().map(|(index, (header, _))| {
@@ -1778,9 +1729,15 @@ impl Item for TableView {
         self.name.clone().into()
     }
 
+    // Not `is_dirty`: the pane would treat the table as an unsaved file, and the edits are
+    // applied with Aplicar, not saved.
     fn tab_content(&self, params: TabContentParams, _window: &Window, cx: &App) -> AnyElement {
-        Label::new(self.tab_content_text(0, cx))
-            .color(params.text_color())
+        h_flex()
+            .gap_1p5()
+            .child(Label::new(self.tab_content_text(0, cx)).color(params.text_color()))
+            .when(self.has_pending_edits(), |this| {
+                this.child(StatusTone::Warning.dot(cx))
+            })
             .into_any_element()
     }
 

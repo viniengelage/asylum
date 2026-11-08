@@ -1137,7 +1137,13 @@
     "context": "ProjectBoard",
     "use_key_equivalents": true,
     "bindings": {
-      "ctrl-n": "github_projects::NewItem",
+      "ctrl-n": "github_projects::NewItem"
+    }
+  },
+  {
+    "context": "TasksPanel",
+    "use_key_equivalents": true,
+    "bindings": {
       "ctrl-enter": "github_projects::StartItem"
     }
   },
@@ -1679,6 +1685,13 @@
       "left": "design::PreviousScreen",
       "right": "design::NextScreen",
       "escape": "design::ExitFocus",
+      "ctrl-l": "design::MentionLayer",
+    },
+  },
+  {
+    "context": "DesignViewer > WebPreview",
+    "bindings": {
+      "ctrl-l": "design::MentionLayer",
     },
   },
   {
@@ -1884,6 +1897,7 @@
     "use_key_equivalents": true,
     "bindings": {
       "ctrl-shift-n": "docker::NewContainer",
+      "ctrl-shift-u": "docker::ComposeUp",
       "ctrl-f": "docker::FocusFilter",
       "alt-t": "docker::OpenTerminal",
       "alt-l": "docker::OpenLogs",
@@ -1972,6 +1986,7 @@
     "use_key_equivalents": true,
     "bindings": {
       "ctrl-enter": "api_client::SendRequest",
+      "ctrl-shift-c": "api_client::CopyRequestAsCurl",
     },
   },
   {

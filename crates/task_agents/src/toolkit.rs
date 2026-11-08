@@ -618,11 +618,12 @@ pub fn act_on_container(
     }
 }
 
-/// Screens of a .fig design travel as log mentions whose id starts with this, like containers.
+/// Screens and layers of a .fig design travel as log mentions whose id starts with this, like
+/// containers; a layer adds `#<layer id>` after the screen id.
 pub const DESIGN_MENTION_PREFIX: &str = "design:";
 
-/// Installed by the design viewer, so the agent can offer and read design screens without
-/// depending on it.
+/// Installed by the design viewer, so the agent can offer and read design screens and layers
+/// without depending on it.
 #[derive(Clone)]
 pub struct DesignSource {
     pub list: ListLogMentions,

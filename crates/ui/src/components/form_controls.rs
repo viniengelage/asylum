@@ -3,7 +3,7 @@
 //! use these instead.
 
 use crate::{CommonAnimationExt, Divider, DividerColor, KeyBinding, prelude::*};
-use gpui::{BoxShadow, Div, FontWeight, Stateful, hsla, px};
+use gpui::{BoxShadow, Div, FontWeight, Hsla, Stateful, hsla, px};
 
 pub fn focus_ring(cx: &App) -> Vec<BoxShadow> {
     vec![
@@ -138,6 +138,109 @@ pub fn choice_chip(
                 } else {
                     Color::Muted
                 }),
+        )
+}
+
+/// The boards' stacked choice card for a starting point: an icon tile, a title and a
+/// description. The `recommended` one gets an accent border and a badge with that label.
+pub fn choice_card(
+    id: impl Into<gpui::ElementId>,
+    icon: IconName,
+    title: impl Into<SharedString>,
+    description: impl Into<SharedString>,
+    recommended: Option<SharedString>,
+    enabled: bool,
+    cx: &App,
+) -> Stateful<Div> {
+    choice_card_with_body(id, icon, title, description, recommended, None, enabled, cx)
+}
+
+/// A [`choice_card`] with more content (a list, an action) under the description, aligned with
+/// the text rather than beside it.
+#[allow(clippy::too_many_arguments)]
+pub fn choice_card_with_body(
+    id: impl Into<gpui::ElementId>,
+    icon: IconName,
+    title: impl Into<SharedString>,
+    description: impl Into<SharedString>,
+    recommended: Option<SharedString>,
+    body: Option<AnyElement>,
+    enabled: bool,
+    cx: &App,
+) -> Stateful<Div> {
+    let colors = cx.theme().colors();
+    let accent = colors.border_focused;
+    let is_recommended = recommended.is_some();
+    h_flex()
+        .id(id)
+        .w_full()
+        .items_start()
+        .p_3()
+        .gap_3()
+        .rounded(Radius::Lg.rems())
+        .border_1()
+        .border_color(if is_recommended {
+            accent
+        } else {
+            colors.border
+        })
+        .bg(if is_recommended {
+            accent.opacity(0.08)
+        } else {
+            colors.element_background
+        })
+        .when(enabled, |this| {
+            this.cursor_pointer()
+                .hover(|this| this.bg(colors.element_hover))
+        })
+        .when(!enabled, |this| this.opacity(0.5))
+        .child(
+            div()
+                .flex()
+                .flex_none()
+                .size(px(30.))
+                .items_center()
+                .justify_center()
+                .rounded(Radius::Md.rems())
+                .bg(if is_recommended {
+                    accent.opacity(0.16)
+                } else {
+                    colors.element_hover
+                })
+                .child(
+                    Icon::new(icon)
+                        .size(IconSize::Small)
+                        .color(if is_recommended {
+                            Color::Accent
+                        } else {
+                            Color::Muted
+                        }),
+                ),
+        )
+        .child(
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .gap_0p5()
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .child(
+                            Label::new(title)
+                                .size(LabelSize::Small)
+                                .weight(FontWeight::SEMIBOLD)
+                                .truncate(),
+                        )
+                        .children(
+                            recommended.map(|label| status_pill(label, StatusTone::Info, cx)),
+                        ),
+                )
+                .child(
+                    Label::new(description)
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted),
+                )
+                .children(body.map(|body| div().pt_2().child(body))),
         )
 }
 
@@ -386,6 +489,89 @@ fn status_chip_shell(icon: Option<AnyElement>, label: SharedString, color: Color
         )
 }
 
+/// The tone of a [`status_pill`] or a [`crate::navigator_footer`] dot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatusTone {
+    Info,
+    Success,
+    Warning,
+    Error,
+    Neutral,
+}
+
+impl StatusTone {
+    pub fn color(self, cx: &App) -> Hsla {
+        match self {
+            Self::Info => Color::Info.color(cx),
+            Self::Success => Color::Success.color(cx),
+            Self::Warning => Color::Warning.color(cx),
+            Self::Error => Color::Error.color(cx),
+            Self::Neutral => Color::Muted.color(cx),
+        }
+    }
+
+    pub fn dot(self, cx: &App) -> Div {
+        div()
+            .flex_none()
+            .size(px(6.))
+            .rounded_full()
+            .bg(self.color(cx))
+    }
+}
+
+/// The boards' Status Pill: a dot and a label in the status color on a tint of it.
+pub fn status_pill(label: impl Into<SharedString>, tone: StatusTone, cx: &App) -> Div {
+    let color = tone.color(cx);
+    let background = match tone {
+        StatusTone::Neutral => cx.theme().colors().element_hover,
+        _ => color.opacity(0.12),
+    };
+    h_flex()
+        .flex_none()
+        .h(px(20.))
+        .px(px(7.))
+        .gap(px(5.))
+        .rounded_full()
+        .bg(background)
+        .child(tone.dot(cx))
+        .child(
+            Label::new(label)
+                .size(LabelSize::Custom(rems_from_px(10.5_f32)))
+                .weight(FontWeight::MEDIUM)
+                .color(Color::Custom(color))
+                .single_line(),
+        )
+}
+
+/// The boards' small capsule button, e.g. the action of a navigator footer.
+pub fn capsule_button(
+    id: impl Into<ElementId>,
+    icon: Option<IconName>,
+    label: impl Into<SharedString>,
+    cx: &App,
+) -> Stateful<Div> {
+    let colors = cx.theme().colors();
+    h_flex()
+        .id(id)
+        .flex_none()
+        .h(px(26.))
+        .px(px(10.))
+        .gap(px(6.))
+        .rounded(px(7.))
+        .bg(colors.element_background)
+        .hover(|this| this.bg(colors.element_hover))
+        .cursor_pointer()
+        .when_some(icon, |this, icon| {
+            this.child(Icon::new(icon).size(IconSize::XSmall).color(Color::Muted))
+        })
+        .child(
+            Label::new(label)
+                .size(LabelSize::Small)
+                .weight(FontWeight::MEDIUM)
+                .single_line(),
+        )
+}
+
 /// The 20 px tile with a name's initial, tinted with an accent derived from the name.
 pub fn initial_tile(name: &str, cx: &App) -> Div {
     let accents = cx.theme().accents();
@@ -484,12 +670,43 @@ pub fn segment_option(
     enabled: bool,
     cx: &App,
 ) -> Stateful<Div> {
+    segment_option_shell(id.into(), label.into(), None, selected, enabled, cx)
+}
+
+/// A [`segment_option`] with a count after its label, e.g. "Rodando 4".
+pub fn segment_option_with_count(
+    id: impl Into<gpui::ElementId>,
+    label: impl Into<SharedString>,
+    count: impl Into<SharedString>,
+    selected: bool,
+    enabled: bool,
+    cx: &App,
+) -> Stateful<Div> {
+    segment_option_shell(
+        id.into(),
+        label.into(),
+        Some(count.into()),
+        selected,
+        enabled,
+        cx,
+    )
+}
+
+fn segment_option_shell(
+    id: gpui::ElementId,
+    label: SharedString,
+    count: Option<SharedString>,
+    selected: bool,
+    enabled: bool,
+    cx: &App,
+) -> Stateful<Div> {
     let colors = cx.theme().colors();
     h_flex()
         .id(id)
         .flex_1()
         .min_w_0()
         .h(px(28.))
+        .when(count.is_some(), |this| this.px_2().gap(px(5.)))
         .justify_center()
         .rounded(px(7.))
         .border_1()
@@ -522,6 +739,12 @@ pub fn segment_option(
                 })
                 .truncate(),
         )
+        .children(count.map(|count| {
+            Label::new(count)
+                .size(LabelSize::XSmall)
+                .buffer_font(cx)
+                .color(Color::Placeholder)
+        }))
 }
 
 pub fn segmented_control(cx: &App) -> Div {

@@ -5,8 +5,9 @@ use crate::{
     collection::{Collection, Exchange},
     config::{self, BodyKind, CaptureRule, FormField, HeaderEntry, ParamEntry, RequestDraft},
     example,
-    panel::{tinted_chip, variable_chip},
+    panel::variable_chip,
     schema::Validation,
+    script::{self, Failure, LineKind, Outcome, Script, TestResult},
     send::{self, HeaderOrigin, REFRESH_TOKEN_VARIABLE, TOKEN_VARIABLE},
     spec::{Operation, ParameterLocation},
     vars::{self, SECRET_PREFIX},
@@ -14,13 +15,13 @@ use crate::{
 use editor::{Editor, EditorEvent, HighlightKey, MultiBufferOffset};
 use gpui::{
     AnyElement, ClipboardItem, Div, DragMoveEvent, Empty, Entity, EventEmitter, FocusHandle,
-    Focusable, FontWeight, HighlightStyle, Hsla, Pixels, Subscription, Task, WeakEntity,
+    Focusable, FontWeight, HighlightStyle, Pixels, Stateful, Subscription, Task, WeakEntity,
 };
 use i18n::t;
 use language::LanguageRegistry;
 use std::{sync::Arc, time::Duration};
 use ui::section_label;
-use ui::{Checkbox, Indicator, Tooltip, prelude::*};
+use ui::{Checkbox, EmptyState, StatusTone, Tooltip, prelude::*};
 use ui_input::{ErasedEditorEvent, InputField};
 use util::ResultExt as _;
 use workspace::{
@@ -35,6 +36,7 @@ enum RequestTab {
     Body,
     Auth,
     Captures,
+    Scripts,
     Docs,
 }
 
@@ -43,6 +45,7 @@ enum ResponseTab {
     Body,
     Headers,
     Cookies,
+    Tests,
     Timeline,
 }
 
@@ -68,6 +71,8 @@ struct CaptureRow {
 const CAPTURE_SAVE_DELAY: Duration = Duration::from_millis(600);
 const MIN_REQUEST_AREA_HEIGHT: Pixels = px(200.);
 const MIN_RESPONSE_HEIGHT: Pixels = px(120.);
+/// Until the divider is dragged, a long form doesn't push the response off screen.
+const MAX_REQUEST_CARD_HEIGHT: Pixels = px(380.);
 
 /// Dragged by the bar between the request and the response.
 struct DraggedResponseDivider;
@@ -93,6 +98,7 @@ pub struct ApiRequestView {
     response_editor: Entity<Editor>,
     request_tab: RequestTab,
     response_tab: ResponseTab,
+    highlighted_script_line: Option<usize>,
     exchange: Option<Exchange>,
     body_validation: Option<Validation>,
     send_task: Option<Task<()>>,
@@ -104,9 +110,9 @@ pub struct ApiRequestView {
 pub fn method_color(method: &str) -> Color {
     match method {
         "GET" => Color::Success,
-        "POST" => Color::Warning,
+        "POST" => Color::Accent,
         "PUT" => Color::Info,
-        "PATCH" => Color::Accent,
+        "PATCH" => Color::Warning,
         "DELETE" => Color::Error,
         _ => Color::Muted,
     }
@@ -120,27 +126,148 @@ pub fn method_label(method: &str, cx: &App) -> Label {
         .color(method_color(method))
 }
 
-pub fn status_color(status: u16) -> Color {
+pub fn status_tone(status: u16) -> StatusTone {
     match status {
-        200..=299 => Color::Success,
-        300..=399 => Color::Info,
-        _ => Color::Error,
+        200..=299 => StatusTone::Success,
+        300..=399 => StatusTone::Info,
+        _ => StatusTone::Error,
     }
 }
 
-fn chip(label: impl Into<SharedString>, color: Color, cx: &App) -> impl IntoElement {
-    let hsla: Hsla = color.color(cx);
-    div()
-        .px_1p5()
-        .py_0p5()
-        .rounded_sm()
-        .bg(hsla.opacity(0.14))
+fn method_chip(method: &str, cx: &App) -> Div {
+    let color = method_color(method);
+    h_flex()
+        .flex_none()
+        .h(px(32.))
+        .px_3()
+        .rounded(Radius::Sm.rems())
+        .bg(color.color(cx).opacity(0.12))
         .child(
-            Label::new(label)
-                .size(LabelSize::XSmall)
-                .weight(FontWeight::MEDIUM)
+            Label::new(SharedString::from(method.to_string()))
+                .size(LabelSize::Small)
+                .weight(FontWeight::BOLD)
+                .buffer_font(cx)
                 .color(color),
         )
+}
+
+fn tinted_row(tone: StatusTone, cx: &App) -> Div {
+    let color = tone.color(cx);
+    h_flex()
+        .w_full()
+        .min_h(px(40.))
+        .px_3p5()
+        .py_1p5()
+        .gap_2p5()
+        .rounded(Radius::Lg.rems())
+        .bg(color.opacity(0.06))
+        .border_1()
+        .border_color(color.opacity(0.33))
+}
+
+fn render_script_lines(
+    script: &Script,
+    highlighted: Option<usize>,
+    cx: &App,
+) -> impl IntoElement {
+    let warning = StatusTone::Warning.color(cx);
+    let error = StatusTone::Error.color(cx);
+    v_flex()
+        .py_1()
+        .children(script.lines.iter().map(|line| {
+            let is_off = matches!(line.kind, LineKind::Off { .. });
+            h_flex()
+                .min_h(px(22.))
+                .px_3()
+                .gap_3()
+                .when(is_off, |this| this.bg(warning.opacity(0.08)))
+                .when(highlighted == Some(line.number), |this| {
+                    this.bg(error.opacity(0.12))
+                })
+                .child(
+                    div().flex_none().w(px(28.)).child(
+                        Label::new(line.number.to_string())
+                            .size(LabelSize::XSmall)
+                            .buffer_font(cx)
+                            .color(Color::Muted),
+                    ),
+                )
+                .child(
+                    div().flex_1().min_w_0().child(
+                        Label::new(line.text.clone())
+                            .size(LabelSize::Small)
+                            .buffer_font(cx)
+                            .single_line(),
+                    ),
+                )
+                .map(|this| match &line.kind {
+                    LineKind::Off { call: Some(call) } => this.child(ui::status_chip(
+                        Some(IconName::Warning),
+                        t!("api_client.request.script_line_off", call = call),
+                        Color::Warning,
+                        cx,
+                    )),
+                    LineKind::Capture { variable, path } => this.child(
+                        h_flex()
+                            .flex_none()
+                            .gap_1p5()
+                            .child(
+                                Label::new(t!(
+                                    "api_client.request.script_becomes_capture",
+                                    path = path
+                                ))
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted),
+                            )
+                            .child(variable_chip(format!("{{{{{variable}}}}}"), cx)),
+                    ),
+                    _ => this,
+                })
+        }))
+}
+
+fn tests_label(tests: &[TestResult]) -> String {
+    let label = t!("api_client.request.response_tab_tests");
+    let ran: Vec<&TestResult> = tests
+        .iter()
+        .filter(|test| test.outcome != Outcome::Off)
+        .collect();
+    if ran.is_empty() {
+        return label.to_string();
+    }
+    let passed = ran
+        .iter()
+        .filter(|test| test.outcome == Outcome::Passed)
+        .count();
+    format!("{label} {passed}/{}", ran.len())
+}
+
+fn failure_message(failure: &Failure) -> SharedString {
+    match failure {
+        Failure::Status { expected, actual } => t!(
+            "api_client.request.tests_assertion_status",
+            expected = expected,
+            actual = actual
+        ),
+        Failure::Equal {
+            subject,
+            expected,
+            actual,
+        } => t!(
+            "api_client.request.tests_assertion_equal",
+            path = subject,
+            expected = expected,
+            actual = actual
+        ),
+        Failure::Match { subject, pattern } => t!(
+            "api_client.request.tests_assertion_match",
+            path = subject,
+            pattern = pattern
+        ),
+        Failure::Exist { subject } => {
+            t!("api_client.request.tests_assertion_exist", path = subject)
+        }
+    }
 }
 
 /// The editor behind an input, to color the placeholders in it.
@@ -214,7 +341,7 @@ fn highlight_placeholders(editor: &Entity<Editor>, collection: &Collection, cx: 
                     anchors(ranges),
                     HighlightStyle {
                         color: Some(color),
-                        background_color: Some(color.opacity(0.12)),
+                        background_color: Some(color.opacity(0.16)),
                         ..HighlightStyle::default()
                     },
                     cx,
@@ -345,6 +472,7 @@ impl ApiRequestView {
                 RequestTab::Params
             },
             response_tab: ResponseTab::Body,
+            highlighted_script_line: None,
             exchange: None,
             body_validation: None,
             send_task: None,
@@ -384,6 +512,7 @@ impl ApiRequestView {
             this.capture_rows.push(row);
         }
         this.watch_input(&this.url_input.clone(), window, cx);
+        this.update_host_hint(cx);
         this._subscriptions.push(
             cx.subscribe(&body_editor, |this, _, event: &EditorEvent, cx| {
                 if matches!(event, EditorEvent::BufferEdited) {
@@ -395,6 +524,7 @@ impl ApiRequestView {
         this._subscriptions
             .push(cx.observe(&collection, |this, _, cx| {
                 this.highlight_placeholders(cx);
+                this.update_host_hint(cx);
                 cx.notify();
             }));
         this.body_changed(cx);
@@ -722,11 +852,13 @@ impl ApiRequestView {
             self.save_captures(cx);
         }
         self.example_status = None;
+        self.highlighted_script_line = None;
         let draft = self.draft(cx);
         let key = self.operation_key.clone();
-        let exchange = self
-            .collection
-            .update(cx, |collection, cx| collection.send(key, draft, cx));
+        let saved_id = self.saved_id.clone();
+        let exchange = self.collection.update(cx, |collection, cx| {
+            collection.send_saved(key, draft, saved_id, cx)
+        });
         self.send_task = Some(cx.spawn_in(window, async move |this, cx| {
             let exchange = exchange.await;
             this.update_in(cx, |this, window, cx| {
@@ -789,6 +921,14 @@ impl ApiRequestView {
         })
     }
 
+    fn update_host_hint(&mut self, cx: &mut Context<Self>) {
+        let hint = self
+            .environment_hint(cx)
+            .map(|hint| (SharedString::from(hint), Color::Muted));
+        self.url_input
+            .update(cx, |input, cx| input.set_end_hint(hint, cx));
+    }
+
     /// Opens the spec at this operation.
     fn open_in_spec(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(operation) = self.operation(cx).cloned() else {
@@ -822,7 +962,6 @@ impl ApiRequestView {
             .unwrap_or_else(|| "?".to_string());
         let sending = self.send_task.is_some();
         let focus_handle = self.focus_handle.clone();
-        let colors = cx.theme().colors();
         let send_button = ui::primary_button(
             "api-send",
             Some(IconName::Send),
@@ -852,53 +991,17 @@ impl ApiRequestView {
             .gap_2()
             .px_3()
             .pt_3()
-            .child(
-                h_flex()
-                    .flex_none()
-                    .h(px(32.))
-                    .w(px(84.))
-                    .px_3()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(colors.border_selected)
-                    .bg(colors.editor_background)
-                    .child(
-                        Label::new(SharedString::from(method.clone()))
-                            .size(LabelSize::Small)
-                            .weight(FontWeight::BOLD)
-                            .buffer_font(cx)
-                            .color(method_color(&method)),
-                    ),
-            )
+            .child(method_chip(&method, cx))
             .child(
                 div()
                     .flex_1()
-                    .relative()
+                    .min_w_0()
                     .capture_action(cx.listener(
                         |this, _: &editor::actions::Newline, window, cx| {
                             this.send(window, cx);
                         },
                     ))
-                    .child(self.url_input.clone())
-                    .when_some(self.environment_hint(cx), |this, hint| {
-                        this.child(
-                            div()
-                                .absolute()
-                                .top_0()
-                                .bottom_0()
-                                .right_2()
-                                .max_w(px(320.))
-                                .flex()
-                                .items_center()
-                                .child(
-                                    Label::new(hint)
-                                        .size(LabelSize::XSmall)
-                                        .buffer_font(cx)
-                                        .color(Color::Muted)
-                                        .truncate(),
-                                ),
-                        )
-                    }),
+                    .child(self.url_input.clone()),
             )
             .child(send_button)
     }
@@ -908,14 +1011,7 @@ impl ApiRequestView {
         let draft = self.draft(cx);
         let prepared = collection.prepare(&self.operation_key, &draft).ok();
         let operation = self.operation(cx);
-        let mut parts: Vec<String> = Vec::new();
-        if let Some(operation) = operation {
-            if let Some(id) = &operation.operation_id {
-                parts.push(format!("operationId: {id}"));
-            }
-            if let Some(tag) = operation.tags.first() {
-                parts.push(format!("tag {tag}"));
-            }
+        let context = operation.map(|operation| {
             let schemes = collection
                 .spec
                 .as_ref()
@@ -926,12 +1022,8 @@ impl ApiRequestView {
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            parts.push(if schemes.is_empty() {
-                t!("api_client.request.security_none").to_string()
-            } else {
-                format!("security: {}", schemes.join(", "))
-            });
-        }
+            (operation.tags.first().cloned(), operation.title(), schemes)
+        });
         let missing = prepared
             .as_ref()
             .map(|prepared| prepared.missing.clone())
@@ -940,27 +1032,35 @@ impl ApiRequestView {
             .px_3()
             .pt_2()
             .gap_1()
-            .child(
-                h_flex()
-                    .gap_1p5()
-                    .child(
-                        Icon::new(IconName::FileCode)
-                            .size(IconSize::XSmall)
-                            .color(Color::Muted),
-                    )
-                    .child(
-                        Label::new(parts.join(" · "))
-                            .size(LabelSize::XSmall)
-                            .color(Color::Muted)
-                            .truncate(),
-                    )
-                    .when_some(
-                        operation.filter(|operation| operation.deprecated),
-                        |this, _| this.child(tinted_chip("deprecated", Color::Warning, cx)),
-                    )
-                    .child(div().flex_1())
-                    .when(operation.is_some(), |this| {
-                        this.child(
+            .when_some(context, |this, (tag, title, schemes)| {
+                this.child(
+                    h_flex()
+                        .gap_1p5()
+                        .when_some(tag, |this, tag| {
+                            this.child(
+                                Label::new(tag)
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted)
+                                    .single_line(),
+                            )
+                            .child(Label::new("›").size(LabelSize::XSmall).color(Color::Muted))
+                        })
+                        .child(
+                            div()
+                                .min_w_0()
+                                .child(Label::new(title).size(LabelSize::XSmall).truncate()),
+                        )
+                        .child(if schemes.is_empty() {
+                            ui::status_pill(
+                                t!("api_client.request.public_route_pill"),
+                                StatusTone::Neutral,
+                                cx,
+                            )
+                        } else {
+                            ui::status_pill(schemes.join(", "), StatusTone::Info, cx)
+                        })
+                        .child(div().flex_1())
+                        .child(
                             div()
                                 .id("api-open-in-spec")
                                 .cursor_pointer()
@@ -974,9 +1074,9 @@ impl ApiRequestView {
                                         this.open_in_spec(window, cx)
                                     }),
                                 ),
-                        )
-                    }),
-            )
+                        ),
+                )
+            })
             .when(!missing.is_empty(), |this| {
                 this.child(
                     h_flex()
@@ -1021,41 +1121,20 @@ impl ApiRequestView {
         on_click: impl Fn(&mut Self, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        ui::segment_option(id, label, active, true, cx)
-            .flex_initial()
-            .px_2p5()
-            .h(px(26.))
-            .on_click(cx.listener(move |this, _, _, cx| {
-                on_click(this, cx);
-                cx.notify();
-            }))
+        tab_option(id, label, active, true, cx).on_click(cx.listener(move |this, _, _, cx| {
+            on_click(this, cx);
+            cx.notify();
+        }))
     }
 
     fn render_request_tabs(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let operation = self.operation(cx).cloned();
-        let request_body = operation
-            .as_ref()
+        let request_body = self
+            .operation(cx)
             .and_then(|operation| operation.request_body.clone());
         let params_count = self.path_params.len() + self.query_rows.len();
         let headers_count = self.header_rows.len() + self.inherited_headers(cx).len();
-        let auth_label = match operation.as_ref() {
-            Some(operation) => {
-                let collection = self.collection.read(cx);
-                let schemes = collection
-                    .spec
-                    .as_ref()
-                    .map(|spec| spec.schemes_for(operation).len())
-                    .unwrap_or(0);
-                if schemes == 0 {
-                    t!("api_client.request.auth_none").to_string()
-                } else {
-                    t!("api_client.request.auth_inherited").to_string()
-                }
-            }
-            None => "Auth".to_string(),
-        };
         let tab = self.request_tab;
-        let with_count = |label: &str, count: usize| {
+        let with_count = |label: SharedString, count: usize| {
             if count > 0 {
                 format!("{label} · {count}")
             } else {
@@ -1065,46 +1144,36 @@ impl ApiRequestView {
         let body_tools = request_body
             .filter(|_| tab == RequestTab::Body && !self.body_kind(cx).is_form())
             .map(|body| body.content_type);
-        let colors = cx.theme().colors().clone();
         h_flex()
-            .px_3()
+            .px_2()
             .pt_2()
             .gap_2()
             .child(
                 ui::segmented_control(cx)
                     .child(self.render_tab_button(
                         "api-tab-params",
-                        with_count("Params", params_count),
+                        with_count(t!("api_client.request.tab_params"), params_count),
                         tab == RequestTab::Params,
                         |this, _| this.request_tab = RequestTab::Params,
                         cx,
                     ))
                     .child(self.render_tab_button(
                         "api-tab-headers",
-                        with_count("Headers", headers_count),
+                        with_count(t!("api_client.request.tab_headers"), headers_count),
                         tab == RequestTab::Headers,
                         |this, _| this.request_tab = RequestTab::Headers,
                         cx,
                     ))
-                    .child(
-                        self.render_tab_button(
-                            "api-tab-body",
-                            if operation
-                                .as_ref()
-                                .is_some_and(|operation| operation.request_body.is_some())
-                            {
-                                "Body".to_string()
-                            } else {
-                                t!("api_client.request.body_none").to_string()
-                            },
-                            tab == RequestTab::Body,
-                            |this, _| this.request_tab = RequestTab::Body,
-                            cx,
-                        ),
-                    )
+                    .child(self.render_tab_button(
+                        "api-tab-body",
+                        t!("api_client.request.tab_body").to_string(),
+                        tab == RequestTab::Body,
+                        |this, _| this.request_tab = RequestTab::Body,
+                        cx,
+                    ))
                     .child(self.render_tab_button(
                         "api-tab-auth",
-                        auth_label,
+                        t!("api_client.request.tab_auth").to_string(),
                         tab == RequestTab::Auth,
                         |this, _| this.request_tab = RequestTab::Auth,
                         cx,
@@ -1112,7 +1181,7 @@ impl ApiRequestView {
                     .child(self.render_tab_button(
                         "api-tab-captures",
                         with_count(
-                            &t!("api_client.request.captures_tab"),
+                            t!("api_client.request.captures_tab"),
                             self.capture_rows.len(),
                         ),
                         tab == RequestTab::Captures,
@@ -1120,8 +1189,15 @@ impl ApiRequestView {
                         cx,
                     ))
                     .child(self.render_tab_button(
+                        "api-tab-scripts",
+                        t!("api_client.request.tab_scripts").to_string(),
+                        tab == RequestTab::Scripts,
+                        |this, _| this.request_tab = RequestTab::Scripts,
+                        cx,
+                    ))
+                    .child(self.render_tab_button(
                         "api-tab-docs",
-                        "Docs".to_string(),
+                        t!("api_client.request.tab_docs").to_string(),
                         tab == RequestTab::Docs,
                         |this, _| this.request_tab = RequestTab::Docs,
                         cx,
@@ -1130,25 +1206,15 @@ impl ApiRequestView {
             .child(div().flex_1())
             .when_some(body_tools, |this, content_type| {
                 this.child(
-                    h_flex()
+                    ui::select_field("api-content-type", content_type, cx)
+                        .w_auto()
                         .flex_none()
-                        .h(px(30.))
-                        .px_2p5()
-                        .rounded_md()
-                        .border_1()
-                        .border_color(colors.border_selected)
-                        .bg(colors.editor_background)
-                        .child(
-                            Label::new(content_type)
-                                .size(LabelSize::XSmall)
-                                .buffer_font(cx)
-                                .color(Color::Muted),
-                        ),
+                        .cursor_default(),
                 )
                 .child(
                     ui::secondary_button(
                         "api-fill-example",
-                        Some((IconName::FileTextOutlined, Color::Muted)),
+                        Some((IconName::Sparkle, Color::Accent)),
                         t!("api_client.request.fill_example"),
                         true,
                         cx,
@@ -1518,7 +1584,7 @@ impl ApiRequestView {
             .child(
                 h_flex()
                     .gap_2()
-                    .child(chip(content_type, Color::Muted, cx))
+                    .child(ui::status_chip(None, content_type, Color::Muted, cx))
                     .child(
                         Label::new(if kind == BodyKind::Multipart {
                             t!("api_client.request.multipart_note")
@@ -1760,7 +1826,9 @@ impl ApiRequestView {
         let is_json = content_type
             .as_deref()
             .is_none_or(crate::spec::is_json_content_type);
-        editor_card(cx)
+        ui::card(cx)
+            .overflow_hidden()
+            .bg(cx.theme().colors().editor_background)
             .size_full()
             .when(!is_json, |this| {
                 this.child(
@@ -1888,9 +1956,10 @@ impl ApiRequestView {
                                     .size(LabelSize::Small)
                                     .buffer_font(cx),
                             )
-                            .child(chip(location, Color::Muted, cx))
+                            .child(ui::status_chip(None, location, Color::Muted, cx))
                             .when(parameter.required, |this| {
-                                this.child(chip(
+                                this.child(ui::status_chip(
+                                    None,
                                     t!("api_client.request.required"),
                                     Color::Warning,
                                     cx,
@@ -1911,12 +1980,13 @@ impl ApiRequestView {
                 let status: u16 = response.status.parse().unwrap_or(0);
                 h_flex()
                     .gap_2()
-                    .child(chip(
+                    .child(ui::status_chip(
+                        None,
                         response.status.clone(),
                         if status == 0 {
                             Color::Muted
                         } else {
-                            status_color(status)
+                            Color::Custom(status_tone(status).color(cx))
                         },
                         cx,
                     ))
@@ -1937,7 +2007,6 @@ impl ApiRequestView {
                 return div()
                     .flex_1()
                     .min_h_0()
-                    .when(self.response_height.is_none(), |this| this.max_h(px(320.)))
                     .px_3()
                     .pt_2p5()
                     .pb_2()
@@ -1946,13 +2015,13 @@ impl ApiRequestView {
             }
             RequestTab::Auth => self.render_auth(cx),
             RequestTab::Captures => self.render_captures(cx),
+            RequestTab::Scripts => self.render_scripts(cx),
             RequestTab::Docs => self.render_docs(cx),
         };
         div()
             .id("api-request-content")
             .flex_1()
             .min_h_0()
-            .when(self.response_height.is_none(), |this| this.max_h(px(320.)))
             .overflow_y_scroll()
             .px_3()
             .pt_2p5()
@@ -1998,20 +2067,13 @@ impl ApiRequestView {
         if pairs.is_empty() && missing.is_empty() {
             return None;
         }
-        let success = Color::Success.color(cx);
-        let warning = Color::Warning.color(cx);
-        let tint = if pairs.is_empty() { warning } else { success };
+        let tone = if pairs.is_empty() {
+            StatusTone::Warning
+        } else {
+            StatusTone::Success
+        };
         Some(
-            h_flex()
-                .w_full()
-                .min_h(px(40.))
-                .px_3p5()
-                .py_1p5()
-                .gap_2p5()
-                .rounded_lg()
-                .bg(tint.opacity(0.06))
-                .border_1()
-                .border_color(tint.opacity(0.33))
+            tinted_row(tone, cx)
                 .child(
                     Icon::new(if pairs.is_empty() {
                         IconName::Warning
@@ -2172,25 +2234,22 @@ impl ApiRequestView {
                 }
             ));
         }
-        facts.push(
-            t!(
-                "api_client.request.sent_at",
-                time = exchange.sent_at.format("%H:%M:%S")
-            )
-            .to_string(),
-        );
         let header = header
             .when_some(exchange.response.as_ref(), |this, response| {
                 let status_text = match &response.reason {
                     Some(reason) => format!("{} {reason}", response.status),
                     None => response.status.to_string(),
                 };
-                this.child(status_chip(status_text, status_color(response.status), cx))
+                this.child(ui::status_pill(
+                    status_text,
+                    status_tone(response.status),
+                    cx,
+                ))
             })
             .when(exchange.error.is_some(), |this| {
-                this.child(status_chip(
-                    t!("api_client.request.failed").to_string(),
-                    Color::Error,
+                this.child(ui::status_pill(
+                    t!("api_client.request.failed"),
+                    StatusTone::Error,
                     cx,
                 ))
             })
@@ -2204,7 +2263,7 @@ impl ApiRequestView {
                 ui::segmented_control(cx)
                     .child(self.render_tab_button(
                         "api-response-body",
-                        "Body".to_string(),
+                        t!("api_client.request.response_tab_body").to_string(),
                         tab == ResponseTab::Body,
                         |this, _| this.response_tab = ResponseTab::Body,
                         cx,
@@ -2212,7 +2271,8 @@ impl ApiRequestView {
                     .child(self.render_tab_button(
                         "api-response-headers",
                         format!(
-                            "Headers · {}",
+                            "{} · {}",
+                            t!("api_client.request.response_tab_headers"),
                             exchange
                                 .response
                                 .as_ref()
@@ -2225,17 +2285,28 @@ impl ApiRequestView {
                     .child(self.render_tab_button(
                         "api-response-cookies",
                         if exchange.cookies_set.is_empty() {
-                            "Cookies".to_string()
+                            t!("api_client.request.response_tab_cookies").to_string()
                         } else {
-                            format!("Cookies · {}", exchange.cookies_set.len())
+                            format!(
+                                "{} · {}",
+                                t!("api_client.request.response_tab_cookies"),
+                                exchange.cookies_set.len()
+                            )
                         },
                         tab == ResponseTab::Cookies,
                         |this, _| this.response_tab = ResponseTab::Cookies,
                         cx,
                     ))
                     .child(self.render_tab_button(
+                        "api-response-tests",
+                        tests_label(&exchange.tests),
+                        tab == ResponseTab::Tests,
+                        |this, _| this.response_tab = ResponseTab::Tests,
+                        cx,
+                    ))
+                    .child(self.render_tab_button(
                         "api-response-timeline",
-                        "Timeline".to_string(),
+                        t!("api_client.request.response_tab_timeline").to_string(),
                         tab == ResponseTab::Timeline,
                         |this, _| this.response_tab = ResponseTab::Timeline,
                         cx,
@@ -2287,7 +2358,9 @@ impl ApiRequestView {
                     this.child(Label::new(error).size(LabelSize::Small).color(Color::Error))
                 })
                 .child(
-                    editor_card(cx)
+                    ui::card(cx)
+                        .overflow_hidden()
+                        .bg(cx.theme().colors().editor_background)
                         .flex_1()
                         .min_h_0()
                         .child(
@@ -2305,7 +2378,8 @@ impl ApiRequestView {
                         )),
                 )
                 .into_any_element(),
-            ResponseTab::Headers => editor_card(cx)
+            ResponseTab::Headers => ui::card(cx)
+                .overflow_hidden()
                 .id("api-response-headers-list")
                 .flex_1()
                 .min_h_0()
@@ -2335,6 +2409,7 @@ impl ApiRequestView {
                 }))
                 .into_any_element(),
             ResponseTab::Cookies => self.render_cookies(exchange, cx),
+            ResponseTab::Tests => self.render_tests(exchange, cx),
             ResponseTab::Timeline => self.render_timeline(exchange, cx),
         };
 
@@ -2560,11 +2635,239 @@ impl ApiRequestView {
         .detach_and_log_err(cx);
     }
 
+    fn render_scripts(&self, cx: &mut Context<Self>) -> AnyElement {
+        let scripts: Vec<(String, Script)> = self
+            .saved_id
+            .as_deref()
+            .map(|saved_id| {
+                self.collection
+                    .read(cx)
+                    .saved_scripts(saved_id)
+                    .iter()
+                    .map(|script| {
+                        let after_response = script.listen == "test";
+                        (
+                            script.listen.clone(),
+                            script::parse(&script.source, after_response),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if scripts.is_empty() {
+            return EmptyState::new(IconName::Code, t!("api_client.request.scripts_empty_title"))
+                .description(t!("api_client.request.scripts_empty_description"))
+                .into_any_element();
+        }
+        let ordered = ["prerequest", "test"]
+            .into_iter()
+            .flat_map(|listen| scripts.iter().filter(move |(other, _)| other == listen));
+        v_flex()
+            .gap_3()
+            .children(ordered.map(|(listen, script)| {
+                let title = if listen == "test" {
+                    t!("api_client.request.scripts_after_response")
+                } else {
+                    t!("api_client.request.scripts_before_send")
+                };
+                let highlighted = self
+                    .highlighted_script_line
+                    .filter(|_| listen == "test");
+                ui::card(cx)
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .px_3()
+                            .py_2()
+                            .border_b_1()
+                            .border_color(cx.theme().colors().border)
+                            .child(ui::section_header(
+                                title,
+                                Some(
+                                    h_flex()
+                                        .gap_2()
+                                        .child(
+                                            Label::new(listen.clone())
+                                                .size(LabelSize::XSmall)
+                                                .buffer_font(cx)
+                                                .color(Color::Muted),
+                                        )
+                                        .when(script.is_off(), |this| {
+                                            this.child(ui::status_pill(
+                                                t!("api_client.request.script_off_pill"),
+                                                StatusTone::Warning,
+                                                cx,
+                                            ))
+                                        })
+                                        .into_any_element(),
+                                ),
+                            )),
+                    )
+                    .child(render_script_lines(script, highlighted, cx))
+            }))
+            .into_any_element()
+    }
+
+    fn render_tests(&self, exchange: &Exchange, cx: &mut Context<Self>) -> AnyElement {
+        if exchange.tests.is_empty() {
+            return EmptyState::new(IconName::ListTodo, t!("api_client.request.tests_empty_title"))
+                .description(t!("api_client.request.tests_empty_description"))
+                .into_any_element();
+        }
+        let captured: Vec<(String, String)> = exchange
+            .captures
+            .iter()
+            .filter(|capture| capture.value.is_some())
+            .map(|capture| (capture.path.clone(), capture.variable.clone()))
+            .collect();
+        ui::card(cx)
+            .overflow_hidden()
+            .id("api-tests")
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .child(
+                v_flex()
+                    .p_3()
+                    .gap_2()
+                    .children(
+                        exchange
+                            .tests
+                            .iter()
+                            .enumerate()
+                            .map(|(index, test)| self.render_test_row(index, test, cx)),
+                    )
+                    .when(!captured.is_empty(), |this| {
+                        this.child(
+                            tinted_row(StatusTone::Success, cx)
+                                .child(
+                                    Icon::new(IconName::Check)
+                                        .size(IconSize::Small)
+                                        .color(Color::Success),
+                                )
+                                .child(
+                                    Label::new(t!("api_client.request.tests_capture_row"))
+                                        .size(LabelSize::Small)
+                                        .weight(FontWeight::SEMIBOLD),
+                                )
+                                .children(captured.into_iter().map(|(path, variable)| {
+                                    h_flex()
+                                        .flex_none()
+                                        .gap_1p5()
+                                        .child(
+                                            Label::new(path).size(LabelSize::XSmall).buffer_font(cx),
+                                        )
+                                        .child(
+                                            Label::new("→")
+                                                .size(LabelSize::XSmall)
+                                                .color(Color::Muted),
+                                        )
+                                        .child(variable_chip(format!("{{{{{variable}}}}}"), cx))
+                                })),
+                        )
+                    }),
+            )
+            .into_any_element()
+    }
+
+    fn render_test_row(&self, index: usize, test: &TestResult, cx: &mut Context<Self>) -> Div {
+        let (tone, icon, pill) = match &test.outcome {
+            Outcome::Passed => (
+                StatusTone::Success,
+                IconName::Check,
+                t!("api_client.request.tests_passed"),
+            ),
+            Outcome::Failed(_) => (
+                StatusTone::Error,
+                IconName::XCircle,
+                t!("api_client.request.tests_failed"),
+            ),
+            Outcome::Off => (
+                StatusTone::Warning,
+                IconName::Warning,
+                t!("api_client.request.script_off_pill"),
+            ),
+        };
+        let icon_color = match tone {
+            StatusTone::Success => Color::Success,
+            StatusTone::Error => Color::Error,
+            _ => Color::Warning,
+        };
+        let line = test.line;
+        tinted_row(tone, cx).items_start().child(
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .gap_1()
+                .child(
+                    h_flex()
+                        .gap_2p5()
+                        .child(Icon::new(icon).size(IconSize::Small).color(icon_color))
+                        .child(
+                            div().flex_1().min_w_0().child(
+                                Label::new(test.name.clone())
+                                    .size(LabelSize::Small)
+                                    .weight(FontWeight::SEMIBOLD)
+                                    .truncate(),
+                            ),
+                        )
+                        .child(ui::status_pill(pill, tone, cx))
+                        .when(test.outcome != Outcome::Off, |this| {
+                            this.child(
+                                Label::new(format!(
+                                    "{:.2} ms",
+                                    test.elapsed.as_secs_f64() * 1000.
+                                ))
+                                .size(LabelSize::XSmall)
+                                .buffer_font(cx)
+                                .color(Color::Muted),
+                            )
+                        }),
+                )
+                .when_some(
+                    match &test.outcome {
+                        Outcome::Failed(failure) => Some(failure_message(failure)),
+                        _ => None,
+                    },
+                    |this, message| {
+                        this.child(
+                            h_flex()
+                                .gap_3()
+                                .child(
+                                    div().flex_1().min_w_0().child(
+                                        Label::new(format!("AssertionError: {message}"))
+                                            .size(LabelSize::XSmall)
+                                            .buffer_font(cx)
+                                            .color(Color::Error),
+                                    ),
+                                )
+                                .child(
+                                    Button::new(
+                                        ("api-test-go-to-line", index),
+                                        t!("api_client.request.tests_go_to_line", line = line),
+                                    )
+                                    .style(ButtonStyle::Subtle)
+                                    .label_size(LabelSize::XSmall)
+                                    .on_click(cx.listener(
+                                        move |this, _, _, cx| {
+                                            this.request_tab = RequestTab::Scripts;
+                                            this.highlighted_script_line = Some(line);
+                                            cx.notify();
+                                        },
+                                    )),
+                                ),
+                        )
+                    },
+                ),
+        )
+    }
+
     fn render_timeline(&self, exchange: &Exchange, cx: &mut Context<Self>) -> AnyElement {
         let steps = exchange.timeline.clone();
         let request = exchange.request.clone();
         let border = cx.theme().colors().border;
-        editor_card(cx)
+        ui::card(cx)
+            .overflow_hidden()
             .id("api-timeline")
             .flex_1()
             .min_h_0()
@@ -2585,9 +2888,9 @@ impl ApiRequestView {
                     })
                     .children(steps.into_iter().enumerate().map(|(index, step)| {
                         let failed = step.status.is_none_or(|status| status >= 400);
-                        let color = match step.status {
-                            Some(status) => status_color(status),
-                            None => Color::Error,
+                        let tone = match step.status {
+                            Some(status) => status_tone(status),
+                            None => StatusTone::Error,
                         };
                         let status_text = match step.status {
                             Some(status) => match reason_phrase(status) {
@@ -2643,9 +2946,9 @@ impl ApiRequestView {
                                             .truncate(),
                                     ),
                             )
-                            .child(h_flex().flex_none().w(px(140.)).child(status_chip(
+                            .child(h_flex().flex_none().w(px(140.)).child(ui::status_pill(
                                 status_text,
-                                color,
+                                tone,
                                 cx,
                             )))
                             .child(
@@ -2734,36 +3037,17 @@ impl ApiRequestView {
     }
 }
 
-/// The bordered box the boards put editors and response lists in.
-fn editor_card(cx: &App) -> Div {
-    v_flex()
-        .rounded_lg()
-        .border_1()
-        .border_color(cx.theme().colors().border)
-        .bg(cx.theme().colors().editor_background)
-        .overflow_hidden()
-}
-
-/// `200 OK` with a dot, on a wash of the status color.
-fn status_chip(label: String, color: Color, cx: &App) -> impl IntoElement {
-    let hsla = color.color(cx);
-    h_flex()
-        .flex_none()
-        .h(px(22.))
-        .px_2()
-        .gap_1p5()
-        .rounded_md()
-        .bg(hsla.opacity(0.08))
-        .border_1()
-        .border_color(hsla.opacity(0.2))
-        .child(Indicator::dot().color(color))
-        .child(
-            Label::new(label)
-                .size(LabelSize::XSmall)
-                .buffer_font(cx)
-                .weight(FontWeight::SEMIBOLD)
-                .color(color),
-        )
+fn tab_option(
+    id: &'static str,
+    label: impl Into<SharedString>,
+    active: bool,
+    enabled: bool,
+    cx: &App,
+) -> Stateful<Div> {
+    ui::segment_option(id, label, active, enabled, cx)
+        .flex_initial()
+        .px_2p5()
+        .h(px(26.))
 }
 
 /// The reason phrase servers usually send, for timeline steps that only kept the code.
@@ -2974,18 +3258,41 @@ impl Render for ApiRequestView {
             .bg(cx.theme().colors().editor_background)
             .child(self.render_request_bar(cx))
             .child(self.render_meta(cx))
-            .child(self.render_request_tabs(cx))
-            .child(self.render_request_content(cx))
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .when(self.response_height.is_none(), |this| {
+                        this.max_h(MAX_REQUEST_CARD_HEIGHT)
+                    })
+                    .px_3()
+                    .pt_2()
+                    .child(
+                        ui::card(cx)
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_hidden()
+                            .child(self.render_request_tabs(cx))
+                            .child(self.render_request_content(cx)),
+                    ),
+            )
             .child(self.render_response_divider(cx))
-            .map(|this| match self.response_height {
-                Some(height) => this.child(
-                    v_flex()
-                        .flex_none()
-                        .h(height)
-                        .child(self.render_response(cx)),
-                ),
-                None => this.child(self.render_response(cx)),
-            })
+            .child(
+                v_flex()
+                    .map(|this| match self.response_height {
+                        Some(height) => this.flex_none().h(height),
+                        None => this.flex_1().min_h_0(),
+                    })
+                    .px_3()
+                    .pb_3()
+                    .child(
+                        ui::card(cx)
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_hidden()
+                            .child(self.render_response(cx)),
+                    ),
+            )
     }
 }
 

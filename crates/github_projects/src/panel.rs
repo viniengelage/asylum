@@ -1,23 +1,26 @@
 //! Board E: the Tarefas dock. The item of the checked-out branch sits on top, then the items
-//! grouped by the project's Status field.
+//! grouped by the project's Status field. The item selected here or on the board replaces the
+//! list with its inspector.
 
 use crate::{
-    Availability, RepositoryProjects, ToggleFocus,
-    api::{self, FieldOption, Item, Project},
+    Availability, RepositoryProjects, StartItem, ToggleFocus,
+    api::{self, FieldOption, Item, ItemKind, NewValue, Project},
     board, github_repository, repository_projects, start_item,
 };
 use chrono::{Local, NaiveDate};
 use gpui::{
-    Action as _, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Hsla, Pixels,
+    Action as _, AnyElement, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Pixels,
     Subscription, WeakEntity, px,
 };
 use i18n::t;
 use project::{Project as WorkspaceProject, git_store::GitStoreEvent};
 use repo_hosting::api::RemoteRepository;
-use std::{collections::HashSet, time::Instant};
+use std::{collections::HashSet, rc::Rc, time::Instant};
 use ui::{
-    ContextMenu, PopoverMenu, PopoverTriggerArea, Tooltip, prelude::*, secondary_button,
-    segment_option, segmented_control,
+    ContextMenu, EmptyState, EmptyStateTone, HeaderBar, KeyBinding, PopoverMenu,
+    PopoverTriggerArea, RowStatus, StatusRow, StatusTone, Tooltip, capsule_button, card,
+    error_callout, grouped_block, navigator_footer, prelude::*, primary_button, secondary_button,
+    section_header, section_label, segment_option, segmented_control, status_chip, status_pill,
 };
 use ui_input::InputField;
 use util::ResultExt as _;
@@ -26,11 +29,15 @@ use workspace::{
     dock::{DockPosition, Panel, PanelEvent},
 };
 
+const ESTIMATES: [f64; 6] = [1.0, 2.0, 3.0, 5.0, 8.0, 13.0];
+
+type MenuBuilder = Rc<dyn Fn(&mut Window, &mut App) -> Entity<ContextMenu>>;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Mine,
     Iteration,
-    Mentions,
+    All,
 }
 
 pub struct TasksPanel {
@@ -41,7 +48,11 @@ pub struct TasksPanel {
     branch: Option<String>,
     state: Option<Entity<RepositoryProjects>>,
     tab: Tab,
+    inspected: Option<String>,
     filter_input: Entity<InputField>,
+    branch_input: Entity<InputField>,
+    /// The item the branch field was filled for, so typing in it isn't overwritten.
+    branch_filled_for: Option<String>,
     comment_input: Entity<InputField>,
     commenting: bool,
     collapsed: HashSet<String>,
@@ -61,6 +72,7 @@ impl TasksPanel {
             InputField::new(window, cx, &t!("github_projects.panel.filter_placeholder"))
                 .start_icon(IconName::MagnifyingGlass)
         });
+        let branch_input = cx.new(|cx| InputField::new(window, cx, "feat/…"));
         let comment_input = cx
             .new(|cx| InputField::new(window, cx, &t!("github_projects.item.comment_placeholder")));
         let mut subscriptions = Vec::new();
@@ -89,7 +101,10 @@ impl TasksPanel {
             branch: None,
             state: None,
             tab: Tab::Mine,
+            inspected: None,
             filter_input,
+            branch_input,
+            branch_filled_for: None,
             comment_input,
             commenting: false,
             collapsed: HashSet::default(),
@@ -99,6 +114,19 @@ impl TasksPanel {
         };
         this.refresh_repository(cx);
         this
+    }
+
+    pub fn inspect(&mut self, item_id: Option<String>, cx: &mut Context<Self>) {
+        if self.inspected != item_id {
+            self.commenting = false;
+            self.error = None;
+        }
+        self.inspected = item_id;
+        cx.notify();
+    }
+
+    pub fn inspected_item(&self) -> Option<&str> {
+        self.inspected.as_deref()
     }
 
     fn refresh_repository(&mut self, cx: &mut Context<Self>) {
@@ -129,7 +157,22 @@ impl TasksPanel {
         .detach_and_log_err(cx);
     }
 
-    fn start(&mut self, item: &Item, window: &mut Window, cx: &mut Context<Self>) {
+    fn move_item(&mut self, item_id: String, option_id: String, cx: &mut Context<Self>) {
+        let Some(state) = self.state.clone() else {
+            return;
+        };
+        self.error = None;
+        let task = state.update(cx, |state, cx| state.move_item(item_id, option_id, cx));
+        self.report(task, cx);
+    }
+
+    fn start(
+        &mut self,
+        item_id: String,
+        branch: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(state) = self.state.clone() else {
             return;
         };
@@ -138,20 +181,63 @@ impl TasksPanel {
             self.workspace.clone(),
             self.project.clone(),
             state,
-            item.id.clone(),
-            api::branch_name(item),
+            item_id,
+            branch,
             window,
             cx,
         );
         self.report(task, cx);
     }
 
-    fn open_board(&mut self, item_id: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+    fn start_inspected(&mut self, _: &StartItem, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(item_id) = self.inspected.clone() else {
+            return;
+        };
+        let branch = self.branch_input.read(cx).text(cx).trim().to_string();
+        if branch.is_empty() {
+            return;
+        }
+        self.start(item_id, branch, window, cx);
+    }
+
+    fn set_field(
+        &mut self,
+        item_id: String,
+        field_id: String,
+        value: NewValue,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(state) = self.state.clone() else {
+            return;
+        };
+        self.error = None;
+        let task = state.update(cx, |state, cx| {
+            state.set_field(item_id, field_id, value, cx)
+        });
+        self.report(task, cx);
+    }
+
+    fn assign_me(&mut self, item_id: String, cx: &mut Context<Self>) {
+        let Some(state) = self.state.clone() else {
+            return;
+        };
+        self.error = None;
+        let task = state.update(cx, |state, cx| state.assign_me(&item_id, cx));
+        self.report(task, cx);
+    }
+
+    fn open_board(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.workspace
-            .update(cx, |workspace, cx| {
-                board::open(workspace, item_id, window, cx)
-            })
+            .update(cx, |workspace, cx| board::open(workspace, None, window, cx))
             .log_err();
+    }
+
+    fn toggle_commenting(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.commenting = !self.commenting;
+        if self.commenting {
+            window.focus(&self.comment_input.focus_handle(cx), cx);
+        }
+        cx.notify();
     }
 
     fn post_comment(&mut self, item_id: String, window: &mut Window, cx: &mut Context<Self>) {
@@ -165,14 +251,40 @@ impl TasksPanel {
         self.comment_input
             .update(cx, |input, cx| input.clear(window, cx));
         self.commenting = false;
+        self.error = None;
         let task = state.update(cx, |state, cx| state.comment(&item_id, body, cx));
         self.report(task, cx);
     }
 
+    fn fill_branch_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(item_id) = self.inspected.clone() else {
+            return;
+        };
+        if self.branch_filled_for.as_deref() == Some(item_id.as_str()) {
+            return;
+        }
+        let Some(name) = self
+            .state
+            .as_ref()
+            .and_then(|state| state.read(cx).project())
+            .and_then(|project| project.item(&item_id))
+            .map(|item| {
+                item.linked_branches
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| api::branch_name(item))
+            })
+        else {
+            return;
+        };
+        self.branch_input
+            .update(cx, |input, cx| input.set_text(&name, window, cx));
+        self.branch_filled_for = Some(item_id);
+    }
+
     fn visible_items<'a>(&self, project: &'a Project, login: &str, cx: &App) -> Vec<&'a Item> {
-        let today = Local::now().date_naive();
         let current = project
-            .current_iteration(today)
+            .current_iteration(today())
             .map(|iteration| iteration.id.clone());
         let filter = self.filter_input.read(cx).text(cx).trim().to_lowercase();
         project
@@ -185,13 +297,13 @@ impl TasksPanel {
                         && project.iteration_of(item).map(|iteration| &iteration.id)
                             == current.as_ref()
                 }
-                Tab::Mentions => item.body.contains(&format!("@{login}")),
+                Tab::All => true,
             })
             .filter(|item| filter.is_empty() || item_matches(item, &filter))
             .collect()
     }
 
-    fn render_source(&self, state: &RepositoryProjects, cx: &Context<Self>) -> impl IntoElement {
+    fn render_header(&self, state: &RepositoryProjects, cx: &Context<Self>) -> impl IntoElement {
         let colors = cx.theme().colors();
         let title = state
             .project()
@@ -202,22 +314,17 @@ impl TasksPanel {
         let weak_state = self.state.as_ref().map(|state| state.downgrade());
         let project_url = state.project().map(|project| project.summary.url.clone());
         let panel = cx.weak_entity();
-        h_flex()
-            .h(px(40.))
-            .px_3()
-            .gap_2()
-            .border_b_1()
-            .border_color(colors.border)
-            .child(
+        HeaderBar::new("tasks-header")
+            .start_child(
                 h_flex()
                     .size(px(20.))
+                    .flex_none()
                     .justify_center()
-                    .rounded(px(5.))
+                    .rounded(Radius::Sm.rems())
                     .bg(colors.border_focused)
                     .child(
-                        Label::new("GH")
-                            .size(LabelSize::XSmall)
-                            .weight(FontWeight::BOLD)
+                        Icon::new(IconName::Github)
+                            .size(IconSize::XSmall)
                             .color(Color::Custom(gpui::white())),
                     ),
             )
@@ -226,19 +333,23 @@ impl TasksPanel {
                     .trigger(PopoverTriggerArea::new(
                         h_flex()
                             .id("tasks-project-trigger")
-                            .gap_2()
                             .min_w_0()
+                            .gap_1p5()
                             .child(
-                                Label::new(title)
-                                    .size(LabelSize::Small)
-                                    .weight(FontWeight::SEMIBOLD)
-                                    .truncate(),
-                            )
-                            .child(
-                                Label::new(format!("GitHub Projects · @{login}"))
-                                    .size(LabelSize::Small)
-                                    .color(Color::Muted)
-                                    .truncate(),
+                                v_flex()
+                                    .min_w_0()
+                                    .child(
+                                        Label::new(title)
+                                            .size(LabelSize::Small)
+                                            .weight(FontWeight::SEMIBOLD)
+                                            .truncate(),
+                                    )
+                                    .child(
+                                        Label::new(format!("GitHub Projects · @{login}"))
+                                            .size(LabelSize::XSmall)
+                                            .color(Color::Muted)
+                                            .truncate(),
+                                    ),
                             )
                             .child(
                                 Icon::new(IconName::ChevronDown)
@@ -267,8 +378,7 @@ impl TasksPanel {
                         }))
                     }),
             )
-            .child(div().flex_1())
-            .child(
+            .end_child(
                 IconButton::new("tasks-sync", IconName::RotateCw)
                     .icon_size(IconSize::Small)
                     .icon_color(Color::Muted)
@@ -280,7 +390,7 @@ impl TasksPanel {
                         }
                     })),
             )
-            .child(
+            .end_child(
                 PopoverMenu::new("tasks-options")
                     .trigger_with_tooltip(
                         IconButton::new("tasks-options-trigger", IconName::Sliders)
@@ -297,7 +407,7 @@ impl TasksPanel {
                                 let panel = panel.clone();
                                 move |window, cx| {
                                     panel
-                                        .update(cx, |panel, cx| panel.open_board(None, window, cx))
+                                        .update(cx, |panel, cx| panel.open_board(window, cx))
                                         .log_err();
                                 }
                             })
@@ -313,39 +423,48 @@ impl TasksPanel {
             )
     }
 
+    fn render_comment_input(&self, item_id: String, cx: &Context<Self>) -> impl IntoElement {
+        div()
+            .key_context("TasksComment")
+            .on_action(cx.listener(move |this, _: &menu::Confirm, window, cx| {
+                this.post_comment(item_id.clone(), window, cx)
+            }))
+            .child(self.comment_input.clone())
+    }
+
     fn render_focus_card(
         &self,
         project: &Project,
         item: &Item,
-        state: &RepositoryProjects,
         cx: &Context<Self>,
     ) -> impl IntoElement {
         let colors = cx.theme().colors();
-        let subtasks = item.subtasks();
-        let done = subtasks.iter().filter(|subtask| subtask.done).count();
         let url = item.url.clone();
-        let item_id = item.id.clone();
-        let status_menu = status_menu(
+        let move_menu = status_menu(
             "tasks-focus-status",
             project,
             item,
-            self.state.clone(),
-            PopoverTriggerArea::new(secondary_button(
-                "tasks-focus-move",
-                Some((IconName::ArrowRight, Color::Muted)),
-                t!("github_projects.panel.move"),
-                true,
-                cx,
-            )),
+            {
+                let this = cx.weak_entity();
+                Rc::new(move |item_id, option_id, cx: &mut App| {
+                    this.update(cx, |this, cx| this.move_item(item_id, option_id, cx))
+                        .log_err();
+                })
+            },
+            Button::new("tasks-focus-move", t!("github_projects.panel.move"))
+                .style(ButtonStyle::Subtle)
+                .label_size(LabelSize::Small)
+                .start_icon(
+                    Icon::new(IconName::ArrowRight)
+                        .size(IconSize::XSmall)
+                        .color(Color::Muted),
+                ),
         );
         div().p_2().child(
-            v_flex()
+            card(cx)
                 .gap_2p5()
                 .p_3()
-                .rounded_lg()
-                .border_1()
                 .border_color(colors.border_focused)
-                .bg(colors.element_background)
                 .child(
                     h_flex()
                         .gap_2()
@@ -356,79 +475,34 @@ impl TasksPanel {
                                 .color(Color::Accent),
                         )
                         .child(
-                            Label::new(t!("github_projects.item.current_branch"))
+                            Label::new(t!("github_projects.panel.in_focus_detail"))
                                 .size(LabelSize::XSmall)
                                 .color(Color::Muted),
                         )
                         .child(div().flex_1())
                         .child(
-                            Label::new(item.reference())
+                            Label::new(item_number(item))
                                 .size(LabelSize::XSmall)
                                 .buffer_font(cx)
                                 .color(Color::Muted),
-                        )
-                        .when_some(url, |this, url| {
-                            this.child(
-                                IconButton::new("tasks-focus-open", IconName::ArrowUpRight)
-                                    .icon_size(IconSize::XSmall)
-                                    .icon_color(Color::Muted)
-                                    .tooltip(Tooltip::text(t!(
-                                        "github_projects.item.open_on_github"
-                                    )))
-                                    .on_click(move |_, _, cx| cx.open_url(&url)),
-                            )
-                        }),
+                        ),
                 )
                 .child(
                     Label::new(item.title.clone())
                         .size(LabelSize::Default)
                         .weight(FontWeight::SEMIBOLD),
                 )
-                .child(item_chips(project, item, true, cx))
-                .child(
-                    h_flex()
-                        .h(px(40.))
-                        .px_2p5()
-                        .gap_2()
-                        .rounded_md()
-                        .border_1()
-                        .border_color(colors.border)
-                        .bg(colors.editor_background)
-                        .child(
-                            Icon::new(IconName::ListTodo)
-                                .size(IconSize::XSmall)
-                                .color(Color::Muted),
-                        )
-                        .child(
-                            Label::new(format!("{done}/{}", subtasks.len()))
-                                .size(LabelSize::Default)
-                                .buffer_font(cx)
-                                .weight(FontWeight::SEMIBOLD),
-                        )
-                        .child(
-                            Label::new(if subtasks.is_empty() {
-                                t!("github_projects.panel.no_subtasks")
-                            } else {
-                                t!("github_projects.panel.subtasks")
-                            })
-                            .size(LabelSize::XSmall)
-                            .color(Color::Muted),
-                        )
-                        .when(state.is_pending(&item.id), |this| {
-                            this.child(
-                                Label::new(t!("github_projects.panel.saving"))
-                                    .size(LabelSize::XSmall)
-                                    .color(Color::Muted),
-                            )
-                        })
-                        .child(div().flex_1())
-                        .child(status_menu),
-                )
+                .child(item_chips(project, item, cx))
                 .child(
                     h_flex()
                         .gap_1()
-                        .child(
-                            Button::new("tasks-focus-comment", t!("github_projects.item.comment"))
+                        .child(move_menu)
+                        .when(item.kind != ItemKind::Draft, |this| {
+                            this.child(
+                                Button::new(
+                                    "tasks-focus-comment",
+                                    t!("github_projects.item.comment"),
+                                )
                                 .style(ButtonStyle::Subtle)
                                 .label_size(LabelSize::Small)
                                 .start_icon(
@@ -436,127 +510,88 @@ impl TasksPanel {
                                         .size(IconSize::XSmall)
                                         .color(Color::Muted),
                                 )
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.commenting = !this.commenting;
-                                    if this.commenting {
-                                        window.focus(&this.comment_input.focus_handle(cx), cx);
-                                    }
-                                    cx.notify();
-                                })),
-                        )
-                        .child(
-                            Button::new(
-                                "tasks-focus-board",
-                                t!("github_projects.panel.open_board"),
+                                .on_click(cx.listener(
+                                    |this, _, window, cx| this.toggle_commenting(window, cx),
+                                )),
                             )
-                            .style(ButtonStyle::Subtle)
-                            .label_size(LabelSize::Small)
-                            .start_icon(
-                                Icon::new(IconName::Blocks)
-                                    .size(IconSize::XSmall)
-                                    .color(Color::Muted),
+                        })
+                        .when_some(url, |this, url| {
+                            this.child(
+                                Button::new(
+                                    "tasks-focus-open",
+                                    t!("github_projects.item.open_on_github"),
+                                )
+                                .style(ButtonStyle::Subtle)
+                                .label_size(LabelSize::Small)
+                                .start_icon(
+                                    Icon::new(IconName::ArrowUpRight)
+                                        .size(IconSize::XSmall)
+                                        .color(Color::Muted),
+                                )
+                                .on_click(move |_, _, cx| cx.open_url(&url)),
                             )
-                            .on_click(cx.listener(
-                                move |this, _, window, cx| {
-                                    this.open_board(Some(item_id.clone()), window, cx)
-                                },
-                            )),
-                        ),
+                        }),
                 )
                 .when(self.commenting, |this| {
-                    let item_id = item.id.clone();
-                    this.child(
-                        div()
-                            .key_context("TasksComment")
-                            .on_action(cx.listener(move |this, _: &menu::Confirm, window, cx| {
-                                this.post_comment(item_id.clone(), window, cx)
-                            }))
-                            .child(self.comment_input.clone()),
-                    )
+                    this.child(self.render_comment_input(item.id.clone(), cx))
                 }),
         )
     }
 
     fn render_row(&self, project: &Project, item: &Item, cx: &Context<Self>) -> impl IntoElement {
-        let colors = cx.theme().colors();
-        let status_color = project
+        let dot = project
             .status_of(item)
-            .map_or(colors.text_muted, |option| option_color(option, cx));
-        let started = !item.linked_branches.is_empty();
-        let item_for_start = item.clone();
+            .map_or(StatusTone::Neutral, option_tone)
+            .color(cx);
+        let can_start = item.linked_branches.is_empty() && item.kind == ItemKind::Issue;
+        let start_id = item.id.clone();
+        let start_branch = api::branch_name(item);
         let item_id = item.id.clone();
-        let right: Option<(String, Color)> = item
-            .pull_requests
-            .first()
-            .map(|pull_request| (format!("PR #{}", pull_request.number), Color::Accent))
-            .or_else(|| {
-                project
-                    .priority_of(item)
-                    .filter(|priority| priority.name.contains('0') || priority.name.contains('1'))
-                    .map(|_| ("!".to_string(), Color::Error))
-            });
         div().px_1p5().child(
-            h_flex()
-                .id(SharedString::from(format!("tasks-row-{}", item.id)))
-                .group("tasks-row")
-                .h(px(46.))
-                .px_2p5()
-                .gap_2p5()
-                .rounded_lg()
-                .cursor_pointer()
-                .hover(|this| this.bg(colors.element_hover))
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.open_board(Some(item_id.clone()), window, cx)
-                }))
-                .child(div().size(px(7.)).rounded_full().bg(status_color))
-                .child(
-                    v_flex()
-                        .flex_1()
-                        .min_w_0()
-                        .gap_0p5()
-                        .child(
-                            Label::new(item.title.clone())
-                                .size(LabelSize::Small)
-                                .truncate(),
+            StatusRow::new(
+                SharedString::from(format!("tasks-row-{}", item.id)),
+                RowStatus::Running,
+                item.title.clone(),
+            )
+            .dot_color(dot)
+            .detail(item_meta(item))
+            .group("tasks-row")
+            .end_slot(
+                h_flex()
+                    .flex_none()
+                    .gap_1p5()
+                    .when(can_start, |this| {
+                        this.child(
+                            div()
+                                .invisible()
+                                .group_hover("tasks-row", |this| this.visible())
+                                .child(
+                                    IconButton::new(
+                                        SharedString::from(format!("tasks-start-{}", item.id)),
+                                        IconName::PlayOutlined,
+                                    )
+                                    .icon_size(IconSize::Small)
+                                    .icon_color(Color::Muted)
+                                    .tooltip(Tooltip::text(t!(
+                                        "github_projects.panel.start_tooltip"
+                                    )))
+                                    .on_click(cx.listener(
+                                        move |this, _, window, cx| {
+                                            cx.stop_propagation();
+                                            this.start(
+                                                start_id.clone(),
+                                                start_branch.clone(),
+                                                window,
+                                                cx,
+                                            )
+                                        },
+                                    )),
+                                ),
                         )
-                        .child(
-                            Label::new(item_meta(project, item))
-                                .size(LabelSize::XSmall)
-                                .buffer_font(cx)
-                                .color(Color::Muted)
-                                .truncate(),
-                        ),
-                )
-                .when(!started && item.kind == api::ItemKind::Issue, |this| {
-                    this.child(
-                        div()
-                            .invisible()
-                            .group_hover("tasks-row", |this| this.visible())
-                            .child(
-                                IconButton::new(
-                                    SharedString::from(format!("tasks-start-{}", item.id)),
-                                    IconName::PlayOutlined,
-                                )
-                                .icon_size(IconSize::Small)
-                                .icon_color(Color::Muted)
-                                .tooltip(Tooltip::text(t!("github_projects.panel.start_tooltip")))
-                                .on_click(cx.listener(
-                                    move |this, _, window, cx| {
-                                        cx.stop_propagation();
-                                        this.start(&item_for_start, window, cx)
-                                    },
-                                )),
-                            ),
-                    )
-                })
-                .when_some(right, |this, (text, color)| {
-                    this.child(
-                        Label::new(text)
-                            .size(LabelSize::XSmall)
-                            .weight(FontWeight::MEDIUM)
-                            .color(color),
-                    )
-                }),
+                    })
+                    .children(priority_pill(project, item, cx)),
+            )
+            .on_click(cx.listener(move |this, _, _, cx| this.inspect(Some(item_id.clone()), cx))),
         )
     }
 
@@ -608,19 +643,16 @@ impl TasksPanel {
                     .map(|(option, items)| {
                         let key = option
                             .map_or_else(|| "sem-status".to_string(), |option| option.id.clone());
+                        let is_done = option.map(|option| &option.id) == done_id.as_ref();
                         let collapsed = self.collapsed.contains(&key)
-                            || (option.map(|option| &option.id) == done_id.as_ref()
-                                && !self.collapsed.contains(&format!("{key}-open")));
+                            || (is_done && !self.collapsed.contains(&format!("{key}-open")));
                         let title = option.map_or_else(
                             || t!("github_projects.panel.no_status").to_string(),
                             |option| option.name.to_uppercase(),
                         );
-                        let color = option.map_or(cx.theme().colors().text_muted, |option| {
-                            option_color(option, cx)
-                        });
+                        let tone = option.map_or(StatusTone::Neutral, option_tone);
                         let count = items.len();
                         let toggle_key = key.clone();
-                        let is_done = option.map(|option| &option.id) == done_id.as_ref();
                         v_flex()
                             .child(
                                 h_flex()
@@ -650,268 +682,783 @@ impl TasksPanel {
                                         .size(IconSize::XSmall)
                                         .color(Color::Muted),
                                     )
-                                    .child(div().size(px(6.)).rounded_full().bg(color))
-                                    .child(
-                                        Label::new(title)
-                                            .size(LabelSize::XSmall)
-                                            .weight(FontWeight::SEMIBOLD)
-                                            .color(Color::Muted),
-                                    )
-                                    .child(
-                                        Label::new(count.to_string())
-                                            .size(LabelSize::XSmall)
-                                            .color(Color::Muted),
-                                    ),
+                                    .child(tone.dot(cx))
+                                    .child(section_label(title))
+                                    .child(section_label(count.to_string())),
                             )
                             .when(!collapsed, |this| {
-                                this.children(
-                                    items
-                                        .into_iter()
-                                        .map(|item| self.render_row(project, item, cx)),
+                                this.child(
+                                    v_flex().when(is_done, |this| this.opacity(0.6)).children(
+                                        items
+                                            .into_iter()
+                                            .map(|item| self.render_row(project, item, cx)),
+                                    ),
                                 )
                             })
                     }),
             )
     }
 
-    fn render_footer(
-        &self,
-        state: &RepositoryProjects,
-        project: &Project,
-        cx: &Context<Self>,
-    ) -> impl IntoElement {
-        let login = state.viewer_login().unwrap_or_default().to_string();
-        let today = Local::now().date_naive();
-        let synced = state
-            .synced_at()
-            .map(|at| t!("github_projects.panel.synced", ago = ago(at)))
-            .unwrap_or_else(|| t!("github_projects.panel.syncing"));
-        let mine = project
-            .items
-            .iter()
-            .filter(|item| item.is_assigned_to(&login))
-            .count();
-        let detail = match (project.current_iteration(today), mine) {
-            (Some(iteration), 1) => t!(
-                "github_projects.panel.footer_mine_in_iteration.one",
-                synced = synced,
-                iteration = iteration.title
+    fn render_footer(&self, state: &RepositoryProjects, cx: &Context<Self>) -> impl IntoElement {
+        let (tone, text) = match state.synced_at() {
+            Some(at) if !state.is_syncing() => (
+                StatusTone::Success,
+                t!("github_projects.panel.synced", ago = ago(at)),
             ),
-            (Some(iteration), _) => t!(
-                "github_projects.panel.footer_mine_in_iteration.other",
-                synced = synced,
-                count = mine,
-                iteration = iteration.title
-            ),
-            (None, 1) => t!("github_projects.panel.footer_mine.one", synced = synced),
-            (None, _) => t!(
-                "github_projects.panel.footer_mine.other",
-                synced = synced,
-                count = mine
-            ),
+            _ => (StatusTone::Neutral, t!("github_projects.panel.syncing")),
         };
-        let url = project.summary.url.clone();
-        h_flex()
-            .h(px(48.))
-            .px_3()
-            .gap_2p5()
-            .border_t_1()
-            .border_color(cx.theme().colors().border)
-            .child(avatar(&login, cx))
-            .child(
-                v_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .child(Label::new(login).size(LabelSize::Small))
-                    .child(
-                        Label::new(detail)
-                            .size(LabelSize::XSmall)
-                            .color(Color::Muted)
-                            .truncate(),
-                    ),
-            )
-            .child(
-                IconButton::new("tasks-open-project", IconName::ArrowUpRight)
-                    .icon_size(IconSize::Small)
-                    .icon_color(Color::Muted)
-                    .tooltip(Tooltip::text(t!(
-                        "github_projects.panel.open_project_on_github"
-                    )))
-                    .on_click(move |_, _, cx| cx.open_url(&url)),
-            )
+        navigator_footer(
+            Some(tone),
+            text,
+            Some(
+                capsule_button(
+                    "tasks-open-board",
+                    Some(IconName::Blocks),
+                    t!("github_projects.panel.board"),
+                    cx,
+                )
+                .on_click(cx.listener(|this, _, window, cx| this.open_board(window, cx)))
+                .into_any_element(),
+            ),
+            cx,
+        )
+        .py_2()
+        .border_t_1()
+        .border_color(cx.theme().colors().border_variant)
     }
 
-    fn render_message(
+    fn render_error(&self, cx: &Context<Self>) -> Option<impl IntoElement> {
+        self.error.clone().map(|error| {
+            div().px_2().py_1().child(error_callout(
+                t!("github_projects.panel.action_failed"),
+                error,
+                cx,
+            ))
+        })
+    }
+
+    fn render_overview(
         &self,
-        icon: IconName,
-        title: impl Into<SharedString>,
-        detail: Option<SharedString>,
-        action: Option<AnyElement>,
+        project: &Project,
+        state: &RepositoryProjects,
+        cx: &Context<Self>,
     ) -> AnyElement {
+        let login = state.viewer_login().unwrap_or_default().to_string();
+        let focus = self
+            .branch
+            .as_deref()
+            .and_then(|branch| api::item_for_branch(&project.items, branch));
+        let iteration = project.current_iteration(today());
+        let tabs: Vec<(Tab, String)> = [
+            Some((Tab::Mine, t!("github_projects.panel.tab_mine").to_string())),
+            iteration.map(|iteration| (Tab::Iteration, iteration.title.clone())),
+            Some((Tab::All, t!("github_projects.panel.tab_all").to_string())),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
         v_flex()
             .size_full()
-            .items_center()
-            .justify_center()
-            .gap_2p5()
-            .px_6()
-            .child(Icon::new(icon).size(IconSize::Medium).color(Color::Muted))
-            .child(
-                Label::new(title)
-                    .size(LabelSize::Small)
-                    .weight(FontWeight::SEMIBOLD),
-            )
-            .when_some(detail, |this, detail| {
-                this.child(
-                    div().text_center().child(
-                        Label::new(detail)
-                            .size(LabelSize::XSmall)
-                            .color(Color::Muted),
-                    ),
-                )
+            .child(self.render_header(state, cx))
+            .when_some(focus, |this, item| {
+                this.child(self.render_focus_card(project, item, cx))
             })
-            .children(action)
+            .children(self.render_error(cx))
+            .child(
+                div()
+                    .px_2()
+                    .py_1()
+                    .child(
+                        segmented_control(cx).children(tabs.into_iter().map(|(tab, label)| {
+                            segment_option(
+                                SharedString::from(format!("tasks-tab-{label}")),
+                                label,
+                                self.tab == tab,
+                                true,
+                                cx,
+                            )
+                            .on_click(cx.listener(
+                                move |this, _, _, cx| {
+                                    this.tab = tab;
+                                    cx.notify();
+                                },
+                            ))
+                        })),
+                    ),
+            )
+            .child(div().px_2().py_1p5().child(self.filter_input.clone()))
+            .child(self.render_list(project, &login, cx))
+            .child(self.render_footer(state, cx))
             .into_any_element()
     }
-}
 
-/// The colors GitHub lets a project's options have, in the theme's terms.
-pub(crate) fn option_color(option: &FieldOption, cx: &App) -> Hsla {
-    match option.color.as_str() {
-        "BLUE" => Color::Info.color(cx),
-        "GREEN" => Color::Success.color(cx),
-        "YELLOW" | "ORANGE" => Color::Warning.color(cx),
-        "RED" => Color::Error.color(cx),
-        "PURPLE" | "PINK" => Color::Accent.color(cx),
-        _ => cx.theme().colors().text_muted,
+    fn option_menu(
+        &self,
+        item: &Item,
+        field: &api::SingleSelectField,
+        cx: &Context<Self>,
+    ) -> MenuBuilder {
+        let panel = cx.weak_entity();
+        let item_id = item.id.clone();
+        let field_id = field.id.clone();
+        let current = item.option_id(&field.id).map(str::to_string);
+        let options = field.options.clone();
+        Rc::new(move |window, cx| {
+            let panel = panel.clone();
+            let item_id = item_id.clone();
+            let field_id = field_id.clone();
+            let current = current.clone();
+            let options = options.clone();
+            ContextMenu::build(window, cx, move |mut menu, _, _| {
+                for option in options {
+                    let panel = panel.clone();
+                    let item_id = item_id.clone();
+                    let field_id = field_id.clone();
+                    let option_id = option.id.clone();
+                    menu = menu.toggleable_entry(
+                        option.name.clone(),
+                        current.as_deref() == Some(option.id.as_str()),
+                        ui::IconPosition::Start,
+                        None,
+                        move |_, cx| {
+                            panel
+                                .update(cx, |panel, cx| {
+                                    panel.set_field(
+                                        item_id.clone(),
+                                        field_id.clone(),
+                                        NewValue::Option(option_id.clone()),
+                                        cx,
+                                    )
+                                })
+                                .log_err();
+                        },
+                    );
+                }
+                menu.separator()
+                    .entry(t!("github_projects.board.clear"), None, move |_, cx| {
+                        panel
+                            .update(cx, |panel, cx| {
+                                panel.set_field(
+                                    item_id.clone(),
+                                    field_id.clone(),
+                                    NewValue::Clear,
+                                    cx,
+                                )
+                            })
+                            .log_err();
+                    })
+            })
+        })
+    }
+
+    fn iteration_menu(
+        &self,
+        item: &Item,
+        field: &api::IterationField,
+        cx: &Context<Self>,
+    ) -> MenuBuilder {
+        let panel = cx.weak_entity();
+        let item_id = item.id.clone();
+        let current = item.iteration_id(&field.id).map(str::to_string);
+        let field = field.clone();
+        Rc::new(move |window, cx| {
+            let panel = panel.clone();
+            let item_id = item_id.clone();
+            let current = current.clone();
+            let field = field.clone();
+            ContextMenu::build(window, cx, move |mut menu, _, _| {
+                for iteration in &field.iterations {
+                    let panel = panel.clone();
+                    let item_id = item_id.clone();
+                    let field_id = field.id.clone();
+                    let iteration_id = iteration.id.clone();
+                    menu = menu.toggleable_entry(
+                        iteration.title.clone(),
+                        current.as_deref() == Some(iteration.id.as_str()),
+                        ui::IconPosition::Start,
+                        None,
+                        move |_, cx| {
+                            panel
+                                .update(cx, |panel, cx| {
+                                    panel.set_field(
+                                        item_id.clone(),
+                                        field_id.clone(),
+                                        NewValue::Iteration(iteration_id.clone()),
+                                        cx,
+                                    )
+                                })
+                                .log_err();
+                        },
+                    );
+                }
+                menu
+            })
+        })
+    }
+
+    fn estimate_menu(&self, item: &Item, field_id: String, cx: &Context<Self>) -> MenuBuilder {
+        let panel = cx.weak_entity();
+        let item_id = item.id.clone();
+        Rc::new(move |window, cx| {
+            let panel = panel.clone();
+            let item_id = item_id.clone();
+            let field_id = field_id.clone();
+            ContextMenu::build(window, cx, move |mut menu, _, _| {
+                for estimate in ESTIMATES {
+                    let panel = panel.clone();
+                    let item_id = item_id.clone();
+                    let field_id = field_id.clone();
+                    menu = menu.entry(format_number(estimate), None, move |_, cx| {
+                        panel
+                            .update(cx, |panel, cx| {
+                                panel.set_field(
+                                    item_id.clone(),
+                                    field_id.clone(),
+                                    NewValue::Number(estimate),
+                                    cx,
+                                )
+                            })
+                            .log_err();
+                    });
+                }
+                menu
+            })
+        })
+    }
+
+    fn assignee_menu(&self, item: &Item, cx: &Context<Self>) -> MenuBuilder {
+        let panel = cx.weak_entity();
+        let item_id = item.id.clone();
+        Rc::new(move |window, cx| {
+            let panel = panel.clone();
+            let item_id = item_id.clone();
+            ContextMenu::build(window, cx, move |menu, _, _| {
+                menu.entry(t!("github_projects.board.assign_me"), None, move |_, cx| {
+                    panel
+                        .update(cx, |panel, cx| panel.assign_me(item_id.clone(), cx))
+                        .log_err();
+                })
+            })
+        })
+    }
+
+    fn render_inspector(
+        &self,
+        project: &Project,
+        item: &Item,
+        state: &RepositoryProjects,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let login = state.viewer_login().unwrap_or_default().to_string();
+        let default_branch = state
+            .info()
+            .and_then(|info| info.default_branch.clone())
+            .unwrap_or_else(|| "main".to_string());
+        let started = !item.linked_branches.is_empty();
+        let on_branch = self
+            .branch
+            .as_ref()
+            .is_some_and(|branch| item.linked_branches.contains(branch));
+        let reference = match (&item.repository, item.number) {
+            (Some(repository), Some(number)) => format!("{repository}#{number}"),
+            _ => item.reference(),
+        };
+        let kind = match item.kind {
+            ItemKind::Issue => t!("github_projects.board.kind_issue"),
+            ItemKind::PullRequest => t!("github_projects.board.kind_pull_request"),
+            ItemKind::Draft => t!("github_projects.board.kind_draft"),
+        };
+        let byline = match (&item.author, item.kind) {
+            (Some(author), ItemKind::Issue) => {
+                t!("github_projects.inspector.issue_opened_by", author = author)
+            }
+            (Some(author), ItemKind::PullRequest) => {
+                t!(
+                    "github_projects.inspector.pull_request_opened_by",
+                    author = author
+                )
+            }
+            (Some(author), ItemKind::Draft) => {
+                t!(
+                    "github_projects.inspector.draft_created_by",
+                    author = author
+                )
+            }
+            (None, _) => kind,
+        };
+        let description: String = item.body.trim().chars().take(600).collect();
+        let muted_dash = || {
+            Label::new("—")
+                .size(LabelSize::Small)
+                .color(Color::Muted)
+                .into_any_element()
+        };
+        let option_value = |option: Option<&FieldOption>| match option {
+            Some(option) => h_flex()
+                .gap_1p5()
+                .child(option_tone(option).dot(cx))
+                .child(Label::new(option.name.clone()).size(LabelSize::Small))
+                .into_any_element(),
+            None => muted_dash(),
+        };
+
+        let mut fields: Vec<AnyElement> = vec![field_row(
+            "tasks-field-status",
+            t!("github_projects.item.status_field"),
+            option_value(project.status_of(item)),
+            project
+                .status
+                .as_ref()
+                .map(|field| self.option_menu(item, field, cx)),
+            cx,
+        )];
+        if let Some(field) = &project.iteration {
+            let value = match project.iteration_of(item) {
+                Some(iteration) => h_flex()
+                    .gap_1p5()
+                    .child(
+                        Icon::new(IconName::History)
+                            .size(IconSize::XSmall)
+                            .color(Color::Muted),
+                    )
+                    .child(
+                        Label::new(iteration.title.clone())
+                            .size(LabelSize::Small)
+                            .truncate(),
+                    )
+                    .into_any_element(),
+                None => muted_dash(),
+            };
+            fields.push(field_row(
+                "tasks-field-iteration",
+                t!("github_projects.board.field_sprint"),
+                value,
+                Some(self.iteration_menu(item, field, cx)),
+                cx,
+            ));
+        }
+        if let Some(field) = &project.priority {
+            fields.push(field_row(
+                "tasks-field-priority",
+                t!("github_projects.board.field_priority"),
+                option_value(project.priority_of(item)),
+                Some(self.option_menu(item, field, cx)),
+                cx,
+            ));
+        }
+        if let Some(field) = &project.estimate {
+            fields.push(field_row(
+                "tasks-field-estimate",
+                t!("github_projects.board.field_estimate"),
+                Label::new(
+                    project
+                        .estimate_of(item)
+                        .map_or("—".to_string(), format_number),
+                )
+                .size(LabelSize::Small)
+                .buffer_font(cx)
+                .into_any_element(),
+                Some(self.estimate_menu(item, field.id.clone(), cx)),
+                cx,
+            ));
+        }
+        let assignee_value = if item.assignees.is_empty() {
+            h_flex()
+                .gap_1p5()
+                .child(
+                    Icon::new(IconName::Person)
+                        .size(IconSize::XSmall)
+                        .color(Color::Muted),
+                )
+                .child(
+                    Label::new(t!("github_projects.board.nobody"))
+                        .size(LabelSize::Small)
+                        .color(Color::Muted),
+                )
+                .into_any_element()
+        } else {
+            h_flex()
+                .gap_1p5()
+                .children(item.assignees.first().map(|login| avatar(login, cx)))
+                .child(
+                    Label::new(item.assignees.join(", "))
+                        .size(LabelSize::Small)
+                        .truncate(),
+                )
+                .into_any_element()
+        };
+        fields.push(field_row(
+            "tasks-field-assignee",
+            t!("github_projects.board.field_assignees"),
+            assignee_value,
+            (item.kind != ItemKind::Draft && !item.is_assigned_to(&login))
+                .then(|| self.assignee_menu(item, cx)),
+            cx,
+        ));
+
+        let can_start = item.kind == ItemKind::Issue && !on_branch;
+        let item_url = item.url.clone();
+        v_flex()
+            .size_full()
+            .on_action(cx.listener(|this, _: &menu::Cancel, _, cx| this.inspect(None, cx)))
+            .child(
+                HeaderBar::new("tasks-inspector-header")
+                    .start_child(
+                        Button::new("tasks-inspector-back", t!("github_projects.dock.title"))
+                            .style(ButtonStyle::Transparent)
+                            .label_size(LabelSize::Small)
+                            .start_icon(Icon::new(IconName::ChevronLeft).size(IconSize::XSmall))
+                            .on_click(cx.listener(|this, _, _, cx| this.inspect(None, cx))),
+                    )
+                    .end_child(
+                        Label::new(reference)
+                            .size(LabelSize::XSmall)
+                            .buffer_font(cx)
+                            .color(Color::Muted),
+                    )
+                    .when_some(item_url, |this, url| {
+                        this.end_child(
+                            IconButton::new("tasks-inspector-open", IconName::ArrowUpRight)
+                                .icon_size(IconSize::Small)
+                                .icon_color(Color::Muted)
+                                .tooltip(Tooltip::text(t!("github_projects.item.open_on_github")))
+                                .on_click(move |_, _, cx| cx.open_url(&url)),
+                        )
+                    }),
+            )
+            .child(
+                v_flex()
+                    .id("tasks-inspector-scroll")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .px_3()
+                    .py_3()
+                    .gap_3()
+                    .child(
+                        v_flex()
+                            .gap_1()
+                            .child(
+                                Label::new(byline)
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted),
+                            )
+                            .child(
+                                Label::new(item.title.clone())
+                                    .size(LabelSize::Large)
+                                    .weight(FontWeight::SEMIBOLD),
+                            ),
+                    )
+                    .child(grouped_block(cx).children(fields))
+                    .when(!description.is_empty(), |this| {
+                        this.child(
+                            v_flex()
+                                .gap_1p5()
+                                .child(section_header(
+                                    t!("github_projects.board.section_description"),
+                                    None,
+                                ))
+                                .child(
+                                    Label::new(description)
+                                        .size(LabelSize::Small)
+                                        .color(Color::Muted),
+                                ),
+                        )
+                    })
+                    .child(
+                        v_flex()
+                            .gap_1p5()
+                            .child(section_header(
+                                t!("github_projects.board.section_development"),
+                                None,
+                            ))
+                            .when(
+                                !started
+                                    && item.pull_requests.is_empty()
+                                    && item.kind == ItemKind::Issue,
+                                |this| {
+                                    this.child(self.branch_input.clone()).child(
+                                        Label::new(t!(
+                                            "github_projects.board.start_creates_branch",
+                                            branch = default_branch
+                                        ))
+                                        .size(LabelSize::XSmall)
+                                        .color(Color::Muted),
+                                    )
+                                },
+                            )
+                            .children(item.linked_branches.iter().map(|branch| {
+                                h_flex()
+                                    .gap_1p5()
+                                    .child(
+                                        Icon::new(IconName::GitBranch)
+                                            .size(IconSize::XSmall)
+                                            .color(Color::Muted),
+                                    )
+                                    .child(
+                                        Label::new(branch.clone())
+                                            .size(LabelSize::Small)
+                                            .buffer_font(cx)
+                                            .truncate(),
+                                    )
+                                    .when(self.branch.as_deref() == Some(branch.as_str()), |this| {
+                                        this.child(status_chip(
+                                            None,
+                                            t!("github_projects.item.current_branch"),
+                                            Color::Accent,
+                                            cx,
+                                        ))
+                                    })
+                            }))
+                            .children(item.pull_requests.iter().map(|pull_request| {
+                                let url = pull_request.url.clone();
+                                h_flex()
+                                    .id(SharedString::from(format!(
+                                        "tasks-pr-{}",
+                                        pull_request.number
+                                    )))
+                                    .gap_1p5()
+                                    .cursor_pointer()
+                                    .on_click(move |_, _, cx| cx.open_url(&url))
+                                    .child(pull_request_chip(pull_request, cx))
+                            })),
+                    ),
+            )
+            .child(
+                v_flex()
+                    .flex_none()
+                    .gap_2()
+                    .p_3()
+                    .border_t_1()
+                    .border_color(cx.theme().colors().border_variant)
+                    .children(self.error.clone().map(|error| {
+                        error_callout(t!("github_projects.panel.action_failed"), error, cx)
+                    }))
+                    .when(self.commenting, |this| {
+                        this.child(self.render_comment_input(item.id.clone(), cx))
+                    })
+                    .child(
+                        card(cx)
+                            .gap_2p5()
+                            .p_3()
+                            .when(can_start && !started, |this| {
+                                this.child(
+                                    Label::new(t!("github_projects.board.start_hint"))
+                                        .size(LabelSize::XSmall)
+                                        .color(Color::Muted),
+                                )
+                            })
+                            .child(
+                                h_flex()
+                                    .gap_1()
+                                    .when(item.kind != ItemKind::Draft, |this| {
+                                        this.child(
+                                            Button::new(
+                                                "tasks-inspector-comment",
+                                                t!("github_projects.item.comment"),
+                                            )
+                                            .style(ButtonStyle::Subtle)
+                                            .label_size(LabelSize::Small)
+                                            .start_icon(
+                                                Icon::new(IconName::Chat)
+                                                    .size(IconSize::XSmall)
+                                                    .color(Color::Muted),
+                                            )
+                                            .on_click(
+                                                cx.listener(|this, _, window, cx| {
+                                                    this.toggle_commenting(window, cx)
+                                                }),
+                                            ),
+                                        )
+                                    })
+                                    .child(div().flex_1())
+                                    .when(can_start, |this| {
+                                        this.child(
+                                            primary_button(
+                                                "tasks-inspector-start",
+                                                Some(IconName::PlayFilled),
+                                                if started {
+                                                    t!("github_projects.board.go_to_branch")
+                                                } else {
+                                                    t!("github_projects.board.start")
+                                                },
+                                                Some(KeyBinding::for_action_in(
+                                                    &StartItem,
+                                                    &self.focus_handle,
+                                                    cx,
+                                                )),
+                                                cx,
+                                            )
+                                            .on_click(
+                                                cx.listener(|this, _, window, cx| {
+                                                    this.start_inspected(&StartItem, window, cx)
+                                                }),
+                                            ),
+                                        )
+                                    }),
+                            ),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_ready(&self, state: &RepositoryProjects, cx: &Context<Self>) -> AnyElement {
+        let Some(project) = state.project() else {
+            return div().into_any_element();
+        };
+        match self.inspected.as_deref().and_then(|id| project.item(id)) {
+            Some(item) => self.render_inspector(project, item, state, cx),
+            None => self.render_overview(project, state, cx),
+        }
     }
 }
 
-/// A tinted chip, as the boards draw labels, fields and links.
-pub(crate) fn chip(
-    label: impl Into<SharedString>,
-    color: Hsla,
-    icon: Option<IconName>,
-    mono: bool,
-    cx: &App,
-) -> impl IntoElement {
-    let neutral = color == cx.theme().colors().text;
-    h_flex()
-        .h(px(20.))
-        .px(px(7.))
-        .gap_1()
-        .rounded(px(5.))
-        .bg(if neutral {
-            cx.theme().colors().element_hover
-        } else {
-            color.opacity(0.14)
-        })
-        .children(icon.map(|icon| {
-            Icon::new(icon)
-                .size(IconSize::XSmall)
-                .color(Color::Custom(color))
-        }))
-        .child({
-            let label = Label::new(label)
-                .size(LabelSize::XSmall)
-                .weight(FontWeight::MEDIUM)
-                .color(Color::Custom(color));
-            if mono { label.buffer_font(cx) } else { label }
-        })
+fn retry_button(id: &'static str, cx: &App) -> gpui::Stateful<gpui::Div> {
+    secondary_button(
+        id,
+        Some((IconName::RotateCw, Color::Muted)),
+        t!("github_projects.empty.retry"),
+        true,
+        cx,
+    )
 }
 
-/// Status, linked pull request, iteration and priority, as the cards show them.
-pub(crate) fn item_chips(
-    project: &Project,
-    item: &Item,
-    with_status: bool,
+/// A property of the inspected item: its name, its value and, when it can change, a menu.
+fn field_row(
+    id: &'static str,
+    label: SharedString,
+    value: AnyElement,
+    menu: Option<MenuBuilder>,
     cx: &App,
-) -> impl IntoElement {
-    let text = cx.theme().colors().text;
+) -> AnyElement {
+    let hover = cx.theme().colors().ghost_element_hover;
+    let has_menu = menu.is_some();
+    let row = h_flex()
+        .id(id)
+        .w_full()
+        .h(px(32.))
+        .px_2()
+        .gap_2()
+        .rounded(Radius::Md.rems())
+        .when(has_menu, |this| this.hover(move |this| this.bg(hover)))
+        .child(
+            div()
+                .w(px(96.))
+                .flex_none()
+                .child(Label::new(label).size(LabelSize::Small).color(Color::Muted)),
+        )
+        .child(div().flex_1().min_w_0().child(value))
+        .when(has_menu, |this| {
+            this.child(
+                Icon::new(IconName::ChevronDown)
+                    .size(IconSize::XSmall)
+                    .color(Color::Muted),
+            )
+        });
+    match menu {
+        Some(menu) => PopoverMenu::new(SharedString::from(format!("{id}-menu")))
+            .full_width(true)
+            .trigger(PopoverTriggerArea::new(row))
+            .menu(move |window, cx| Some(menu(window, cx)))
+            .into_any_element(),
+        None => row.into_any_element(),
+    }
+}
+
+/// The colors GitHub lets a project's options have, as status tones.
+pub(crate) fn option_tone(option: &FieldOption) -> StatusTone {
+    match option.color.as_str() {
+        "BLUE" => StatusTone::Info,
+        "GREEN" => StatusTone::Success,
+        "YELLOW" | "ORANGE" => StatusTone::Warning,
+        "RED" => StatusTone::Error,
+        _ => StatusTone::Neutral,
+    }
+}
+
+/// P0 and P1 stand out; the rest stay neutral.
+pub(crate) fn priority_pill(project: &Project, item: &Item, cx: &App) -> Option<gpui::Div> {
+    project.priority_of(item).map(|priority| {
+        let urgent = priority.name.contains('0') || priority.name.contains('1');
+        status_pill(
+            priority.name.clone(),
+            if urgent {
+                StatusTone::Error
+            } else {
+                StatusTone::Neutral
+            },
+            cx,
+        )
+    })
+}
+
+fn pull_request_chip(pull_request: &api::LinkedPullRequest, cx: &App) -> gpui::Div {
+    let (text, color) = match pull_request.state.as_str() {
+        "MERGED" => (
+            t!(
+                "github_projects.item.pull_request_merged",
+                number = pull_request.number
+            ),
+            Color::Accent,
+        ),
+        "CLOSED" => (
+            t!(
+                "github_projects.item.pull_request_closed",
+                number = pull_request.number
+            ),
+            Color::Muted,
+        ),
+        _ => (format!("PR #{}", pull_request.number).into(), Color::Accent),
+    };
+    status_chip(Some(IconName::PullRequest), text, color, cx)
+}
+
+/// Status, iteration and linked pull request, as the focus card shows them.
+fn item_chips(project: &Project, item: &Item, cx: &App) -> impl IntoElement {
     h_flex()
         .flex_wrap()
         .gap_1p5()
-        .when_some(
-            project.status_of(item).filter(|_| with_status),
-            |this, status| {
-                this.child(chip(
-                    status.name.clone(),
-                    option_color(status, cx),
-                    None,
-                    false,
-                    cx,
-                ))
-            },
+        .children(
+            project
+                .status_of(item)
+                .map(|status| status_pill(status.name.clone(), option_tone(status), cx)),
         )
-        .children(item.pull_requests.first().map(|pull_request| {
-            let (color, text) = match pull_request.state.as_str() {
-                "MERGED" => (
-                    Color::Accent.color(cx),
-                    t!(
-                        "github_projects.item.pull_request_merged",
-                        number = pull_request.number
-                    ),
-                ),
-                "CLOSED" => (
-                    cx.theme().colors().text_muted,
-                    t!(
-                        "github_projects.item.pull_request_closed",
-                        number = pull_request.number
-                    ),
-                ),
-                _ => (
-                    Color::Accent.color(cx),
-                    format!("PR #{}", pull_request.number).into(),
-                ),
-            };
-            chip(text, color, Some(IconName::PullRequest), false, cx)
-        }))
         .children(project.iteration_of(item).map(|iteration| {
-            chip(
-                iteration.title.clone(),
-                text,
+            status_chip(
                 Some(IconName::History),
-                false,
+                iteration.title.clone(),
+                Color::Default,
                 cx,
             )
         }))
-        .children(project.priority_of(item).map(|priority| {
-            chip(
-                priority.name.clone(),
-                option_color(priority, cx),
-                None,
-                false,
-                cx,
-            )
-        }))
-        .children(item.labels.iter().take(2).map(|label| {
-            let color = if label.name.eq_ignore_ascii_case("bug") {
-                Color::Error.color(cx)
-            } else {
-                Color::Info.color(cx)
-            };
-            chip(label.name.clone(), color, None, false, cx)
-        }))
+        .children(
+            item.pull_requests
+                .first()
+                .map(|pull_request| pull_request_chip(pull_request, cx)),
+        )
 }
 
-/// `#201 · feature · P2 · 3 pts`.
-pub(crate) fn item_meta(project: &Project, item: &Item) -> String {
-    let mut parts = vec![match item.number {
+/// `#212`, or "draft" for a draft.
+pub(crate) fn item_number(item: &Item) -> String {
+    match item.number {
         Some(number) => format!("#{number}"),
         None => t!("github_projects.item.draft").to_string(),
-    }];
-    parts.extend(item.labels.first().map(|label| label.name.clone()));
-    parts.extend(
-        project
-            .priority_of(item)
-            .map(|priority| priority.name.clone()),
-    );
-    if let Some(estimate) = project.estimate_of(item) {
-        parts.push(format!("{} pts", format_number(estimate)));
     }
-    if let Some(pull_request) = item.pull_requests.first() {
-        parts.push(format!("PR #{}", pull_request.number));
+}
+
+/// `#212 · bug, ui`.
+fn item_meta(item: &Item) -> String {
+    let mut meta = item_number(item);
+    if !item.labels.is_empty() {
+        let labels: Vec<&str> = item
+            .labels
+            .iter()
+            .map(|label| label.name.as_str())
+            .collect();
+        meta.push_str(" · ");
+        meta.push_str(&labels.join(", "));
     }
-    parts.join(" · ")
+    meta
 }
 
 pub(crate) fn format_number(number: f64) -> String {
@@ -975,7 +1522,7 @@ pub(crate) fn status_menu(
     id: &'static str,
     project: &Project,
     item: &Item,
-    state: Option<Entity<RepositoryProjects>>,
+    on_pick: Rc<dyn Fn(String, String, &mut App)>,
     trigger: impl ui::PopoverTrigger,
 ) -> impl IntoElement {
     let options = project.columns().to_vec();
@@ -988,10 +1535,10 @@ pub(crate) fn status_menu(
             let options = options.clone();
             let current = current.clone();
             let item_id = item_id.clone();
-            let state = state.clone();
+            let on_pick = on_pick.clone();
             Some(ContextMenu::build(window, cx, move |mut menu, _, _| {
                 for option in options {
-                    let state = state.clone();
+                    let on_pick = on_pick.clone();
                     let item_id = item_id.clone();
                     let option_id = option.id.clone();
                     menu = menu.toggleable_entry(
@@ -999,15 +1546,7 @@ pub(crate) fn status_menu(
                         current.as_deref() == Some(option.id.as_str()),
                         ui::IconPosition::Start,
                         None,
-                        move |_, cx| {
-                            if let Some(state) = &state {
-                                state
-                                    .update(cx, |state, cx| {
-                                        state.move_item(item_id.clone(), option_id.clone(), cx)
-                                    })
-                                    .detach_and_log_err(cx);
-                            }
-                        },
+                        move |_, cx| on_pick(item_id.clone(), option_id.clone(), cx),
                     );
                 }
                 menu
@@ -1020,212 +1559,84 @@ pub(crate) fn today() -> NaiveDate {
 }
 
 impl Render for TasksPanel {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.fill_branch_input(window, cx);
         let content: AnyElement = match self.state.clone() {
-            None => self.render_message(
+            None => EmptyState::new(
                 IconName::Blocks,
                 t!("github_projects.empty.not_github_title"),
-                Some(t!("github_projects.empty.not_github_detail")),
-                None,
-            ),
+            )
+            .description(t!("github_projects.empty.not_github_detail"))
+            .into_any_element(),
             Some(state_entity) => {
                 let state = state_entity.read(cx);
                 match state.availability(cx) {
-                    Availability::NotConnected => self.render_message(
+                    Availability::NotConnected => EmptyState::new(
                         IconName::Disconnected,
                         t!("github_projects.empty.connect_title"),
-                        Some(t!("github_projects.empty.connect_detail")),
-                        Some(
-                            secondary_button(
-                                "tasks-open-repo",
-                                Some((IconName::PullRequest, Color::Muted)),
-                                t!("github_projects.empty.open_repo"),
-                                true,
-                                cx,
-                            )
-                            .on_click(|_, window, cx| {
-                                window.dispatch_action(repo_hosting::ToggleFocus.boxed_clone(), cx)
-                            })
-                            .into_any_element(),
-                        ),
-                    ),
-                    Availability::Loading => self.render_message(
-                        IconName::LoadCircle,
-                        t!("github_projects.empty.loading"),
-                        None,
-                        None,
-                    ),
-                    Availability::NoProjects => self.render_message(
-                        IconName::Blocks,
-                        t!("github_projects.empty.no_projects_title"),
-                        Some(t!(
-                            "github_projects.empty.no_projects_detail",
-                            repository = state.repository().full_name()
-                        )),
-                        None,
-                    ),
-                    Availability::MissingScope => self.render_message(
-                        IconName::Lock,
-                        t!("github_projects.empty.missing_scope_title"),
-                        Some(t!("github_projects.empty.missing_scope_detail_retry")),
-                        Some(
-                            secondary_button(
-                                "tasks-retry",
-                                Some((IconName::RotateCw, Color::Muted)),
-                                t!("github_projects.empty.retry"),
-                                true,
-                                cx,
-                            )
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                if let Some(state) = &this.state {
-                                    state.update(cx, |state, cx| state.retry_with_fresh_token(cx));
-                                }
-                            }))
-                            .into_any_element(),
-                        ),
-                    ),
-                    Availability::Failed(error) => self.render_message(
-                        IconName::Warning,
-                        t!("github_projects.empty.failed_title"),
-                        Some(error),
-                        Some(
-                            secondary_button(
-                                "tasks-retry",
-                                Some((IconName::RotateCw, Color::Muted)),
-                                t!("github_projects.empty.retry"),
-                                true,
-                                cx,
-                            )
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                if let Some(state) = &this.state {
-                                    state.update(cx, |state, cx| state.sync(cx));
-                                }
-                            }))
-                            .into_any_element(),
-                        ),
-                    ),
-                    Availability::Ready => {
-                        let Some(project) = state.project() else {
-                            return div();
-                        };
-                        let login = state.viewer_login().unwrap_or_default().to_string();
-                        let focus = self
-                            .branch
-                            .as_deref()
-                            .and_then(|branch| api::item_for_branch(&project.items, branch));
-                        let today = today();
-                        let iteration = project.current_iteration(today);
-                        let mine = project
-                            .items
-                            .iter()
-                            .filter(|item| item.is_assigned_to(&login))
-                            .count();
-                        let in_iteration = iteration.map(|iteration| {
-                            project
-                                .items
-                                .iter()
-                                .filter(|item| {
-                                    project.iteration_of(item).map(|it| &it.id)
-                                        == Some(&iteration.id)
-                                })
-                                .count()
-                        });
-                        let mentions = project
-                            .items
-                            .iter()
-                            .filter(|item| item.body.contains(&format!("@{login}")))
-                            .count();
-                        let tabs: Vec<(Tab, String, Option<usize>)> = [
-                            Some((
-                                Tab::Mine,
-                                t!("github_projects.panel.tab_mine").to_string(),
-                                Some(mine),
-                            )),
-                            iteration.map(|iteration| {
-                                (Tab::Iteration, iteration.title.clone(), in_iteration)
-                            }),
-                            Some((
-                                Tab::Mentions,
-                                t!("github_projects.panel.tab_mentions").to_string(),
-                                Some(mentions),
-                            )),
-                        ]
-                        .into_iter()
-                        .flatten()
-                        .collect();
-                        v_flex()
-                            .size_full()
-                            .child(self.render_source(state, cx))
-                            .when_some(focus, |this, item| {
-                                this.child(self.render_focus_card(project, item, state, cx))
-                            })
-                            .when_some(self.error.clone(), |this, error| {
-                                this.child(
-                                    div().px_3().py_1().child(
-                                        Label::new(error)
-                                            .size(LabelSize::XSmall)
-                                            .color(Color::Error),
-                                    ),
-                                )
-                            })
-                            .child(div().px_2().py_1().child(segmented_control(cx).children(
-                                tabs.into_iter().map(|(tab, label, count)| {
-                                    let label = match count {
-                                        Some(count) => format!("{label} {count}"),
-                                        None => label,
-                                    };
-                                    segment_option(
-                                        SharedString::from(format!("tasks-tab-{label}")),
-                                        label,
-                                        self.tab == tab,
-                                        true,
-                                        cx,
-                                    )
-                                    .on_click(cx.listener(
-                                        move |this, _, _, cx| {
-                                            this.tab = tab;
-                                            cx.notify();
-                                        },
-                                    ))
-                                }),
-                            )))
-                            .child(
-                                h_flex()
-                                    .px_2()
-                                    .py_1p5()
-                                    .gap_1p5()
-                                    .child(div().flex_1().child(self.filter_input.clone()))
-                                    .child(
-                                        h_flex()
-                                            .gap_1()
-                                            .px_1p5()
-                                            .child(
-                                                Icon::new(IconName::ListTree)
-                                                    .size(IconSize::XSmall)
-                                                    .color(Color::Muted),
-                                            )
-                                            .child(
-                                                Label::new(
-                                                    project.status.as_ref().map_or(
-                                                        t!("github_projects.item.status_field")
-                                                            .to_string(),
-                                                        |field| field.name.clone(),
-                                                    ),
-                                                )
-                                                .size(LabelSize::Small),
-                                            ),
-                                    ),
-                            )
-                            .child(self.render_list(project, &login, cx))
-                            .child(self.render_footer(state, project, cx))
+                    )
+                    .description(t!("github_projects.empty.connect_detail"))
+                    .action(
+                        secondary_button(
+                            "tasks-open-repo",
+                            Some((IconName::PullRequest, Color::Muted)),
+                            t!("github_projects.empty.open_repo"),
+                            true,
+                            cx,
+                        )
+                        .on_click(|_, window, cx| {
+                            window.dispatch_action(repo_hosting::ToggleFocus.boxed_clone(), cx)
+                        }),
+                    )
+                    .into_any_element(),
+                    Availability::Loading => {
+                        EmptyState::new(IconName::LoadCircle, t!("github_projects.empty.loading"))
+                            .spinning(true)
                             .into_any_element()
                     }
+                    Availability::NoProjects => EmptyState::new(
+                        IconName::Blocks,
+                        t!("github_projects.empty.no_projects_title"),
+                    )
+                    .description(t!(
+                        "github_projects.empty.no_projects_detail",
+                        repository = state.repository().full_name()
+                    ))
+                    .into_any_element(),
+                    Availability::MissingScope => EmptyState::new(
+                        IconName::Lock,
+                        t!("github_projects.empty.missing_scope_title"),
+                    )
+                    .description(t!("github_projects.empty.missing_scope_detail_retry"))
+                    .action(retry_button("tasks-retry", cx).on_click(cx.listener(
+                        |this, _, _, cx| {
+                            if let Some(state) = &this.state {
+                                state.update(cx, |state, cx| state.retry_with_fresh_token(cx));
+                            }
+                        },
+                    )))
+                    .into_any_element(),
+                    Availability::Failed(error) => {
+                        EmptyState::new(IconName::Warning, t!("github_projects.empty.failed_title"))
+                            .tone(EmptyStateTone::Error)
+                            .detail(error)
+                            .action(retry_button("tasks-retry", cx).on_click(cx.listener(
+                                |this, _, _, cx| {
+                                    if let Some(state) = &this.state {
+                                        state.update(cx, |state, cx| state.sync(cx));
+                                    }
+                                },
+                            )))
+                            .into_any_element()
+                    }
+                    Availability::Ready => self.render_ready(state, cx),
                 }
             }
         };
         v_flex()
             .key_context("TasksPanel")
             .track_focus(&self.focus_handle)
+            .on_action(cx.listener(Self::start_inspected))
             .size_full()
             .bg(cx.theme().colors().panel_background)
             .child(content)

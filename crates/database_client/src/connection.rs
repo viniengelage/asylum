@@ -79,6 +79,39 @@ fn default_true() -> bool {
 }
 
 impl SavedConnection {
+    /// A connection brought from another tool. Its SSH tunnel isn't carried over, and production
+    /// opens read-only.
+    pub fn imported(
+        name: String,
+        environment: Environment,
+        host: String,
+        port: u16,
+        database: String,
+        user: String,
+        ssl_mode: Option<SslMode>,
+    ) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            name,
+            environment,
+            host,
+            port,
+            database,
+            user,
+            ssl_mode: ssl_mode.unwrap_or_default(),
+            read_only: environment == Environment::Prod,
+            confirm_writes: true,
+            ssh: None,
+        }
+    }
+
+    pub fn same_target(&self, host: &str, port: u16, database: &str, user: &str) -> bool {
+        self.host.eq_ignore_ascii_case(host)
+            && self.port == port
+            && self.database == database
+            && self.user == user
+    }
+
     /// Same server, database and user share one keychain entry across projects.
     pub fn keychain_url(&self) -> String {
         format!(

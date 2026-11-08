@@ -1,7 +1,7 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
 pub struct Dump {
@@ -46,7 +46,7 @@ pub struct Bounds {
     pub height: f64,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Color {
     pub r: f64,
     pub g: f64,
@@ -135,6 +135,9 @@ pub struct Size {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Node {
+    /// Fixtures written before layers were read leave it out.
+    #[serde(default)]
+    id: String,
     #[serde(rename = "type")]
     kind: String,
     #[serde(default)]
@@ -177,6 +180,39 @@ pub struct Node {
     size: Option<Size>,
     #[serde(default)]
     children: Vec<Node>,
+    #[serde(default)]
+    visible: Option<bool>,
+    #[serde(default)]
+    layout_mode: Option<String>,
+    #[serde(default)]
+    item_spacing: Option<f64>,
+    #[serde(default)]
+    padding_top: Option<f64>,
+    #[serde(default)]
+    padding_right: Option<f64>,
+    #[serde(default)]
+    padding_bottom: Option<f64>,
+    #[serde(default)]
+    padding_left: Option<f64>,
+    #[serde(default)]
+    primary_axis_align_items: Option<String>,
+    #[serde(default)]
+    counter_axis_align_items: Option<String>,
+    #[serde(default)]
+    layout_sizing_horizontal: Option<String>,
+    #[serde(default)]
+    layout_sizing_vertical: Option<String>,
+    #[serde(default)]
+    component: Option<String>,
+    /// Variable names by property, e.g. `fills` → `color/surface`.
+    #[serde(default)]
+    tokens: BTreeMap<String, String>,
+}
+
+impl Node {
+    fn is_visible(&self) -> bool {
+        self.visible != Some(false)
+    }
 }
 
 /// Lives in the cache directory, one level above the pages that load it.
@@ -207,7 +243,7 @@ fn html_escape(text: &str) -> String {
     escaped
 }
 
-fn number(value: f64) -> String {
+pub(crate) fn number(value: f64) -> String {
     let rounded = (value * 1000.0).round() / 1000.0;
     if rounded == 0.0 {
         "0".to_string()
@@ -533,6 +569,9 @@ fn render_vector(node: &Node, origin: (f64, f64), out: &mut String) {
 }
 
 fn render_node(node: &Node, origin: (f64, f64), fonts: &mut BTreeSet<String>, out: &mut String) {
+    if !node.is_visible() {
+        return;
+    }
     if node.kind == "TEXT" {
         render_text(node, origin, fonts, out);
         return;
@@ -598,24 +637,27 @@ fn render_node(node: &Node, origin: (f64, f64), fonts: &mut BTreeSet<String>, ou
 }
 
 fn canvas_bounds(children: &[Node]) -> Bounds {
-    let extent = children.iter().fold(None, |extent, node| {
-        let bounds = node.bounds;
-        let (left, top, right, bottom) = (
-            bounds.x,
-            bounds.y,
-            bounds.x + bounds.width,
-            bounds.y + bounds.height,
-        );
-        Some(match extent {
-            None => (left, top, right, bottom),
-            Some((min_x, min_y, max_x, max_y)) => (
-                f64::min(min_x, left),
-                f64::min(min_y, top),
-                f64::max(max_x, right),
-                f64::max(max_y, bottom),
-            ),
-        })
-    });
+    let extent = children
+        .iter()
+        .filter(|node| node.is_visible())
+        .fold(None, |extent, node| {
+            let bounds = node.bounds;
+            let (left, top, right, bottom) = (
+                bounds.x,
+                bounds.y,
+                bounds.x + bounds.width,
+                bounds.y + bounds.height,
+            );
+            Some(match extent {
+                None => (left, top, right, bottom),
+                Some((min_x, min_y, max_x, max_y)) => (
+                    f64::min(min_x, left),
+                    f64::min(min_y, top),
+                    f64::max(max_x, right),
+                    f64::max(max_y, bottom),
+                ),
+            })
+        });
     match extent {
         Some((min_x, min_y, max_x, max_y)) => Bounds {
             x: min_x,
@@ -701,6 +743,414 @@ pub fn render_page(page: &DumpPage) -> RenderedPage {
         width: canvas.width,
         height: canvas.height,
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LayerKind {
+    AutoLayout,
+    Frame,
+    Group,
+    Text,
+    Instance,
+    Image,
+    Shape,
+}
+
+/// A value and the variable it is bound to, if any.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Tokened<T> {
+    pub value: T,
+    #[serde(default)]
+    pub token: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoLayout {
+    pub horizontal: bool,
+    pub gap: Tokened<f64>,
+    #[serde(default)]
+    pub primary_align: Option<String>,
+    #[serde(default)]
+    pub counter_align: Option<String>,
+    /// Top, right, bottom, left.
+    pub padding: Tokened<[f64; 4]>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Sizing {
+    #[serde(default)]
+    pub horizontal: Option<String>,
+    #[serde(default)]
+    pub vertical: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Stroke {
+    pub weight: f64,
+    pub color: Tokened<Color>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TextStyle {
+    pub characters: String,
+    #[serde(default)]
+    pub family: Option<Tokened<String>>,
+    #[serde(default)]
+    pub size: Option<Tokened<f64>>,
+    pub weight: u16,
+    #[serde(default)]
+    pub color: Option<Tokened<Color>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UnboundProperty {
+    Fill,
+    Radius,
+    Gap,
+    Padding,
+    Stroke,
+    FontSize,
+    TextColor,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Unbound {
+    pub property: UnboundProperty,
+    pub value: String,
+}
+
+/// One node of a screen as the inspector and the canvas overlay read it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Layer {
+    pub id: String,
+    pub name: String,
+    pub kind: LayerKind,
+    /// Relative to the top-left of the page's rendered canvas, like `Screen::bounds`.
+    #[serde(rename = "box")]
+    pub bounds: Bounds,
+    pub visible: bool,
+    #[serde(default)]
+    pub component: Option<String>,
+    #[serde(default)]
+    pub auto_layout: Option<AutoLayout>,
+    #[serde(default)]
+    pub sizing: Option<Sizing>,
+    #[serde(default)]
+    pub fill: Option<Tokened<Color>>,
+    #[serde(default)]
+    pub radius: Option<Tokened<String>>,
+    #[serde(default)]
+    pub stroke: Option<Stroke>,
+    #[serde(default)]
+    pub shadow: Option<Tokened<String>>,
+    #[serde(default)]
+    pub text: Option<TextStyle>,
+    #[serde(default)]
+    pub unbound: Vec<Unbound>,
+    #[serde(default)]
+    pub children: Vec<Layer>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenLayers {
+    pub screen_id: String,
+    pub layers: Vec<Layer>,
+}
+
+pub fn hex_color(color: &Color) -> String {
+    let mut hex = format!(
+        "#{:02X}{:02X}{:02X}",
+        channel(color.r),
+        channel(color.g),
+        channel(color.b)
+    );
+    if color.a < 1.0 {
+        write!(hex, " {}%", (color.a.clamp(0.0, 1.0) * 100.0).round()).ok();
+    }
+    hex
+}
+
+fn solid_color(paints: &[Paint]) -> Option<Color> {
+    paints
+        .iter()
+        .find(|paint| paint.kind == "SOLID")
+        .and_then(|paint| {
+            let color = paint.color?;
+            Some(Color {
+                a: color.a * paint.opacity,
+                ..color
+            })
+        })
+}
+
+fn layer_kind(node: &Node) -> LayerKind {
+    let auto_layout = matches!(
+        node.layout_mode.as_deref(),
+        Some("HORIZONTAL") | Some("VERTICAL")
+    );
+    match node.kind.as_str() {
+        "TEXT" => LayerKind::Text,
+        "INSTANCE" => LayerKind::Instance,
+        _ if node.children.is_empty() && node.fills.iter().any(|paint| paint.kind == "IMAGE") => {
+            LayerKind::Image
+        }
+        "FRAME" | "COMPONENT" | "COMPONENT_SET" | "SECTION" if auto_layout => LayerKind::AutoLayout,
+        "FRAME" | "COMPONENT" | "COMPONENT_SET" | "SECTION" => LayerKind::Frame,
+        "GROUP" | "BOOLEAN_OPERATION" => LayerKind::Group,
+        _ => LayerKind::Shape,
+    }
+}
+
+fn radius_value(node: &Node) -> Option<String> {
+    if node.kind == "ELLIPSE" {
+        return None;
+    }
+    match node.radius.as_ref()? {
+        Radius::Uniform(value) if *value > 0.0 => Some(number(*value)),
+        Radius::Uniform(_) => None,
+        Radius::Corners(corners) => {
+            let corners: Vec<f64> = corners.iter().map(|corner| corner.unwrap_or(0.0)).collect();
+            let first = *corners.first()?;
+            if corners.iter().all(|corner| *corner == 0.0) {
+                None
+            } else if corners.iter().all(|corner| *corner == first) {
+                Some(number(first))
+            } else {
+                Some(
+                    corners
+                        .iter()
+                        .map(|corner| number(*corner))
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                )
+            }
+        }
+    }
+}
+
+fn shadow_value(node: &Node) -> Option<String> {
+    let effect = node
+        .effects
+        .iter()
+        .find(|effect| effect.kind == "DROP_SHADOW" || effect.kind == "INNER_SHADOW")?;
+    let offset = effect.offset.unwrap_or_default();
+    let mut value = format!(
+        "{} {} {} {}",
+        number(offset.x),
+        number(offset.y),
+        number(effect.radius.unwrap_or(0.0)),
+        number(effect.spread.unwrap_or(0.0)),
+    );
+    if let Some(color) = &effect.color {
+        write!(value, " {}", hex_color(color)).ok();
+    }
+    if effect.kind == "INNER_SHADOW" {
+        value.insert_str(0, "inset ");
+    }
+    Some(value)
+}
+
+fn layer(node: &Node, origin: (f64, f64)) -> Layer {
+    let token = |key: &str| node.tokens.get(key).cloned();
+    let is_text = node.kind == "TEXT";
+    let mut unbound = Vec::new();
+    let mut flag = |property: UnboundProperty, token: &Option<String>, value: String| {
+        if token.is_none() {
+            unbound.push(Unbound { property, value });
+        }
+    };
+
+    let auto_layout = match node.layout_mode.as_deref() {
+        Some(mode @ ("HORIZONTAL" | "VERTICAL")) => {
+            let gap = Tokened {
+                value: node.item_spacing.unwrap_or(0.0),
+                token: token("itemSpacing"),
+            };
+            let padding = Tokened {
+                value: [
+                    node.padding_top.unwrap_or(0.0),
+                    node.padding_right.unwrap_or(0.0),
+                    node.padding_bottom.unwrap_or(0.0),
+                    node.padding_left.unwrap_or(0.0),
+                ],
+                token: token("padding"),
+            };
+            if gap.value > 0.0 {
+                flag(UnboundProperty::Gap, &gap.token, number(gap.value));
+            }
+            if padding.value.iter().any(|side| *side > 0.0) {
+                flag(
+                    UnboundProperty::Padding,
+                    &padding.token,
+                    padding_value(&padding.value),
+                );
+            }
+            Some(AutoLayout {
+                horizontal: mode == "HORIZONTAL",
+                gap,
+                primary_align: node.primary_axis_align_items.clone(),
+                counter_align: node.counter_axis_align_items.clone(),
+                padding,
+            })
+        }
+        _ => None,
+    };
+
+    let sizing = (node.layout_sizing_horizontal.is_some() || node.layout_sizing_vertical.is_some())
+        .then(|| Sizing {
+            horizontal: node.layout_sizing_horizontal.clone(),
+            vertical: node.layout_sizing_vertical.clone(),
+        });
+
+    let fill_color = solid_color(&node.fills).map(|value| Tokened {
+        value,
+        token: token("fills"),
+    });
+    let (fill, text) = if is_text {
+        if let Some(color) = &fill_color {
+            flag(
+                UnboundProperty::TextColor,
+                &color.token,
+                hex_color(&color.value),
+            );
+        }
+        let size = node.font_size.map(|value| Tokened {
+            value,
+            token: token("fontSize"),
+        });
+        if let Some(size) = &size {
+            flag(UnboundProperty::FontSize, &size.token, number(size.value));
+        }
+        let font = node.font_name.as_ref();
+        let text = TextStyle {
+            characters: node.characters.clone().unwrap_or_default(),
+            family: font
+                .and_then(|font| font.family.clone())
+                .map(|value| Tokened {
+                    value,
+                    token: token("fontFamily"),
+                }),
+            size,
+            weight: font_weight(
+                font.and_then(|font| font.style.as_deref())
+                    .unwrap_or("Regular"),
+            ),
+            color: fill_color,
+        };
+        (None, Some(text))
+    } else {
+        if let Some(fill) = &fill_color {
+            flag(UnboundProperty::Fill, &fill.token, hex_color(&fill.value));
+        }
+        (fill_color, None)
+    };
+
+    let radius = radius_value(node).map(|value| Tokened {
+        value,
+        token: token("radius"),
+    });
+    if let Some(radius) = &radius {
+        flag(UnboundProperty::Radius, &radius.token, radius.value.clone());
+    }
+
+    let stroke = node
+        .stroke_weight
+        .filter(|weight| *weight > 0.0)
+        .zip(solid_color(&node.strokes))
+        .map(|(weight, color)| Stroke {
+            weight,
+            color: Tokened {
+                value: color,
+                token: token("strokes"),
+            },
+        });
+    if let Some(stroke) = &stroke {
+        flag(
+            UnboundProperty::Stroke,
+            &stroke.color.token,
+            format!(
+                "{} {}",
+                number(stroke.weight),
+                hex_color(&stroke.color.value)
+            ),
+        );
+    }
+
+    let shadow = shadow_value(node).map(|value| Tokened {
+        value,
+        token: token("effects"),
+    });
+
+    Layer {
+        id: node.id.clone(),
+        name: node.name.clone(),
+        kind: layer_kind(node),
+        bounds: Bounds {
+            x: node.bounds.x - origin.0,
+            y: node.bounds.y - origin.1,
+            ..node.bounds
+        },
+        visible: node.is_visible(),
+        component: node.component.clone(),
+        auto_layout,
+        sizing,
+        fill,
+        radius,
+        stroke,
+        shadow,
+        text,
+        unbound,
+        children: if is_text {
+            Vec::new()
+        } else {
+            node.children
+                .iter()
+                .map(|child| layer(child, origin))
+                .collect()
+        },
+    }
+}
+
+pub fn padding_value(padding: &[f64; 4]) -> String {
+    padding
+        .iter()
+        .map(|side| number(*side))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn find_node<'a>(nodes: &'a [Node], id: &str) -> Option<&'a Node> {
+    nodes.iter().find_map(|node| {
+        if node.id == id {
+            Some(node)
+        } else {
+            find_node(&node.children, id)
+        }
+    })
+}
+
+/// The layer tree under each screen of `page`, in the same coordinates as the rendered page.
+pub fn page_layers(page: &DumpPage, origin: (f64, f64)) -> Vec<ScreenLayers> {
+    page.screens
+        .iter()
+        .filter_map(|screen| {
+            let node = find_node(&page.children, &screen.id)?;
+            Some(ScreenLayers {
+                screen_id: screen.id.clone(),
+                layers: node
+                    .children
+                    .iter()
+                    .map(|child| layer(child, origin))
+                    .collect(),
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -959,5 +1409,121 @@ mod tests {
         let link = font_link(&fonts);
         assert!(link.contains("family=Bear+Sans+UI:"));
         assert!(link.contains("family=A%26B:"));
+    }
+
+    fn layered_page() -> DumpPage {
+        let title = serde_json::json!({
+            "id": "4:1",
+            "type": "TEXT",
+            "name": "title",
+            "box": { "x": 132, "y": 82, "width": 200, "height": 20 },
+            "characters": "Fatura",
+            "fontName": { "family": "Inter", "style": "Semi Bold" },
+            "fontSize": 16,
+            "fills": [{ "type": "SOLID", "color": { "r": 0, "g": 0, "b": 0, "a": 1 }, "opacity": 1 }],
+            "tokens": { "fills": "color/text" },
+        });
+        let card = serde_json::json!({
+            "id": "3:1",
+            "type": "FRAME",
+            "name": "card",
+            "box": { "x": 116, "y": 66, "width": 358, "height": 120 },
+            "layoutMode": "VERTICAL",
+            "itemSpacing": 8,
+            "paddingTop": 16,
+            "paddingRight": 16,
+            "paddingBottom": 16,
+            "paddingLeft": 16,
+            "primaryAxisAlignItems": "MIN",
+            "layoutSizingHorizontal": "FILL",
+            "fills": [{ "type": "SOLID", "color": { "r": 1, "g": 1, "b": 1, "a": 1 }, "opacity": 1 }],
+            "radius": 12,
+            "tokens": { "fills": "color/surface", "itemSpacing": "space/2" },
+            "children": [title],
+        });
+        let button = serde_json::json!({
+            "id": "3:2",
+            "type": "INSTANCE",
+            "name": "button",
+            "box": { "x": 116, "y": 700, "width": 358, "height": 48 },
+            "component": "Button / Primary",
+        });
+        let hidden = serde_json::json!({
+            "id": "3:3",
+            "type": "RECTANGLE",
+            "name": "secret",
+            "visible": false,
+            "box": { "x": 116, "y": 800, "width": 10, "height": 10 },
+            "fills": [{ "type": "SOLID", "color": { "r": 1, "g": 0, "b": 0, "a": 1 }, "opacity": 1 }],
+        });
+        serde_json::from_value(serde_json::json!({
+            "id": "1:1",
+            "name": "Page",
+            "children": [{
+                "id": "2:1",
+                "type": "FRAME",
+                "name": "Home",
+                "box": { "x": 100, "y": 50, "width": 390, "height": 844 },
+                "children": [card, button, hidden],
+            }],
+            "screens": [{
+                "id": "2:1",
+                "name": "Home",
+                "box": { "x": 100, "y": 50, "width": 390, "height": 844 },
+            }],
+        }))
+        .expect("fixture is valid")
+    }
+
+    #[test]
+    fn hidden_layers_are_not_rendered_but_are_listed() {
+        let page = layered_page();
+        let rendered = render_page(&page);
+        assert!(!rendered.html.contains("secret"));
+        let layers = page_layers(&page, rendered.origin);
+        assert_eq!(layers.len(), 1);
+        let hidden = &layers[0].layers[2];
+        assert_eq!(hidden.name, "secret");
+        assert!(!hidden.visible);
+    }
+
+    #[test]
+    fn layers_are_relative_to_the_canvas_and_know_their_tokens() {
+        let page = layered_page();
+        let rendered = render_page(&page);
+        let layers = page_layers(&page, rendered.origin);
+        let card = &layers[0].layers[0];
+        assert_eq!(card.kind, LayerKind::AutoLayout);
+        assert_eq!((card.bounds.x, card.bounds.y), (16.0, 16.0));
+        let auto_layout = card.auto_layout.as_ref().expect("card has auto layout");
+        assert!(!auto_layout.horizontal);
+        assert_eq!(auto_layout.gap.token.as_deref(), Some("space/2"));
+        assert_eq!(
+            card.fill.as_ref().and_then(|fill| fill.token.as_deref()),
+            Some("color/surface")
+        );
+        assert_eq!(
+            card.unbound
+                .iter()
+                .map(|unbound| unbound.property)
+                .collect::<Vec<_>>(),
+            vec![UnboundProperty::Padding, UnboundProperty::Radius]
+        );
+
+        let title = &card.children[0];
+        assert_eq!(title.kind, LayerKind::Text);
+        let text = title.text.as_ref().expect("title is text");
+        assert_eq!(text.weight, 600);
+        assert_eq!(
+            text.color.as_ref().and_then(|color| color.token.as_deref()),
+            Some("color/text")
+        );
+        assert_eq!(title.unbound.len(), 1);
+        assert_eq!(title.unbound[0].property, UnboundProperty::FontSize);
+        assert!(title.fill.is_none());
+
+        let button = &layers[0].layers[1];
+        assert_eq!(button.kind, LayerKind::Instance);
+        assert_eq!(button.component.as_deref(), Some("Button / Primary"));
     }
 }

@@ -6,7 +6,7 @@ use crate::{
         Check, Commit, Hosting, Issue, MergeOutcome, MergeStrategy, NewPullRequest, Person,
         Pipeline, PullRequest, PullRequestDetail, PullRequestState, RemoteRepository,
     },
-    bitbucket, github,
+    bitbucket, github, gitlab,
 };
 use anyhow::Result;
 use http_client::HttpClient;
@@ -17,6 +17,7 @@ use std::sync::Arc;
 pub enum Credentials {
     Bitbucket(bitbucket::Credentials),
     GitHub(github::Credentials),
+    GitLab(gitlab::Credentials),
 }
 
 impl Credentials {
@@ -24,6 +25,28 @@ impl Credentials {
         match self {
             Credentials::Bitbucket(_) => Hosting::Bitbucket,
             Credentials::GitHub(_) => Hosting::GitHub,
+            Credentials::GitLab(_) => Hosting::GitLab,
+        }
+    }
+
+    /// Whether the token is read from a CLI (`gh` or `glab`) on each request.
+    pub fn is_cli(&self) -> bool {
+        match self {
+            Credentials::GitHub(credentials) => credentials.is_gh_cli(),
+            Credentials::GitLab(credentials) => credentials.is_glab_cli(),
+            Credentials::Bitbucket(_) => false,
+        }
+    }
+
+    /// Whether these credentials can reach `repository`: a GitLab token only works on the
+    /// instance it was created on.
+    pub fn serves(&self, repository: &RemoteRepository) -> bool {
+        match self {
+            Credentials::GitLab(credentials) => {
+                repository.hosting == Hosting::GitLab
+                    && credentials.instance == repository.instance()
+            }
+            _ => self.hosting() == repository.hosting,
         }
     }
 }
@@ -56,7 +79,7 @@ impl Client {
     pub fn github_credentials(&self) -> Option<&github::Credentials> {
         match &self.credentials {
             Credentials::GitHub(credentials) => Some(credentials),
-            Credentials::Bitbucket(_) => None,
+            Credentials::Bitbucket(_) | Credentials::GitLab(_) => None,
         }
     }
 
@@ -70,6 +93,9 @@ impl Client {
             }
             Credentials::GitHub(credentials) => {
                 github::list_open_pull_requests(&self.http_client, credentials, repository).await
+            }
+            Credentials::GitLab(credentials) => {
+                gitlab::list_open_pull_requests(&self.http_client, credentials, repository).await
             }
         }
     }
@@ -93,6 +119,10 @@ impl Client {
                 github::list_closed_pull_requests(&self.http_client, credentials, repository, state)
                     .await
             }
+            Credentials::GitLab(credentials) => {
+                gitlab::list_closed_pull_requests(&self.http_client, credentials, repository, state)
+                    .await
+            }
         }
     }
 
@@ -103,6 +133,9 @@ impl Client {
             }
             Credentials::GitHub(credentials) => {
                 github::list_pipelines(&self.http_client, credentials, repository).await
+            }
+            Credentials::GitLab(credentials) => {
+                gitlab::list_pipelines(&self.http_client, credentials, repository).await
             }
         }
     }
@@ -117,6 +150,9 @@ impl Client {
             }
             Credentials::GitHub(credentials) => {
                 github::list_open_issues(&self.http_client, credentials, repository).await
+            }
+            Credentials::GitLab(credentials) => {
+                gitlab::list_open_issues(&self.http_client, credentials, repository).await
             }
         }
     }
@@ -135,6 +171,10 @@ impl Client {
                 github::get_pull_request_diff(&self.http_client, credentials, repository, number)
                     .await
             }
+            Credentials::GitLab(credentials) => {
+                gitlab::get_pull_request_diff(&self.http_client, credentials, repository, number)
+                    .await
+            }
         }
     }
 
@@ -149,6 +189,9 @@ impl Client {
             }
             Credentials::GitHub(credentials) => {
                 github::get_checks(&self.http_client, credentials, repository, number).await
+            }
+            Credentials::GitLab(credentials) => {
+                gitlab::get_checks(&self.http_client, credentials, repository, number).await
             }
         }
     }
@@ -172,6 +215,10 @@ impl Client {
                 github::get_pull_request_detail(&self.http_client, credentials, repository, number)
                     .await
             }
+            Credentials::GitLab(credentials) => {
+                gitlab::get_pull_request_detail(&self.http_client, credentials, repository, number)
+                    .await
+            }
         }
     }
 
@@ -188,6 +235,9 @@ impl Client {
             }
             Credentials::GitHub(credentials) => {
                 github::post_comment(&self.http_client, credentials, repository, number, text).await
+            }
+            Credentials::GitLab(credentials) => {
+                gitlab::post_comment(&self.http_client, credentials, repository, number, text).await
             }
         }
     }
@@ -225,6 +275,59 @@ impl Client {
                 )
                 .await
             }
+            Credentials::GitLab(credentials) => {
+                gitlab::post_inline_comment(
+                    &self.http_client,
+                    credentials,
+                    repository,
+                    number,
+                    path,
+                    line,
+                    text,
+                )
+                .await
+            }
+        }
+    }
+
+    /// Marks the inline thread that `root_comment_id` starts as resolved.
+    pub async fn resolve_comment_thread(
+        &self,
+        repository: &RemoteRepository,
+        number: u64,
+        root_comment_id: u64,
+    ) -> Result<()> {
+        match &self.credentials {
+            Credentials::Bitbucket(credentials) => {
+                bitbucket::resolve_comment(
+                    &self.http_client,
+                    credentials,
+                    repository,
+                    number,
+                    root_comment_id,
+                )
+                .await
+            }
+            Credentials::GitHub(credentials) => {
+                github::resolve_review_thread(
+                    &self.http_client,
+                    credentials,
+                    repository,
+                    number,
+                    root_comment_id,
+                )
+                .await
+            }
+            Credentials::GitLab(credentials) => {
+                gitlab::resolve_discussion(
+                    &self.http_client,
+                    credentials,
+                    repository,
+                    number,
+                    root_comment_id,
+                )
+                .await
+            }
         }
     }
 
@@ -239,6 +342,9 @@ impl Client {
             Credentials::GitHub(credentials) => {
                 github::get_default_destination(&self.http_client, credentials, repository).await
             }
+            Credentials::GitLab(credentials) => {
+                gitlab::get_default_destination(&self.http_client, credentials, repository).await
+            }
         }
     }
 
@@ -250,10 +356,14 @@ impl Client {
             Credentials::GitHub(credentials) => {
                 github::list_branches(&self.http_client, credentials, repository).await
             }
+            Credentials::GitLab(credentials) => {
+                gitlab::list_branches(&self.http_client, credentials, repository).await
+            }
         }
     }
 
-    /// GitHub has no default reviewers outside CODEOWNERS, which it applies by itself.
+    /// GitHub has no default reviewers outside CODEOWNERS, and GitLab applies its approval rules
+    /// and code owners by itself.
     pub async fn get_default_reviewers(
         &self,
         repository: &RemoteRepository,
@@ -262,7 +372,7 @@ impl Client {
             Credentials::Bitbucket(credentials) => {
                 bitbucket::get_default_reviewers(&self.http_client, credentials, repository).await
             }
-            Credentials::GitHub(_) => Ok(Vec::new()),
+            Credentials::GitHub(_) | Credentials::GitLab(_) => Ok(Vec::new()),
         }
     }
 
@@ -293,6 +403,16 @@ impl Client {
                 )
                 .await
             }
+            Credentials::GitLab(credentials) => {
+                gitlab::list_commits_between(
+                    &self.http_client,
+                    credentials,
+                    repository,
+                    source,
+                    destination,
+                )
+                .await
+            }
         }
     }
 
@@ -308,6 +428,9 @@ impl Client {
             }
             Credentials::GitHub(credentials) => {
                 github::create_pull_request(&self.http_client, credentials, repository, new).await
+            }
+            Credentials::GitLab(credentials) => {
+                gitlab::create_pull_request(&self.http_client, credentials, repository, new).await
             }
         }
     }
@@ -337,6 +460,15 @@ impl Client {
                     allows_auto_merge,
                 })
             }
+            Credentials::GitLab(credentials) => Ok(MergeOptions {
+                strategies: gitlab::get_merge_strategies(
+                    &self.http_client,
+                    credentials,
+                    repository,
+                )
+                .await?,
+                allows_auto_merge: true,
+            }),
         }
     }
 
@@ -373,6 +505,18 @@ impl Client {
                 )
                 .await
             }
+            Credentials::GitLab(credentials) => {
+                gitlab::merge_pull_request(
+                    &self.http_client,
+                    credentials,
+                    repository,
+                    number,
+                    strategy,
+                    message,
+                    close_source_branch,
+                )
+                .await
+            }
         }
     }
 
@@ -390,6 +534,9 @@ impl Client {
             Credentials::GitHub(_) => {
                 anyhow::bail!("{}", t!("repo_hosting.error.github_no_merge_task"))
             }
+            Credentials::GitLab(_) => {
+                anyhow::bail!("{}", t!("repo_hosting.error.gitlab_no_merge_task"))
+            }
         }
     }
 
@@ -405,6 +552,16 @@ impl Client {
             }
             Credentials::GitHub(credentials) => {
                 github::enable_auto_merge(
+                    &self.http_client,
+                    credentials,
+                    repository,
+                    number,
+                    strategy,
+                )
+                .await
+            }
+            Credentials::GitLab(credentials) => {
+                gitlab::enable_auto_merge(
                     &self.http_client,
                     credentials,
                     repository,
@@ -430,6 +587,10 @@ impl Client {
                 github::decline_pull_request(&self.http_client, credentials, repository, number)
                     .await
             }
+            Credentials::GitLab(credentials) => {
+                gitlab::decline_pull_request(&self.http_client, credentials, repository, number)
+                    .await
+            }
         }
     }
 
@@ -448,6 +609,10 @@ impl Client {
                 github::set_approval(&self.http_client, credentials, repository, number, approve)
                     .await
             }
+            Credentials::GitLab(credentials) => {
+                gitlab::set_approval(&self.http_client, credentials, repository, number, approve)
+                    .await
+            }
         }
     }
 
@@ -458,6 +623,9 @@ impl Client {
             }
             Credentials::GitHub(credentials) => {
                 github::rerun_job(&self.http_client, credentials, repository, job_id).await
+            }
+            Credentials::GitLab(credentials) => {
+                gitlab::rerun_job(&self.http_client, credentials, repository, job_id).await
             }
         }
     }
@@ -470,11 +638,17 @@ impl Client {
             Credentials::GitHub(credentials) => {
                 github::get_job_log(&self.http_client, credentials, repository, job_id).await
             }
+            Credentials::GitLab(credentials) => {
+                gitlab::get_job_log(&self.http_client, credentials, repository, job_id).await
+            }
         }
     }
 }
 
 /// The repository an `origin` URL points at, on any host the panel speaks to.
-pub fn parse_remote(url: &str) -> Option<RemoteRepository> {
-    bitbucket::parse_remote(url).or_else(|| github::parse_remote(url))
+/// `gitlab_base_urls` are the self-hosted GitLab instances set in `git_hosting_providers`.
+pub fn parse_remote(url: &str, gitlab_base_urls: &[String]) -> Option<RemoteRepository> {
+    bitbucket::parse_remote(url)
+        .or_else(|| github::parse_remote(url))
+        .or_else(|| gitlab::parse_remote(url, gitlab_base_urls))
 }

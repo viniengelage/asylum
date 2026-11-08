@@ -9,9 +9,9 @@ use db::kvp::KeyValueStore;
 
 use gpui::{
     Action, Anchor, AnyView, App, Axis, ClickEvent, Context, ElementId, Entity, EntityId,
-    EventEmitter, FocusHandle, Focusable, IntoElement, KeyContext, MouseButton, MouseDownEvent,
-    MouseUpEvent, ParentElement, Render, SharedString, StyleRefinement, Styled, Subscription,
-    WeakEntity, Window, deferred, div, px,
+    EventEmitter, FocusHandle, Focusable, FontWeight, IntoElement, KeyContext, MouseButton,
+    MouseDownEvent, MouseUpEvent, ParentElement, Render, SharedString, StyleRefinement, Styled,
+    Subscription, WeakEntity, Window, deferred, div, px,
 };
 use serde::{Deserialize, Serialize};
 use settings::{Settings, SettingsStore, TerminalDockPosition};
@@ -106,6 +106,14 @@ pub trait Panel: Focusable + EventEmitter<PanelEvent> + Render + Sized {
     fn draws_own_cards(&self, _cx: &App) -> bool {
         false
     }
+    /// Icon buttons shown in the right dock's header, grouped in a capsule after the tabs.
+    fn dock_header_actions(
+        &mut self,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<Vec<AnyElement>> {
+        None
+    }
     fn remote_id() -> Option<proto::PanelId> {
         None
     }
@@ -141,6 +149,7 @@ pub trait PanelHandle: Send + Sync {
     fn pane(&self, cx: &App) -> Option<Entity<Pane>>;
     fn hosted_content_kind(&self, cx: &App) -> Option<crate::pane::ContentKind>;
     fn draws_own_cards(&self, cx: &App) -> bool;
+    fn dock_header_actions(&self, window: &mut Window, cx: &mut App) -> Option<Vec<AnyElement>>;
     fn default_size(&self, window: &Window, cx: &App) -> Pixels;
     fn min_size(&self, window: &Window, cx: &App) -> Option<Pixels>;
     fn initial_size_state(&self, window: &Window, cx: &App) -> PanelSizeState;
@@ -246,6 +255,10 @@ where
 
     fn draws_own_cards(&self, cx: &App) -> bool {
         self.read(cx).draws_own_cards(cx)
+    }
+
+    fn dock_header_actions(&self, window: &mut Window, cx: &mut App) -> Option<Vec<AnyElement>> {
+        self.update(cx, |this, cx| this.dock_header_actions(window, cx))
     }
 
     fn remote_id(&self) -> Option<PanelId> {
@@ -1186,8 +1199,8 @@ impl Dock {
 
     /// The tab strip that lets the right dock switch between panels.
     ///
-    /// Returns `None` when there is nothing to switch between, so the dock does not reserve a
-    /// header's worth of height for a single tab.
+    /// Returns `None` when there is nothing to switch between and the active panel has no header
+    /// actions, so the dock does not reserve a header's worth of height for a single tab.
     fn render_right_dock_tabs(
         &self,
         window: &mut Window,
@@ -1207,7 +1220,15 @@ impl Dock {
             })
             .collect();
 
-        if visible_entries.len() < 2 {
+        let header_actions = if is_open {
+            self.active_panel()
+                .and_then(|panel| panel.dock_header_actions(window, cx))
+                .filter(|actions| !actions.is_empty())
+        } else {
+            None
+        };
+
+        if visible_entries.len() < 2 && header_actions.is_none() {
             return None;
         }
 
@@ -1224,6 +1245,9 @@ impl Dock {
         Some(
             TabBar::new("right-dock-tabs")
                 .style(ui::TabStyle::Pill)
+                .when_some(header_actions, |tab_bar, actions| {
+                    tab_bar.end_child(ui::button_group(actions, cx))
+                })
                 .children(visible_entries.into_iter().enumerate().map(
                     |(visible_index, (panel_index, entry))| {
                         let icon = entry.panel.tab_icon(window, cx);
@@ -1249,17 +1273,22 @@ impl Dock {
                             .position(tab_position)
                             .toggle_state(is_active)
                             .start_slot::<AnyElement>(icon.map(|icon| {
-                                Icon::new(icon)
-                                    .size(IconSize::Small)
-                                    .color(if is_active {
-                                        Color::Accent
-                                    } else {
-                                        Color::Muted
-                                    })
+                                div()
+                                    .flex_none()
+                                    .when(!is_active, |this| this.opacity(0.6))
+                                    .child(Icon::new(icon).size(IconSize::Medium).color(
+                                        if is_active {
+                                            Color::Default
+                                        } else {
+                                            Color::Muted
+                                        },
+                                    ))
                                     .into_any_element()
                             }))
                             .child(
                                 Label::new(label)
+                                    .size(LabelSize::Small)
+                                    .weight(FontWeight::MEDIUM)
                                     .when(!is_active, |label| label.color(Color::Muted))
                                     .truncate(),
                             )
@@ -1713,7 +1742,7 @@ impl Render for Dock {
                 .track_focus(&self.focus_handle(cx))
                 .focus_follows_mouse(WorkspaceSettings::get_global(cx).focus_follows_mouse, cx)
                 .flex()
-                .rounded_lg()
+                .rounded(ui::pane_corner_radius())
                 .when(
                     self.position() != DockPosition::Bottom && !entry.panel.draws_own_cards(cx),
                     |this| this.bg(cx.theme().colors().panel_background),

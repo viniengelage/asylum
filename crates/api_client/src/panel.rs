@@ -1,18 +1,24 @@
 use crate::{
-    ToggleFocus,
+    CopyRequestAsCurl, ExportPostmanCollection, ExportPostmanEnvironments, MatchSpec,
+    ReimportPostman, ToggleFocus,
     collection::{self, Collection, LoginStatus},
-    config::{Environment, HeaderEntry, LoginConfig, Variable},
+    config::{
+        self, Environment, HeaderEntry, LoginConfig, PostmanError, PostmanFile, PostmanImport,
+        Variable,
+    },
     request_view::{self, method_label},
     send,
     spec::{self, SchemeKind},
     vars::SECRET_PREFIX,
 };
+use anyhow::Context as _;
 use collections::HashSet;
 use editor::Editor;
 use fs::Fs;
 use gpui::{
-    Action as _, AnyElement, Div, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Pixels,
-    Stateful, Subscription, Task, WeakEntity, px, uniform_list,
+    Action as _, AnyElement, AsyncApp, DismissEvent, Div, ElementId, Entity, EventEmitter,
+    FocusHandle, Focusable, FontWeight, Pixels, PromptButton, PromptLevel, Stateful, Subscription,
+    Task, WeakEntity, px, uniform_list,
 };
 use i18n::t;
 use project::Project;
@@ -20,17 +26,19 @@ use std::{
     ops::Range,
     path::{Path, PathBuf},
     sync::Arc,
+    time::Duration,
 };
 use ui::section_label;
 use ui::{
-    CommonAnimationExt as _, ContextMenu, Indicator, PopoverMenu, PopoverTriggerArea, SwitchField,
-    ToggleState, Tooltip, prelude::*,
+    ContextMenu, ContextMenuEntry, EmptyState, KeyBinding, PopoverMenu, PopoverTriggerArea,
+    StatusTone, SwitchField, ToggleState, Tooltip, prelude::*,
 };
 use ui_input::{ErasedEditorEvent, InputField};
 use util::ResultExt as _;
 use workspace::{
-    OpenOptions, Workspace,
+    ModalView, OpenOptions, Toast, Workspace,
     dock::{DockPosition, Panel, PanelEvent},
+    notifications::NotificationId,
 };
 
 /// Specs found in the project that aren't linked yet.
@@ -38,6 +46,7 @@ const MAX_CANDIDATES: usize = 40;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum View {
+    Start,
     Tree,
     Settings,
     Link,
@@ -61,16 +70,12 @@ enum TreeRow {
         key: String,
         method: String,
         title: String,
-        path: String,
         deprecated: bool,
     },
-    SavedHeader {
-        file: String,
-    },
+    SavedHeader,
     Saved {
         id: String,
         name: String,
-        path: String,
         method: String,
     },
 }
@@ -116,6 +121,8 @@ pub struct ApiPanel {
     settings: Option<SettingsForm>,
     discover_task: Task<()>,
     collection_subscriptions: Vec<Subscription>,
+    /// Re-renders the footer's "synced N min ago".
+    _sync_clock: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -126,6 +133,7 @@ impl ApiPanel {
         let filter_input = cx.new(|cx| {
             InputField::new(window, cx, &t!("api_client.panel.filter_placeholder"))
                 .start_icon(IconName::MagnifyingGlass)
+                .end_hint("⌘F")
         });
         let mut subscriptions = Vec::new();
         {
@@ -188,6 +196,16 @@ impl ApiPanel {
             settings: None,
             discover_task: Task::ready(()),
             collection_subscriptions: Vec::new(),
+            _sync_clock: cx.spawn(async move |this, cx| {
+                loop {
+                    cx.background_executor()
+                        .timer(Duration::from_secs(60))
+                        .await;
+                    if this.update(cx, |_, cx| cx.notify()).is_err() {
+                        break;
+                    }
+                }
+            }),
             _subscriptions: subscriptions,
         };
         this.discover(cx);
@@ -298,8 +316,10 @@ impl ApiPanel {
             .map(|collection| cx.observe(collection, |_, _, cx| cx.notify()))
             .collect();
         if self.collections.is_empty() {
-            self.view = View::Link;
-        } else if self.view == View::Link && self.link_task.is_none() {
+            if self.view != View::Link {
+                self.view = View::Start;
+            }
+        } else if matches!(self.view, View::Link | View::Start) && self.link_task.is_none() {
             self.view = View::Tree;
         }
     }
@@ -363,22 +383,7 @@ impl ApiPanel {
                 this.link_task = None;
                 match result {
                     Ok(file) => {
-                        let mut files: Vec<(PathBuf, PathBuf)> = this
-                            .collections
-                            .iter()
-                            .map(|collection| {
-                                let collection = collection.read(cx);
-                                (collection.root.clone(), collection.file_path.clone())
-                            })
-                            .collect();
-                        files.push((root, file.clone()));
-                        this.set_collections(files, cx);
-                        this.selected = this
-                            .collections
-                            .iter()
-                            .position(|collection| collection.read(cx).file_path == file)
-                            .unwrap_or(0);
-                        this.view = View::Tree;
+                        this.adopt_collection(root, file, cx);
                     }
                     Err(error) => this.link_error = Some(format!("{error:#}").into()),
                 }
@@ -387,6 +392,200 @@ impl ApiPanel {
             .log_err();
         }));
         cx.notify();
+    }
+
+    /// Adds a collection file just written and selects it.
+    fn adopt_collection(
+        &mut self,
+        root: PathBuf,
+        file: PathBuf,
+        cx: &mut Context<Self>,
+    ) -> Option<Entity<Collection>> {
+        let mut files: Vec<(PathBuf, PathBuf)> = self
+            .collections
+            .iter()
+            .map(|collection| {
+                let collection = collection.read(cx);
+                (collection.root.clone(), collection.file_path.clone())
+            })
+            .filter(|(_, existing)| *existing != file)
+            .collect();
+        files.push((root, file.clone()));
+        self.set_collections(files, cx);
+        let index = self
+            .collections
+            .iter()
+            .position(|collection| collection.read(cx).file_path == file)?;
+        self.selected = index;
+        self.view = View::Tree;
+        cx.notify();
+        self.collections.get(index).cloned()
+    }
+
+    fn show_toast(workspace: &WeakEntity<Workspace>, message: String, cx: &mut AsyncApp) {
+        workspace
+            .update(cx, |workspace, cx| {
+                workspace.show_toast(
+                    Toast::new(NotificationId::unique::<ApiPanel>(), message).autohide(),
+                    cx,
+                );
+            })
+            .log_err();
+    }
+
+    fn import_modal(&self, cx: &mut Context<Self>) -> PostmanImportModal {
+        PostmanImportModal {
+            panel: cx.weak_entity(),
+            workspace: self.workspace.clone(),
+            target: self.collection().cloned(),
+            root: self.roots(cx).into_iter().next(),
+            fs: self.fs.clone(),
+            focus_handle: cx.focus_handle(),
+            files: Vec::new(),
+            match_spec: true,
+            importing: None,
+            error: None,
+        }
+    }
+
+    fn open_import(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let modal = self.import_modal(cx);
+        self.workspace
+            .update(cx, |workspace, cx| {
+                workspace.toggle_modal(window, cx, |_, _| modal);
+            })
+            .log_err();
+    }
+
+    pub(crate) fn export_collection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(collection) = self.collection() else {
+            return;
+        };
+        let collection = collection.read(cx);
+        let text = collection.postman_collection_text();
+        let suggested = format!(
+            "{}.postman_collection.json",
+            config::slug(&collection.title())
+        );
+        let path = cx.prompt_for_new_path(&collection.root, Some(&suggested));
+        let fs = self.fs.clone();
+        let workspace = self.workspace.clone();
+        cx.spawn_in(window, async move |_, cx| {
+            let Some(path) = path.await?? else {
+                return anyhow::Ok(());
+            };
+            let result = async { fs.atomic_write(path.clone(), text?).await }.await;
+            let message = match result {
+                Ok(()) => t!("api_client.panel.export_done", path = path.display()).to_string(),
+                Err(error) => format!("{error:#}"),
+            };
+            Self::show_toast(&workspace, message, cx);
+            anyhow::Ok(())
+        })
+        .detach_and_log_err(cx);
+    }
+
+    pub(crate) fn export_environments(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(collection) = self.collection() else {
+            return;
+        };
+        let files = collection.read(cx).postman_environment_texts();
+        let directory = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some(t!("api_client.panel.export_environments_postman")),
+        });
+        let fs = self.fs.clone();
+        let workspace = self.workspace.clone();
+        cx.spawn_in(window, async move |_, cx| {
+            let Some(directory) = directory.await??.and_then(|paths| paths.into_iter().next())
+            else {
+                return anyhow::Ok(());
+            };
+            let result = async {
+                for (name, text) in files? {
+                    fs.atomic_write(directory.join(name), text).await?;
+                }
+                anyhow::Ok(())
+            }
+            .await;
+            let message = match result {
+                Ok(()) => {
+                    t!("api_client.panel.export_done", path = directory.display()).to_string()
+                }
+                Err(error) => format!("{error:#}"),
+            };
+            Self::show_toast(&workspace, message, cx);
+            anyhow::Ok(())
+        })
+        .detach_and_log_err(cx);
+    }
+
+    pub(crate) fn match_spec(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(collection) = self.collection().cloned() else {
+            return;
+        };
+        let Some(outcome) =
+            collection.update(cx, |collection, cx| collection.match_saved_with_spec(cx))
+        else {
+            return;
+        };
+        let message = t!(
+            "api_client.panel.import_match_spec_detail",
+            matched = outcome.matched,
+            unmatched = outcome.unmatched
+        )
+        .to_string();
+        let workspace = self.workspace.clone();
+        cx.spawn_in(window, async move |_, cx| {
+            Self::show_toast(&workspace, message, cx);
+        })
+        .detach();
+    }
+
+    pub(crate) fn remove_collection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(collection) = self.collection().cloned() else {
+            return;
+        };
+        let (title, file) = {
+            let collection = collection.read(cx);
+            (
+                collection.title(),
+                collection
+                    .file_path
+                    .strip_prefix(&collection.root)
+                    .unwrap_or(&collection.file_path)
+                    .display()
+                    .to_string(),
+            )
+        };
+        let answer = window.prompt(
+            PromptLevel::Warning,
+            &t!("api_client.panel.remove_collection_confirm", name = &title),
+            Some(&t!(
+                "api_client.panel.remove_collection_detail",
+                path = &file
+            )),
+            &[
+                PromptButton::new(t!("api_client.panel.remove_collection")),
+                PromptButton::Cancel(t!("api_client.panel.import_cancel")),
+            ],
+            cx,
+        );
+        let workspace = self.workspace.clone();
+        cx.spawn_in(window, async move |this, cx| {
+            if answer.await? != 0 {
+                return anyhow::Ok(());
+            }
+            let removed = collection.update(cx, |collection, cx| collection.remove(cx));
+            if let Err(error) = removed.await {
+                Self::show_toast(&workspace, format!("{error:#}"), cx);
+            }
+            this.update(cx, |this, cx| this.discover(cx))?;
+            anyhow::Ok(())
+        })
+        .detach_and_log_err(cx);
     }
 
     fn open_operation(&mut self, key: String, window: &mut Window, cx: &mut Context<Self>) {
@@ -441,9 +640,10 @@ impl ApiPanel {
             return Vec::new();
         };
         let collection = collection.read(cx);
-        let Some(spec) = collection.spec.as_ref() else {
+        let spec = collection.spec.as_ref();
+        if spec.is_none() && !collection.file.spec.is_empty() {
             return Vec::new();
-        };
+        }
         let filter = self.filter_input.read(cx).text(cx).trim().to_lowercase();
         let matches = |operation: &spec::Operation, tag: &str| -> bool {
             if filter.is_empty() {
@@ -462,7 +662,7 @@ impl ApiPanel {
                 .all(|word| haystack.contains(word))
         };
         let mut rows = Vec::new();
-        for (tag, operations) in spec.folders() {
+        for (tag, operations) in spec.map(|spec| spec.folders()).unwrap_or_default() {
             let visible: Vec<_> = operations
                 .into_iter()
                 .filter(|operation| matches(operation, &tag))
@@ -482,7 +682,6 @@ impl ApiPanel {
                         key: operation.key.clone(),
                         method: operation.method.clone(),
                         title: operation.title(),
-                        path: operation.path.clone(),
                         deprecated: operation.deprecated,
                     });
                 }
@@ -495,22 +694,16 @@ impl ApiPanel {
             .filter(|saved| filter.is_empty() || saved.name.to_lowercase().contains(&filter))
             .collect();
         if !saved.is_empty() {
-            let file = collection
-                .file_path
-                .strip_prefix(&collection.root)
-                .unwrap_or(&collection.file_path)
-                .to_string_lossy()
-                .into_owned();
-            rows.push(TreeRow::SavedHeader { file });
+            rows.push(TreeRow::SavedHeader);
             for saved in saved {
-                let (method, path) = spec
-                    .operation(&saved.operation)
-                    .map(|operation| (operation.method.clone(), operation.path.clone()))
-                    .unwrap_or_else(|| ("?".to_string(), saved.operation.clone()));
+                let method = spec
+                    .and_then(|spec| spec.operation(&saved.operation))
+                    .map(|operation| operation.method.clone())
+                    .or_else(|| saved.method.clone())
+                    .unwrap_or_else(|| "?".to_string());
                 rows.push(TreeRow::Saved {
                     id: saved.id.clone(),
                     name: saved.name.clone(),
-                    path,
                     method,
                 });
             }
@@ -529,24 +722,11 @@ impl ApiPanel {
             .h(px(26.))
             .pr_2()
             .gap_1p5()
-            .rounded_md()
-            .border_1()
-            .border_color(gpui::transparent_black())
+            .rounded(Radius::Md.rems())
             .cursor_pointer()
             .hover(move |style| style.bg(hover));
         let mark = move |row: Stateful<Div>, selected: bool| {
-            row.when(selected, |row| {
-                row.bg(accent.opacity(0.18)).border_color(accent)
-            })
-        };
-        let path_label = |path: String, cx: &App| {
-            div().flex_none().max_w(px(150.)).child(
-                Label::new(path)
-                    .size(LabelSize::XSmall)
-                    .buffer_font(cx)
-                    .color(Color::Muted)
-                    .truncate(),
-            )
+            row.when(selected, |row| row.bg(accent.opacity(0.16)))
         };
         match row {
             TreeRow::Folder {
@@ -565,19 +745,12 @@ impl ApiPanel {
                     .color(Color::Muted),
                 )
                 .child(
-                    Icon::new(if expanded {
-                        IconName::FolderOpen
-                    } else {
-                        IconName::Folder
-                    })
-                    .size(IconSize::Small)
-                    .color(Color::Muted),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .child(Label::new(name.clone()).size(LabelSize::Small).truncate()),
+                    div().flex_1().min_w_0().child(
+                        Label::new(name.clone())
+                            .size(LabelSize::Small)
+                            .weight(FontWeight::MEDIUM)
+                            .truncate(),
+                    ),
                 )
                 .child(
                     Label::new(count.to_string())
@@ -596,7 +769,6 @@ impl ApiPanel {
                 key,
                 method,
                 title,
-                path,
                 deprecated,
             } => {
                 let selected = self
@@ -604,7 +776,8 @@ impl ApiPanel {
                     .as_ref()
                     .is_some_and(|(open, saved)| *open == key && saved.is_none());
                 mark(base, selected)
-                    .pl(px(36.))
+                    .pl(px(30.))
+                    .when(deprecated, |this| this.opacity(0.5))
                     .child(
                         div()
                             .flex_none()
@@ -612,61 +785,45 @@ impl ApiPanel {
                             .child(method_label(&method, cx)),
                     )
                     .child(
-                        h_flex()
+                        div()
                             .flex_1()
                             .min_w_0()
-                            .gap_1p5()
-                            .child(
-                                Label::new(title)
-                                    .size(LabelSize::Small)
-                                    .color(if deprecated {
-                                        Color::Muted
-                                    } else {
-                                        Color::Default
-                                    })
-                                    .truncate(),
-                            )
-                            .when(deprecated, |this| {
-                                this.child(tinted_chip("deprecated", Color::Warning, cx))
-                            }),
+                            .child(Label::new(title).size(LabelSize::Small).truncate()),
                     )
-                    .child(path_label(path, cx))
+                    .when(deprecated, |this| {
+                        this.child(
+                            Label::new(t!("api_client.panel.deprecated"))
+                                .size(LabelSize::XSmall)
+                                .color(Color::Warning),
+                        )
+                    })
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.open_operation(key.clone(), window, cx);
                     }))
                     .into_any_element()
             }
-            TreeRow::SavedHeader { file } => h_flex()
+            TreeRow::SavedHeader => div()
                 .id(("api-row", index))
                 .w_full()
-                .h(px(26.))
+                .pt_3()
+                .pb_1()
                 .px_1()
-                .gap_2()
-                .border_t_1()
-                .border_color(colors.border)
-                .child(section_label(t!("api_client.panel.saved_by_me_section")))
-                .child(div().flex_1())
-                .child(
-                    Label::new(file)
-                        .size(LabelSize::XSmall)
-                        .buffer_font(cx)
-                        .color(Color::Muted)
-                        .truncate(),
-                )
+                .child(ui::section_header(
+                    t!("api_client.panel.saved_by_me_section"),
+                    None,
+                ))
                 .into_any_element(),
-            TreeRow::Saved {
-                id,
-                name,
-                path,
-                method,
-            } => {
+            TreeRow::Saved { id, name, method } => {
                 let delete_id = id.clone();
+                let failing = self
+                    .collection()
+                    .map_or(0, |collection| collection.read(cx).failing_tests(&id));
                 let selected = self
                     .active_request
                     .as_ref()
                     .is_some_and(|(_, saved)| saved.as_deref() == Some(id.as_str()));
                 mark(base, selected)
-                    .pl(px(36.))
+                    .pl(px(30.))
                     .child(
                         div()
                             .flex_none()
@@ -679,7 +836,29 @@ impl ApiPanel {
                             .min_w_0()
                             .child(Label::new(name).size(LabelSize::Small).truncate()),
                     )
-                    .child(path_label(path, cx))
+                    .when(failing > 0, |this| {
+                        this.child(
+                            h_flex()
+                                .id(("api-saved-failing", index))
+                                .flex_none()
+                                .gap_1()
+                                .child(StatusTone::Error.dot(cx))
+                                .child(
+                                    Label::new(failing.to_string())
+                                        .size(LabelSize::XSmall)
+                                        .buffer_font(cx)
+                                        .color(Color::Error),
+                                )
+                                .tooltip(Tooltip::text(if failing == 1 {
+                                    t!("api_client.panel.failing_tests_tooltip.one")
+                                } else {
+                                    t!(
+                                        "api_client.panel.failing_tests_tooltip.other",
+                                        count = failing
+                                    )
+                                })),
+                        )
+                    })
                     .child(
                         IconButton::new(("api-saved-delete", index), IconName::Trash)
                             .icon_size(IconSize::XSmall)
@@ -702,426 +881,467 @@ impl ApiPanel {
         }
     }
 
-    fn render_header(
+    fn render_collection_selector(
         &self,
         collection: &Entity<Collection>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let this = cx.weak_entity();
-        let collection_entity = collection.clone();
         let collection = collection.read(cx);
-        let colors = cx.theme().colors();
-        let version = collection
+        let title = collection.title();
+        let spec_file = collection
+            .spec_path()
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| collection.file.spec.clone());
+        let subtitle = match collection
             .spec
             .as_ref()
             .map(|spec| spec.api_version.clone())
-            .filter(|version| !version.is_empty());
-        let synced = match (&collection.spec_error, collection.synced_at) {
-            (Some(_), _) => (t!("api_client.panel.sync_error").to_string(), Color::Error),
-            (None, Some(synced_at)) => (
-                t!(
-                    "api_client.panel.synced_at",
-                    time = synced_at.format("%H:%M")
-                )
-                .to_string(),
-                Color::Success,
-            ),
-            (None, None) => (
-                t!("api_client.panel.reading_spec").to_string(),
-                Color::Muted,
-            ),
+            .filter(|version| !version.is_empty())
+        {
+            Some(version) => format!("{spec_file} · v{version}"),
+            None => spec_file,
         };
-        let environments: Vec<String> = collection
-            .environments()
-            .iter()
-            .map(|environment| environment.name.clone())
-            .collect();
-        let active = collection
-            .active_environment()
-            .map(|environment| environment.name.clone())
-            .unwrap_or_else(|| t!("api_client.panel.no_environment").to_string());
         let titles: Vec<(usize, String)> = self
             .collections
             .iter()
             .enumerate()
             .map(|(index, collection)| (index, collection.read(cx).title()))
             .collect();
-        let has_many = titles.len() > 1;
-        let hover = colors.element_hover;
-        let environment_trigger = h_flex()
-            .id("api-environment-button")
-            .flex_none()
-            .h(px(26.))
-            .px_2()
-            .gap_1p5()
-            .rounded_md()
-            .border_1()
-            .border_color(colors.border_selected)
+        let selected = self.selected;
+        let hover = cx.theme().colors().element_hover;
+        let trigger = h_flex()
+            .id("api-collection-selector")
+            .w_full()
+            .min_w_0()
+            .h(px(40.))
+            .px_1p5()
+            .gap_2()
+            .rounded(Radius::Md.rems())
             .hover(move |style| style.bg(hover))
-            .child(Indicator::dot().color(environment_color(&active)))
-            .child(Label::new(active.clone()).size(LabelSize::Small))
-            .child(
-                Icon::new(IconName::ChevronDown)
-                    .size(IconSize::XSmall)
-                    .color(Color::Muted),
-            );
-        v_flex()
-            .w_full()
-            .p_3()
-            .gap_1()
-            .rounded_lg()
-            .bg(colors.element_background)
-            .border_1()
-            .border_color(colors.border_selected)
-            .child(
-                h_flex()
-                    .gap_1p5()
-                    .child(
-                        h_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .gap_2()
-                            .child(
-                                Label::new(collection.title())
-                                    .weight(FontWeight::SEMIBOLD)
-                                    .truncate(),
-                            )
-                            .when_some(version, |this, version| {
-                                this.child(
-                                    h_flex()
-                                        .flex_none()
-                                        .h(px(18.))
-                                        .px_1p5()
-                                        .rounded_md()
-                                        .border_1()
-                                        .border_color(colors.border_selected)
-                                        .child(
-                                            Label::new(format!("v{version}"))
-                                                .size(LabelSize::XSmall)
-                                                .buffer_font(cx)
-                                                .color(Color::Muted),
-                                        ),
-                                )
-                            }),
-                    )
-                    .child(
-                        PopoverMenu::new("api-environment")
-                            .trigger(PopoverTriggerArea::new(environment_trigger))
-                            .anchor(gpui::Anchor::TopRight)
-                            .menu(move |window, cx| {
-                                let environments = environments.clone();
-                                let active = active.clone();
-                                let collection = collection_entity.clone();
-                                Some(ContextMenu::build(window, cx, move |mut menu, _, _| {
-                                    menu = menu.header(t!("api_client.panel.environment_header"));
-                                    for name in environments.iter() {
-                                        let collection = collection.clone();
-                                        let chosen = name.clone();
-                                        menu = menu.toggleable_entry(
-                                            name.clone(),
-                                            *name == active,
-                                            IconPosition::End,
-                                            None,
-                                            move |_, cx| {
-                                                collection.update(cx, |collection, cx| {
-                                                    collection
-                                                        .set_active_environment(chosen.clone(), cx)
-                                                });
-                                            },
-                                        );
-                                    }
-                                    menu
-                                }))
-                            }),
-                    )
-                    .child(
-                        IconButton::new("api-settings", IconName::Sliders)
-                            .icon_size(IconSize::Small)
-                            .icon_color(Color::Muted)
-                            .tooltip(Tooltip::text(t!("api_client.panel.settings_tooltip")))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.open_settings(window, cx);
-                            })),
-                    )
-                    .child(
-                        PopoverMenu::new("api-collection-menu")
-                            .trigger(
-                                IconButton::new("api-collection-menu-button", IconName::Ellipsis)
-                                    .icon_size(IconSize::Small)
-                                    .icon_color(Color::Muted),
-                            )
-                            .anchor(gpui::Anchor::TopRight)
-                            .menu(move |window, cx| {
-                                let this = this.clone();
-                                let titles = titles.clone();
-                                Some(ContextMenu::build(window, cx, move |mut menu, _, _| {
-                                    if has_many {
-                                        menu =
-                                            menu.header(t!("api_client.panel.collections_header"));
-                                        for (index, title) in titles.iter() {
-                                            let this = this.clone();
-                                            let index = *index;
-                                            menu = menu.entry(title.clone(), None, move |_, cx| {
-                                                this.update(cx, |this, cx| {
-                                                    this.selected = index;
-                                                    this.view = View::Tree;
-                                                    cx.notify();
-                                                })
-                                                .log_err();
-                                            });
-                                        }
-                                        menu = menu.separator();
-                                    }
-                                    let open_spec = this.clone();
-                                    let reload = this.clone();
-                                    let link = this;
-                                    menu.entry(
-                                        t!("api_client.panel.open_spec"),
-                                        None,
-                                        move |window, cx| {
-                                            open_spec
-                                                .update(cx, |this, cx| this.open_spec(window, cx))
-                                                .log_err();
-                                        },
-                                    )
-                                    .entry(
-                                        t!("api_client.panel.reload_spec"),
-                                        None,
-                                        move |_, cx| {
-                                            reload
-                                                .update(cx, |this, cx| {
-                                                    if let Some(collection) = this.collection() {
-                                                        collection.update(cx, |collection, cx| {
-                                                            collection.reload_spec(cx)
-                                                        });
-                                                    }
-                                                })
-                                                .log_err();
-                                        },
-                                    )
-                                    .entry(
-                                        t!("api_client.panel.link_another"),
-                                        None,
-                                        move |_, cx| {
-                                            link.update(cx, |this, cx| {
-                                                this.view = View::Link;
-                                                this.discover(cx);
-                                            })
-                                            .log_err();
-                                        },
-                                    )
-                                }))
-                            }),
-                    ),
-            )
-            .child(
-                h_flex()
-                    .gap_1p5()
-                    .child(Indicator::dot().color(synced.1))
-                    .child(
-                        div().min_w_0().child(
-                            Label::new(collection.file.spec.clone())
-                                .size(LabelSize::XSmall)
-                                .buffer_font(cx)
-                                .color(Color::Muted)
-                                .truncate(),
-                        ),
-                    )
-                    .child(
-                        Label::new(format!("· {}", synced.0))
-                            .size(LabelSize::XSmall)
-                            .color(Color::Muted)
-                            .single_line(),
-                    ),
-            )
-    }
-
-    fn render_auth_card(
-        &self,
-        collection: &Entity<Collection>,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let collection_entity = collection.clone();
-        let collection = collection.read(cx);
-        let spec = collection.spec.clone();
-        let has_bearer = spec.as_ref().is_some_and(|spec| {
-            spec.security_schemes
-                .iter()
-                .any(|scheme| matches!(scheme.kind, SchemeKind::Bearer { .. } | SchemeKind::OAuth2))
-        });
-        if !has_bearer && collection.file.auth.login.is_none() {
-            return div().into_any_element();
-        }
-        let (icon, icon_color, title, detail): (IconName, Color, String, String) =
-            match (&collection.login_status, collection.session.is_logged_in()) {
-                (LoginStatus::LoggingIn, _) => (
-                    IconName::LoadCircle,
-                    Color::Muted,
-                    t!("api_client.panel.logging_in").to_string(),
-                    collection
-                        .file
-                        .auth
-                        .login
-                        .as_ref()
-                        .map(|login| login.operation.clone())
-                        .unwrap_or_default(),
-                ),
-                (LoginStatus::Failed(error), _) => (
-                    IconName::Warning,
-                    Color::Error,
-                    t!("api_client.panel.login_failed").to_string(),
-                    error.to_string(),
-                ),
-                (LoginStatus::Idle, true) => {
-                    let who = collection
-                        .login_label()
-                        .map(|label| t!("api_client.panel.logged_in_as", label = label).to_string())
-                        .unwrap_or_else(|| t!("api_client.panel.logged_in").to_string());
-                    let expiry = match collection.session.seconds_left() {
-                        Some(seconds) if seconds <= 0 => {
-                            t!("api_client.panel.token_expired").to_string()
-                        }
-                        Some(seconds) if seconds < 120 => {
-                            t!("api_client.panel.token_expires_seconds", seconds = seconds)
-                                .to_string()
-                        }
-                        Some(seconds) if seconds < 7200 => t!(
-                            "api_client.panel.token_expires_minutes",
-                            minutes = seconds / 60
-                        )
-                        .to_string(),
-                        Some(seconds) => t!(
-                            "api_client.panel.token_expires_hours",
-                            hours = seconds / 3600
-                        )
-                        .to_string(),
-                        None => t!("api_client.panel.token_no_expiry").to_string(),
-                    };
-                    let scheme = collection
-                        .file
-                        .auth
-                        .login
-                        .as_ref()
-                        .map(|login| login.scheme.clone())
-                        .unwrap_or_default();
-                    (
-                        IconName::UserCheck,
-                        Color::Success,
-                        who,
-                        format!("{scheme} · {expiry}"),
-                    )
-                }
-                (LoginStatus::Idle, false) => match &collection.file.auth.login {
-                    Some(login) => (
-                        IconName::Person,
-                        Color::Muted,
-                        t!("api_client.panel.not_logged_in").to_string(),
-                        t!("api_client.panel.login_via", operation = &login.operation).to_string(),
-                    ),
-                    None => (
-                        IconName::Person,
-                        Color::Muted,
-                        t!("api_client.panel.login_not_configured").to_string(),
-                        t!("api_client.panel.login_not_found").to_string(),
-                    ),
-                },
-            };
-        let logged_in = collection.session.is_logged_in();
-        let logging_in = collection.login_status == LoginStatus::LoggingIn;
-        let has_login = collection.file.auth.login.is_some();
-        let has_credentials = !collection.login_secret_names().is_empty()
-            && collection
-                .login_secret_names()
-                .iter()
-                .all(|name| collection.secret(name).is_some());
-        let colors = cx.theme().colors();
-        let tint = match icon_color {
-            Color::Success | Color::Error => Some(icon_color.color(cx)),
-            _ => None,
-        };
-        let action: AnyElement = if logging_in {
-            div().into_any_element()
-        } else if has_login && logged_in {
-            let renew = collection_entity;
-            ui::secondary_button("api-renew", None, t!("api_client.panel.renew"), true, cx)
-                .on_click(move |_, _, cx| {
-                    renew.update(cx, |collection, cx| {
-                        collection.renew(cx).detach_and_log_err(cx)
-                    });
-                })
-                .into_any_element()
-        } else if has_login && has_credentials {
-            let login = collection_entity;
-            ui::primary_button("api-login", None, t!("api_client.panel.log_in"), None, cx)
-                .on_click(move |_, _, cx| {
-                    login.update(cx, |collection, cx| collection.start_login(cx));
-                })
-                .into_any_element()
-        } else {
-            ui::secondary_button(
-                "api-configure-login",
-                None,
-                t!("api_client.panel.configure"),
-                true,
-                cx,
-            )
-            .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx)))
-            .into_any_element()
-        };
-        h_flex()
-            .w_full()
-            .px_3()
-            .py_2p5()
-            .gap_2p5()
-            .rounded_lg()
-            .border_1()
-            .map(|this| match tint {
-                Some(tint) => this.bg(tint.opacity(0.06)).border_color(tint.opacity(0.2)),
-                None => this
-                    .bg(colors.element_background)
-                    .border_color(colors.border_selected),
-            })
-            .child(
-                div()
-                    .flex()
-                    .flex_none()
-                    .size(px(30.))
-                    .items_center()
-                    .justify_center()
-                    .rounded_md()
-                    .bg(icon_color.color(cx).opacity(0.1))
-                    .child(if logging_in {
-                        Icon::new(icon)
-                            .size(IconSize::Small)
-                            .color(icon_color)
-                            .with_rotate_animation(2)
-                            .into_any_element()
-                    } else {
-                        Icon::new(icon)
-                            .size(IconSize::Small)
-                            .color(icon_color)
-                            .into_any_element()
-                    }),
-            )
+            .child(ui::initial_tile(&title, cx).size(px(22.)))
             .child(
                 v_flex()
                     .flex_1()
                     .min_w_0()
                     .child(
                         Label::new(title)
-                            .size(LabelSize::Small)
+                            .size(LabelSize::Custom(rems_from_px(12.5_f32)))
                             .weight(FontWeight::SEMIBOLD)
                             .truncate(),
                     )
                     .child(
-                        Label::new(detail)
-                            .size(LabelSize::XSmall)
+                        Label::new(subtitle)
+                            .size(LabelSize::Custom(rems_from_px(10.5_f32)))
+                            .buffer_font(cx)
                             .color(Color::Muted)
                             .truncate(),
                     ),
             )
-            .child(action)
-            .into_any_element()
+            .child(
+                Icon::new(IconName::ChevronUpDown)
+                    .size(IconSize::XSmall)
+                    .color(Color::Muted),
+            );
+        PopoverMenu::new("api-collection-menu")
+            .full_width(true)
+            .trigger(PopoverTriggerArea::new(trigger))
+            .anchor(gpui::Anchor::TopLeft)
+            .menu(move |window, cx| {
+                let this = this.clone();
+                let titles = titles.clone();
+                Some(ContextMenu::build(window, cx, move |mut menu, _, _| {
+                    menu = menu.header(t!("api_client.panel.collections_header"));
+                    for (index, title) in titles.iter() {
+                        let this = this.clone();
+                        let index = *index;
+                        menu = menu.toggleable_entry(
+                            title.clone(),
+                            index == selected,
+                            IconPosition::End,
+                            None,
+                            move |_, cx| {
+                                this.update(cx, |this, cx| {
+                                    this.selected = index;
+                                    this.view = View::Tree;
+                                    cx.notify();
+                                })
+                                .log_err();
+                            },
+                        );
+                    }
+                    let open_spec = this.clone();
+                    let reload = this.clone();
+                    let link = this;
+                    menu.separator()
+                        .entry(t!("api_client.panel.open_spec"), None, move |window, cx| {
+                            open_spec
+                                .update(cx, |this, cx| this.open_spec(window, cx))
+                                .log_err();
+                        })
+                        .entry(t!("api_client.panel.reload_spec"), None, move |_, cx| {
+                            reload.update(cx, |this, cx| this.reload_spec(cx)).log_err();
+                        })
+                        .entry(t!("api_client.panel.link_another"), None, move |_, cx| {
+                            link.update(cx, |this, cx| this.show_link(cx)).log_err();
+                        })
+                }))
+            })
+    }
+
+    fn reload_spec(&mut self, cx: &mut Context<Self>) {
+        if let Some(collection) = self.collection() {
+            collection.update(cx, |collection, cx| collection.reload_spec(cx));
+        }
+    }
+
+    fn render_environment_row(
+        &self,
+        collection: &Entity<Collection>,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let collection_entity = collection.clone();
+        let environments: Vec<String> = collection
+            .read(cx)
+            .environments()
+            .iter()
+            .map(|environment| environment.name.clone())
+            .collect();
+        let active = collection
+            .read(cx)
+            .active_environment()
+            .map(|environment| environment.name.clone())
+            .unwrap_or_else(|| t!("api_client.panel.no_environment").to_string());
+        h_flex()
+            .w_full()
+            .gap_2()
+            .child(
+                div().flex_1().min_w_0().child(
+                    PopoverMenu::new("api-environment")
+                        .full_width(true)
+                        .trigger(PopoverTriggerArea::new(ui::select_field(
+                            "api-environment-button",
+                            active.clone(),
+                            cx,
+                        )))
+                        .anchor(gpui::Anchor::TopLeft)
+                        .menu(move |window, cx| {
+                            let environments = environments.clone();
+                            let active = active.clone();
+                            let collection = collection_entity.clone();
+                            Some(ContextMenu::build(window, cx, move |mut menu, _, _| {
+                                menu = menu.header(t!("api_client.panel.environment_header"));
+                                for name in environments.iter() {
+                                    let collection = collection.clone();
+                                    let chosen = name.clone();
+                                    menu = menu.toggleable_entry(
+                                        name.clone(),
+                                        *name == active,
+                                        IconPosition::End,
+                                        None,
+                                        move |_, cx| {
+                                            collection.update(cx, |collection, cx| {
+                                                collection
+                                                    .set_active_environment(chosen.clone(), cx)
+                                            });
+                                        },
+                                    );
+                                }
+                                menu
+                            }))
+                        }),
+                ),
+            )
+            .children(self.render_login_pill(collection, cx))
+    }
+
+    /// The session at a glance; the tooltip carries the long version and a click does the
+    /// next step (log in, renew, or configure).
+    fn render_login_pill(
+        &self,
+        collection: &Entity<Collection>,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let collection_entity = collection.clone();
+        let collection = collection.read(cx);
+        let has_bearer = collection.spec.as_ref().is_some_and(|spec| {
+            spec.security_schemes
+                .iter()
+                .any(|scheme| matches!(scheme.kind, SchemeKind::Bearer { .. } | SchemeKind::OAuth2))
+        });
+        let login = collection.file.auth.login.clone();
+        if !has_bearer && login.is_none() {
+            return None;
+        }
+        let logged_in = collection.session.is_logged_in();
+        let logging_in = collection.login_status == LoginStatus::LoggingIn;
+        let has_credentials = !collection.login_secret_names().is_empty()
+            && collection
+                .login_secret_names()
+                .iter()
+                .all(|name| collection.secret(name).is_some());
+        let login_via = login.as_ref().map(|login| {
+            t!("api_client.panel.login_via", operation = &login.operation).to_string()
+        });
+        let (chip, tooltip) = match (&collection.login_status, logged_in) {
+            (LoginStatus::LoggingIn, _) => (
+                ui::status_chip_spinning(
+                    IconName::LoadCircle,
+                    t!("api_client.panel.logging_in"),
+                    Color::Muted,
+                    cx,
+                ),
+                login_via.unwrap_or_default(),
+            ),
+            (LoginStatus::Failed(error), _) => (
+                ui::status_chip(
+                    Some(IconName::Warning),
+                    t!("api_client.panel.login_failed"),
+                    Color::Error,
+                    cx,
+                ),
+                error.to_string(),
+            ),
+            (LoginStatus::Idle, true) => {
+                let seconds_left = collection.session.seconds_left();
+                let (label, color) = match seconds_left {
+                    Some(seconds) if seconds <= 0 => (
+                        t!("api_client.panel.login_pill_expired").to_string(),
+                        Color::Warning,
+                    ),
+                    Some(seconds) if seconds < 3600 => (
+                        t!(
+                            "api_client.panel.login_pill_minutes",
+                            minutes = (seconds / 60).max(1)
+                        )
+                        .to_string(),
+                        Color::Success,
+                    ),
+                    Some(seconds) => (
+                        t!("api_client.panel.login_pill_hours", hours = seconds / 3600).to_string(),
+                        Color::Success,
+                    ),
+                    None => (t!("api_client.panel.logged_in").to_string(), Color::Success),
+                };
+                let who = collection
+                    .login_label()
+                    .map(|label| t!("api_client.panel.logged_in_as", label = label).to_string())
+                    .unwrap_or_else(|| t!("api_client.panel.logged_in").to_string());
+                let expiry = match seconds_left {
+                    Some(seconds) if seconds <= 0 => {
+                        t!("api_client.panel.token_expired").to_string()
+                    }
+                    Some(seconds) if seconds < 120 => {
+                        t!("api_client.panel.token_expires_seconds", seconds = seconds).to_string()
+                    }
+                    Some(seconds) if seconds < 7200 => t!(
+                        "api_client.panel.token_expires_minutes",
+                        minutes = seconds / 60
+                    )
+                    .to_string(),
+                    Some(seconds) => t!(
+                        "api_client.panel.token_expires_hours",
+                        hours = seconds / 3600
+                    )
+                    .to_string(),
+                    None => t!("api_client.panel.token_no_expiry").to_string(),
+                };
+                (
+                    ui::status_chip(Some(IconName::UserCheck), label, color, cx),
+                    format!("{who} · {expiry}"),
+                )
+            }
+            (LoginStatus::Idle, false) => match login_via {
+                Some(login_via) if has_credentials => (
+                    ui::status_chip(
+                        Some(IconName::Person),
+                        t!("api_client.panel.log_in"),
+                        Color::Default,
+                        cx,
+                    ),
+                    login_via,
+                ),
+                Some(login_via) => (
+                    ui::status_chip(
+                        Some(IconName::Person),
+                        t!("api_client.panel.configure"),
+                        Color::Muted,
+                        cx,
+                    ),
+                    login_via,
+                ),
+                None => (
+                    ui::status_chip(
+                        Some(IconName::Person),
+                        t!("api_client.panel.configure"),
+                        Color::Muted,
+                        cx,
+                    ),
+                    t!("api_client.panel.login_not_found").to_string(),
+                ),
+            },
+        };
+        let has_login = login.is_some();
+        Some(
+            div()
+                .id("api-login-pill")
+                .flex_none()
+                .when(!logging_in, |this| this.cursor_pointer())
+                .child(chip)
+                .when(!tooltip.is_empty(), |this| {
+                    this.tooltip(Tooltip::text(tooltip))
+                })
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    if logging_in {
+                        return;
+                    }
+                    if has_login && logged_in {
+                        collection_entity.update(cx, |collection, cx| {
+                            collection.renew(cx).detach_and_log_err(cx)
+                        });
+                    } else if has_login && has_credentials {
+                        collection_entity.update(cx, |collection, cx| collection.start_login(cx));
+                    } else {
+                        this.open_settings(window, cx);
+                    }
+                }))
+                .into_any_element(),
+        )
+    }
+
+    fn render_footer(&self, collection: &Entity<Collection>, cx: &mut Context<Self>) -> Div {
+        let collection = collection.read(cx);
+        let warnings = collection
+            .spec
+            .as_ref()
+            .map(|spec| spec.warnings.clone())
+            .unwrap_or_default();
+        let (mut tone, mut text) = match (&collection.spec_error, collection.synced_at) {
+            (Some(_), _) => (
+                StatusTone::Error,
+                t!("api_client.panel.sync_error").to_string(),
+            ),
+            (None, Some(synced_at)) => (StatusTone::Success, synced_text(synced_at)),
+            (None, None) if collection.file.spec.is_empty() => (StatusTone::Success, String::new()),
+            (None, None) => (
+                StatusTone::Neutral,
+                t!("api_client.panel.reading_spec").to_string(),
+            ),
+        };
+        let has_spec = collection.spec.is_some();
+        let has_request = self.active_request.is_some();
+        if !warnings.is_empty() {
+            if tone == StatusTone::Success {
+                tone = StatusTone::Warning;
+            }
+            text.push(' ');
+            text.push_str(&if warnings.len() == 1 {
+                t!("api_client.panel.warnings.one")
+            } else {
+                t!("api_client.panel.warnings.other", count = warnings.len())
+            });
+        }
+        let this = cx.weak_entity();
+        let more_menu = PopoverMenu::new("api-footer-menu")
+            .trigger_with_tooltip(
+                IconButton::new("api-footer-menu-button", IconName::Ellipsis)
+                    .icon_size(IconSize::Small)
+                    .icon_color(Color::Muted),
+                Tooltip::text(t!("api_client.panel.more_tooltip")),
+            )
+            .anchor(gpui::Anchor::BottomRight)
+            .menu(move |window, cx| {
+                let this = this.clone();
+                let warnings = warnings.clone();
+                Some(ContextMenu::build(window, cx, move |mut menu, _, _| {
+                    let settings = this.clone();
+                    let open_spec = this.clone();
+                    let reload = this.clone();
+                    let remove = this.clone();
+                    menu = menu
+                        .sectioned()
+                        .entry(
+                            t!("api_client.panel.settings_tooltip"),
+                            None,
+                            move |window, cx| {
+                                settings
+                                    .update(cx, |this, cx| this.open_settings(window, cx))
+                                    .log_err();
+                            },
+                        )
+                        .entry(t!("api_client.panel.open_spec"), None, move |window, cx| {
+                            open_spec
+                                .update(cx, |this, cx| this.open_spec(window, cx))
+                                .log_err();
+                        })
+                        .entry(t!("api_client.panel.reload_spec"), None, move |_, cx| {
+                            reload.update(cx, |this, cx| this.reload_spec(cx)).log_err();
+                        });
+                    if !warnings.is_empty() {
+                        menu = menu.separator();
+                        for warning in warnings.iter().take(8) {
+                            menu = menu.label(warning.clone());
+                        }
+                    }
+                    menu.header(t!("api_client.panel.menu_export_section"))
+                        .action(
+                            t!("api_client.panel.export_collection_postman"),
+                            ExportPostmanCollection.boxed_clone(),
+                        )
+                        .action(
+                            t!("api_client.panel.export_environments_postman"),
+                            ExportPostmanEnvironments.boxed_clone(),
+                        )
+                        .action_disabled_when(
+                            !has_request,
+                            t!("api_client.panel.export_request_curl"),
+                            CopyRequestAsCurl.boxed_clone(),
+                        )
+                        .header(t!("api_client.panel.menu_collection_section"))
+                        .action(
+                            t!("api_client.panel.reimport_postman"),
+                            ReimportPostman.boxed_clone(),
+                        )
+                        .action_disabled_when(
+                            !has_spec,
+                            t!("api_client.panel.match_spec"),
+                            MatchSpec.boxed_clone(),
+                        )
+                        .item(
+                            ContextMenuEntry::new(t!("api_client.panel.remove_collection"))
+                                .icon(IconName::Trash)
+                                .icon_position(IconPosition::Start)
+                                .icon_color(Color::Error)
+                                .handler(move |window, cx| {
+                                    remove
+                                        .update(cx, |this, cx| this.remove_collection(window, cx))
+                                        .log_err();
+                                }),
+                        )
+                }))
+            });
+        ui::navigator_footer(
+            Some(tone),
+            text,
+            Some(
+                h_flex()
+                    .gap_1()
+                    .child(
+                        ui::capsule_button(
+                            "api-import",
+                            Some(IconName::Download),
+                            t!("api_client.panel.import"),
+                            cx,
+                        )
+                        .on_click(cx.listener(|this, _, window, cx| this.open_import(window, cx))),
+                    )
+                    .child(more_menu)
+                    .into_any_element(),
+            ),
+            cx,
+        )
+        .h(px(44.))
     }
 
     fn render_tree_view(
@@ -1134,104 +1354,46 @@ impl ApiPanel {
         let file_error = collection.read(cx).file_error.clone();
         let storage_error = collection.read(cx).storage_error.clone();
         let banner_error = file_error.or(spec_error).or(storage_error);
-        let spec = collection.read(cx).spec.clone();
-        let spec_file_name = collection
+        let operation_count = collection
             .read(cx)
-            .spec_path()
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "spec".to_string());
-        let summary = spec.as_ref().map(|spec| {
-            t!(
-                "api_client.panel.spec_summary",
-                operations = spec.operations.len(),
-                tags = spec.folders().len(),
-                servers = spec.servers.len()
-            )
-        });
-        let warnings = spec
+            .spec
             .as_ref()
-            .map(|spec| spec.warnings.clone())
-            .unwrap_or_default();
+            .map_or(0, |spec| spec.operations.len());
         let row_count = rows.len();
         v_flex()
             .size_full()
             .child(
                 div()
-                    .px_3()
-                    .pt_3()
-                    .child(self.render_header(collection, cx)),
+                    .px_2()
+                    .pt_2()
+                    .child(self.render_collection_selector(collection, cx)),
             )
-            .child(div().px_3().pt_3().child(self.filter_input.clone()))
             .child(
                 div()
                     .px_3()
-                    .pt_3()
-                    .child(self.render_auth_card(collection, cx)),
+                    .pt_2()
+                    .child(self.render_environment_row(collection, cx)),
             )
+            .child(div().px_3().pt_2().child(self.filter_input.clone()))
             .when_some(banner_error, |this, error| {
-                this.child(
-                    h_flex()
-                        .mx_3()
-                        .mt_2()
-                        .p_2()
-                        .gap_2()
-                        .rounded_md()
-                        .bg(Color::Error.color(cx).opacity(0.1))
-                        .child(
-                            Icon::new(IconName::Warning)
-                                .size(IconSize::Small)
-                                .color(Color::Error),
-                        )
-                        .child(
-                            div().flex_1().min_w_0().child(
-                                Label::new(error)
-                                    .size(LabelSize::XSmall)
-                                    .color(Color::Error),
-                            ),
-                        ),
-                )
+                this.child(div().px_3().pt_2().child(ui::error_callout(
+                    t!("api_client.panel.collection_error"),
+                    error,
+                    cx,
+                )))
             })
             .child(
-                h_flex()
-                    .px_3()
-                    .pt_3()
-                    .pb_1()
-                    .gap_2()
-                    .child(section_label(t!("api_client.panel.routes_section")))
-                    .when_some(spec.as_ref(), |this, spec| {
-                        this.child(
-                            Label::new(spec.operations.len().to_string())
-                                .size(LabelSize::XSmall)
-                                .color(Color::Muted),
-                        )
-                    })
-                    .child(div().flex_1())
-                    .child(
-                        IconButton::new("api-expand-all", IconName::ChevronDownUp)
+                div().px_3().pt_3().pb_1().child(ui::section_header(
+                    t!("api_client.panel.routes_count", count = operation_count),
+                    Some(
+                        IconButton::new("api-add-route", IconName::Plus)
                             .icon_size(IconSize::Small)
                             .icon_color(Color::Muted)
-                            .tooltip(Tooltip::text(t!("api_client.panel.expand_all_tooltip")))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                let Some(collection) = this.collection() else {
-                                    return;
-                                };
-                                let tags: Vec<String> = collection
-                                    .read(cx)
-                                    .spec
-                                    .as_ref()
-                                    .map(|spec| {
-                                        spec.folders().into_iter().map(|(tag, _)| tag).collect()
-                                    })
-                                    .unwrap_or_default();
-                                if tags.iter().all(|tag| this.expanded.contains(tag)) {
-                                    this.expanded.clear();
-                                } else {
-                                    this.expanded.extend(tags);
-                                }
-                                cx.notify();
-                            })),
+                            .tooltip(Tooltip::text(t!("api_client.panel.open_spec")))
+                            .on_click(cx.listener(|this, _, window, cx| this.open_spec(window, cx)))
+                            .into_any_element(),
                     ),
+                )),
             )
             .child(
                 div().flex_1().min_h_0().px_2().child(
@@ -1252,61 +1414,57 @@ impl ApiPanel {
                     .size_full(),
                 ),
             )
+            .child(self.render_footer(collection, cx))
+            .into_any_element()
+    }
+
+    fn render_start_view(&self, cx: &mut Context<Self>) -> AnyElement {
+        v_flex()
+            .id("api-start")
+            .size_full()
+            .overflow_y_scroll()
+            .p_3()
+            .gap_2()
             .child(
-                h_flex()
-                    .h(px(44.))
-                    .flex_none()
-                    .px_3()
-                    .gap_2()
-                    .border_t_1()
-                    .border_color(cx.theme().colors().border)
-                    .when_some(summary, |this, summary| {
-                        this.child(
-                            Label::new(summary)
-                                .size(LabelSize::XSmall)
-                                .color(Color::Muted),
-                        )
-                    })
-                    .when(!warnings.is_empty(), |this| {
-                        let tooltip = warnings
-                            .iter()
-                            .take(8)
-                            .cloned()
-                            .collect::<Vec<_>>()
-                            .join("\n");
-                        this.child(
-                            div()
-                                .id("api-warnings")
-                                .child(
-                                    Label::new(if warnings.len() == 1 {
-                                        t!("api_client.panel.warnings.one")
-                                    } else {
-                                        t!(
-                                            "api_client.panel.warnings.other",
-                                            count = warnings.len()
-                                        )
-                                    })
-                                    .size(LabelSize::XSmall)
-                                    .color(Color::Warning),
-                                )
-                                .tooltip(Tooltip::text(tooltip)),
-                        )
-                    })
-                    .child(div().flex_1())
-                    .child(
-                        div()
-                            .id("api-open-spec")
-                            .cursor_pointer()
-                            .child(
-                                Label::new(t!("api_client.panel.open_file", file = spec_file_name))
-                                    .size(LabelSize::XSmall)
-                                    .weight(FontWeight::MEDIUM)
-                                    .color(Color::Accent),
-                            )
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.open_spec(window, cx)),
-                            ),
-                    ),
+                ui::choice_card(
+                    "api-start-spec",
+                    IconName::FileCode,
+                    t!("api_client.panel.empty_use_spec_title"),
+                    t!("api_client.panel.empty_use_spec_description"),
+                    Some(t!("api_client.panel.recommended")),
+                    true,
+                    cx,
+                )
+                .on_click(cx.listener(|this, _, _, cx| this.show_link(cx))),
+            )
+            .child(
+                ui::choice_card(
+                    "api-start-postman",
+                    IconName::Download,
+                    t!("api_client.panel.empty_import_postman_title"),
+                    t!("api_client.panel.empty_import_postman_description"),
+                    None,
+                    true,
+                    cx,
+                )
+                .on_click(cx.listener(|this, _, window, cx| this.open_import(window, cx))),
+            )
+            // Blank collections have no backend yet.
+            .child(ui::choice_card(
+                "api-start-blank",
+                IconName::Plus,
+                t!("api_client.panel.empty_from_scratch_title"),
+                t!("api_client.panel.empty_from_scratch_description"),
+                None,
+                false,
+                cx,
+            ))
+            .child(
+                div().pt_1().child(
+                    Label::new(t!("api_client.panel.curl_hint"))
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted),
+                ),
             )
             .into_any_element()
     }
@@ -1364,7 +1522,6 @@ impl ApiPanel {
         let linking = self.link_task.is_some();
         let selected = self.selected_candidate;
         let colors = cx.theme().colors();
-        let accent = colors.border_focused;
         let chosen = self
             .candidates
             .get(selected)
@@ -1372,48 +1529,6 @@ impl ApiPanel {
             .and_then(|summary| summary.as_ref().ok())
             .cloned();
         let can_link = chosen.is_some();
-        let plan_row = |icon: IconName, key: &'static str, value: String, detail: String| {
-            h_flex()
-                .w_full()
-                .gap_2p5()
-                .child(
-                    div()
-                        .flex()
-                        .flex_none()
-                        .size(px(30.))
-                        .items_center()
-                        .justify_center()
-                        .rounded_md()
-                        .bg(colors.element_background)
-                        .border_1()
-                        .border_color(colors.border_selected)
-                        .child(Icon::new(icon).size(IconSize::Small).color(Color::Muted)),
-                )
-                .child(
-                    v_flex()
-                        .flex_none()
-                        .child(
-                            Label::new(key)
-                                .size(LabelSize::XSmall)
-                                .buffer_font(cx)
-                                .color(Color::Muted),
-                        )
-                        .child(
-                            Label::new(value)
-                                .size(LabelSize::Small)
-                                .weight(FontWeight::MEDIUM),
-                        ),
-                )
-                .child(div().flex_1())
-                .child(
-                    div().min_w_0().child(
-                        Label::new(detail)
-                            .size(LabelSize::XSmall)
-                            .color(Color::Muted)
-                            .truncate(),
-                    ),
-                )
-        };
         let note_row = |icon: IconName, title: SharedString, detail: SharedString| {
             h_flex()
                 .w_full()
@@ -1531,32 +1646,12 @@ impl ApiPanel {
                                 let detail: AnyElement = match &candidate.summary {
                                     Some(Ok(summary)) => h_flex()
                                         .gap_2()
-                                        .child(
-                                            h_flex()
-                                                .flex_none()
-                                                .h(px(18.))
-                                                .px_1p5()
-                                                .rounded_md()
-                                                .map(|this| {
-                                                    if active {
-                                                        this.bg(accent)
-                                                    } else {
-                                                        this.bg(Color::Warning
-                                                            .color(cx)
-                                                            .opacity(0.12))
-                                                    }
-                                                })
-                                                .child(
-                                                    Label::new(summary.format.clone())
-                                                        .size(LabelSize::XSmall)
-                                                        .weight(FontWeight::SEMIBOLD)
-                                                        .color(if active {
-                                                            Color::Custom(gpui::white())
-                                                        } else {
-                                                            Color::Warning
-                                                        }),
-                                                ),
-                                        )
+                                        .child(ui::status_chip(
+                                            None,
+                                            summary.format.clone(),
+                                            Color::Warning,
+                                            cx,
+                                        ))
                                         .child(
                                             Label::new(summary.info.clone())
                                                 .size(LabelSize::XSmall)
@@ -1574,24 +1669,8 @@ impl ApiPanel {
                                         .color(Color::Muted)
                                         .into_any_element(),
                                 };
-                                h_flex()
-                                    .id(("api-candidate", index))
-                                    .w_full()
-                                    .px_3()
-                                    .py_2p5()
-                                    .gap_2p5()
-                                    .rounded_lg()
-                                    .border_1()
+                                radio_card(("api-candidate", index), active, true, cx)
                                     .cursor_pointer()
-                                    .map(|this| {
-                                        if active {
-                                            this.bg(accent.opacity(0.18)).border_color(accent)
-                                        } else {
-                                            this.bg(colors.element_background)
-                                                .border_color(colors.border_selected)
-                                        }
-                                    })
-                                    .child(ui::radio_indicator(active, cx))
                                     .child(
                                         v_flex()
                                             .flex_1()
@@ -1654,9 +1733,9 @@ impl ApiPanel {
                             .child(plan_row(
                                 IconName::Folder,
                                 "tags",
-                                t!("api_client.panel.plan_folders", count = chosen.tags.len())
-                                    .to_string(),
-                                folders,
+                                t!("api_client.panel.plan_folders", count = chosen.tags.len()),
+                                plan_detail(folders),
+                                cx,
                             ))
                             .child(plan_row(
                                 IconName::ArrowRightLeft,
@@ -1664,39 +1743,39 @@ impl ApiPanel {
                                 t!(
                                     "api_client.panel.plan_requests",
                                     count = chosen.operation_count
-                                )
-                                .to_string(),
-                                String::new(),
+                                ),
+                                gpui::Empty.into_any_element(),
+                                cx,
                             ))
                             .child(plan_row(
                                 IconName::Server,
                                 "servers",
                                 match chosen.servers.len() {
-                                    0 | 1 => {
-                                        t!("api_client.panel.plan_environments.one").to_string()
-                                    }
+                                    0 | 1 => t!("api_client.panel.plan_environments.one"),
                                     count => t!(
                                         "api_client.panel.plan_environments.other",
                                         count = count
-                                    )
-                                    .to_string(),
+                                    ),
                                 },
-                                servers,
+                                plan_detail(servers),
+                                cx,
                             ))
                             .when(!chosen.schemes.is_empty(), |this| {
                                 this.child(plan_row(
                                     IconName::Lock,
                                     "securitySchemes",
-                                    t!("api_client.panel.plan_login").to_string(),
-                                    chosen.schemes.join(", "),
+                                    t!("api_client.panel.plan_login"),
+                                    plan_detail(chosen.schemes.join(", ")),
+                                    cx,
                                 ))
                             })
                             .when(chosen.schema_count > 0, |this| {
                                 this.child(plan_row(
                                     IconName::Check,
                                     "components.schemas",
-                                    t!("api_client.panel.plan_validation").to_string(),
-                                    t!("api_client.panel.plan_validation_detail").to_string(),
+                                    t!("api_client.panel.plan_validation"),
+                                    plan_detail(t!("api_client.panel.plan_validation_detail")),
+                                    cx,
                                 ))
                             })
                     })
@@ -1711,30 +1790,7 @@ impl ApiPanel {
                         t!("api_client.panel.note_versioned_title"),
                         t!("api_client.panel.note_versioned_detail"),
                     ))
-                    .child(
-                        h_flex()
-                            .w_full()
-                            .px_3()
-                            .py_2p5()
-                            .gap_2p5()
-                            .items_start()
-                            .rounded_lg()
-                            .bg(colors.element_background)
-                            .border_1()
-                            .border_color(colors.border_selected)
-                            .child(
-                                Icon::new(IconName::Lock)
-                                    .size(IconSize::Small)
-                                    .color(Color::Muted),
-                            )
-                            .child(
-                                div().flex_1().min_w_0().child(
-                                    Label::new(t!("api_client.panel.keychain_note"))
-                                        .size(LabelSize::XSmall)
-                                        .color(Color::Muted),
-                                ),
-                            ),
-                    )
+                    .child(keychain_note(t!("api_client.panel.keychain_note"), cx))
                     .when_some(self.link_error.clone(), |this, error| {
                         this.child(Label::new(error).size(LabelSize::Small).color(Color::Error))
                     }),
@@ -1975,6 +2031,7 @@ impl ApiPanel {
             .map(|(name, value)| Variable {
                 name: text(name),
                 value: value.read(cx).text(cx).trim().to_string(),
+                secret: false,
             })
             .filter(|variable| !variable.name.is_empty())
             .collect();
@@ -1998,6 +2055,30 @@ impl ApiPanel {
             for (name, value) in secrets {
                 if collection.secret(&name).unwrap_or("") != value {
                     collection.set_secret(&name, value, cx);
+                }
+            }
+            // A secret variable typed in here goes to the keychain, never the shared file.
+            let secret_variables: Vec<String> = collection
+                .environments()
+                .iter()
+                .find(|environment| environment.name == environment_name)
+                .map(|environment| {
+                    environment
+                        .variables
+                        .iter()
+                        .filter(|variable| variable.secret)
+                        .map(|variable| variable.name.clone())
+                        .collect()
+                })
+                .unwrap_or_default();
+            let mut variables = variables;
+            for variable in &mut variables {
+                if secret_variables.contains(&variable.name) {
+                    variable.secret = true;
+                    let value = std::mem::take(&mut variable.value);
+                    if !value.is_empty() {
+                        collection.set_secret(&variable.name, value, cx);
+                    }
                 }
             }
             collection.update_file(
@@ -2355,10 +2436,15 @@ impl ApiPanel {
                             .color(Color::Muted),
                     ),
             )
-            .child(section_header(
+            .child(ui::section_header(
                 t!("api_client.settings.schemes_section"),
-                Some("components.securitySchemes"),
-                cx,
+                Some(
+                    Label::new("components.securitySchemes")
+                        .size(LabelSize::XSmall)
+                        .buffer_font(cx)
+                        .color(Color::Muted)
+                        .into_any_element(),
+                ),
             ))
             .when(schemes.is_empty(), |this| {
                 this.child(field_label(
@@ -2775,6 +2861,7 @@ impl ApiPanel {
                                                 variables: vec![Variable {
                                                     name: "baseUrl".to_string(),
                                                     value: base_url,
+                                                    secret: false,
                                                 }],
                                             });
                                         }
@@ -2836,20 +2923,820 @@ impl ApiPanel {
     }
 }
 
-/// A section title with a note at its right, like the spec key the section comes from.
-fn section_header(text: impl Into<SharedString>, note: Option<&'static str>, cx: &App) -> Div {
+pub(crate) fn open_import_modal(
+    workspace: &mut Workspace,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    crate::open(workspace, window, cx);
+    let Some(panel) = workspace.panel::<ApiPanel>(cx) else {
+        return;
+    };
+    let modal = panel.update(cx, |panel, cx| panel.import_modal(cx));
+    workspace.toggle_modal(window, cx, |_, _| modal);
+}
+
+pub(crate) fn copy_request_as_curl(workspace: &mut Workspace, cx: &mut Context<Workspace>) {
+    let request = workspace
+        .active_item_as::<request_view::ApiRequestView>(cx)
+        .map(|view| {
+            let view = view.read(cx);
+            (view.operation_key.clone(), view.saved_id.clone())
+        });
+    let collection = workspace
+        .panel::<ApiPanel>(cx)
+        .and_then(|panel| panel.read(cx).collection().cloned());
+    let curl = match (request, collection) {
+        (Some((operation, saved_id)), Some(collection)) => {
+            let collection = collection.read(cx);
+            let draft = saved_id
+                .and_then(|id| {
+                    collection
+                        .file
+                        .saved
+                        .iter()
+                        .find(|saved| saved.id == id)
+                        .map(|saved| saved.draft.clone())
+                })
+                .unwrap_or_else(|| collection.draft(&operation));
+            Some(
+                collection
+                    .prepare(&operation, &draft)
+                    .map(|prepared| prepared.masked().curl()),
+            )
+        }
+        _ => None,
+    };
+    let message = match curl {
+        Some(Ok(curl)) => {
+            cx.write_to_clipboard(gpui::ClipboardItem::new_string(curl));
+            return;
+        }
+        Some(Err(error)) => format!("{error:#}"),
+        None => t!("api_client.panel.export_no_request").to_string(),
+    };
+    workspace.show_toast(
+        Toast::new(NotificationId::unique::<ApiPanel>(), message).autohide(),
+        cx,
+    );
+}
+
+struct PickedFile {
+    path: PathBuf,
+    name: String,
+    /// `None` while reading; an error carries its title and message.
+    state: Option<Result<PostmanFile, (SharedString, SharedString)>>,
+}
+
+pub struct PostmanImportModal {
+    panel: WeakEntity<ApiPanel>,
+    workspace: WeakEntity<Workspace>,
+    /// The selected collection; without one, a new collection file is created.
+    target: Option<Entity<Collection>>,
+    root: Option<PathBuf>,
+    fs: Arc<dyn Fs>,
+    focus_handle: FocusHandle,
+    files: Vec<PickedFile>,
+    match_spec: bool,
+    importing: Option<Task<()>>,
+    error: Option<SharedString>,
+}
+
+impl EventEmitter<DismissEvent> for PostmanImportModal {}
+
+impl ModalView for PostmanImportModal {}
+
+impl Focusable for PostmanImportModal {
+    fn focus_handle(&self, _cx: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
+impl PostmanImportModal {
+    fn import(&self) -> PostmanImport {
+        let mut import = PostmanImport::default();
+        for file in &self.files {
+            if let Some(Ok(parsed)) = &file.state {
+                import.add(parsed.clone());
+            }
+        }
+        import
+    }
+
+    fn source_name(import: &PostmanImport) -> String {
+        import
+            .collections
+            .first()
+            .map(|collection| collection.name.clone())
+            .or_else(|| {
+                import
+                    .environments
+                    .first()
+                    .map(|environment| environment.name.clone())
+            })
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or_else(|| "postman".to_string())
+    }
+
+    fn target_spec(&self, cx: &App) -> Option<(Arc<spec::Spec>, String)> {
+        let collection = self.target.as_ref()?.read(cx);
+        let spec = collection.spec.clone()?;
+        let file_name = collection
+            .spec_path()
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| collection.file.spec.clone());
+        Some((spec, file_name))
+    }
+
+    fn destination(&self, import: &PostmanImport, cx: &App) -> String {
+        match &self.target {
+            Some(collection) => {
+                let collection = collection.read(cx);
+                collection
+                    .file_path
+                    .strip_prefix(&collection.root)
+                    .unwrap_or(&collection.file_path)
+                    .display()
+                    .to_string()
+            }
+            None => format!(
+                "{}/{}.json",
+                config::COLLECTIONS_DIR,
+                config::slug(&Self::source_name(import))
+            ),
+        }
+    }
+
+    fn pick_files(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let paths = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: true,
+            prompt: Some(t!("api_client.panel.import_pick_files")),
+        });
+        let fs = self.fs.clone();
+        cx.spawn_in(window, async move |this, cx| {
+            let Some(paths) = paths.await?? else {
+                return anyhow::Ok(());
+            };
+            for path in paths {
+                let name = path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.display().to_string());
+                this.update(cx, |this, cx| {
+                    this.files.retain(|file| file.path != path);
+                    this.files.push(PickedFile {
+                        path: path.clone(),
+                        name: name.clone(),
+                        state: None,
+                    });
+                    cx.notify();
+                })?;
+                let state = match fs.load(&path).await {
+                    Ok(text) => cx
+                        .background_spawn(async move { config::parse_postman(&text) })
+                        .await
+                        .map_err(|error| match error {
+                            PostmanError::Json {
+                                line,
+                                column,
+                                message,
+                            } => (
+                                t!("api_client.panel.import_invalid_json_title", file = &name),
+                                t!(
+                                    "api_client.panel.import_invalid_json_line",
+                                    line = line,
+                                    column = column,
+                                    error = message
+                                ),
+                            ),
+                            PostmanError::NotPostman => (
+                                SharedString::from(name.clone()),
+                                t!("api_client.panel.import_not_postman"),
+                            ),
+                        }),
+                    Err(error) => Err((
+                        SharedString::from(name.clone()),
+                        t!(
+                            "api_client.collection.error_postman_parse",
+                            error = format!("{error:#}")
+                        ),
+                    )),
+                };
+                this.update(cx, |this, cx| {
+                    if let Some(file) = this.files.iter_mut().find(|file| file.path == path) {
+                        file.state = Some(state);
+                    }
+                    cx.notify();
+                })?;
+            }
+            anyhow::Ok(())
+        })
+        .detach_and_log_err(cx);
+    }
+
+    fn cancel(&mut self, _: &menu::Cancel, _: &mut Window, cx: &mut Context<Self>) {
+        cx.emit(DismissEvent);
+    }
+
+    fn confirm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.importing.is_some() {
+            return;
+        }
+        let import = self.import();
+        if import.is_empty() {
+            return;
+        }
+        let name = Self::source_name(&import);
+        let done = t!(
+            "api_client.panel.import_done",
+            count = import.counts(None).requests,
+            name = &name
+        )
+        .to_string();
+        let match_spec = self.match_spec && self.target_spec(cx).is_some();
+        if let Some(collection) = self.target.clone() {
+            collection.update(cx, |collection, cx| {
+                collection.apply_postman_import(import, match_spec, cx)
+            });
+            self.workspace
+                .update(cx, |workspace, cx| {
+                    workspace.show_toast(
+                        Toast::new(NotificationId::unique::<ApiPanel>(), done).autohide(),
+                        cx,
+                    );
+                })
+                .log_err();
+            cx.emit(DismissEvent);
+            return;
+        }
+        let Some(root) = self.root.clone() else {
+            self.error = Some(t!("api_client.panel.import_no_folder"));
+            cx.notify();
+            return;
+        };
+        let fs = self.fs.clone();
+        let panel = self.panel.clone();
+        let workspace = self.workspace.clone();
+        self.error = None;
+        self.importing = Some(cx.spawn_in(window, async move |this, cx| {
+            let result = async {
+                let file = collection::create_for_import(fs, root.clone(), &name).await?;
+                let collection = panel
+                    .update(cx, |panel, cx| panel.adopt_collection(root, file, cx))?
+                    .context("the new collection file was not listed")?;
+                collection.update(cx, |collection, cx| {
+                    collection.apply_postman_import(import, false, cx)
+                });
+                anyhow::Ok(())
+            }
+            .await;
+            let succeeded = result.is_ok();
+            this.update(cx, |this, cx| {
+                this.importing = None;
+                match result {
+                    Ok(()) => cx.emit(DismissEvent),
+                    Err(error) => this.error = Some(format!("{error:#}").into()),
+                }
+                cx.notify();
+            })
+            .log_err();
+            if succeeded {
+                ApiPanel::show_toast(&workspace, done, cx);
+            }
+        }));
+        cx.notify();
+    }
+
+    fn render_file(&self, index: usize, file: &PickedFile, cx: &mut Context<Self>) -> AnyElement {
+        let chip = match &file.state {
+            None => ui::status_chip_spinning(
+                IconName::LoadCircle,
+                t!("api_client.panel.reading"),
+                Color::Muted,
+                cx,
+            ),
+            Some(Ok(PostmanFile::Collection(collection))) => ui::status_chip(
+                None,
+                t!(
+                    "api_client.panel.import_kind_collection",
+                    version = &collection.version
+                ),
+                Color::Accent,
+                cx,
+            ),
+            Some(Ok(PostmanFile::Environment(_))) => ui::status_chip(
+                None,
+                t!("api_client.panel.import_kind_environment"),
+                Color::Muted,
+                cx,
+            ),
+            Some(Err(_)) => ui::status_chip(
+                Some(IconName::Warning),
+                t!("api_client.panel.import_invalid_tag"),
+                Color::Error,
+                cx,
+            ),
+        };
+        v_flex()
+            .w_full()
+            .gap_1p5()
+            .child(
+                h_flex()
+                    .w_full()
+                    .gap_2()
+                    .child(
+                        Icon::new(IconName::FileCode)
+                            .size(IconSize::Small)
+                            .color(Color::Muted),
+                    )
+                    .child(
+                        div().flex_1().min_w_0().child(
+                            Label::new(file.name.clone())
+                                .size(LabelSize::Small)
+                                .buffer_font(cx)
+                                .truncate(),
+                        ),
+                    )
+                    .child(chip)
+                    .child(
+                        IconButton::new(("api-import-remove-file", index), IconName::Close)
+                            .icon_size(IconSize::XSmall)
+                            .icon_color(Color::Muted)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if index < this.files.len() {
+                                    this.files.remove(index);
+                                }
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .when_some(
+                match &file.state {
+                    Some(Err(error)) => Some(error.clone()),
+                    _ => None,
+                },
+                |this, (title, message)| this.child(ui::error_callout(title, message, cx)),
+            )
+            .into_any_element()
+    }
+
+    fn render_plan(&self, import: &PostmanImport, cx: &App) -> Vec<AnyElement> {
+        let spec = self
+            .target_spec(cx)
+            .filter(|_| self.match_spec)
+            .map(|(spec, _)| spec);
+        let counts = import.counts(spec.as_deref());
+        let empty = || gpui::Empty.into_any_element();
+        let mut rows = Vec::new();
+        if counts.requests > 0 || counts.folders > 0 {
+            rows.push(plan_row(
+                IconName::Folder,
+                "item[]",
+                t!(
+                    "api_client.panel.import_row_requests",
+                    folders = counts.folders,
+                    requests = counts.requests
+                ),
+                empty(),
+                cx,
+            ));
+        }
+        if counts.environments > 0 || counts.variables > 0 {
+            rows.push(plan_row(
+                IconName::Server,
+                "values[]",
+                t!(
+                    "api_client.panel.import_row_environments",
+                    environments = counts.environments,
+                    variables = counts.variables
+                ),
+                empty(),
+                cx,
+            ));
+        }
+        if counts.secrets > 0 {
+            rows.push(plan_row(
+                IconName::Lock,
+                "type: secret",
+                t!(
+                    "api_client.panel.import_row_secrets",
+                    count = counts.secrets
+                ),
+                empty(),
+                cx,
+            ));
+        }
+        if counts.auth {
+            rows.push(plan_row(
+                IconName::UserCheck,
+                "auth",
+                t!("api_client.panel.import_row_auth"),
+                empty(),
+                cx,
+            ));
+        }
+        if counts.captures > 0 {
+            rows.push(plan_row(
+                IconName::ArrowRightLeft,
+                "pm.environment.set",
+                t!(
+                    "api_client.panel.import_row_captures",
+                    count = counts.captures
+                ),
+                empty(),
+                cx,
+            ));
+        }
+        if counts.tests > 0 {
+            rows.push(plan_row(
+                IconName::Check,
+                "pm.test",
+                t!("api_client.panel.import_row_tests", count = counts.tests),
+                empty(),
+                cx,
+            ));
+        }
+        if counts.unsupported > 0 {
+            rows.push(plan_row(
+                IconName::Warning,
+                "pm.sendRequest",
+                t!(
+                    "api_client.panel.import_row_unsupported",
+                    count = counts.unsupported
+                ),
+                ui::status_pill(
+                    t!("api_client.panel.import_tag_disabled"),
+                    StatusTone::Warning,
+                    cx,
+                )
+                .into_any_element(),
+                cx,
+            ));
+        }
+        rows.into_iter()
+            .map(IntoElement::into_any_element)
+            .collect()
+    }
+}
+
+impl Render for PostmanImportModal {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let import = self.import();
+        let counts = import.counts(None);
+        let reading = self.files.iter().any(|file| file.state.is_none());
+        let can_import = !import.is_empty() && !reading && self.importing.is_none();
+        let target_spec = self.target_spec(cx);
+        let destination = t!(
+            "api_client.panel.import_destination",
+            path = self.destination(&import, cx)
+        );
+        let confirm_label = if counts.requests == 1 {
+            t!("api_client.panel.import_confirm.one")
+        } else {
+            t!(
+                "api_client.panel.import_confirm.other",
+                count = counts.requests
+            )
+        };
+        let focus_handle = self.focus_handle.clone();
+        let files: Vec<AnyElement> = self
+            .files
+            .iter()
+            .enumerate()
+            .map(|(index, file)| self.render_file(index, file, cx))
+            .collect();
+        let plan = self.render_plan(&import, cx);
+
+        let source_files = radio_card("api-import-from-files", true, true, cx).child(
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .gap_2()
+                .child(
+                    v_flex()
+                        .gap_0p5()
+                        .child(
+                            Label::new(t!("api_client.panel.import_from_files"))
+                                .size(LabelSize::Small)
+                                .weight(FontWeight::SEMIBOLD),
+                        )
+                        .child(
+                            Label::new(t!("api_client.panel.import_from_files_description"))
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted),
+                        ),
+                )
+                .children(files)
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .child(
+                            ui::secondary_button(
+                                "api-import-pick",
+                                Some((IconName::FolderSearch, Color::Muted)),
+                                t!("api_client.panel.import_pick_files"),
+                                true,
+                                cx,
+                            )
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.pick_files(window, cx)),
+                            ),
+                        )
+                        .when(self.files.is_empty(), |this| {
+                            this.child(
+                                Label::new(t!("api_client.panel.import_no_files"))
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted),
+                            )
+                        }),
+                ),
+        );
+        let source_workspace = radio_card("api-import-from-workspace", false, false, cx).child(
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .gap_0p5()
+                .child(
+                    Label::new(t!("api_client.panel.import_from_workspace"))
+                        .size(LabelSize::Small)
+                        .weight(FontWeight::SEMIBOLD),
+                )
+                .child(
+                    Label::new(t!("api_client.panel.import_from_workspace_note"))
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted),
+                ),
+        );
+
+        let match_row = target_spec.map(|(spec, spec_name)| {
+            let (matched, unmatched) = if self.match_spec {
+                let matches = import.matches(&spec);
+                let matched = matches.iter().filter(|found| found.is_some()).count();
+                (matched, matches.len() - matched)
+            } else {
+                (0, counts.requests)
+            };
+            h_flex()
+                .w_full()
+                .gap_2p5()
+                .child(
+                    ui::toggle_switch("api-import-match", self.match_spec, true, cx).on_click(
+                        cx.listener(|this, _, _, cx| {
+                            this.match_spec = !this.match_spec;
+                            cx.notify();
+                        }),
+                    ),
+                )
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .child(
+                            Label::new(t!("api_client.panel.import_match_spec", spec = spec_name))
+                                .size(LabelSize::Small)
+                                .weight(FontWeight::MEDIUM),
+                        )
+                        .child(
+                            Label::new(t!(
+                                "api_client.panel.import_match_spec_detail",
+                                matched = matched,
+                                unmatched = unmatched
+                            ))
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
+                        ),
+                )
+        });
+
+        let confirm = ui::primary_button(
+            "api-import-confirm",
+            Some(IconName::Download),
+            confirm_label,
+            Some(KeyBinding::for_action_in(
+                &menu::SecondaryConfirm,
+                &focus_handle,
+                cx,
+            )),
+            cx,
+        )
+        .map(|this| {
+            if can_import {
+                this.on_click(cx.listener(|this, _, window, cx| this.confirm(window, cx)))
+            } else {
+                this.opacity(0.5).cursor_default()
+            }
+        });
+
+        ui::modal_surface(cx)
+            .key_context("ApiImportModal")
+            .track_focus(&self.focus_handle)
+            .on_action(cx.listener(Self::cancel))
+            .on_action(cx.listener(|this, _: &menu::Confirm, window, cx| this.confirm(window, cx)))
+            .on_action(
+                cx.listener(|this, _: &menu::SecondaryConfirm, window, cx| {
+                    this.confirm(window, cx)
+                }),
+            )
+            .w(px(720.))
+            .child(
+                h_flex()
+                    .w_full()
+                    .px_6()
+                    .pt_5()
+                    .pb_4()
+                    .gap_3()
+                    .child(
+                        div().flex_1().min_w_0().child(
+                            Label::new(t!("api_client.panel.import_title"))
+                                .size(LabelSize::Large)
+                                .weight(FontWeight::SEMIBOLD),
+                        ),
+                    )
+                    .child(
+                        ui::segmented_control(cx)
+                            .w(px(260.))
+                            .child(ui::segment_option(
+                                "api-import-postman",
+                                t!("api_client.panel.import_source_postman"),
+                                true,
+                                true,
+                                cx,
+                            ))
+                            .child(
+                                ui::segment_option(
+                                    "api-import-openapi",
+                                    t!("api_client.panel.import_source_openapi"),
+                                    false,
+                                    true,
+                                    cx,
+                                )
+                                .on_click(cx.listener(
+                                    |this, _, _, cx| {
+                                        this.panel
+                                            .update(cx, |panel, cx| panel.show_link(cx))
+                                            .log_err();
+                                        cx.emit(DismissEvent);
+                                    },
+                                )),
+                            )
+                            .child(ui::segment_option(
+                                "api-import-curl",
+                                t!("api_client.panel.import_source_curl"),
+                                false,
+                                false,
+                                cx,
+                            )),
+                    ),
+            )
+            .child(
+                v_flex()
+                    .id("api-import-body")
+                    .w_full()
+                    .max_h(px(520.))
+                    .overflow_y_scroll()
+                    .px_6()
+                    .pb_5()
+                    .gap_2p5()
+                    .child(section_label(t!("api_client.panel.import_origin_section")))
+                    .child(source_files)
+                    .child(source_workspace)
+                    .when(!plan.is_empty(), |this| {
+                        this.child(div().h_1())
+                            .child(section_label(t!("api_client.panel.import_plan_section")))
+                            .child(ui::card(cx).p_3().gap_2p5().children(plan))
+                    })
+                    .when(counts.secrets > 0, |this| {
+                        this.child(keychain_note(t!("api_client.panel.keychain_note"), cx))
+                    })
+                    .when_some(match_row.filter(|_| counts.requests > 0), |this, row| {
+                        this.child(row)
+                    })
+                    .when_some(self.error.clone(), |this, error| {
+                        this.child(ui::error_callout(
+                            t!("api_client.panel.collection_error"),
+                            error,
+                            cx,
+                        ))
+                    }),
+            )
+            .child(
+                ui::modal_footer(cx)
+                    .child(
+                        div().flex_1().min_w_0().child(
+                            Label::new(destination)
+                                .size(LabelSize::XSmall)
+                                .buffer_font(cx)
+                                .color(Color::Muted)
+                                .truncate(),
+                        ),
+                    )
+                    .child(
+                        ui::secondary_button(
+                            "api-import-cancel",
+                            None,
+                            t!("api_client.panel.import_cancel"),
+                            true,
+                            cx,
+                        )
+                        .on_click(cx.listener(|_, _, _, cx| cx.emit(DismissEvent))),
+                    )
+                    .child(confirm),
+            )
+    }
+}
+
+/// What a step brings in: an icon tile, where it comes from and what it becomes, and a
+/// detail on the right.
+fn plan_row(
+    icon: IconName,
+    key: impl Into<SharedString>,
+    value: impl Into<SharedString>,
+    detail: AnyElement,
+    cx: &App,
+) -> Div {
+    let colors = cx.theme().colors();
     h_flex()
         .w_full()
-        .gap_2()
-        .child(section_label(text))
-        .when_some(note, |this, note| {
-            this.child(div().flex_1()).child(
-                Label::new(note)
-                    .size(LabelSize::XSmall)
-                    .buffer_font(cx)
-                    .color(Color::Muted),
-            )
+        .gap_2p5()
+        .child(
+            div()
+                .flex()
+                .flex_none()
+                .size(px(30.))
+                .items_center()
+                .justify_center()
+                .rounded(Radius::Md.rems())
+                .bg(colors.element_background)
+                .border_1()
+                .border_color(colors.border_selected)
+                .child(Icon::new(icon).size(IconSize::Small).color(Color::Muted)),
+        )
+        .child(
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .child(
+                    Label::new(key)
+                        .size(LabelSize::XSmall)
+                        .buffer_font(cx)
+                        .color(Color::Muted),
+                )
+                .child(
+                    Label::new(value)
+                        .size(LabelSize::Small)
+                        .weight(FontWeight::MEDIUM),
+                ),
+        )
+        .child(div().flex_none().max_w(px(220.)).min_w_0().child(detail))
+}
+
+fn plan_detail(text: impl Into<SharedString>) -> AnyElement {
+    Label::new(text)
+        .size(LabelSize::XSmall)
+        .color(Color::Muted)
+        .truncate()
+        .into_any_element()
+}
+
+/// A choice card with a radio; the chosen one gets the accent border and tint. The caller
+/// adds the content and the click.
+fn radio_card(id: impl Into<ElementId>, selected: bool, enabled: bool, cx: &App) -> Stateful<Div> {
+    let accent = cx.theme().colors().border_focused;
+    ui::card(cx)
+        .id(id)
+        .flex_row()
+        .items_start()
+        .px_3()
+        .py_2p5()
+        .gap_2p5()
+        .when(selected, |this| {
+            this.bg(accent.opacity(0.18)).border_color(accent)
         })
+        .when(!enabled, |this| this.opacity(0.5))
+        .child(div().pt_0p5().child(ui::radio_indicator(selected, cx)))
+}
+
+fn keychain_note(text: impl Into<SharedString>, cx: &App) -> Div {
+    ui::card(cx)
+        .flex_row()
+        .items_start()
+        .px_3()
+        .py_2p5()
+        .gap_2p5()
+        .child(
+            Icon::new(IconName::Lock)
+                .size(IconSize::Small)
+                .color(Color::Muted),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .child(Label::new(text).size(LabelSize::XSmall).color(Color::Muted)),
+        )
 }
 
 /// A `{{variable}}` set off in the accent, as the boards draw them outside editors.
@@ -2859,7 +3746,7 @@ pub(crate) fn variable_chip(name: impl Into<SharedString>, cx: &App) -> Div {
         .h(px(20.))
         .px_1p5()
         .rounded_sm()
-        .bg(cx.theme().colors().border_focused.opacity(0.22))
+        .bg(cx.theme().colors().border_focused.opacity(0.16))
         .child(
             Label::new(name)
                 .size(LabelSize::XSmall)
@@ -2868,33 +3755,14 @@ pub(crate) fn variable_chip(name: impl Into<SharedString>, cx: &App) -> Div {
         )
 }
 
-/// A small label on a wash of its color, e.g. `deprecated`.
-pub(crate) fn tinted_chip(label: impl Into<SharedString>, color: Color, cx: &App) -> Div {
-    h_flex()
-        .flex_none()
-        .h(px(18.))
-        .px_1p5()
-        .rounded_md()
-        .bg(color.color(cx).opacity(0.12))
-        .child(
-            Label::new(label)
-                .size(LabelSize::XSmall)
-                .weight(FontWeight::MEDIUM)
-                .color(color),
-        )
-}
-
-/// Production in red, staging in amber, dev in green, as the database dock does.
-fn environment_color(name: &str) -> Color {
-    let name = name.to_ascii_lowercase();
-    if name.contains("prod") {
-        Color::Error
-    } else if name.contains("stag") || name.contains("hml") || name.contains("homolog") {
-        Color::Warning
-    } else if name.contains("dev") {
-        Color::Success
+fn synced_text(synced_at: chrono::DateTime<chrono::Local>) -> String {
+    let minutes = (chrono::Local::now() - synced_at).num_minutes();
+    if minutes < 1 {
+        t!("api_client.panel.synced_just_now").to_string()
+    } else if minutes < 60 {
+        t!("api_client.panel.synced_minutes_ago", minutes = minutes).to_string()
     } else {
-        Color::Muted
+        t!("api_client.panel.synced_hours_ago", hours = minutes / 60).to_string()
     }
 }
 
@@ -2955,23 +3823,16 @@ fn summarize(path: &Path, text: &str) -> Result<CandidateSummary, String> {
 impl Render for ApiPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let content = match (self.view, self.collection().cloned()) {
-            (View::Link, _) | (_, None) => {
-                if !self.discovered && self.collections.is_empty() {
-                    v_flex()
-                        .size_full()
-                        .items_center()
-                        .justify_center()
-                        .child(
-                            Label::new(t!("api_client.panel.searching_apis"))
-                                .size(LabelSize::Small)
-                                .color(Color::Muted),
-                        )
-                        .into_any_element()
-                } else {
-                    self.render_link_view(cx)
-                }
-            }
-            (View::Tree, Some(collection)) => self.render_tree_view(&collection, cx),
+            (_, None) if !self.discovered => v_flex()
+                .size_full()
+                .child(
+                    EmptyState::new(IconName::LoadCircle, t!("api_client.panel.searching_apis"))
+                        .spinning(true),
+                )
+                .into_any_element(),
+            (View::Link, _) => self.render_link_view(cx),
+            (_, None) => self.render_start_view(cx),
+            (View::Tree | View::Start, Some(collection)) => self.render_tree_view(&collection, cx),
             (View::Settings, Some(collection)) => self.render_settings_view(&collection, cx),
         };
         v_flex()

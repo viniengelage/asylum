@@ -12,6 +12,7 @@ mod lens;
 mod panel;
 mod request_view;
 mod schema;
+mod script;
 mod send;
 mod spec;
 mod vars;
@@ -37,6 +38,20 @@ actions!(
         ToggleFocus,
         /// Sends the request in the focused API tab.
         SendRequest,
+        /// Imports a Postman collection (v2.0 or v2.1) and its environments.
+        ImportPostman,
+        /// Imports the Postman files again, merging by Postman id without removing anything.
+        ReimportPostman,
+        /// Saves the collection as a Postman v2.1 collection, without secret values.
+        ExportPostmanCollection,
+        /// Saves each environment as a Postman environment, without secret values.
+        ExportPostmanEnvironments,
+        /// Copies the request of the active API tab as a cURL command.
+        CopyRequestAsCurl,
+        /// Points saved requests outside the spec at the operation with the same method and path.
+        MatchSpec,
+        /// Deletes the collection file and this profile's credentials for it.
+        RemoveCollection,
     ]
 );
 
@@ -62,6 +77,27 @@ pub fn init(cx: &mut App) {
     cx.observe_new(|workspace: &mut Workspace, window, cx| {
         workspace.register_action(|workspace, _: &ToggleFocus, window, cx| {
             toggle_focus(workspace, window, cx);
+        });
+        workspace.register_action(|workspace, _: &ImportPostman, window, cx| {
+            panel::open_import_modal(workspace, window, cx);
+        });
+        workspace.register_action(|workspace, _: &ReimportPostman, window, cx| {
+            panel::open_import_modal(workspace, window, cx);
+        });
+        workspace.register_action(|workspace, _: &CopyRequestAsCurl, _, cx| {
+            panel::copy_request_as_curl(workspace, cx);
+        });
+        workspace.register_action(|workspace, _: &ExportPostmanCollection, window, cx| {
+            with_panel(workspace, window, cx, ApiPanel::export_collection);
+        });
+        workspace.register_action(|workspace, _: &ExportPostmanEnvironments, window, cx| {
+            with_panel(workspace, window, cx, ApiPanel::export_environments);
+        });
+        workspace.register_action(|workspace, _: &MatchSpec, window, cx| {
+            with_panel(workspace, window, cx, ApiPanel::match_spec);
+        });
+        workspace.register_action(|workspace, _: &RemoveCollection, window, cx| {
+            with_panel(workspace, window, cx, ApiPanel::remove_collection);
         });
         // `panel`, `settings` and `link` open the dock on that screen; `op:<METHOD path>[:send]`
         // also opens that operation's tab and sends it, `tab:headers` shows its headers and
@@ -152,6 +188,18 @@ pub fn open(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Wor
         workspace.add_panel(panel, window, cx);
     }
     workspace.focus_panel::<ApiPanel>(window, cx);
+}
+
+fn with_panel(
+    workspace: &mut Workspace,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+    action: impl FnOnce(&mut ApiPanel, &mut Window, &mut Context<ApiPanel>),
+) {
+    open(workspace, window, cx);
+    if let Some(panel) = workspace.panel::<ApiPanel>(cx) {
+        panel.update(cx, |panel, cx| action(panel, window, cx));
+    }
 }
 
 fn toggle_focus(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {

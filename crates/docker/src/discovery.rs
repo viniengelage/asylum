@@ -1,5 +1,5 @@
 //! Where the daemon's socket is: `DOCKER_HOST`, the active `docker context`, then the places
-//! Docker Desktop, Linux, Colima and OrbStack put it.
+//! Docker Desktop, Linux, Colima, OrbStack and Podman put it.
 
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SocketCandidate {
-    /// "Docker Desktop", "Colima", "OrbStack"… as the empty state names them.
+    /// "Docker Desktop", "Colima", "OrbStack", "Podman"… as the empty state names them.
     pub runtime: String,
     pub path: PathBuf,
     pub exists: bool,
@@ -39,7 +39,7 @@ pub fn home_relative(path: &Path) -> String {
 
 /// Every place worth trying, in order, without duplicates. `exists` says whether the socket
 /// file is there; a stale file can still refuse connections.
-pub fn candidates() -> Vec<SocketCandidate> {
+pub async fn candidates() -> Vec<SocketCandidate> {
     let home = paths::home_dir();
     let mut found: Vec<(Option<String>, PathBuf)> = Vec::new();
     if let Some(path) = std::env::var("DOCKER_HOST")
@@ -65,6 +65,7 @@ pub fn candidates() -> Vec<SocketCandidate> {
         Some("OrbStack".into()),
         home.join(".orbstack/run/docker.sock"),
     ));
+    found.push((Some("Podman".into()), podman_socket(home).await));
 
     let mut candidates: Vec<SocketCandidate> = Vec::new();
     for (runtime, path) in found {
@@ -79,6 +80,55 @@ pub fn candidates() -> Vec<SocketCandidate> {
         });
     }
     candidates
+}
+
+/// Podman machine's API socket: under `machine/` or one folder per VM provider (applehv,
+/// libkrun, qemu…), else where `podman machine inspect` says. Falls back to the usual path so
+/// the empty state still lists Podman as not found.
+async fn podman_socket(home: &Path) -> PathBuf {
+    let machine_dir = home.join(".local/share/containers/podman/machine");
+    let default = machine_dir.join("podman.sock");
+    if default.exists() {
+        return default;
+    }
+    let in_provider_dir = std::fs::read_dir(&machine_dir).ok().and_then(|entries| {
+        entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.path().join("podman.sock"))
+            .find(|path| path.exists())
+    });
+    if let Some(path) = in_provider_dir {
+        return path;
+    }
+    podman_inspect_socket().await.unwrap_or(default)
+}
+
+async fn podman_inspect_socket() -> Option<PathBuf> {
+    let output = match util::command::new_command("podman")
+        .args([
+            "machine",
+            "inspect",
+            "--format",
+            "{{.ConnectionInfo.PodmanSocket.Path}}",
+        ])
+        .output()
+        .await
+    {
+        Ok(output) => output,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(error) => {
+            log::warn!("podman machine inspect failed: {error}");
+            return None;
+        }
+    };
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty() && *line != "<no value>")
+        .map(PathBuf::from)
 }
 
 /// The runtime behind a socket, by where it lives. `/var/run/docker.sock` on macOS is Docker
@@ -183,7 +233,14 @@ mod tests {
             runtime_for(Path::new("/Users/v/.orbstack/run/docker.sock"), false),
             "OrbStack"
         );
-        let candidates = candidates();
+        assert_eq!(
+            runtime_for(
+                Path::new("/Users/v/.local/share/containers/podman/machine/applehv/podman.sock"),
+                false
+            ),
+            "Podman"
+        );
+        let candidates = futures::executor::block_on(candidates());
         assert!(
             candidates
                 .iter()

@@ -1,8 +1,11 @@
 //! What the Repo panel shows, independent of the host it came from. Each host's module turns
 //! its own API responses into these types.
 
+use anyhow::{Context as _, Result};
 use chrono::{DateTime, Utc};
 use i18n::t;
+use serde::de::DeserializeOwned;
+use std::collections::HashMap;
 
 /// The failures the UI reacts to differently. Anything else surfaces as a plain error.
 #[derive(Debug)]
@@ -51,6 +54,7 @@ impl std::error::Error for ApiError {}
 pub enum Hosting {
     Bitbucket,
     GitHub,
+    GitLab,
 }
 
 impl Hosting {
@@ -58,6 +62,7 @@ impl Hosting {
         match self {
             Hosting::Bitbucket => "Bitbucket",
             Hosting::GitHub => "GitHub",
+            Hosting::GitLab => "GitLab",
         }
     }
 }
@@ -66,9 +71,12 @@ impl Hosting {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct RemoteRepository {
     pub hosting: Hosting,
-    /// The Bitbucket workspace or the GitHub owner.
+    /// The Bitbucket workspace, the GitHub owner or the GitLab namespace (subgroups included,
+    /// as in `group/subgroup`).
     pub owner: String,
     pub name: String,
+    /// The self-hosted GitLab's host name; `None` on the public instance of each host.
+    pub instance: Option<String>,
 }
 
 impl RemoteRepository {
@@ -76,11 +84,18 @@ impl RemoteRepository {
         format!("{}/{}", self.owner, self.name)
     }
 
-    pub fn web_url(&self) -> String {
-        match self.hosting {
-            Hosting::Bitbucket => format!("https://bitbucket.org/{}/{}", self.owner, self.name),
-            Hosting::GitHub => format!("https://github.com/{}/{}", self.owner, self.name),
+    /// The host name the repository's web pages and API live on.
+    pub fn instance(&self) -> &str {
+        match (&self.instance, self.hosting) {
+            (Some(instance), _) => instance,
+            (None, Hosting::Bitbucket) => "bitbucket.org",
+            (None, Hosting::GitHub) => "github.com",
+            (None, Hosting::GitLab) => "gitlab.com",
         }
+    }
+
+    pub fn web_url(&self) -> String {
+        format!("https://{}/{}/{}", self.instance(), self.owner, self.name)
     }
 
     /// The host's page for opening a pull request from `source`.
@@ -101,6 +116,15 @@ impl RemoteRepository {
                 urlencoding::encode(destination)
             ),
             (Hosting::GitHub, None) => format!("{}/pull/new/{source}", self.web_url()),
+            (Hosting::GitLab, Some(destination)) => format!(
+                "{}/-/merge_requests/new?merge_request%5Bsource_branch%5D={source}&merge_request%5Btarget_branch%5D={}",
+                self.web_url(),
+                urlencoding::encode(destination)
+            ),
+            (Hosting::GitLab, None) => format!(
+                "{}/-/merge_requests/new?merge_request%5Bsource_branch%5D={source}",
+                self.web_url()
+            ),
         }
     }
 }
@@ -218,7 +242,7 @@ pub struct Check {
     pub state: CheckState,
     pub url: Option<String>,
     pub updated_at: Option<DateTime<Utc>>,
-    /// The GitHub Actions job behind the check, which can be run again on its own.
+    /// The GitHub Actions or GitLab CI job behind the check, which can be run again on its own.
     pub rerun_job: Option<u64>,
 }
 
@@ -397,4 +421,43 @@ pub struct Issue {
     pub assignee: Option<String>,
     pub updated_at: Option<DateTime<Utc>>,
     pub url: String,
+}
+
+/// The `rel="next"` URL of a `Link` header.
+pub(crate) fn next_page(link: &str) -> Option<String> {
+    link.split(',').find_map(|part| {
+        let (url, rest) = part.split_once(';')?;
+        rest.contains("rel=\"next\"").then(|| {
+            url.trim()
+                .trim_start_matches('<')
+                .trim_end_matches('>')
+                .to_string()
+        })
+    })
+}
+
+pub(crate) struct RawResponse {
+    pub text: String,
+    pub endpoint: String,
+    /// Lowercased names.
+    pub headers: HashMap<String, String>,
+    pub host: &'static str,
+}
+
+impl RawResponse {
+    pub fn parse<T: DeserializeOwned>(&self) -> Result<T> {
+        // Merges, approvals, reruns and deletes can answer with no body.
+        let text = if self.text.trim().is_empty() {
+            "null"
+        } else {
+            &self.text
+        };
+        serde_json::from_str(text).with_context(|| {
+            t!(
+                "repo_hosting.error.unexpected_response",
+                host = self.host,
+                endpoint = self.endpoint
+            )
+        })
+    }
 }

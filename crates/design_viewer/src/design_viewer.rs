@@ -31,7 +31,7 @@ use workspace::{
 };
 
 pub use agent_toolkit::register_toolkit as register_agent_toolkit;
-pub use render::Bounds;
+pub use render::{Bounds, Layer, ScreenLayers};
 pub use view::DesignView;
 
 actions!(
@@ -53,6 +53,8 @@ actions!(
         ExitFocus,
         /// Moves focus to the screen search field.
         FocusSearch,
+        /// Mentions the selected layer, or the focused screen, in the agent.
+        MentionLayer,
     ]
 );
 
@@ -231,7 +233,7 @@ impl project::ProjectItem for FigFile {
 
 /// Bump whenever the dump script or the renderer changes their output, so cached
 /// pages from an older converter are regenerated.
-pub const CONVERTER_VERSION: u32 = 3;
+pub const CONVERTER_VERSION: u32 = 4;
 
 /// The CLI version the dump script was validated against. Cached pages record it, so
 /// changing the pin regenerates them.
@@ -298,6 +300,10 @@ pub struct PageId(pub String);
 impl PageId {
     fn file_name(&self) -> String {
         format!("{}.html", file_stem(&self.0))
+    }
+
+    fn layers_file_name(&self) -> String {
+        format!("{}.layers.json", file_stem(&self.0))
     }
 }
 
@@ -375,6 +381,21 @@ pub fn screen_reference(page: &PageEntry, screen: &Screen) -> String {
         view::split_page_name(&page.name).1,
         screen.name
     )
+}
+
+/// A layer of a screen, e.g. `design:Faturas/fatura-detalhe/card/botão pagar`.
+pub fn layer_reference(page: &PageEntry, screen: &Screen, path: &[&str]) -> String {
+    let mut reference = screen_reference(page, screen);
+    for name in path {
+        reference.push('/');
+        reference.push_str(name);
+    }
+    reference
+}
+
+/// How a layer mention reads in the agent's composer, e.g. `fatura-detalhe › botão pagar`.
+pub fn layer_mention_title(screen: &Screen, layer: &Layer) -> String {
+    format!("{} › {}", screen.name, layer.name)
 }
 
 /// The manifests read in this session, so the agent's `@` menu can list screens without
@@ -518,6 +539,26 @@ fn page_path(cache_dir: &Path, id: &PageId) -> PathBuf {
     cache_dir.join(PAGES_DIR_NAME).join(id.file_name())
 }
 
+/// Kept out of the manifest, which is cloned on every navigator render and kept for the
+/// agent's `@` menu.
+fn page_layers_path(cache_dir: &Path, id: &PageId) -> PathBuf {
+    cache_dir.join(PAGES_DIR_NAME).join(id.layers_file_name())
+}
+
+async fn load_page_layers(fs: &dyn Fs, path: &Path) -> anyhow::Result<Vec<ScreenLayers>> {
+    let text = fs.load(path).await?;
+    Ok(serde_json::from_str(&text)?)
+}
+
+/// The layer trees of `page` as the last revalidation of `fig_path` cached them.
+pub(crate) async fn cached_page_layers(
+    fs: &dyn Fs,
+    fig_path: &Path,
+    page: &PageEntry,
+) -> anyhow::Result<Vec<ScreenLayers>> {
+    load_page_layers(fs, &page_layers_path(&cache_dir_for(fig_path), &page.id)).await
+}
+
 async fn load_manifest(fs: &dyn Fs, cache_dir: &Path) -> Option<Manifest> {
     let path = cache_dir.join(MANIFEST_FILE_NAME);
     if !fs.is_file(&path).await {
@@ -632,15 +673,28 @@ async fn revalidate_cache(
     let mut changed_pages = Vec::new();
     for (index, page) in dump.pages.iter().enumerate() {
         let rendered = render::render_page(page);
-        let hash = sha256_hex(rendered.html.as_bytes());
+        let layers = serde_json::to_string(&render::page_layers(page, rendered.origin))
+            .map_err(|error| DesignViewerError::cache(error.into()))?;
+        // Bound variables change only the layers, so they are part of what makes a page new.
+        let hash = hex::encode(
+            Sha256::new()
+                .chain_update(rendered.html.as_bytes())
+                .chain_update(layers.as_bytes())
+                .finalize(),
+        );
         let id = PageId(page.id.clone());
         let path = page_path(cache_dir, &id);
+        let layers_path = page_layers_path(cache_dir, &id);
         let unchanged = cached
             .and_then(|manifest| manifest.page(&id))
             .is_some_and(|entry| entry.hash == hash)
-            && fs.is_file(&path).await;
+            && fs.is_file(&path).await
+            && fs.is_file(&layers_path).await;
         if !unchanged {
             fs.atomic_write(path, rendered.html)
+                .await
+                .map_err(DesignViewerError::cache)?;
+            fs.atomic_write(layers_path, layers)
                 .await
                 .map_err(DesignViewerError::cache)?;
             changed_pages.push(id.clone());
@@ -680,15 +734,20 @@ async fn revalidate_cache(
             .iter()
             .filter(|old| !pages.iter().any(|page| page.id == old.id))
         {
-            fs.remove_file(
-                &page_path(cache_dir, &removed.id),
-                RemoveOptions {
-                    recursive: false,
-                    ignore_if_not_exists: true,
-                },
-            )
-            .await
-            .map_err(DesignViewerError::cache)?;
+            for path in [
+                page_path(cache_dir, &removed.id),
+                page_layers_path(cache_dir, &removed.id),
+            ] {
+                fs.remove_file(
+                    &path,
+                    RemoveOptions {
+                        recursive: false,
+                        ignore_if_not_exists: true,
+                    },
+                )
+                .await
+                .map_err(DesignViewerError::cache)?;
+            }
             changed_pages.push(removed.id.clone());
         }
     }
@@ -782,6 +841,25 @@ impl DesignDocument {
             .as_ref()?
             .page(page_id)
             .map(|_| page_path(&self.cache_dir, page_id))
+    }
+
+    pub fn load_layers(
+        &self,
+        page_id: &PageId,
+        cx: &App,
+    ) -> Task<anyhow::Result<Arc<Vec<ScreenLayers>>>> {
+        if self
+            .manifest
+            .as_ref()
+            .is_none_or(|manifest| manifest.page(page_id).is_none())
+        {
+            return Task::ready(Err(anyhow::anyhow!(
+                "page {page_id} is not in the manifest"
+            )));
+        }
+        let fs = self.fs.clone();
+        let path = page_layers_path(&self.cache_dir, page_id);
+        cx.background_spawn(async move { load_page_layers(fs.as_ref(), &path).await.map(Arc::new) })
     }
 
     pub fn revalidate(&mut self, cx: &mut Context<Self>) {
@@ -954,11 +1032,14 @@ mod tests {
                 "name": format!("Page {id}"),
                 "background": { "r": 0, "g": 0, "b": 0, "a": 1 },
                 "children": [{
+                    "id": format!("{id}-screen"),
                     "type": "FRAME",
                     "name": "Screen",
                     "box": { "x": 100, "y": 50, "width": 300, "height": 200 },
                     "children": [{
+                        "id": format!("{id}-label"),
                         "type": "TEXT",
+                        "name": "label",
                         "box": { "x": 110, "y": 60, "width": 100, "height": 20 },
                         "characters": label,
                     }],
@@ -1024,6 +1105,17 @@ mod tests {
         );
         let screen = &first.manifest.pages[0].screens[0];
         assert_eq!((screen.bounds.x, screen.bounds.y), (0.0, 0.0));
+        let layers = load_page_layers(
+            fs.as_ref(),
+            &page_layers_path(Path::new(CACHE), &PageId("0:1".into())),
+        )
+        .await
+        .expect("layers were written");
+        assert_eq!(layers.len(), 1);
+        assert_eq!(layers[0].screen_id, "0:1-screen");
+        let label = &layers[0].layers[0];
+        assert_eq!(label.name, "label");
+        assert_eq!((label.bounds.x, label.bounds.y), (10.0, 10.0));
 
         let loaded = load_manifest(fs.as_ref(), Path::new(CACHE))
             .await

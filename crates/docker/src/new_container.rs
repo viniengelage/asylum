@@ -6,10 +6,10 @@ use crate::{
     CreateContainer as CreateAction,
     client::{CreateContainer, CreateHostConfig, DockerError, PortBinding, RestartPolicy},
     format_bytes,
-    panel::{caption, mono, mono_input, text},
+    panel::{mono, mono_input, text},
     store::DockerStore,
 };
-use collections::HashMap;
+use collections::{HashMap, HashSet};
 use editor::{Editor, EditorEvent};
 use gpui::{
     ClipboardItem, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
@@ -20,7 +20,9 @@ use std::path::{Path, PathBuf};
 use tokio::sync::mpsc;
 use ui::{
     CommonAnimationExt as _, ContextMenu, KeyBinding, PopoverMenu, PopoverTriggerArea, Tooltip,
-    modal_surface, prelude::*, toggle_switch,
+    card, modal_footer, modal_surface, pill_button, prelude::*, primary_button, secondary_button,
+    section_label, segment_option, segmented_control, select_field, status_chip, text_field,
+    toggle_switch,
 };
 use util::ResultExt as _;
 use workspace::{ModalView, Toast, Workspace, notifications::NotificationId};
@@ -304,6 +306,32 @@ impl NewContainerModal {
             return Some((describe(container, owner), false));
         }
         None
+    }
+
+    fn published_ports(&self, cx: &App) -> HashSet<u16> {
+        self.store
+            .read(cx)
+            .containers()
+            .iter()
+            .filter(|container| container.state.is_up())
+            .flat_map(|container| {
+                container
+                    .published_ports()
+                    .into_iter()
+                    .map(|(public, _)| public)
+            })
+            .collect()
+    }
+
+    fn next_free_port(&self, from: u16, cx: &App) -> Option<u16> {
+        next_free_port(from, &self.published_ports(cx))
+    }
+
+    fn use_host_port(&mut self, port: u16, window: &mut Window, cx: &mut Context<Self>) {
+        self.host_port.update(cx, |editor, cx| {
+            editor.set_text(port.to_string(), window, cx)
+        });
+        cx.notify();
     }
 
     fn local_image(&self, cx: &App) -> Option<i64> {
@@ -653,54 +681,11 @@ impl NewContainerModal {
                 Some(width) => this.w(px(width)).flex_none(),
                 None => this.flex_1().min_w_0(),
             })
-            .child(field_label(label))
+            .child(section_label(label))
             .child(
-                input_box(editor, 32., window, cx)
-                    .child(div().flex_1().child(mono_input(editor, 12.5, cx))),
+                input_field(editor, window, cx)
+                    .child(div().flex_1().min_w_0().child(mono_input(editor, 12.5, cx))),
             )
-    }
-
-    fn render_mode(
-        &self,
-        value: Mode,
-        icon: IconName,
-        label: SharedString,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let colors = cx.theme().colors();
-        let active = self.mode == value;
-        h_flex()
-            .id(match value {
-                Mode::Image => "docker-mode-image",
-                Mode::ComposeService => "docker-mode-compose-service",
-            })
-            .h(px(24.))
-            .px(px(10.))
-            .gap(px(6.))
-            .rounded(px(6.))
-            .cursor_pointer()
-            .when(active, |this| this.bg(colors.element_selected))
-            .when(!active, |this| {
-                this.hover(|this| this.bg(colors.ghost_element_hover))
-            })
-            .child(Icon::new(icon).size(IconSize::XSmall).color(if active {
-                Color::Default
-            } else {
-                Color::Muted
-            }))
-            .child(
-                text(label, 12.)
-                    .weight(if active {
-                        FontWeight::BOLD
-                    } else {
-                        FontWeight::MEDIUM
-                    })
-                    .color(if active { Color::Default } else { Color::Muted }),
-            )
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.mode = value;
-                cx.notify();
-            }))
     }
 
     fn render_option(
@@ -739,7 +724,7 @@ impl NewContainerModal {
                     .child(
                         div()
                             .flex_1()
-                            .child(field_label(t!("docker.new_container.env"))),
+                            .child(section_label(t!("docker.new_container.env"))),
                     )
                     .when_some(env_file, |this, path| {
                         this.child(
@@ -769,16 +754,21 @@ impl NewContainerModal {
                     .w_full()
                     .gap(px(8.))
                     .child(
-                        input_box(&row.key, 30., window, cx)
+                        input_field(&row.key, window, cx)
                             .w(px(200.))
                             .flex_none()
-                            .child(div().flex_1().child(env_key_input(&row.key, cx))),
+                            .child(div().flex_1().min_w_0().child(env_key_input(&row.key, cx))),
                     )
                     .child(
-                        input_box(&row.value, 30., window, cx)
+                        input_field(&row.value, window, cx)
                             .flex_1()
                             .gap(px(8.))
-                            .child(div().flex_1().child(mono_input(&row.value, 12., cx)))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(mono_input(&row.value, 12., cx)),
+                            )
                             .when(secret, |this| {
                                 this.child(
                                     IconButton::new(
@@ -828,23 +818,14 @@ impl NewContainerModal {
             .w(px(200.))
             .flex_none()
             .gap(px(6.))
-            .child(field_label(t!("docker.new_container.network")))
+            .child(section_label(t!("docker.new_container.network")))
             .child(
                 PopoverMenu::new("docker-network")
-                    .trigger(PopoverTriggerArea::new(
-                        select_box("docker-network-trigger", cx)
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .child(mono(current, 12., Color::Default, cx).truncate()),
-                            )
-                            .child(
-                                Icon::new(IconName::ChevronDown)
-                                    .size(IconSize::XSmall)
-                                    .color(Color::Muted),
-                            ),
-                    ))
+                    .trigger(PopoverTriggerArea::new(select_field(
+                        "docker-network-trigger",
+                        current,
+                        cx,
+                    )))
                     .menu(move |window, cx| {
                         let this = this.clone();
                         let networks = networks.clone();
@@ -874,42 +855,12 @@ fn file_name(path: &Path) -> String {
         .unwrap_or_else(|| path.display().to_string())
 }
 
-fn field_label(label: SharedString) -> Label {
-    text(label, 11.5)
-        .weight(FontWeight::MEDIUM)
-        .color(Color::Muted)
+fn input_field(editor: &Entity<Editor>, window: &Window, cx: &App) -> Div {
+    text_field(editor.focus_handle(cx).contains_focused(window, cx), cx)
 }
 
-fn input_box(editor: &Entity<Editor>, height: f32, window: &Window, cx: &App) -> Div {
-    let colors = cx.theme().colors();
-    let focused = editor.focus_handle(cx).contains_focused(window, cx);
-    h_flex()
-        .w_full()
-        .h(px(height))
-        .px(px(10.))
-        .rounded(px(6.))
-        .border_1()
-        .border_color(if focused {
-            colors.border_focused
-        } else {
-            colors.border
-        })
-        .bg(colors.editor_background)
-}
-
-fn select_box(id: &'static str, cx: &App) -> gpui::Stateful<Div> {
-    let colors = cx.theme().colors();
-    h_flex()
-        .id(id)
-        .w_full()
-        .h(px(32.))
-        .px(px(10.))
-        .gap(px(6.))
-        .rounded(px(6.))
-        .border_1()
-        .border_color(colors.border)
-        .bg(colors.editor_background)
-        .hover(|this| this.bg(colors.ghost_element_hover))
+fn next_free_port(from: u16, used: &HashSet<u16>) -> Option<u16> {
+    (from.checked_add(1)?..=u16::MAX).find(|port| !used.contains(port))
 }
 
 /// Env keys are drawn in the accent, as in the board.
@@ -1055,12 +1006,17 @@ fn yaml_scalar(value: &str) -> String {
 
 impl Render for NewContainerModal {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let colors = cx.theme().colors().clone();
         let port_note = self.port_note(cx);
+        let free_port = match &port_note {
+            Some((_, true)) => self
+                .ports(cx)
+                .and_then(|(host, _)| self.next_free_port(host, cx)),
+            _ => None,
+        };
+        let port_conflict = matches!(port_note, Some((_, true)));
         let local_image = self.local_image(cx);
         let image_text = Self::field(&self.image, cx);
         let command = self.command(cx);
-        let image_focused = self.image.focus_handle(cx).contains_focused(window, cx);
         let compose = self.mode == Mode::ComposeService;
         let primary_label = match (compose, self.start_now) {
             (true, true) => t!("docker.new_container.write_and_start"),
@@ -1075,7 +1031,6 @@ impl Render for NewContainerModal {
             .on_action(cx.listener(Self::cancel))
             .on_action(cx.listener(|this, _: &CreateAction, window, cx| this.create(window, cx)))
             .w(px(580.))
-            .bg(colors.elevated_surface_background)
             .child(
                 h_flex()
                     .w_full()
@@ -1087,7 +1042,7 @@ impl Render for NewContainerModal {
                             .size(px(36.))
                             .flex_none()
                             .justify_center()
-                            .rounded(px(8.))
+                            .rounded(Radius::Md.rems())
                             .bg(Color::Accent.color(cx).opacity(0.16))
                             .child(Icon::new(IconName::Box).size(IconSize::Medium).color(Color::Accent)),
                     )
@@ -1115,26 +1070,34 @@ impl Render for NewContainerModal {
                     .px(px(20.))
                     .pb(px(18.))
                     .child(
-                        h_flex()
-                            .h(px(30.))
-                            .p(px(2.))
-                            .gap(px(2.))
-                            .rounded(px(8.))
-                            .border_1()
-                            .border_color(colors.border)
-                            .bg(colors.editor_background)
-                            .child(self.render_mode(
-                                Mode::Image,
-                                IconName::Box,
-                                t!("docker.new_container.mode_image"),
-                                cx,
-                            ))
-                            .child(self.render_mode(
-                                Mode::ComposeService,
-                                IconName::Blocks,
-                                t!("docker.new_container.mode_compose_service"),
-                                cx,
-                            )),
+                        segmented_control(cx)
+                            .w(px(320.))
+                            .child(
+                                segment_option(
+                                    "docker-mode-image",
+                                    t!("docker.new_container.mode_image"),
+                                    !compose,
+                                    true,
+                                    cx,
+                                )
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.mode = Mode::Image;
+                                    cx.notify();
+                                })),
+                            )
+                            .child(
+                                segment_option(
+                                    "docker-mode-compose-service",
+                                    t!("docker.new_container.mode_compose_service"),
+                                    compose,
+                                    true,
+                                    cx,
+                                )
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.mode = Mode::ComposeService;
+                                    cx.notify();
+                                })),
+                            ),
                     )
                     .child(
                         h_flex()
@@ -1146,34 +1109,31 @@ impl Render for NewContainerModal {
                                     .flex_1()
                                     .min_w_0()
                                     .gap(px(6.))
-                                    .child(field_label(t!("docker.new_container.image")))
+                                    .child(section_label(t!("docker.new_container.image")))
                                     .child(
-                                        input_box(&self.image, 32., window, cx)
+                                        input_field(&self.image, window, cx)
                                             .gap(px(8.))
-                                            .when(image_focused, |this| this.border_color(colors.border_focused))
                                             .child(
                                                 Icon::new(IconName::CloudDownload)
                                                     .size(IconSize::Small)
                                                     .color(Color::Muted),
                                             )
-                                            .child(div().flex_1().child(mono_input(&self.image, 12.5, cx)))
+                                            .child(div().flex_1().min_w_0().child(mono_input(&self.image, 12.5, cx)))
                                             .when(!image_text.is_empty(), |this| {
-                                                this.child(
-                                                    h_flex()
-                                                        .py(px(2.))
-                                                        .px(px(6.))
-                                                        .rounded(px(4.))
-                                                        .bg(colors.element_selected)
-                                                        .child(match local_image {
-                                                            Some(size) => mono(
-                                                                t!("docker.new_container.image_local", size = format_bytes(size.max(0) as u64)),
-                                                                10.5,
-                                                                Color::Success,
-                                                                cx,
-                                                            ),
-                                                            None => mono(t!("docker.new_container.image_pulled_on_create"), 10.5, Color::Placeholder, cx),
-                                                        }),
-                                                )
+                                                this.child(match local_image {
+                                                    Some(size) => status_chip(
+                                                        None,
+                                                        t!("docker.new_container.image_local", size = format_bytes(size.max(0) as u64)),
+                                                        Color::Success,
+                                                        cx,
+                                                    ),
+                                                    None => status_chip(
+                                                        None,
+                                                        t!("docker.new_container.image_pulled_on_create"),
+                                                        Color::Muted,
+                                                        cx,
+                                                    ),
+                                                })
                                             }),
                                     ),
                             )
@@ -1193,23 +1153,26 @@ impl Render for NewContainerModal {
                         v_flex()
                             .w_full()
                             .gap(px(6.))
-                            .child(field_label(t!("docker.new_container.ports")))
+                            .child(section_label(t!("docker.new_container.ports")))
                             .child(
                                 h_flex()
                                     .w_full()
                                     .gap(px(8.))
                                     .child(
-                                        input_box(&self.host_port, 32., window, cx)
+                                        input_field(&self.host_port, window, cx)
                                             .w(px(96.))
                                             .flex_none()
-                                            .child(div().flex_1().child(mono_input(&self.host_port, 12.5, cx))),
+                                            .when(port_conflict, |this| {
+                                                this.border_color(Color::Warning.color(cx))
+                                            })
+                                            .child(div().flex_1().min_w_0().child(mono_input(&self.host_port, 12.5, cx))),
                                     )
                                     .child(Icon::new(IconName::ArrowRight).size(IconSize::Small))
                                     .child(
-                                        input_box(&self.container_port, 32., window, cx)
+                                        input_field(&self.container_port, window, cx)
                                             .w(px(96.))
                                             .flex_none()
-                                            .child(div().flex_1().child(mono_input(&self.container_port, 12.5, cx))),
+                                            .child(div().flex_1().min_w_0().child(mono_input(&self.container_port, 12.5, cx))),
                                     )
                                     .when_some(port_note, |this, (note, conflict)| {
                                         this.child(
@@ -1220,6 +1183,20 @@ impl Render for NewContainerModal {
                                                     Color::Placeholder
                                                 }),
                                             ),
+                                        )
+                                    })
+                                    .when_some(free_port, |this, port| {
+                                        this.child(
+                                            pill_button(
+                                                "docker-use-free-port",
+                                                None,
+                                                t!("docker.new_container.use_port", port = port),
+                                                true,
+                                                cx,
+                                            )
+                                            .on_click(cx.listener(move |this, _, window, cx| {
+                                                this.use_host_port(port, window, cx)
+                                            })),
                                         )
                                     }),
                             ),
@@ -1265,18 +1242,13 @@ impl Render for NewContainerModal {
                     .when(!compose, |this| {
                         let copy = self.command_for_clipboard(cx);
                         this.child(
-                            v_flex()
-                                .w_full()
+                            card(cx)
                                 .gap(px(6.))
                                 .p(px(12.))
-                                .rounded(px(8.))
-                                .border_1()
-                                .border_color(colors.border)
-                                .bg(colors.editor_background)
                                 .child(
                                     h_flex()
                                         .w_full()
-                                        .child(div().flex_1().child(caption(t!("docker.new_container.equivalent_command"))))
+                                        .child(div().flex_1().child(section_label(t!("docker.new_container.equivalent_command"))))
                                         .child(
                                             IconButton::new("docker-copy-command", IconName::Copy)
                                                 .icon_size(IconSize::XSmall)
@@ -1287,17 +1259,12 @@ impl Render for NewContainerModal {
                                                 }),
                                         ),
                                 )
-                                .child(mono(command, 11.5, Color::Custom(colors.editor_foreground), cx)),
+                                .child(mono(command, 11.5, Color::Default, cx)),
                         )
                     }),
             )
             .child(
-                h_flex()
-                    .w_full()
-                    .h(px(56.))
-                    .px(px(20.))
-                    .gap(px(8.))
-                    .bg(colors.element_background)
+                modal_footer(cx)
                     .child(div().flex_1().min_w_0().child(match &self.progress {
                         Progress::Idle => mono(t!("docker.new_container.escape_hint"), 11.5, Color::Placeholder, cx).into_any_element(),
                         Progress::Working(message) => h_flex()
@@ -1315,39 +1282,24 @@ impl Render for NewContainerModal {
                             .into_any_element(),
                     }))
                     .child(
-                        h_flex()
-                            .id("docker-new-cancel")
-                            .h(px(28.))
-                            .px(px(10.))
-                            .rounded(px(6.))
-                            .border_1()
-                            .border_color(colors.border_selected)
-                            .cursor_pointer()
-                            .hover(|this| this.bg(colors.ghost_element_hover))
-                            .child(
-                                text(t!("docker.new_container.cancel"), 12.5)
-                                    .weight(FontWeight::MEDIUM)
-                                    .color(Color::Custom(colors.editor_foreground)),
-                            )
-                            .on_click(cx.listener(|_, _, _, cx| cx.emit(DismissEvent))),
+                        secondary_button(
+                            "docker-new-cancel",
+                            None,
+                            t!("docker.new_container.cancel"),
+                            true,
+                            cx,
+                        )
+                        .on_click(cx.listener(|_, _, _, cx| cx.emit(DismissEvent))),
                     )
                     .child(
-                        h_flex()
-                            .id("docker-new-create")
-                            .h(px(28.))
-                            .px(px(10.))
-                            .gap(px(6.))
-                            .rounded(px(6.))
-                            .bg(colors.border_focused)
-                            .cursor_pointer()
-                            .hover(|this| this.opacity(0.9))
-                            .child(text(primary_label, 12.5).weight(FontWeight::BOLD))
-                            .child(
-                                KeyBinding::for_action_in(&CreateAction, &focus_handle, cx)
-                                    .size(rems_from_px(11_f32))
-                                    .color(Color::Custom(colors.text.opacity(0.6))),
-                            )
-                            .on_click(cx.listener(|this, _, window, cx| this.create(window, cx))),
+                        primary_button(
+                            "docker-new-create",
+                            None,
+                            primary_label,
+                            Some(KeyBinding::for_action_in(&CreateAction, &focus_handle, cx)),
+                            cx,
+                        )
+                        .on_click(cx.listener(|this, _, window, cx| this.create(window, cx))),
                     ),
             )
     }
@@ -1410,6 +1362,14 @@ mod tests {
             "services:\n  api:\n    build: ./api\n  pg-testes:\n    image: postgres:16-alpine\n    ports: [\"5433:5432\"]\n    environment:\n      POSTGRES_DB: trix_test\n      POSTGRES_PASSWORD: \"s3cr3t: yes\"\n    volumes: [pgtest:/var/lib/postgresql/data]\n\nvolumes:\n  pgdata:\n  pgtest:\n"
         );
         assert!(add_service(&updated, &service()).is_err());
+    }
+
+    #[test]
+    fn suggests_the_next_free_port() {
+        let used: HashSet<u16> = [5432, 5433, 5435].into_iter().collect();
+        assert_eq!(next_free_port(5432, &used), Some(5434));
+        assert_eq!(next_free_port(8080, &used), Some(8081));
+        assert_eq!(next_free_port(u16::MAX, &used), None);
     }
 
     #[test]

@@ -1,7 +1,7 @@
 use gpui::{AnyElement, Div, FontWeight, px};
 use smallvec::SmallVec;
 
-use crate::{CommonAnimationExt, prelude::*};
+use crate::{CommonAnimationExt, StatusTone, prelude::*};
 
 pub fn section_label(text: impl Into<SharedString>) -> Label {
     Label::new(text)
@@ -18,6 +18,31 @@ pub fn section_header(text: impl Into<SharedString>, end: Option<AnyElement>) ->
         .justify_between()
         .child(section_label(text))
         .children(end)
+}
+
+/// The boards' navigator footer: a status dot and a subtle line on the left, an action on the
+/// right.
+pub fn navigator_footer(
+    status: Option<StatusTone>,
+    text: impl Into<SharedString>,
+    action: Option<AnyElement>,
+    cx: &App,
+) -> Div {
+    h_flex()
+        .w_full()
+        .flex_none()
+        .px_3()
+        .gap_2()
+        .when_some(status, |this, status| this.child(status.dot(cx)))
+        .child(
+            div().flex_1().min_w_0().child(
+                Label::new(text)
+                    .size(LabelSize::Custom(rems_from_px(11_f32)))
+                    .color(Color::Placeholder)
+                    .truncate(),
+            ),
+        )
+        .children(action)
 }
 
 pub fn grouped_block(cx: &App) -> Div {

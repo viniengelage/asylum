@@ -44,6 +44,8 @@ actions!(
         ToggleFocus,
         /// Opens the project's board in a tab.
         OpenBoard,
+        /// Starts the inspected item: creates its branch, checks it out and moves it.
+        StartItem,
     ]
 );
 
@@ -64,10 +66,7 @@ pub fn init(cx: &mut App) {
             {
                 return;
             }
-            let project = workspace.project().clone();
-            let weak_workspace = workspace.weak_handle();
-            let panel = cx.new(|cx| TasksPanel::new(project, weak_workspace, window, cx));
-            workspace.add_panel(panel, window, cx);
+            ensure_panel(workspace, window, cx);
         },
         cx,
     );
@@ -132,13 +131,36 @@ pub fn open(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Wor
     if !toolkit_allowed(workspace, cx) {
         return;
     }
-    if workspace.panel::<TasksPanel>(cx).is_none() {
-        let project = workspace.project().clone();
-        let weak_workspace = workspace.weak_handle();
-        let panel = cx.new(|cx| TasksPanel::new(project, weak_workspace, window, cx));
-        workspace.add_panel(panel, window, cx);
-    }
+    ensure_panel(workspace, window, cx);
     workspace.focus_panel::<TasksPanel>(window, cx);
+}
+
+pub(crate) fn ensure_panel(
+    workspace: &mut Workspace,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) -> Entity<TasksPanel> {
+    if let Some(panel) = workspace.panel::<TasksPanel>(cx) {
+        return panel;
+    }
+    let project = workspace.project().clone();
+    let weak_workspace = workspace.weak_handle();
+    let panel = cx.new(|cx| TasksPanel::new(project, weak_workspace, window, cx));
+    workspace.add_panel(panel.clone(), window, cx);
+    panel
+}
+
+/// Shows `item_id` in the dock's inspector, or the dock's list when `None`. The board selects
+/// through here so the dock and the board agree on the selected item.
+pub(crate) fn inspect_item(
+    workspace: &mut Workspace,
+    item_id: Option<String>,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    let panel = ensure_panel(workspace, window, cx);
+    workspace.reveal_panel::<TasksPanel>(window, cx);
+    panel.update(cx, |panel, cx| panel.inspect(item_id, cx));
 }
 
 /// One [`RepositoryProjects`] per GitHub repository, shared by every window that has it open.

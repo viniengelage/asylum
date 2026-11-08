@@ -7,13 +7,14 @@ use crate::{
     completion::{SchemaCache, SqlCompletionProvider},
     connection::SavedConnection,
     grid::{GridColumn, GridEvent, ResultGrid},
-    panel::{chip, environment_color, segment},
+    panel::{connection_chip, segment},
     session::{QueryOutcome, ServerError, Session},
     statements::{self, Statement, StatementKind, Transaction},
     write_guard::{Decision, WriteGuard},
 };
 use editor::{
-    Editor, EditorEvent, HighlightKey, MultiBufferOffset, SelectionEffects, ToOffset as _,
+    Editor, EditorEvent, HighlightKey, MultiBufferOffset, RowHighlightOptions, SelectionEffects,
+    ToOffset as _,
 };
 use gpui::{
     Animation, AnimationExt as _, AnyElement, AnyWindowHandle, ClipboardItem, DragMoveEvent, Empty,
@@ -31,7 +32,9 @@ use std::{
     time::{Duration, Instant},
 };
 use ui::{
-    Indicator, KeyBinding, Tooltip, prelude::*, primary_button, secondary_button, segmented_control,
+    ContextMenu, KeyBinding, PopoverMenu, PopoverTriggerArea, StatusTone, Tooltip, prelude::*,
+    primary_button, secondary_button, segmented_control, status_chip, status_chip_spinning,
+    status_pill,
 };
 use util::ResultExt as _;
 use workspace::{
@@ -47,6 +50,7 @@ const MIN_EDITOR_HEIGHT: Pixels = px(80.);
 
 /// Dragged by the bar between the editor and the results.
 struct DraggedResultsDivider;
+struct CursorStatement;
 /// How much of the editor goes to the agent when the tab is mentioned.
 const MAX_AGENT_SQL_CHARS: usize = 20_000;
 
@@ -316,12 +320,18 @@ impl SqlQueryView {
                     if matches!(this.state, RunState::Failed(_)) {
                         this.clear_highlight(HighlightKey::DatabaseError, cx);
                     }
+                    if !this.is_running() {
+                        this.highlight_cursor_statement(cx);
+                    }
                     cx.emit(ItemEvent::Edit);
+                }
+                EditorEvent::SelectionsChanged { .. } if !this.is_running() => {
+                    this.highlight_cursor_statement(cx);
                 }
                 _ => {}
             }),
         ];
-        Self {
+        let mut this = Self {
             workspace,
             project_id: project.entity_id(),
             window: window.window_handle(),
@@ -344,7 +354,9 @@ impl SqlQueryView {
             tick_task: Task::ready(()),
             cancel_task: Task::ready(()),
             _subscriptions: subscriptions,
-        }
+        };
+        this.highlight_cursor_statement(cx);
+        this
     }
 
     pub(crate) fn path(&self) -> &Path {
@@ -453,10 +465,56 @@ impl SqlQueryView {
         self.editor.update(cx, |editor, cx| {
             editor.clear_background_highlights(key, cx);
         });
+        if key == HighlightKey::DatabaseStatement {
+            self.highlight_cursor_statement(cx);
+        }
+    }
+
+    fn highlight_cursor_statement(&mut self, cx: &mut Context<Self>) {
+        self.editor.update(cx, |editor, cx| {
+            editor.clear_row_highlights::<CursorStatement>();
+            editor.clear_gutter_highlights::<CursorStatement>(cx);
+            let text = editor.text(cx);
+            let snapshot = editor.buffer().read(cx).snapshot(cx);
+            let cursor = editor
+                .selections
+                .newest_anchor()
+                .head()
+                .to_offset(&snapshot)
+                .0
+                .min(text.len());
+            let all = statements::split(&text);
+            let Some(statement) = statements::statement_at(&all, cursor) else {
+                return;
+            };
+            let range = snapshot.anchor_before(MultiBufferOffset(statement.range.start))
+                ..snapshot.anchor_after(MultiBufferOffset(statement.range.end));
+            editor.highlight_rows::<CursorStatement>(
+                range.clone(),
+                |cx| cx.theme().colors().border_focused.opacity(0.06),
+                RowHighlightOptions {
+                    autoscroll: false,
+                    include_gutter: false,
+                },
+                cx,
+            );
+            editor.highlight_gutter::<CursorStatement>(
+                vec![range],
+                |cx| cx.theme().colors().border_focused,
+                cx,
+            );
+        });
     }
 
     fn highlight(&mut self, key: HighlightKey, ranges: Vec<Range<usize>>, cx: &mut Context<Self>) {
         let error = key == HighlightKey::DatabaseError;
+        if key == HighlightKey::DatabaseStatement {
+            // The running statement gets its own highlight; two tints on one row would blur it.
+            self.editor.update(cx, |editor, cx| {
+                editor.clear_row_highlights::<CursorStatement>();
+                editor.clear_gutter_highlights::<CursorStatement>(cx);
+            });
+        }
         self.editor.update(cx, |editor, cx| {
             let snapshot = editor.buffer().read(cx).snapshot(cx);
             let anchors = ranges
@@ -694,9 +752,12 @@ impl SqlQueryView {
         let session = self.session.clone();
         let panel_session = self.panel_session.clone();
         let in_transaction = self.in_transaction;
+        let read_only = self.connection.read_only;
         self.run_task = cx.spawn(async move |this, cx| {
             let session = match session {
                 Some(session) => Ok(session),
+                // The dock's Leitura mode can be on for a connection saved as read-write.
+                None if read_only => panel_session.connect_read_only().await.map(Arc::new),
                 None => panel_session.connect_again().await.map(Arc::new),
             };
             let session = match session {
@@ -974,11 +1035,6 @@ impl SqlQueryView {
         window.focus(&self.editor.focus_handle(cx), cx);
     }
 
-    fn copy_as_csv(&self, cx: &mut Context<Self>) {
-        let csv = self.grid.read(cx).to_csv();
-        cx.write_to_clipboard(ClipboardItem::new_string(csv));
-    }
-
     fn copy_as_insert(&self, cx: &mut Context<Self>) {
         let sql = self.grid.read(cx).to_insert("resultado");
         cx.write_to_clipboard(ClipboardItem::new_string(sql));
@@ -1044,81 +1100,72 @@ impl SqlQueryView {
         .detach_and_log_err(cx);
     }
 
+    fn format_sql(&mut self, cx: &mut Context<Self>) {
+        self.editor.update(cx, |editor, cx| {
+            let text = editor.text(cx);
+            let selection = editor
+                .selections
+                .newest::<MultiBufferOffset>(&editor.display_snapshot(cx));
+            let whole_file = selection.is_empty();
+            let range = if whole_file {
+                0..text.len()
+            } else {
+                selection.start.0..selection.end.0
+            };
+            let Some(source) = text.get(range.clone()) else {
+                return;
+            };
+            let mut formatted = sqlformat::format(
+                source,
+                &sqlformat::QueryParams::None,
+                sqlformat::FormatOptions::default(),
+            );
+            if whole_file && source.ends_with('\n') {
+                formatted.push('\n');
+            }
+            if formatted != source {
+                editor.edit(
+                    [(
+                        MultiBufferOffset(range.start)..MultiBufferOffset(range.end),
+                        formatted,
+                    )],
+                    cx,
+                );
+            }
+        });
+    }
+
     fn render_toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
         let running = self.is_running();
         let connection = &self.connection;
-        let environment = environment_color(connection.environment);
-        let saved_in = self
-            .path
-            .to_string_lossy()
-            .split_once(".asylum/")
-            .map(|(_, rest)| {
-                t!(
-                    "database_client.query.saved_in",
-                    path = format!(".asylum/{rest}")
-                )
-            });
+        let editor_focus = self.editor.focus_handle(cx);
         h_flex()
             .h(px(52.))
             .flex_none()
             .px_3()
             .gap_2()
             .child(
-                h_flex()
-                    .h(px(32.))
-                    .px_2p5()
-                    .gap_2()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(cx.theme().colors().border_selected)
-                    .child(Indicator::dot().color(environment))
-                    .child(
-                        Label::new(connection.name.clone())
-                            .size(LabelSize::Small)
-                            .weight(FontWeight::SEMIBOLD),
-                    )
-                    .child(
-                        Label::new(connection.environment.label())
-                            .size(LabelSize::XSmall)
-                            .color(Color::Muted),
+                connection_chip("db-query-connection", connection, cx).tooltip(Tooltip::text(
+                    format!(
+                        "{} · {}",
+                        connection.environment.label(),
+                        connection.address_with_tunnel()
                     ),
+                )),
             )
-            .child(
-                chip(cx).child(
-                    Label::new(if self.in_transaction {
-                        t!("database_client.query.transaction_open")
-                    } else {
-                        t!("database_client.query.auto_commit")
-                    })
-                    .size(LabelSize::XSmall)
-                    .color(if self.in_transaction {
-                        Color::Warning
-                    } else {
-                        Color::Default
-                    }),
-                ),
-            )
-            .when(connection.read_only, |this| {
-                this.child(chip(cx).child(
-                    Label::new(t!("database_client.panel.read_only")).size(LabelSize::XSmall),
+            .child(status_chip(
+                None,
+                t!("database_client.query.limit_chip", limit = ROW_LIMIT),
+                Color::Muted,
+                cx,
+            ))
+            .when(self.in_transaction, |this| {
+                this.child(status_chip(
+                    None,
+                    t!("database_client.query.transaction_open"),
+                    Color::Warning,
+                    cx,
                 ))
-            })
-            .child(
-                chip(cx).child(
-                    Label::new(t!("database_client.query.limit_chip", limit = ROW_LIMIT))
-                        .size(LabelSize::XSmall),
-                ),
-            )
-            .when_some(saved_in, |this, saved_in| {
-                this.child(
-                    div().min_w_0().child(
-                        Label::new(saved_in)
-                            .size(LabelSize::XSmall)
-                            .buffer_font(cx)
-                            .color(Color::Muted)
-                            .truncate(),
-                    ),
-                )
             })
             .child(div().flex_1())
             .when(self.in_transaction && !running, |this| {
@@ -1143,56 +1190,44 @@ impl SqlQueryView {
                 )
             })
             .child(
-                secondary_button(
-                    "db-explain",
-                    Some((IconName::ListTree, Color::Muted)),
-                    "EXPLAIN",
-                    !running,
-                    cx,
-                )
-                .when(!running, |this| {
-                    this.on_click(
-                        cx.listener(|this, _, window, cx| this.run(Scope::Explain, window, cx)),
-                    )
-                }),
+                Button::new("db-format", t!("database_client.query.format"))
+                    .style(ButtonStyle::Subtle)
+                    .label_size(LabelSize::Small)
+                    .disabled(running)
+                    .on_click(cx.listener(|this, _, _, cx| this.format_sql(cx))),
             )
-            .child(if running {
-                let error = Color::Error.color(cx);
-                h_flex()
-                    .id("db-cancel-query")
-                    .h(px(30.))
-                    .px_3()
-                    .gap_1p5()
-                    .rounded_md()
-                    .cursor_pointer()
-                    .bg(error.opacity(0.06))
-                    .border_1()
-                    .border_color(error)
+            .child(
+                secondary_button("db-explain", None, "EXPLAIN", !running, cx)
                     .child(
-                        div()
-                            .size(px(9.))
-                            .rounded(px(2.))
-                            .bg(cx.theme().colors().text),
-                    )
-                    .child(Label::new(t!("database_client.query.cancel")).size(LabelSize::Small))
-                    .child(
-                        KeyBinding::for_action_in(&CancelQuery, &self.editor.focus_handle(cx), cx)
+                        KeyBinding::for_action_in(&ExplainStatement, &editor_focus, cx)
                             .size(rems_from_px(12_f32)),
                     )
-                    .on_click(
-                        cx.listener(|this, _, window, cx| this.cancel(&CancelQuery, window, cx)),
-                    )
-                    .into_any_element()
+                    .when(!running, |this| {
+                        this.on_click(
+                            cx.listener(|this, _, window, cx| this.run(Scope::Explain, window, cx)),
+                        )
+                    }),
+            )
+            .child(if running {
+                secondary_button(
+                    "db-cancel-query",
+                    Some((IconName::Stop, Color::Error)),
+                    t!("database_client.query.cancel"),
+                    true,
+                    cx,
+                )
+                .child(
+                    KeyBinding::for_action_in(&CancelQuery, &editor_focus, cx)
+                        .size(rems_from_px(12_f32)),
+                )
+                .on_click(cx.listener(|this, _, window, cx| this.cancel(&CancelQuery, window, cx)))
+                .into_any_element()
             } else {
                 primary_button(
                     "db-run",
                     Some(IconName::PlayFilled),
                     t!("database_client.query.run"),
-                    Some(KeyBinding::for_action_in(
-                        &RunStatement,
-                        &self.editor.focus_handle(cx),
-                        cx,
-                    )),
+                    Some(KeyBinding::for_action_in(&RunStatement, &editor_focus, cx)),
                     cx,
                 )
                 .on_click(cx.listener(|this, _, window, cx| this.run(Scope::Statement, window, cx)))
@@ -1272,15 +1307,6 @@ impl SqlQueryView {
             .border_color(cx.theme().colors().border)
             .child(Icon::new(icon).size(IconSize::Small).color(color))
             .child(Label::new(message).size(LabelSize::Small))
-            .when(!self.is_running(), |this| {
-                this.child(
-                    div().pl_4().child(
-                        Label::new(t!("database_client.query.shortcuts_hint"))
-                            .size(LabelSize::XSmall)
-                            .color(Color::Muted),
-                    ),
-                )
-            })
             .child(div().flex_1())
             .child(
                 Label::new(format!("Ln {}, Col {}", point.row + 1, point.column + 1))
@@ -1291,63 +1317,95 @@ impl SqlQueryView {
             .into_any_element()
     }
 
-    fn render_state_chip(&self, cx: &App) -> AnyElement {
-        let (icon, label, color, mono) = match &self.state {
-            RunState::Idle => return Empty.into_any_element(),
-            RunState::Running { .. } => (
-                Some(IconName::LoadCircle),
+    fn render_state_pill(&self, cx: &App) -> AnyElement {
+        match &self.state {
+            RunState::Idle => Empty.into_any_element(),
+            RunState::Running { .. } => status_chip_spinning(
+                IconName::LoadCircle,
                 t!("database_client.query.chip_running"),
                 Color::Warning,
-                false,
-            ),
+                cx,
+            )
+            .into_any_element(),
             RunState::Done {
                 rows: Some(rows),
                 truncated,
                 ..
-            } => (
-                None,
+            } => status_pill(
                 match (rows, truncated) {
                     (_, true) => t!("database_client.query.rows_truncated", count = rows),
                     (1, false) => t!("database_client.query.rows.one"),
                     (rows, false) => t!("database_client.query.rows.other", count = rows),
                 },
-                Color::Success,
-                false,
-            ),
-            RunState::Done { .. } => (
-                None,
-                t!("database_client.query.chip_ok"),
-                Color::Success,
-                false,
-            ),
-            RunState::Failed(failure) => (
-                None,
+                StatusTone::Success,
+                cx,
+            )
+            .into_any_element(),
+            RunState::Done { .. } => {
+                status_pill(t!("database_client.query.chip_ok"), StatusTone::Success, cx)
+                    .into_any_element()
+            }
+            RunState::Failed(failure) => status_pill(
                 failure
                     .server
                     .as_ref()
                     .map(|server| t!("database_client.query.chip_error_code", code = server.code))
                     .unwrap_or_else(|| t!("database_client.query.chip_error")),
-                Color::Error,
-                true,
-            ),
-        };
-        h_flex()
-            .h(px(22.))
-            .px_2()
-            .gap_1p5()
-            .rounded_md()
-            .bg(color.color(cx).opacity(0.1))
-            .map(|this| match icon {
-                Some(icon) => this.child(Icon::new(icon).size(IconSize::XSmall).color(color)),
-                None => this.child(Indicator::dot().color(color)),
-            })
-            .child(
-                Label::new(label)
-                    .size(LabelSize::XSmall)
-                    .weight(FontWeight::SEMIBOLD)
-                    .color(color)
-                    .when(mono, |label| label.buffer_font(cx)),
+                StatusTone::Error,
+                cx,
             )
+            .into_any_element(),
+        }
+    }
+
+    fn render_export_menu(&self, enabled: bool, cx: &mut Context<Self>) -> AnyElement {
+        let trigger = secondary_button(
+            "db-export",
+            Some((IconName::Download, Color::Muted)),
+            t!("database_client.query.export"),
+            enabled,
+            cx,
+        );
+        if !enabled {
+            return trigger.into_any_element();
+        }
+        let this = cx.weak_entity();
+        PopoverMenu::new("db-export-menu")
+            .trigger(PopoverTriggerArea::new(trigger))
+            .anchor(gpui::Anchor::TopRight)
+            .menu(move |window, cx| {
+                let this = this.clone();
+                Some(ContextMenu::build(window, cx, move |menu, _, _| {
+                    let csv = this.clone();
+                    let json = this.clone();
+                    let insert = this;
+                    menu.entry(
+                        t!("database_client.query.export_csv"),
+                        None,
+                        move |window, cx| {
+                            csv.update(cx, |this, cx| this.export(Export::Csv, window, cx))
+                                .log_err();
+                        },
+                    )
+                    .entry(
+                        t!("database_client.query.export_json"),
+                        None,
+                        move |window, cx| {
+                            json.update(cx, |this, cx| this.export(Export::Json, window, cx))
+                                .log_err();
+                        },
+                    )
+                    .entry(
+                        t!("database_client.query.copy_insert"),
+                        None,
+                        move |_, cx| {
+                            insert
+                                .update(cx, |this, cx| this.copy_as_insert(cx))
+                                .log_err();
+                        },
+                    )
+                }))
+            })
             .into_any_element()
     }
 
@@ -1887,97 +1945,65 @@ impl SqlQueryView {
                     })),
             )
             .child(
-                h_flex()
-                    .h(px(44.))
-                    .flex_none()
-                    .px_3()
-                    .gap_2p5()
-                    .child(
-                        Label::new(t!("database_client.query.results"))
-                            .weight(FontWeight::SEMIBOLD),
-                    )
-                    .child(self.render_state_chip(cx))
-                    .child(
-                        Label::new(self.render_state_detail())
-                            .size(LabelSize::XSmall)
-                            .color(Color::Muted),
-                    )
-                    .child(div().flex_1())
-                    .child(segmented_control(cx).children(tabs.map(|(tab, label)| {
-                        segment(("db-result-tab", tab as usize), label, tab == self.tab, cx)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.tab = tab;
-                                cx.notify();
-                            }))
-                    })))
-                    .child(
-                        IconButton::new("db-copy-csv", IconName::Copy)
-                            .icon_size(IconSize::Small)
-                            .icon_color(Color::Muted)
-                            .disabled(!export)
-                            .tooltip(Tooltip::text(t!("database_client.query.copy_csv")))
-                            .on_click(cx.listener(|this, _, _, cx| this.copy_as_csv(cx))),
-                    )
-                    .child(
-                        IconButton::new("db-export-csv", IconName::Download)
-                            .icon_size(IconSize::Small)
-                            .icon_color(Color::Muted)
-                            .disabled(!export)
-                            .tooltip(Tooltip::text(t!("database_client.query.export_csv")))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.export(Export::Csv, window, cx)
-                            })),
-                    ),
-            )
-            .child(
-                div()
+                ui::card(cx)
+                    .relative()
                     .flex_1()
                     .min_h_0()
-                    .border_t_1()
-                    .border_color(cx.theme().colors().border)
-                    .child(content),
-            )
-            .when_some(footer, |this, footer| {
-                this.child(
-                    h_flex()
-                        .h(px(40.))
-                        .flex_none()
-                        .px_3()
-                        .gap_2()
-                        .border_t_1()
-                        .border_color(cx.theme().colors().border)
-                        .child(
-                            Label::new(footer)
-                                .size(LabelSize::XSmall)
-                                .color(Color::Muted),
-                        )
-                        .child(div().flex_1())
-                        .when(export, |this| {
-                            let link = |id: &'static str, label: SharedString| {
-                                Button::new(id, label)
-                                    .style(ButtonStyle::Subtle)
-                                    .label_size(LabelSize::XSmall)
-                                    .color(Color::Accent)
-                            };
-                            this.child(
-                                link("db-export-csv-link", t!("database_client.query.export_csv"))
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.export(Export::Csv, window, cx)
-                                    })),
-                            )
-                            .child(link("db-export-json", "JSON".into()).on_click(cx.listener(
-                                |this, _, window, cx| this.export(Export::Json, window, cx),
-                            )))
+                    .mx_3()
+                    .mb_3()
+                    .overflow_hidden()
+                    .child(
+                        h_flex()
+                            .h(px(44.))
+                            .flex_none()
+                            .px_3()
+                            .gap_2p5()
                             .child(
-                                link("db-copy-insert", t!("database_client.query.copy_insert"))
-                                    .on_click(
-                                        cx.listener(|this, _, _, cx| this.copy_as_insert(cx)),
-                                    ),
+                                Label::new(t!("database_client.query.results"))
+                                    .weight(FontWeight::SEMIBOLD),
                             )
-                        }),
-                )
-            })
-            .children(self.render_running(cx))
+                            .child(self.render_state_pill(cx))
+                            .child(
+                                Label::new(self.render_state_detail())
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted),
+                            )
+                            .child(div().flex_1())
+                            .child(segmented_control(cx).children(tabs.map(|(tab, label)| {
+                                segment(("db-result-tab", tab as usize), label, tab == self.tab, cx)
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.tab = tab;
+                                        cx.notify();
+                                    }))
+                            })))
+                            .child(self.render_export_menu(export, cx)),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .border_t_1()
+                            .border_color(cx.theme().colors().border)
+                            .child(content),
+                    )
+                    .when_some(footer, |this, footer| {
+                        this.child(
+                            h_flex()
+                                .h(px(40.))
+                                .flex_none()
+                                .px_3()
+                                .gap_2()
+                                .border_t_1()
+                                .border_color(cx.theme().colors().border)
+                                .child(
+                                    Label::new(footer)
+                                        .size(LabelSize::XSmall)
+                                        .color(Color::Muted),
+                                ),
+                        )
+                    })
+                    .children(self.render_running(cx)),
+            )
             .into_any_element()
     }
 }

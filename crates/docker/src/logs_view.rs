@@ -12,7 +12,10 @@ use gpui::{
 };
 use i18n::t;
 use std::{collections::VecDeque, ops::Range, sync::LazyLock};
-use ui::{ContextMenu, PopoverMenu, PopoverTriggerArea, Tooltip, prelude::*};
+use ui::{
+    ContextMenu, PopoverMenu, PopoverTriggerArea, StatusTone, Tooltip, prelude::*, select_field,
+    status_pill,
+};
 use util::ResultExt as _;
 use workspace::{
     Workspace,
@@ -302,7 +305,12 @@ impl LogsView {
             .id(("docker-log-line", index))
             .w_full()
             .h(px(19.))
+            .px(px(6.))
             .gap(px(12.))
+            .rounded(px(6.))
+            .when(line.level == Some(Level::Error), |this| {
+                this.bg(Color::Error.color(cx).opacity(0.08))
+            })
             .child(
                 Label::new(line.clock.clone())
                     .size(LabelSize::Custom(rems_from_px(12_f32)))
@@ -334,78 +342,41 @@ impl LogsView {
     }
 
     fn render_controls(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let colors = cx.theme().colors();
-        let accent = Color::Accent.color(cx);
         let following = self.following;
         let missed = self.missed;
         let this = cx.weak_entity();
         h_flex()
             .gap(px(4.))
             .child(
-                h_flex()
-                    .id("docker-logs-follow")
-                    .h(px(24.))
-                    .px(px(8.))
-                    .gap(px(6.))
-                    .rounded(px(6.))
-                    .cursor_pointer()
-                    .when(following, |this| this.bg(accent.opacity(0.16)))
-                    .when(!following, |this| {
-                        this.border_1()
-                            .border_color(colors.border)
-                            .bg(colors.panel_background)
-                    })
-                    .child(div().size(px(6.)).rounded_full().bg(if following {
-                        accent
+                status_pill(
+                    if following {
+                        t!("docker.logs.following")
+                    } else if missed > 0 {
+                        t!("docker.logs.paused_with_new", count = missed)
                     } else {
-                        colors.border_selected
-                    }))
-                    .child(
-                        Label::new(if following {
-                            t!("docker.logs.following")
-                        } else if missed > 0 {
-                            t!("docker.logs.paused_with_new", count = missed)
-                        } else {
-                            t!("docker.logs.paused")
-                        })
-                        .size(LabelSize::Custom(rems_from_px(11.5_f32)))
-                        .weight(gpui::FontWeight::MEDIUM)
-                        .color(if following {
-                            Color::Accent
-                        } else {
-                            Color::Muted
-                        }),
-                    )
-                    .tooltip(Tooltip::text(if following {
-                        t!("docker.logs.pause_scrolling")
+                        t!("docker.logs.paused")
+                    },
+                    if following {
+                        StatusTone::Info
                     } else {
-                        t!("docker.logs.resume_following")
-                    }))
-                    .on_click(cx.listener(|this, _, _, cx| this.toggle_follow(cx))),
+                        StatusTone::Neutral
+                    },
+                    cx,
+                )
+                .id("docker-logs-follow")
+                .cursor_pointer()
+                .tooltip(Tooltip::text(if following {
+                    t!("docker.logs.pause_scrolling")
+                } else {
+                    t!("docker.logs.resume_following")
+                }))
+                .on_click(cx.listener(|this, _, _, cx| this.toggle_follow(cx))),
             )
             .child(
                 PopoverMenu::new("docker-logs-level")
                     .trigger(PopoverTriggerArea::new(
-                        h_flex()
-                            .id("docker-logs-level-trigger")
-                            .h(px(24.))
-                            .px(px(8.))
-                            .gap(px(6.))
-                            .rounded(px(6.))
-                            .border_1()
-                            .border_color(colors.border)
-                            .bg(colors.panel_background)
-                            .hover(|this| this.bg(colors.ghost_element_hover))
-                            .child(
-                                Icon::new(IconName::Filter)
-                                    .size(IconSize::XSmall)
-                                    .color(Color::Muted),
-                            )
-                            .child(
-                                Label::new(self.filter.label())
-                                    .size(LabelSize::Custom(rems_from_px(11.5_f32)))
-                                    .color(Color::Muted),
-                            ),
+                        select_field("docker-logs-level-trigger", self.filter.label(), cx)
+                            .w(px(150.)),
                     ))
                     .menu(move |window, cx| {
                         let this = this.clone();

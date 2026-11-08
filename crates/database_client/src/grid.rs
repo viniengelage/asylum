@@ -484,6 +484,9 @@ impl ResultGrid {
                         Some(pending) => pending,
                         None => value,
                     };
+                    let negative = numeric
+                        && pending.is_none()
+                        && value.as_deref().is_some_and(|value| value.starts_with('-'));
                     cells.push(
                         div()
                             .id(("db-grid-cell", row_index * 4096 + column_index))
@@ -496,7 +499,7 @@ impl ResultGrid {
                             .when(row_selected, |this| this.bg(selected_row_background))
                             .when(pending.is_some(), |this| {
                                 this.bg(Color::Warning.color(cx).opacity(0.14))
-                                    .border_l_2()
+                                    .border_1()
                                     .border_color(Color::Warning.color(cx))
                             })
                             .when(cell_selected, |this| {
@@ -523,6 +526,7 @@ impl ResultGrid {
                                     .size(LabelSize::Small)
                                     .buffer_font(cx)
                                     .when(pending.is_some(), |label| label.color(Color::Warning))
+                                    .when(negative, |label| label.color(Color::Error))
                                     .single_line()
                                     .truncate()
                                     .into_any_element(),

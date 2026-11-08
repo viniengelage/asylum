@@ -6,6 +6,7 @@ use crate::{
     client::{
         Container, ContainerState, Docker, DockerError, Image, Network, PruneReport, Stats, Volume,
     },
+    compose_markers::ComposeProject,
     discovery::{self, SocketCandidate},
 };
 use collections::{HashMap, HashSet};
@@ -14,7 +15,9 @@ use gpui::{
     App, AppContext as _, Context, Entity, EventEmitter, Global, SharedString, Task, TaskExt as _,
 };
 use i18n::t;
+use serde::{Deserialize, Serialize};
 use std::{
+    collections::BTreeSet,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -22,6 +25,7 @@ use util::ResultExt as _;
 use workspace::AppState;
 
 const PREFERRED_SOCKET_KEY: &str = "docker-preferred-socket";
+const COMPOSE_SELECTION_KEY: &str = "docker-compose-selection";
 const STATS_INTERVAL: Duration = Duration::from_secs(2);
 const RECONNECT_INTERVAL: Duration = Duration::from_secs(5);
 /// Events come in bursts (a compose restart sends dozens); one refresh covers a burst.
@@ -118,6 +122,18 @@ impl Group {
     }
 }
 
+/// What "Subir" brings up for one compose project.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ComposeSelection {
+    /// "padrão": the services without a profile.
+    pub default_profile: bool,
+    pub profiles: BTreeSet<String>,
+    pub services: BTreeSet<String>,
+    /// A file name next to the compose file; compose's own `.env` lookup when `None`.
+    pub env_file: Option<String>,
+    pub rebuild: bool,
+}
+
 pub enum StoreEvent {
     ContainersChanged,
 }
@@ -136,6 +152,7 @@ pub struct DockerStore {
     volume_sizes: HashMap<String, i64>,
     networks: Vec<Network>,
     pruning: bool,
+    compose_selections: HashMap<PathBuf, ComposeSelection>,
     connect_task: Task<()>,
     events_task: Task<()>,
     stats_task: Task<()>,
@@ -184,6 +201,7 @@ impl DockerStore {
             volume_sizes: HashMap::default(),
             networks: Vec::new(),
             pruning: false,
+            compose_selections: HashMap::default(),
             connect_task: Task::ready(()),
             events_task: Task::ready(()),
             stats_task: Task::ready(()),
@@ -276,6 +294,50 @@ impl DockerStore {
         self.pruning
     }
 
+    /// Shared by the dock's card and the markers in the yml, keyed by the project's directory.
+    pub fn compose_selection(&self, root: &Path) -> Option<&ComposeSelection> {
+        self.compose_selections.get(root)
+    }
+
+    /// The saved selection for this project and Asylum profile, or the default one.
+    pub(crate) fn load_compose_selection(
+        &mut self,
+        project: &ComposeProject,
+        cx: &mut Context<Self>,
+    ) -> ComposeSelection {
+        if let Some(selection) = self.compose_selections.get(&project.root) {
+            return selection.clone();
+        }
+        let selection = KeyValueStore::global(cx)
+            .read_kvp(&compose_selection_key(&project.root))
+            .log_err()
+            .flatten()
+            .and_then(|json| serde_json::from_str(&json).log_err())
+            .unwrap_or_else(|| project.default_selection());
+        self.compose_selections
+            .insert(project.root.clone(), selection.clone());
+        cx.notify();
+        selection
+    }
+
+    pub fn set_compose_selection(
+        &mut self,
+        root: PathBuf,
+        selection: ComposeSelection,
+        cx: &mut Context<Self>,
+    ) {
+        let key = compose_selection_key(&root);
+        let store = KeyValueStore::global(cx);
+        match serde_json::to_string(&selection) {
+            Ok(json) => cx
+                .background_spawn(async move { store.write_kvp(key, json).await })
+                .detach_and_log_err(cx),
+            Err(error) => log::error!("Docker: seleção do compose não salvou: {error}"),
+        }
+        self.compose_selections.insert(root, selection);
+        cx.notify();
+    }
+
     /// The compose project whose directory is `project_root` first, everything else under
     /// "Avulsos".
     pub fn groups(&self, project_root: Option<&Path>) -> Vec<Group> {
@@ -340,7 +402,7 @@ impl DockerStore {
     fn connect(&mut self, cx: &mut Context<Self>) {
         let preferred_socket = self.preferred_socket.clone();
         self.connect_task = cx.spawn(async move |this, cx| {
-            let candidates = cx.background_spawn(async { discovery::candidates() }).await;
+            let candidates = cx.background_spawn(discovery::candidates()).await;
             let mut order: Vec<PathBuf> = preferred_socket.into_iter().collect();
             order.extend(
                 candidates
@@ -634,6 +696,14 @@ fn stats_wanted(cx: &App) -> bool {
     AppState::any_workspace(cx, |workspace, cx| crate::panel_is_visible(workspace, cx))
 }
 
+fn compose_selection_key(root: &Path) -> String {
+    format!(
+        "{COMPOSE_SELECTION_KEY}-{}-{}",
+        paths::current_profile_id(),
+        root.display()
+    )
+}
+
 fn same_dir(left: &Path, right: &Path) -> bool {
     if left == right {
         return true;
@@ -723,6 +793,7 @@ mod tests {
             volume_sizes: HashMap::default(),
             networks: Vec::new(),
             pruning: false,
+            compose_selections: HashMap::default(),
             connect_task: Task::ready(()),
             events_task: Task::ready(()),
             stats_task: Task::ready(()),

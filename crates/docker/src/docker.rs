@@ -1,6 +1,7 @@
-//! Docker in the dock: the project's containers grouped by compose project, their terminal and
-//! logs in the center, a form for new containers, state markers in docker-compose.yml and the
-//! agent's tools, all through the Engine API on the daemon's socket.
+//! Docker in the dock: the project's containers grouped by compose project, bringing the compose
+//! up and down, their terminal and logs in the center, a form for new containers, state markers
+//! in docker-compose.yml and the agent's tools, through the Engine API on the daemon's socket.
+//! Compose up/down go through the `docker compose` CLI in a terminal, since the API has neither.
 
 mod agent_toolkit;
 mod client;
@@ -59,6 +60,11 @@ actions!(
         Prune,
         /// Pauses or resumes following the logs.
         ToggleFollow,
+        /// Starts the compose services checked in the dock.
+        ComposeUp,
+        /// Brings the project's compose down, after confirming when anonymous volumes would be
+        /// lost. Named volumes stay.
+        ComposeDown,
     ]
 );
 

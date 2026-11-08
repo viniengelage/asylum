@@ -10,6 +10,7 @@ mod connection;
 mod discovery;
 mod edits;
 mod grid;
+mod import_view;
 mod panel;
 mod query_view;
 mod session;

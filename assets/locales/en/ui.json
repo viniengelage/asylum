@@ -1,4 +1,6 @@
 {
+  "board.drop_here": "Drop here · moves to {column}",
+  "board.more_items": "+ {count} items",
   "context_menu.clear": "Clear",
   "context_menu.navigate": "Navigate",
   "context_menu.no_matches": "No matches",

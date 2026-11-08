@@ -1,4 +1,6 @@
 {
+  "board.drop_here": "Solte aqui · vira {column}",
+  "board.more_items": "+ {count} itens",
   "context_menu.clear": "Limpar",
   "context_menu.navigate": "Navegar",
   "context_menu.no_matches": "Nenhum resultado",

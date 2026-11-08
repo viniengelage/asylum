@@ -1,15 +1,16 @@
 //! The agent's Docker tools. Reading (list, logs, inspect, stats) is free; anything that changes a
-//! container asks first, and removing one is only possible from the dock. Env values never reach
-//! the model.
+//! container, bringing the compose up included, asks first, and removing one (or bringing the
+//! compose down) is only possible from the dock. Env values never reach the model.
 
 use crate::{
     DockerPanel,
     client::{Container, ContainerDetails, Docker, LogLine, LogStream},
+    compose_markers::{self, ComposeProject},
     format_bytes, format_percent, panel,
     store::{ContainerAction, DockerStore},
 };
 use anyhow::{Context as _, anyhow};
-use gpui::{App, AsyncApp, Entity, Task, TaskExt as _, Window};
+use gpui::{App, AsyncApp, Entity, Task, TaskExt as _, Window, WindowHandle};
 use i18n::t;
 use project::Project;
 use schemars::JsonSchema;
@@ -20,7 +21,7 @@ use task_agents::{
     DockerContainerResult, DockerLogLine, LogMention, ToolAccess, Toolkit, ToolkitOutput,
     ToolkitTool,
 };
-use workspace::{AppState, Workspace};
+use workspace::{MultiWorkspace, Workspace};
 
 const DEFAULT_TAIL: usize = 200;
 const MAX_TAIL: usize = 1000;
@@ -69,6 +70,22 @@ struct ExecInput {
     /// Seconds before giving up. Defaults to 30, at most 120.
     #[serde(default)]
     timeout_seconds: Option<u64>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct ComposeUpInput {
+    /// Compose services to start. Defaults to the ones checked in the Docker dock.
+    #[serde(default)]
+    services: Option<Vec<String>>,
+    /// Compose profiles to enable (`--profile`). Defaults to the dock's.
+    #[serde(default)]
+    profiles: Option<Vec<String>>,
+    /// An env file next to the compose file, e.g. `.env.local`. Defaults to the dock's.
+    #[serde(default)]
+    env_file: Option<String>,
+    /// Rebuild images first (`--build`). Defaults to the dock's.
+    #[serde(default)]
+    build: Option<bool>,
 }
 
 /// The store once it is connected and has listed the containers, waiting a little for a dock
@@ -508,17 +525,110 @@ fn exec_in_container(
     })
 }
 
-fn workspace_for(project: &Entity<Project>, cx: &App) -> Option<Entity<Workspace>> {
-    let app_state = AppState::try_global(cx)?;
-    let workspaces: Vec<_> = app_state
-        .workspace_store
-        .read(cx)
-        .workspaces()
-        .filter_map(|workspace| workspace.upgrade())
-        .collect();
-    workspaces
+fn compose_up(
+    project: Entity<Project>,
+    input: ComposeUpInput,
+    cx: &mut App,
+) -> Task<anyhow::Result<ToolkitOutput>> {
+    cx.spawn(async move |cx| {
+        let (store, docker) = ready_store(cx).await?;
+        let root = cx
+            .update(|cx| panel::project_root(&project, cx))
+            .context("O projeto não tem uma pasta aberta.")?;
+        let compose = ComposeProject::load(&root).with_context(|| {
+            format!(
+                "Nenhum compose.yaml ou docker-compose.yml em {}.",
+                root.display()
+            )
+        })??;
+        let mut selection =
+            store.update(cx, |store, cx| store.load_compose_selection(&compose, cx));
+        if let Some(services) = input.services {
+            if let Some(unknown) = services
+                .iter()
+                .find(|service| compose.service(service).is_none())
+            {
+                let known: Vec<&str> = compose
+                    .services
+                    .iter()
+                    .map(|service| service.name.as_str())
+                    .collect();
+                return Err(anyhow!(
+                    "O compose não tem o serviço {unknown}. Serviços: {}.",
+                    known.join(", ")
+                ));
+            }
+            selection.services = services.into_iter().collect();
+        }
+        if let Some(profiles) = input.profiles {
+            selection.profiles = profiles.into_iter().collect();
+        }
+        if let Some(env_file) = input.env_file {
+            anyhow::ensure!(
+                compose_markers::env_files(&root).contains(&env_file),
+                "Não existe {env_file} em {}.",
+                root.display()
+            );
+            selection.env_file = Some(env_file);
+        }
+        if let Some(build) = input.build {
+            selection.rebuild = build;
+        }
+        anyhow::ensure!(
+            !compose.selected_services(&selection).is_empty(),
+            "Nenhum serviço escolhido para subir."
+        );
+        let command = compose.up_command(&selection);
+        let label = command.1.clone();
+        let task = compose_markers::compose_terminal_task(&compose, command, Some(docker.socket()));
+        let (window, workspace) = cx
+            .update(|cx| window_for(&project, cx))
+            .context("Nenhuma janela mostra este projeto para abrir o terminal.")?;
+        let status = window
+            .update(cx, |_, window, cx| {
+                workspace.update(cx, |workspace, cx| {
+                    workspace.spawn_in_terminal(task, window, cx)
+                })
+            })?
+            .await;
+        match status {
+            Some(Ok(status)) if status.success() => Ok(ToolkitOutput::text(format!(
+                "Rodou `{label}` num terminal; os containers aparecem no docker_list."
+            ))),
+            Some(Ok(status)) => Err(anyhow!(
+                "`{label}` saiu com código {}. A saída está no terminal.",
+                status
+                    .code()
+                    .map(|code| code.to_string())
+                    .unwrap_or_else(|| "?".into())
+            )),
+            Some(Err(error)) => Err(error),
+            None => Err(anyhow!("Não deu para abrir um terminal nesta janela.")),
+        }
+    })
+}
+
+/// A window showing `project`, for the terminal `docker compose` runs in.
+fn window_for(
+    project: &Entity<Project>,
+    cx: &App,
+) -> Option<(WindowHandle<MultiWorkspace>, Entity<Workspace>)> {
+    cx.windows()
         .into_iter()
-        .find(|workspace| workspace.read(cx).project() == project)
+        .filter_map(|window| window.downcast::<MultiWorkspace>())
+        .find_map(|window| {
+            let workspace = window.read(cx).ok().and_then(|multi_workspace| {
+                multi_workspace
+                    .workspaces()
+                    .find(|workspace| workspace.read(cx).project() == project)
+                    .cloned()
+            })?;
+            Some((window, workspace))
+        })
+}
+
+fn workspace_for(project: &Entity<Project>, cx: &App) -> Option<Entity<Workspace>> {
+    window_for(project, cx).map(|(_, workspace)| workspace)
 }
 
 fn list_mentions(project: &Entity<Project>, cx: &App) -> Vec<LogMention> {
@@ -741,6 +851,16 @@ pub fn register_toolkit(cx: &mut App) {
                     "Resumes a paused container. Asks the user first.",
                     ToolAccess::Act,
                     lifecycle(ContainerAction::Unpause),
+                ),
+                ToolkitTool::new(
+                    "docker_compose_up",
+                    t!("docker.agent.tool.compose_up"),
+                    "Brings the project's compose services up with `docker compose up -d` in a \
+                     terminal. Without arguments it starts what the Docker dock has checked; \
+                     `services`, `profiles`, `env_file` and `build` override that. Asks the user \
+                     first. Use docker_list afterwards to see the containers.",
+                    ToolAccess::Act,
+                    compose_up,
                 ),
                 ToolkitTool::new(
                     "docker_exec",

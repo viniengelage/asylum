@@ -1,8 +1,9 @@
-//! GitHub's REST API, authenticated with the token the `gh` CLI already holds or with a
-//! fine-grained token pasted in the panel. Auto-merge only exists in the GraphQL API.
+//! GitHub's REST API, authenticated with a fine-grained token pasted in the panel or with the
+//! token the `gh` CLI holds, read from `gh` on every request. Auto-merge only exists in the
+//! GraphQL API.
 
 use crate::api::{
-    ApiError, ChangedFile, Check, CheckState, Comment, Commit, FileChange, Hosting, Issue,
+    self, ApiError, ChangedFile, Check, CheckState, Comment, Commit, FileChange, Hosting, Issue,
     MergeOutcome, MergeStrategy, NewPullRequest, Participant, ParticipantRole, Person, Pipeline,
     PipelineState, PullRequest, PullRequestDetail, PullRequestState, RemoteRepository,
 };
@@ -21,36 +22,16 @@ const HOST: &str = "GitHub";
 /// Where GitHub lets you create fine-grained tokens.
 pub const TOKEN_SETTINGS_URL: &str = "https://github.com/settings/personal-access-tokens/new";
 
-/// The fine-grained permissions the panel and the tasks dock use, with what each is for.
-pub fn token_permissions() -> [(&'static str, SharedString, SharedString); 5] {
+/// The fine-grained permissions the panel and the tasks dock need from a token.
+pub fn token_permissions() -> [(&'static str, SharedString); 5] {
     let read = t!("repo_hosting.github_connect.permission_read");
     let write = t!("repo_hosting.github_connect.permission_write");
     [
-        (
-            "Contents",
-            read,
-            t!("repo_hosting.github_connect.permission_contents"),
-        ),
-        (
-            "Pull requests",
-            write.clone(),
-            t!("repo_hosting.github_connect.permission_pull_requests"),
-        ),
-        (
-            "Issues",
-            write.clone(),
-            t!("repo_hosting.github_connect.permission_issues"),
-        ),
-        (
-            "Actions",
-            write.clone(),
-            t!("repo_hosting.github_connect.permission_actions"),
-        ),
-        (
-            "Projects",
-            write,
-            t!("repo_hosting.github_connect.permission_projects"),
-        ),
+        ("Contents", read),
+        ("Pull requests", write.clone()),
+        ("Issues", write.clone()),
+        ("Actions", write.clone()),
+        ("Projects", write),
     ]
 }
 
@@ -58,8 +39,40 @@ pub fn token_permissions() -> [(&'static str, SharedString, SharedString); 5] {
 const MAX_PAGES: usize = 5;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TokenSource {
+    Token(String),
+    /// `gh auth refresh` issues a new token, so a copy would keep the scopes it had back then.
+    GhCli,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Credentials {
-    pub token: String,
+    pub source: TokenSource,
+}
+
+impl Credentials {
+    pub fn from_token(token: String) -> Self {
+        Self {
+            source: TokenSource::Token(token),
+        }
+    }
+
+    pub fn gh_cli() -> Self {
+        Self {
+            source: TokenSource::GhCli,
+        }
+    }
+
+    pub fn is_gh_cli(&self) -> bool {
+        self.source == TokenSource::GhCli
+    }
+
+    pub async fn token(&self) -> Result<String> {
+        match &self.source {
+            TokenSource::Token(token) => Ok(token.clone()),
+            TokenSource::GhCli => token_from_gh_cli().await,
+        }
+    }
 }
 
 /// The repository an `origin` URL points at, when it is on github.com.
@@ -70,6 +83,7 @@ pub fn parse_remote(url: &str) -> Option<RemoteRepository> {
         hosting: Hosting::GitHub,
         owner: parsed.owner.to_string(),
         name: parsed.repo.to_string(),
+        instance: None,
     })
 }
 
@@ -810,6 +824,97 @@ pub async fn post_inline_comment(
     Ok(())
 }
 
+/// The REST API only knows comment ids, so the thread's GraphQL id is found by its first comment.
+pub async fn resolve_review_thread(
+    client: &Arc<dyn HttpClient>,
+    credentials: &Credentials,
+    repository: &RemoteRepository,
+    number: u64,
+    root_comment_id: u64,
+) -> Result<()> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ThreadComment {
+        #[serde(default)]
+        database_id: Option<u64>,
+    }
+    #[derive(Deserialize)]
+    struct ThreadComments {
+        nodes: Vec<ThreadComment>,
+    }
+    #[derive(Deserialize)]
+    struct ReviewThread {
+        id: String,
+        comments: ThreadComments,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct PageInfo {
+        has_next_page: bool,
+        #[serde(default)]
+        end_cursor: Option<String>,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ReviewThreads {
+        nodes: Vec<ReviewThread>,
+        page_info: PageInfo,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct GraphQlPullRequest {
+        review_threads: ReviewThreads,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct GraphQlRepository {
+        pull_request: GraphQlPullRequest,
+    }
+    #[derive(Deserialize)]
+    struct Data {
+        repository: GraphQlRepository,
+    }
+
+    let mut cursor: Option<String> = None;
+    let thread_id = loop {
+        let data: Data = graphql(
+            client,
+            credentials,
+            "query($owner: String!, $name: String!, $number: Int!, $after: String) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { reviewThreads(first: 100, after: $after) { nodes { id comments(first: 1) { nodes { databaseId } } } pageInfo { hasNextPage endCursor } } } } }",
+            serde_json::json!({
+                "owner": repository.owner,
+                "name": repository.name,
+                "number": number,
+                "after": cursor,
+            }),
+        )
+        .await?;
+        let threads = data.repository.pull_request.review_threads;
+        if let Some(thread) = threads.nodes.into_iter().find(|thread| {
+            thread
+                .comments
+                .nodes
+                .first()
+                .and_then(|comment| comment.database_id)
+                == Some(root_comment_id)
+        }) {
+            break thread.id;
+        }
+        if !threads.page_info.has_next_page || threads.page_info.end_cursor.is_none() {
+            anyhow::bail!("{}", t!("repo_hosting.changes.thread_not_found"));
+        }
+        cursor = threads.page_info.end_cursor;
+    };
+    graphql::<serde_json::Value>(
+        client,
+        credentials,
+        "mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { thread { isResolved } } }",
+        serde_json::json!({ "id": thread_id }),
+    )
+    .await?;
+    Ok(())
+}
+
 #[derive(Deserialize)]
 struct RepositoryDetails {
     #[serde(default)]
@@ -1212,23 +1317,10 @@ async fn get_all_pages<T: DeserializeOwned>(
         url = response
             .headers
             .get("link")
-            .and_then(|link| next_page(link))
+            .and_then(|link| api::next_page(link))
             .filter(|next| next.starts_with(API_URL));
     }
     Ok(values)
-}
-
-/// The `rel="next"` URL of a `Link` header.
-fn next_page(link: &str) -> Option<String> {
-    link.split(',').find_map(|part| {
-        let (url, rest) = part.split_once(';')?;
-        rest.contains("rel=\"next\"").then(|| {
-            url.trim()
-                .trim_start_matches('<')
-                .trim_end_matches('>')
-                .to_string()
-        })
-    })
 }
 
 async fn get<T: DeserializeOwned>(
@@ -1258,31 +1350,6 @@ async fn send<T: DeserializeOwned>(
     response.parse()
 }
 
-struct RawResponse {
-    text: String,
-    endpoint: String,
-    /// Lowercased names.
-    headers: HashMap<String, String>,
-}
-
-impl RawResponse {
-    fn parse<T: DeserializeOwned>(&self) -> Result<T> {
-        // Merges, reruns and deletes answer with no body.
-        let text = if self.text.trim().is_empty() {
-            "null"
-        } else {
-            &self.text
-        };
-        serde_json::from_str(text).with_context(|| {
-            t!(
-                "repo_hosting.error.unexpected_response",
-                host = HOST,
-                endpoint = self.endpoint
-            )
-        })
-    }
-}
-
 /// Sends a request and turns error statuses into [`ApiError`]s.
 async fn send_raw(
     client: &Arc<dyn HttpClient>,
@@ -1291,11 +1358,12 @@ async fn send_raw(
     url: &str,
     body: Option<serde_json::Value>,
     accept: &str,
-) -> Result<RawResponse> {
+) -> Result<api::RawResponse> {
+    let token = credentials.token().await?;
     let mut builder = Request::builder()
         .method(method)
         .uri(url)
-        .header("Authorization", format!("Bearer {}", credentials.token))
+        .header("Authorization", format!("Bearer {token}"))
         .header("Accept", accept)
         .header("X-GitHub-Api-Version", "2022-11-28")
         .header("User-Agent", "Asylum");
@@ -1361,10 +1429,11 @@ async fn send_raw(
         }
         _ => {}
     }
-    Ok(RawResponse {
+    Ok(api::RawResponse {
         text,
         endpoint,
         headers,
+        host: HOST,
     })
 }
 
@@ -1392,6 +1461,7 @@ mod tests {
                 hosting: Hosting::GitHub,
                 owner: "viniengelage".to_string(),
                 name: "asylum".to_string(),
+                instance: None,
             })
         );
         assert_eq!(parse_remote("git@bitbucket.org:trix/app.git"), None);
@@ -1401,10 +1471,10 @@ mod tests {
     fn follows_the_next_link() {
         let link = "<https://api.github.com/repos/a/b/pulls?page=2>; rel=\"next\", <https://api.github.com/repos/a/b/pulls?page=5>; rel=\"last\"";
         assert_eq!(
-            next_page(link).as_deref(),
+            api::next_page(link).as_deref(),
             Some("https://api.github.com/repos/a/b/pulls?page=2")
         );
-        assert_eq!(next_page("<https://x>; rel=\"prev\""), None);
+        assert_eq!(api::next_page("<https://x>; rel=\"prev\""), None);
     }
 
     #[test]

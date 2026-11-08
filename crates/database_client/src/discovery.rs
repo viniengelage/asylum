@@ -1,8 +1,10 @@
 //! Connections the project already describes: URLs in `.env` files, a postgres service in
 //! docker compose, and passwords from `~/.pgpass`. These are only suggestions; nothing connects
-//! until the person picks one.
+//! until the person picks one. Also reads the connections other database tools saved, for the
+//! import modal.
 
-use crate::connection::{DEFAULT_PORT, UrlFields, parse_url};
+use crate::connection::{DEFAULT_PORT, Environment, UrlFields, parse_url};
+use crate::tls::SslMode;
 use collections::HashMap;
 use fs::Fs;
 use std::path::{Path, PathBuf};
@@ -346,6 +348,290 @@ fn split_pgpass_line(line: &str) -> Vec<String> {
     fields
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Tool {
+    DBeaver,
+    TablePlus,
+    DataGrip,
+    PgAdmin,
+}
+
+impl Tool {
+    pub const ALL: [Self; 4] = [
+        Self::DBeaver,
+        Self::TablePlus,
+        Self::DataGrip,
+        Self::PgAdmin,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::DBeaver => "DBeaver",
+            Self::TablePlus => "TablePlus",
+            Self::DataGrip => "DataGrip",
+            Self::PgAdmin => "pgAdmin",
+        }
+    }
+
+    pub fn is_supported(self) -> bool {
+        matches!(self, Self::DBeaver | Self::TablePlus)
+    }
+
+    pub fn default_path(self) -> Option<PathBuf> {
+        let home = util::paths::home_dir();
+        match self {
+            Self::DBeaver => {
+                let data = if cfg!(target_os = "macos") {
+                    home.join("Library/DBeaverData")
+                } else if cfg!(target_os = "windows") {
+                    home.join("AppData/Roaming/DBeaverData")
+                } else {
+                    home.join(".local/share/DBeaverData")
+                };
+                Some(data.join("workspace6/General/.dbeaver/data-sources.json"))
+            }
+            Self::TablePlus => cfg!(target_os = "macos").then(|| {
+                home.join(
+                    "Library/Application Support/com.tinyapp.TablePlus/Data/Connections.plist",
+                )
+            }),
+            Self::DataGrip | Self::PgAdmin => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PasswordSource {
+    Included(String),
+    /// Behind a master password or another app's keychain.
+    AskOnConnect,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Imported {
+    pub name: String,
+    pub host: String,
+    pub port: u16,
+    pub database: String,
+    pub user: String,
+    pub password: PasswordSource,
+    /// The tool's own environment label, e.g. DBeaver's connection type.
+    pub environment_hint: Option<String>,
+    pub ssl_mode: Option<SslMode>,
+}
+
+impl Imported {
+    pub fn address(&self) -> String {
+        format!("{}:{}/{}", self.host, self.port, self.database)
+    }
+
+    pub fn environment(&self) -> Environment {
+        guess_environment(&self.name, &self.host, self.environment_hint.as_deref())
+    }
+}
+
+pub async fn read_tool(fs: &dyn Fs, tool: Tool, path: &Path) -> anyhow::Result<Vec<Imported>> {
+    match tool {
+        Tool::DBeaver => {
+            let text = fs.load(path).await?;
+            // An encrypted credentials file (DBeaver's default) isn't UTF-8 JSON; the passwords
+            // are then asked for on connect.
+            let credentials = match path.parent() {
+                Some(folder) => fs.load(&folder.join("credentials-config.json")).await.ok(),
+                None => None,
+            };
+            dbeaver_connections(&text, credentials.as_deref())
+        }
+        Tool::TablePlus => {
+            let bytes = fs.load_bytes(path).await?;
+            tableplus_connections(&bytes)
+        }
+        Tool::DataGrip | Tool::PgAdmin => Ok(Vec::new()),
+    }
+}
+
+fn json_string(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(text) => Some(text.clone()),
+        serde_json::Value::Number(number) => Some(number.to_string()),
+        _ => None,
+    }
+}
+
+fn non_empty(text: String) -> Option<String> {
+    (!text.trim().is_empty()).then_some(text)
+}
+
+fn dbeaver_connections(text: &str, credentials: Option<&str>) -> anyhow::Result<Vec<Imported>> {
+    let document: serde_json::Value = serde_json::from_str(text)?;
+    let credentials =
+        credentials.and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok());
+    let Some(connections) = document
+        .get("connections")
+        .and_then(|connections| connections.as_object())
+    else {
+        return Ok(Vec::new());
+    };
+    let mut imported = Vec::new();
+    for (id, entry) in connections {
+        let provider = entry
+            .get("provider")
+            .and_then(json_string)
+            .unwrap_or_default();
+        let driver = entry
+            .get("driver")
+            .and_then(json_string)
+            .unwrap_or_default();
+        if provider != "postgresql" && !driver.starts_with("postgres") {
+            continue;
+        }
+        let configuration = entry.get("configuration");
+        let field = |key: &str| {
+            configuration
+                .and_then(|configuration| configuration.get(key))
+                .and_then(json_string)
+                .and_then(non_empty)
+        };
+        let url_fields = field("url")
+            .and_then(|url| parse_url(url.trim_start_matches("jdbc:")).ok())
+            .unwrap_or_default();
+        let Some(host) = field("host").or(url_fields.host) else {
+            continue;
+        };
+        let saved = credentials
+            .as_ref()
+            .and_then(|credentials| credentials.get(id))
+            .and_then(|credentials| credentials.get("#connection"));
+        let saved_field = |key: &str| {
+            saved
+                .and_then(|saved| saved.get(key))
+                .and_then(json_string)
+                .and_then(non_empty)
+        };
+        let user = saved_field("user")
+            .or_else(|| field("user"))
+            .or(url_fields.user)
+            .unwrap_or_else(|| "postgres".to_owned());
+        let database = field("database")
+            .or(url_fields.database)
+            .unwrap_or_else(|| user.clone());
+        let handler = |name: &str| {
+            configuration
+                .and_then(|configuration| configuration.get("handlers"))
+                .and_then(|handlers| handlers.get(name))
+                .filter(|handler| {
+                    handler
+                        .get("enabled")
+                        .and_then(|enabled| enabled.as_bool())
+                        .unwrap_or(false)
+                })
+        };
+        let ssl_mode = handler("postgre_ssl")
+            .and_then(|ssl| ssl.get("properties"))
+            .and_then(|properties| properties.get("ssl.mode").or(properties.get("sslmode")))
+            .and_then(json_string)
+            .and_then(|mode| SslMode::parse(&mode))
+            .or(url_fields.ssl_mode);
+        imported.push(Imported {
+            name: entry
+                .get("name")
+                .and_then(json_string)
+                .and_then(non_empty)
+                .unwrap_or_else(|| database.clone()),
+            port: field("port")
+                .and_then(|port| port.trim().parse().ok())
+                .or(url_fields.port)
+                .unwrap_or(DEFAULT_PORT),
+            password: match saved_field("password") {
+                Some(password) => PasswordSource::Included(password),
+                None => PasswordSource::AskOnConnect,
+            },
+            environment_hint: field("type"),
+            ssl_mode,
+            host,
+            database,
+            user,
+        });
+    }
+    imported.sort_by_key(|connection| connection.name.to_lowercase());
+    Ok(imported)
+}
+
+fn plist_string(value: &plist::Value) -> Option<String> {
+    match value {
+        plist::Value::String(text) => Some(text.clone()),
+        plist::Value::Integer(number) => Some(number.to_string()),
+        _ => None,
+    }
+}
+
+/// TablePlus keeps every password in its own keychain entry, so none comes along.
+fn tableplus_connections(bytes: &[u8]) -> anyhow::Result<Vec<Imported>> {
+    let document = plist::Value::from_reader(std::io::Cursor::new(bytes))?;
+    let Some(entries) = document.as_array() else {
+        return Ok(Vec::new());
+    };
+    let mut imported = Vec::new();
+    for entry in entries.iter().filter_map(|entry| entry.as_dictionary()) {
+        let field = |key: &str| entry.get(key).and_then(plist_string).and_then(non_empty);
+        let is_postgres =
+            field("Driver").is_some_and(|driver| driver.eq_ignore_ascii_case("PostgreSQL"));
+        let Some(host) = field("DatabaseHost").filter(|_| is_postgres) else {
+            continue;
+        };
+        let user = field("DatabaseUser").unwrap_or_else(|| "postgres".to_owned());
+        let database = field("DatabaseName").unwrap_or_else(|| user.clone());
+        imported.push(Imported {
+            name: field("ConnectionName").unwrap_or_else(|| database.clone()),
+            port: field("DatabasePort")
+                .and_then(|port| port.trim().parse().ok())
+                .unwrap_or(DEFAULT_PORT),
+            password: PasswordSource::AskOnConnect,
+            // "Enviroment" is how TablePlus spells it.
+            environment_hint: field("Enviroment").or_else(|| field("Environment")),
+            ssl_mode: None,
+            host,
+            database,
+            user,
+        });
+    }
+    Ok(imported)
+}
+
+fn environment_from_word(word: &str) -> Option<Environment> {
+    match word.to_lowercase().as_str() {
+        "prod" | "production" | "prd" => Some(Environment::Prod),
+        "staging" | "stage" | "stg" | "hml" | "homolog" | "test" | "testing" => {
+            Some(Environment::Staging)
+        }
+        "dev" | "develop" | "development" => Some(Environment::Dev),
+        "local" => Some(Environment::Local),
+        _ => None,
+    }
+}
+
+/// The tool's own label wins; otherwise words in the name or host decide, production first so a
+/// connection that looks like production opens read-only.
+pub fn guess_environment(name: &str, host: &str, hint: Option<&str>) -> Environment {
+    if let Some(environment) = hint.and_then(environment_from_word) {
+        return environment;
+    }
+    let text = format!("{name} {host}").to_lowercase();
+    let words = text
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>();
+    for environment in [Environment::Prod, Environment::Staging, Environment::Dev] {
+        if words
+            .iter()
+            .any(|word| environment_from_word(word) == Some(environment))
+        {
+            return environment;
+        }
+    }
+    Environment::Local
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -435,5 +721,119 @@ services:
             Some("any")
         );
         assert_eq!(pgpass_password(pgpass, "localhost", 5432, "x", "app"), None);
+    }
+
+    #[test]
+    fn dbeaver_reads_postgres_and_plain_credentials() {
+        let sources = r#"{
+            "connections": {
+                "postgres-1": {
+                    "provider": "postgresql",
+                    "driver": "postgres-jdbc",
+                    "name": "Billing prod",
+                    "configuration": {
+                        "host": "db.billing.internal",
+                        "port": "5433",
+                        "database": "billing",
+                        "type": "prod",
+                        "handlers": {
+                            "ssh_tunnel": {"type": "TUNNEL", "enabled": true},
+                            "postgre_ssl": {"enabled": true, "properties": {"ssl.mode": "require"}}
+                        }
+                    }
+                },
+                "mysql-1": {
+                    "provider": "mysql",
+                    "driver": "mysql8",
+                    "name": "Shop",
+                    "configuration": {"host": "localhost", "port": "3306"}
+                },
+                "postgres-2": {
+                    "provider": "postgresql",
+                    "name": "Local app",
+                    "configuration": {"url": "jdbc:postgresql://localhost:5432/app"}
+                }
+            }
+        }"#;
+        let credentials =
+            r##"{"postgres-1": {"#connection": {"user": "billing", "password": "s3cret"}}}"##;
+        let imported = dbeaver_connections(sources, Some(credentials)).unwrap();
+        assert_eq!(imported.len(), 2);
+        let billing = &imported[0];
+        assert_eq!(billing.name, "Billing prod");
+        assert_eq!(billing.address(), "db.billing.internal:5433/billing");
+        assert_eq!(billing.user, "billing");
+        assert_eq!(billing.password, PasswordSource::Included("s3cret".into()));
+        assert_eq!(billing.ssl_mode, Some(SslMode::Require));
+        assert_eq!(billing.environment(), Environment::Prod);
+        let local = &imported[1];
+        assert_eq!(local.address(), "localhost:5432/app");
+        assert_eq!(local.password, PasswordSource::AskOnConnect);
+
+        let encrypted = "\u{1}\u{2}not json";
+        let imported = dbeaver_connections(sources, Some(encrypted)).unwrap();
+        assert_eq!(imported[0].password, PasswordSource::AskOnConnect);
+        assert_eq!(imported[0].user, "postgres");
+    }
+
+    #[test]
+    fn tableplus_reads_postgres_only() {
+        let plist = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<array>
+    <dict>
+        <key>ConnectionName</key><string>Analytics</string>
+        <key>Driver</key><string>PostgreSQL</string>
+        <key>DatabaseHost</key><string>analytics.stg.example.com</string>
+        <key>DatabasePort</key><string>6543</string>
+        <key>DatabaseName</key><string>events</string>
+        <key>DatabaseUser</key><string>reader</string>
+        <key>isOverSSH</key><true/>
+    </dict>
+    <dict>
+        <key>ConnectionName</key><string>Cache</string>
+        <key>Driver</key><string>Redis</string>
+        <key>DatabaseHost</key><string>localhost</string>
+    </dict>
+</array>
+</plist>"#;
+        let imported = tableplus_connections(plist.as_bytes()).unwrap();
+        assert_eq!(imported.len(), 1);
+        assert_eq!(
+            imported[0].address(),
+            "analytics.stg.example.com:6543/events"
+        );
+        assert_eq!(imported[0].user, "reader");
+        assert_eq!(imported[0].password, PasswordSource::AskOnConnect);
+        assert_eq!(imported[0].environment(), Environment::Staging);
+    }
+
+    #[test]
+    fn environment_guess() {
+        assert_eq!(
+            guess_environment("api", "localhost", Some("dev")),
+            Environment::Dev
+        );
+        assert_eq!(
+            guess_environment("Orders PRD", "10.0.0.4", None),
+            Environment::Prod
+        );
+        assert_eq!(
+            guess_environment("orders", "orders-hml.internal", None),
+            Environment::Staging
+        );
+        assert_eq!(
+            guess_environment("orders", "dev-db.internal", None),
+            Environment::Dev
+        );
+        assert_eq!(
+            guess_environment("orders", "127.0.0.1", None),
+            Environment::Local
+        );
+        assert_eq!(
+            guess_environment("prod copy", "localhost", Some("unknown")),
+            Environment::Prod
+        );
     }
 }
