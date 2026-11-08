@@ -407,6 +407,72 @@ fn restore_original_sigchld_action() {
     }
 }
 
+/// Writes cookies brought from another browser into this profile's cookie store, and
+/// returns how many the store took. Starts CEF when nothing has yet.
+pub fn import_cookies(cookies: &[crate::browser_import::ImportedCookie]) -> Result<usize> {
+    use crate::browser_import::SameSite;
+
+    ensure_cef_initialized()?;
+    let manager = cookie_manager_get_global_manager(None)
+        .ok_or_else(|| anyhow!("CEF has no cookie manager"))?;
+    let now = basetime_now();
+    let mut accepted = 0;
+    for cookie in cookies {
+        let same_site = match cookie.same_site {
+            SameSite::Unspecified => sys::cef_cookie_same_site_t::CEF_COOKIE_SAME_SITE_UNSPECIFIED,
+            SameSite::None => sys::cef_cookie_same_site_t::CEF_COOKIE_SAME_SITE_NO_RESTRICTION,
+            SameSite::Lax => sys::cef_cookie_same_site_t::CEF_COOKIE_SAME_SITE_LAX_MODE,
+            SameSite::Strict => sys::cef_cookie_same_site_t::CEF_COOKIE_SAME_SITE_STRICT_MODE,
+        };
+        let cef_cookie = Cookie {
+            name: CefString::from(cookie.name.as_str()),
+            value: CefString::from(cookie.value.as_str()),
+            // An empty domain makes a cookie for the URL's host only.
+            domain: CefString::from(if cookie.is_host_only() {
+                ""
+            } else {
+                cookie.domain.as_str()
+            }),
+            path: CefString::from(cookie.path.as_str()),
+            secure: cookie.secure as i32,
+            httponly: cookie.http_only as i32,
+            creation: now.clone(),
+            last_access: now.clone(),
+            has_expires: cookie.expires.is_some() as i32,
+            expires: Basetime {
+                val: cookie.expires.unwrap_or(0),
+            },
+            same_site: CookieSameSite::from(same_site),
+            priority: CookiePriority::from(sys::cef_cookie_priority_t::CEF_COOKIE_PRIORITY_MEDIUM),
+            ..Default::default()
+        };
+        let url = CefString::from(cookie.url().as_str());
+        if manager.set_cookie(Some(&url), Some(&cef_cookie), None) != 0 {
+            accepted += 1;
+        }
+    }
+    manager.flush_store(None);
+    request_pump();
+    Ok(accepted)
+}
+
+/// Deletes the named cookies of each address from this profile's cookie store.
+pub fn delete_cookies(cookies: &[(String, String)]) -> Result<()> {
+    ensure_cef_initialized()?;
+    let manager = cookie_manager_get_global_manager(None)
+        .ok_or_else(|| anyhow!("CEF has no cookie manager"))?;
+    for (url, name) in cookies {
+        manager.delete_cookies(
+            Some(&CefString::from(url.as_str())),
+            Some(&CefString::from(name.as_str())),
+            None,
+        );
+    }
+    manager.flush_store(None);
+    request_pump();
+    Ok(())
+}
+
 fn profile_directory() -> PathBuf {
     crate::runtime_discovery::browser_cache_dir()
 }

@@ -1,11 +1,15 @@
 #[cfg(target_os = "macos")]
 mod agent_toolkit;
 #[cfg(target_os = "macos")]
+mod browser_import;
+#[cfg(target_os = "macos")]
 mod cef_browser;
 #[cfg(target_os = "macos")]
 mod cef_install;
 #[cfg(target_os = "macos")]
 mod cef_paths;
+#[cfg(target_os = "macos")]
+mod import_modal;
 mod runtime_discovery;
 
 #[cfg(target_os = "macos")]
@@ -22,11 +26,11 @@ use gpui::{
 };
 use i18n::t;
 use std::{rc::Rc, time::Duration};
-use util::ResultExt as _;
 use ui::{
     Color, CommonAnimationExt, ContextMenu, Icon, IconButton, IconName, IconPosition, IconSize,
     Label, LabelSize, PopoverMenu, Tooltip, prelude::*, v_flex,
 };
+use util::ResultExt as _;
 use workspace::{
     StatusItemView, ToolkitEntry, Workspace,
     item::{Item, ItemEvent, ItemHandle},
@@ -73,6 +77,10 @@ actions!(
         OpenInSystemBrowser,
         /// Swaps the width and height of the device the page is shown at.
         RotateDevice,
+        /// Brings bookmarks and logged-in sessions from another browser on this Mac.
+        ImportFromBrowser,
+        /// Adds the page to the bookmarks, or removes it.
+        ToggleBookmark,
     ]
 );
 
@@ -113,6 +121,9 @@ const DEVICE_PRESETS: [DevicePreset; 5] = [
 
 /// Chromium steps zoom by a factor of 1.2 per level.
 const ZOOM_STEP_FACTOR: f64 = 1.2;
+/// How many bookmarks the start page shows as tiles.
+#[cfg(target_os = "macos")]
+const SHOWN_BOOKMARKS: usize = 10;
 const MAX_ZOOM_LEVEL: f64 = 5.;
 
 /// Ports dev servers commonly listen on, checked when a new tab opens.
@@ -221,6 +232,10 @@ pub fn init(cx: &mut App) {
     cx.observe_new(|workspace: &mut Workspace, window, _cx| {
         workspace.register_action(WebPreviewView::open_action);
         workspace.register_action(WebPreviewView::open_url_action);
+        #[cfg(target_os = "macos")]
+        workspace.register_action(|workspace, _: &ImportFromBrowser, window, cx| {
+            import_modal::open(workspace, window, cx);
+        });
 
         if let Some(window) = window {
             let button = _cx.new(|cx| WebPreviewToolkitButton::new(workspace, cx));
@@ -371,6 +386,11 @@ pub struct WebPreviewView {
     _agent_activity_reset: Option<Task<()>>,
     local_servers: Vec<u16>,
     _local_servers_probe: Option<Task<()>>,
+    /// Browsers on this Mac the start page offers to import from, once looked up.
+    #[cfg(target_os = "macos")]
+    import_sources: Option<Vec<browser_import::BrowserSource>>,
+    #[cfg(target_os = "macos")]
+    _import_sources_probe: Option<Task<()>>,
 }
 
 impl WebPreviewView {
@@ -743,6 +763,10 @@ impl WebPreviewView {
             _agent_activity_reset: None,
             local_servers: Vec::new(),
             _local_servers_probe: None,
+            #[cfg(target_os = "macos")]
+            import_sources: None,
+            #[cfg(target_os = "macos")]
+            _import_sources_probe: None,
         }
     }
 
@@ -1475,6 +1499,249 @@ impl WebPreviewView {
         }
     }
 
+    #[cfg(target_os = "macos")]
+    fn is_bookmarked(&self, cx: &mut Context<Self>) -> bool {
+        !is_blank_url(&self.url)
+            && browser_import::BrowserLibrary::global(cx).is_bookmarked(&self.url)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn toggle_bookmark(&mut self, cx: &mut Context<Self>) {
+        if is_blank_url(&self.url) {
+            return;
+        }
+        let (title, url) = (self.title.clone(), self.url.clone());
+        browser_import::BrowserLibrary::update(cx, |library| library.toggle_bookmark(&title, &url));
+        cx.notify();
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn clear_imported_data(&mut self, _cx: &mut Context<Self>) {}
+
+    #[cfg(not(target_os = "macos"))]
+    fn toggle_bookmark(&mut self, _cx: &mut Context<Self>) {}
+
+    #[cfg(target_os = "macos")]
+    fn clear_imported_data(&mut self, cx: &mut Context<Self>) {
+        let cookies =
+            browser_import::BrowserLibrary::update(cx, |library| library.clear_imported());
+        let cookies: Vec<(String, String)> = cookies
+            .into_iter()
+            .map(|cookie| (cookie.url, cookie.name))
+            .collect();
+        if let Err(error) = cef_browser::delete_cookies(&cookies) {
+            log::error!("deleting imported cookies: {error:#}");
+        }
+        cx.notify();
+    }
+
+    #[cfg(target_os = "macos")]
+    fn probe_import_sources(&mut self, cx: &mut Context<Self>) {
+        if self._import_sources_probe.is_some() {
+            return;
+        }
+        let probe = cx.background_spawn(async move { browser_import::detect_sources() });
+        self._import_sources_probe = Some(cx.spawn(async move |this, cx| {
+            let sources = probe.await;
+            this.update(cx, |this, cx| {
+                this.import_sources = Some(sources);
+                cx.notify();
+            })
+            .ok();
+        }));
+    }
+
+    /// The start page's offer to bring accounts from the browsers found on this Mac, until
+    /// something was imported or the offer was dismissed.
+    #[cfg(target_os = "macos")]
+    fn render_import_card(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !browser_import::BrowserLibrary::global(cx).offers_import() {
+            return None;
+        }
+        self.probe_import_sources(cx);
+        let sources = self
+            .import_sources
+            .as_ref()
+            .filter(|sources| !sources.is_empty())?;
+        let colors = cx.theme().colors();
+        let mut found = h_flex().flex_wrap().gap_1p5().pt_1().child(
+            Label::new(t!("web_preview.import.card_found"))
+                .size(LabelSize::XSmall)
+                .color(Color::Muted),
+        );
+        for source in sources {
+            let label = if source.profiles.len() > 1 {
+                format!(
+                    "{} · {}",
+                    source.kind.short_name(),
+                    t!(
+                        "web_preview.import.profiles",
+                        count = source.profiles.len().to_string()
+                    )
+                )
+            } else {
+                source.kind.short_name().to_string()
+            };
+            found = found.child(
+                h_flex()
+                    .h(px(20.))
+                    .px_2()
+                    .rounded_full()
+                    .bg(colors.element_background)
+                    .child(Label::new(label).size(LabelSize::XSmall)),
+            );
+        }
+        Some(
+            ui::card(cx)
+                .w_full()
+                .flex()
+                .flex_row()
+                .items_start()
+                .gap_3p5()
+                .p_4()
+                .child(
+                    div()
+                        .flex_none()
+                        .size(px(32.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded_md()
+                        .bg(Color::Accent.color(cx).opacity(0.16))
+                        .child(
+                            Icon::new(IconName::UserCheck)
+                                .size(IconSize::Small)
+                                .color(Color::Accent),
+                        ),
+                )
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .gap_1()
+                        .child(
+                            Label::new(t!("web_preview.import.card_title"))
+                                .size(LabelSize::Small)
+                                .weight(FontWeight::BOLD),
+                        )
+                        .child(
+                            Label::new(t!("web_preview.import.card_description"))
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted),
+                        )
+                        .child(found),
+                )
+                .child(
+                    h_flex()
+                        .flex_none()
+                        .gap_1()
+                        .child(
+                            ui::primary_button(
+                                "import-card-start",
+                                None,
+                                t!("web_preview.import.card_action"),
+                                None,
+                                cx,
+                            )
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(ImportFromBrowser.boxed_clone(), cx)
+                            }),
+                        )
+                        .child(
+                            IconButton::new("import-card-dismiss", IconName::Close)
+                                .icon_size(IconSize::Small)
+                                .icon_color(Color::Muted)
+                                .tooltip(Tooltip::text(t!("web_preview.import.card_dismiss")))
+                                .on_click(cx.listener(|_, _, _, cx| {
+                                    browser_import::BrowserLibrary::update(cx, |library| {
+                                        library.dismiss_offer()
+                                    });
+                                    cx.notify();
+                                })),
+                        ),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// The first bookmarks as tiles, with where they came from.
+    #[cfg(target_os = "macos")]
+    fn render_bookmarks(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let library = browser_import::BrowserLibrary::global(cx);
+        if library.bookmarks().is_empty() {
+            return None;
+        }
+        let count = library.bookmarks().len();
+        let source = library.last_import().map(|record| record.source.clone());
+        let bookmarks: Vec<browser_import::Bookmark> = library
+            .bookmarks()
+            .iter()
+            .take(SHOWN_BOOKMARKS)
+            .cloned()
+            .collect();
+        let colors = cx.theme().colors();
+        let (tile_background, tile_border, tile_hover) = (
+            colors.element_background,
+            colors.border_variant,
+            colors.element_hover,
+        );
+        let mut tiles = h_flex().w_full().flex_wrap().gap_2();
+        for (index, bookmark) in bookmarks.into_iter().enumerate() {
+            let url = bookmark.url.clone();
+            tiles = tiles.child(
+                v_flex()
+                    .id(SharedString::from(format!("bookmark-{index}")))
+                    .w(px(122.))
+                    .gap_2()
+                    .p_3()
+                    .rounded_lg()
+                    .border_1()
+                    .border_color(tile_border)
+                    .bg(tile_background)
+                    .cursor_pointer()
+                    .hover(move |this| this.bg(tile_hover))
+                    .child(ui::initial_tile(&bookmark.title, cx).size(px(24.)))
+                    .child(
+                        Label::new(bookmark.title.clone())
+                            .size(LabelSize::Small)
+                            .weight(FontWeight::MEDIUM)
+                            .single_line()
+                            .truncate(),
+                    )
+                    .tooltip(Tooltip::text(bookmark.url.clone()))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.open_address(url.clone(), window, cx);
+                    })),
+            );
+        }
+        let detail = match source {
+            Some(source) => t!(
+                "web_preview.start.bookmarks_count_from",
+                count = count.to_string(),
+                source = source
+            ),
+            None => SharedString::from(count.to_string()),
+        };
+        Some(
+            v_flex()
+                .w_full()
+                .gap_1p5()
+                .child(
+                    h_flex()
+                        .px_2()
+                        .child(ui::section_label(t!("web_preview.start.bookmarks")))
+                        .child(div().flex_1())
+                        .child(
+                            Label::new(detail)
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted),
+                        ),
+                )
+                .child(div().px_2().child(tiles))
+                .into_any_element(),
+        )
+    }
+
     fn probe_local_servers(&mut self, cx: &mut Context<Self>) {
         if self._local_servers_probe.is_some() {
             return;
@@ -1598,6 +1865,10 @@ impl WebPreviewView {
     }
 
     fn render_address_bar(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        #[cfg(target_os = "macos")]
+        let bookmarked = (!is_blank_url(&self.url)).then(|| self.is_bookmarked(cx));
+        #[cfg(not(target_os = "macos"))]
+        let bookmarked: Option<bool> = None;
         let colors = cx.theme().colors();
         let focused = self
             .url_editor
@@ -1681,6 +1952,32 @@ impl WebPreviewView {
                     )
                     .on_click(cx.listener(|this, _, window, cx| this.focus_address_bar(window, cx)))
                     .into_any_element()
+            })
+            .when_some(bookmarked, |this, bookmarked| {
+                this.child(
+                    IconButton::new(
+                        "bookmark",
+                        if bookmarked {
+                            IconName::StarFilled
+                        } else {
+                            IconName::Star
+                        },
+                    )
+                    .icon_size(IconSize::XSmall)
+                    .icon_color(if bookmarked {
+                        Color::Accent
+                    } else {
+                        Color::Muted
+                    })
+                    .tooltip(Tooltip::text(if bookmarked {
+                        t!("web_preview.toolbar.remove_bookmark")
+                    } else {
+                        t!("web_preview.toolbar.add_bookmark")
+                    }))
+                    .on_click(cx.listener(|_, _, window, cx| {
+                        window.dispatch_action(ToggleBookmark.boxed_clone(), cx)
+                    })),
+                )
             })
             .when(self.loading, |this| {
                 this.child(
@@ -1770,6 +2067,14 @@ impl WebPreviewView {
 
     fn render_more_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let this = cx.weak_entity();
+        #[cfg(target_os = "macos")]
+        let (bookmarked, has_imported_data) = (
+            self.is_bookmarked(cx),
+            browser_import::BrowserLibrary::global(cx).has_imported_data(),
+        );
+        #[cfg(not(target_os = "macos"))]
+        let (bookmarked, has_imported_data) = (false, false);
+        let can_bookmark = !is_blank_url(&self.url) && is_supported();
         PopoverMenu::new("browser-more-menu")
             .trigger_with_tooltip(
                 IconButton::new("browser-more-button", IconName::Ellipsis)
@@ -1782,29 +2087,62 @@ impl WebPreviewView {
                 Some(ContextMenu::build(window, cx, move |menu, _, _| {
                     let devtools = this.clone();
                     let copy = this.clone();
+                    let clear = this.clone();
                     let system = this;
+                    let menu = menu
+                        .entry(
+                            t!("web_preview.toolbar.open_devtools"),
+                            Some(OpenDevTools.boxed_clone()),
+                            move |window, cx| {
+                                devtools
+                                    .update(cx, |this, cx| this.handle_open_devtools(window, cx))
+                                    .ok();
+                            },
+                        )
+                        .entry(
+                            t!("web_preview.toolbar.copy_url"),
+                            Some(CopyUrl.boxed_clone()),
+                            move |_, cx| {
+                                copy.update(cx, |this, cx| this.copy_url(cx)).ok();
+                            },
+                        )
+                        .entry(
+                            t!("web_preview.toolbar.open_in_system_browser"),
+                            None,
+                            move |_, cx| {
+                                system
+                                    .update(cx, |this, cx| this.open_in_system_browser(cx))
+                                    .ok();
+                            },
+                        );
+                    if !is_supported() {
+                        return menu;
+                    }
+                    let menu = menu
+                        .separator()
+                        .action(
+                            t!("web_preview.toolbar.import_from_browser"),
+                            ImportFromBrowser.boxed_clone(),
+                        )
+                        .when(can_bookmark, |menu| {
+                            menu.action(
+                                if bookmarked {
+                                    t!("web_preview.toolbar.remove_bookmark")
+                                } else {
+                                    t!("web_preview.toolbar.add_bookmark")
+                                },
+                                ToggleBookmark.boxed_clone(),
+                            )
+                        });
+                    if !has_imported_data {
+                        return menu;
+                    }
                     menu.entry(
-                        t!("web_preview.toolbar.open_devtools"),
-                        Some(OpenDevTools.boxed_clone()),
-                        move |window, cx| {
-                            devtools
-                                .update(cx, |this, cx| this.handle_open_devtools(window, cx))
-                                .ok();
-                        },
-                    )
-                    .entry(
-                        t!("web_preview.toolbar.copy_url"),
-                        Some(CopyUrl.boxed_clone()),
-                        move |_, cx| {
-                            copy.update(cx, |this, cx| this.copy_url(cx)).ok();
-                        },
-                    )
-                    .entry(
-                        t!("web_preview.toolbar.open_in_system_browser"),
+                        t!("web_preview.toolbar.clear_imported_data"),
                         None,
                         move |_, cx| {
-                            system
-                                .update(cx, |this, cx| this.open_in_system_browser(cx))
+                            clear
+                                .update(cx, |this, cx| this.clear_imported_data(cx))
                                 .ok();
                         },
                     )
@@ -1846,7 +2184,26 @@ impl WebPreviewView {
                 }))
         };
 
-        let mut list = v_flex().w(px(520.)).max_w_full().gap_0p5();
+        #[cfg(target_os = "macos")]
+        let import_card = self.render_import_card(cx);
+        #[cfg(not(target_os = "macos"))]
+        let import_card: Option<AnyElement> = None;
+        #[cfg(target_os = "macos")]
+        let bookmarks = self.render_bookmarks(cx);
+        #[cfg(not(target_os = "macos"))]
+        let bookmarks: Option<AnyElement> = None;
+        let has_extras = import_card.is_some() || bookmarks.is_some();
+
+        let mut list = v_flex()
+            .w(px(640.))
+            .max_w_full()
+            .gap_0p5()
+            .when_some(import_card, |this, card| {
+                this.child(card).child(div().h_4())
+            })
+            .when_some(bookmarks, |this, bookmarks| {
+                this.child(bookmarks).child(div().h_4())
+            });
         if !self.local_servers.is_empty() {
             list = list.child(
                 div()
@@ -1885,7 +2242,8 @@ impl WebPreviewView {
                 ));
             }
         }
-        if self.local_servers.is_empty()
+        if !has_extras
+            && self.local_servers.is_empty()
             && cx
                 .try_global::<RecentPages>()
                 .is_none_or(|recent| recent.0.is_empty())
@@ -2233,6 +2591,7 @@ impl Render for WebPreviewView {
                 this.set_zoom_level(0., cx);
             }))
             .on_action(cx.listener(|this, _: &CopyUrl, _, cx| this.copy_url(cx)))
+            .on_action(cx.listener(|this, _: &ToggleBookmark, _, cx| this.toggle_bookmark(cx)))
             .on_action(cx.listener(|this, _: &OpenInSystemBrowser, _, cx| {
                 this.open_in_system_browser(cx);
             }))
