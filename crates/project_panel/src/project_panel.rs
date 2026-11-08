@@ -18,7 +18,7 @@ use git;
 use git::status::GitSummary;
 use git_ui_core::file_diff_view::FileDiffView;
 use gpui::{
-    Action, Anchor, AnyElement, App, AsyncWindowContext, Bounds,
+    Action, Anchor, Animation, AnimationExt, AnyElement, App, AsyncWindowContext, Bounds,
     ClipboardEntry as GpuiClipboardEntry, ClipboardItem, Context, CursorStyle, DismissEvent, Div,
     DragMoveEvent, Entity, EventEmitter, ExternalDragPayload, ExternalPaths, FileDragPaths,
     FileDropEvent, FocusHandle, Focusable, FontWeight, Hsla, InteractiveElement, KeyContext,
@@ -167,7 +167,24 @@ pub struct ProjectPanel {
     update_visible_entries_task: UpdateVisibleEntriesTask,
     undo_manager: UndoManager,
     state: State,
+    expand_animation: Option<ExpandAnimation>,
 }
+
+/// A folder that was just opened, so the rows it reveals can slide in.
+struct ExpandAnimation {
+    worktree_id: WorktreeId,
+    entry_id: ProjectEntryId,
+    path: Arc<RelPath>,
+    started_at: Instant,
+}
+
+const EXPAND_ANIMATION_ROW_DURATION: Duration = Duration::from_millis(180);
+const EXPAND_ANIMATION_ROW_STAGGER: Duration = Duration::from_millis(16);
+const EXPAND_ANIMATION_MAX_STAGGERED_ROWS: usize = 12;
+const EXPAND_ANIMATION_SLIDE_DISTANCE: f32 = 6.;
+// Visible entries are recomputed on a background task, and unloaded folders fill in
+// later, so the revealed rows can show up some time after the click.
+const EXPAND_ANIMATION_WINDOW: Duration = Duration::from_millis(600);
 
 struct UpdateVisibleEntriesTask {
     _visible_entries_task: Task<()>,
@@ -918,6 +935,7 @@ impl ProjectPanel {
                 fs: workspace.app_state().fs.clone(),
                 focus_handle,
                 rendered_entries_len: 0,
+                expand_animation: None,
                 folded_directory_drag_target: None,
                 drag_target_entry: None,
                 marked_entries: Default::default(),
@@ -1544,6 +1562,7 @@ impl ProjectPanel {
                         });
 
                         expanded_dir_ids.insert(ix, entry_id);
+                        self.start_expand_animation(worktree_id, entry_id, cx);
                         self.update_visible_entries(None, false, false, window, cx);
                         cx.notify();
                     }
@@ -1804,21 +1823,86 @@ impl ProjectPanel {
         if let Some(worktree_id) = self.project.read(cx).worktree_id_for_entry(entry_id, cx)
             && let Some(expanded_dir_ids) = self.state.expanded_dir_ids.get_mut(&worktree_id)
         {
-            self.project.update(cx, |project, cx| {
+            let expanded = self.project.update(cx, |project, cx| {
                 match expanded_dir_ids.binary_search(&entry_id) {
                     Ok(ix) => {
                         expanded_dir_ids.remove(ix);
+                        false
                     }
                     Err(ix) => {
                         project.expand_entry(worktree_id, entry_id, cx);
                         expanded_dir_ids.insert(ix, entry_id);
+                        true
                     }
                 }
             });
+            if expanded {
+                self.start_expand_animation(worktree_id, entry_id, cx);
+            } else {
+                self.expand_animation = None;
+            }
             self.update_visible_entries(Some((worktree_id, entry_id)), false, false, window, cx);
             window.focus(&self.focus_handle, cx);
             cx.notify();
         }
+    }
+
+    fn start_expand_animation(
+        &mut self,
+        worktree_id: WorktreeId,
+        entry_id: ProjectEntryId,
+        cx: &App,
+    ) {
+        let Some(path) = self
+            .project
+            .read(cx)
+            .worktree_for_id(worktree_id, cx)
+            .and_then(|worktree| Some(worktree.read(cx).entry_for_id(entry_id)?.path.clone()))
+        else {
+            return;
+        };
+        self.expand_animation = Some(ExpandAnimation {
+            worktree_id,
+            entry_id,
+            path,
+            started_at: Instant::now(),
+        });
+    }
+
+    fn global_index_of_entry(&self, entry_id: ProjectEntryId) -> Option<usize> {
+        let mut offset = 0;
+        for visible in &self.state.visible_entries {
+            if let Some(ix) = visible.entries.iter().position(|entry| entry.id == entry_id) {
+                return Some(offset + ix);
+            }
+            offset += visible.entries.len();
+        }
+        None
+    }
+
+    fn animate_revealed_entry(
+        element: Stateful<Div>,
+        entry_id: ProjectEntryId,
+        row_offset: usize,
+    ) -> AnyElement {
+        let stagger_rows = row_offset.min(EXPAND_ANIMATION_MAX_STAGGERED_ROWS) as u32;
+        let delay = EXPAND_ANIMATION_ROW_STAGGER * stagger_rows;
+        let total = delay + EXPAND_ANIMATION_ROW_DURATION;
+        let delay_fraction = delay.as_secs_f32() / total.as_secs_f32();
+        element
+            .relative()
+            .with_animation(
+                ("project-panel-reveal", entry_id.to_proto() as usize),
+                Animation::new(total),
+                move |element, delta| {
+                    let local = ((delta - delay_fraction) / (1. - delay_fraction)).clamp(0., 1.);
+                    let eased = 1. - (1. - local).powi(3);
+                    element
+                        .top(px(-EXPAND_ANIMATION_SLIDE_DISTANCE * (1. - eased)))
+                        .opacity(eased)
+                },
+            )
+            .into_any_element()
     }
 
     fn toggle_expand_all(
@@ -7853,21 +7937,53 @@ impl Render for ProjectPanel {
                             uniform_list("entries", item_count, {
                                 cx.processor(|this, range: Range<usize>, window, cx| {
                                     this.rendered_entries_len = range.end - range.start;
-                                    let mut items = Vec::with_capacity(this.rendered_entries_len);
+                                    if this.expand_animation.as_ref().is_some_and(|animation| {
+                                        animation.started_at.elapsed() > EXPAND_ANIMATION_WINDOW
+                                    }) {
+                                        this.expand_animation = None;
+                                    }
+                                    let reveal = this.expand_animation.as_ref().and_then(
+                                        |animation| {
+                                            Some((
+                                                animation,
+                                                this.global_index_of_entry(animation.entry_id)?,
+                                            ))
+                                        },
+                                    );
+                                    let mut items: Vec<AnyElement> =
+                                        Vec::with_capacity(this.rendered_entries_len);
                                     let marked_selections: Arc<[SelectedEntry]> =
                                         Arc::from(this.marked_entries.clone());
+                                    let mut global_index = range.start;
                                     this.for_each_visible_entry(
                                         range,
                                         window,
                                         cx,
                                         &mut |id, details, window, cx| {
-                                            items.push(this.render_entry(
+                                            let revealed_by = reveal.filter(|(animation, _)| {
+                                                details.worktree_id == animation.worktree_id
+                                                    && details.path != animation.path
+                                                    && details.path.starts_with(&animation.path)
+                                            });
+                                            let element = this.render_entry(
                                                 id,
                                                 details,
                                                 Arc::clone(&marked_selections),
                                                 window,
                                                 cx,
-                                            ));
+                                            );
+                                            items.push(match revealed_by {
+                                                Some((_, parent_index)) => {
+                                                    Self::animate_revealed_entry(
+                                                        element,
+                                                        id,
+                                                        global_index
+                                                            .saturating_sub(parent_index + 1),
+                                                    )
+                                                }
+                                                None => element.into_any_element(),
+                                            });
+                                            global_index += 1;
                                         },
                                     );
                                     items
