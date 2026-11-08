@@ -7386,7 +7386,7 @@ pub mod test {
                             "Last setting",
                             Some(
                                 "A long setting description that wraps as the window narrows. "
-                                    .repeat(8),
+                                    .repeat(4),
                             ),
                         ),
                     ],
