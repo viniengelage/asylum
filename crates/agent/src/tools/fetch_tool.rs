@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::{borrow::Cow, cell::RefCell};
@@ -7,7 +8,9 @@ use anyhow::{Context as _, Result, bail};
 use futures::{AsyncReadExt as _, FutureExt as _};
 use gpui::{App, AppContext as _, Task};
 use html_to_markdown::{TagHandler, convert_html_to_markdown, markdown};
-use http_client::{AsyncBody, HttpClientWithUrl};
+use http_client::{
+    AsyncBody, HttpClient as _, HttpClientWithUrl, HttpRequestExt as _, RedirectPolicy, http,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ui::SharedString;
@@ -22,7 +25,24 @@ enum ContentType {
     Html,
     Plaintext,
     Json,
+    Binary,
 }
+
+/// Headers that carry credentials for the host they were written for, so a redirect to another
+/// host must not forward them.
+const CREDENTIAL_HEADERS: [&str; 3] = ["authorization", "cookie", "proxy-authorization"];
+
+/// Response headers worth showing for an API request; the rest are mostly transport noise.
+const SHOWN_RESPONSE_HEADERS: [&str; 8] = [
+    "content-type",
+    "location",
+    "set-cookie",
+    "www-authenticate",
+    "retry-after",
+    "etag",
+    "x-request-id",
+    "x-ratelimit-remaining",
+];
 
 /// The maximum number of HTTP redirects the fetch tool will follow. Each hop is
 /// re-authorized against the shared network grants before being followed.
@@ -36,6 +56,105 @@ enum FetchStep {
     /// A terminal response was received and converted to Markdown.
     /// `saved_bytes` is how much compacting a JSON response removed.
     Complete { text: String, saved_bytes: usize },
+}
+
+/// One hop of a fetch: what is requested from `url`.
+#[derive(Clone, Debug, PartialEq)]
+struct FetchRequest {
+    url: String,
+    method: http::Method,
+    headers: BTreeMap<String, String>,
+    body: Option<String>,
+}
+
+impl FetchRequest {
+    fn from_input(input: &FetchToolInput) -> Result<Self> {
+        let method = match input.method.as_deref().map(str::trim) {
+            None | Some("") => http::Method::GET,
+            Some(method) => http::Method::from_bytes(method.to_ascii_uppercase().as_bytes())
+                .with_context(|| format!("invalid HTTP method {method:?}"))?,
+        };
+        Ok(Self {
+            url: input.url.clone(),
+            method,
+            headers: input.headers.clone(),
+            body: input.body.clone(),
+        })
+    }
+
+    /// A request beyond a plain GET of a page: its response shows the status and headers, and
+    /// error statuses are returned as content, since an API's error body is what the caller
+    /// needs to see.
+    fn is_api_request(&self) -> bool {
+        self.method != http::Method::GET || !self.headers.is_empty() || self.body.is_some()
+    }
+
+    /// The request to make after `status` redirected this one to `target`, following what
+    /// browsers and curl do: 303 (and 301/302 after a POST) turn into a GET without a body,
+    /// 307/308 repeat the request, and credentials never cross to another host.
+    fn redirected(&self, status: http::StatusCode, target: String) -> Self {
+        let becomes_get = status == http::StatusCode::SEE_OTHER
+            || (self.method == http::Method::POST
+                && matches!(
+                    status,
+                    http::StatusCode::MOVED_PERMANENTLY | http::StatusCode::FOUND
+                ));
+        let same_host = host_of(&self.url).is_some() && host_of(&self.url) == host_of(&target);
+        let mut headers = self.headers.clone();
+        if !same_host {
+            headers.retain(|name, _| {
+                !CREDENTIAL_HEADERS.contains(&name.to_ascii_lowercase().as_str())
+            });
+        }
+        if becomes_get {
+            headers.retain(|name, _| !name.eq_ignore_ascii_case("content-type"));
+        }
+        Self {
+            url: target,
+            method: if becomes_get {
+                http::Method::GET
+            } else {
+                self.method.clone()
+            },
+            headers,
+            body: if becomes_get { None } else { self.body.clone() },
+        }
+    }
+}
+
+fn host_of(url: &str) -> Option<String> {
+    url::Url::parse(&normalize_url(url))
+        .ok()?
+        .host_str()
+        .map(str::to_ascii_lowercase)
+}
+
+fn content_type_of(header: Option<&str>) -> ContentType {
+    let Some(header) = header else {
+        return ContentType::Plaintext;
+    };
+    let essence = header
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    if essence == "application/json" || essence.ends_with("+json") {
+        ContentType::Json
+    } else if essence == "text/html" || essence == "application/xhtml+xml" {
+        ContentType::Html
+    } else if essence.starts_with("text/")
+        || essence.ends_with("xml")
+        || essence == "application/javascript"
+        || essence == "application/x-www-form-urlencoded"
+        || essence == "application/graphql"
+    {
+        ContentType::Plaintext
+    } else if essence.is_empty() {
+        ContentType::Html
+    } else {
+        ContentType::Binary
+    }
 }
 
 /// Prepends `https://` when the URL has no explicit HTTP(S) scheme, matching the
@@ -61,9 +180,24 @@ fn normalize_url(url: &str) -> Cow<'_, str> {
 /// entirely, matching the terminal, which is also how loopback and IP-literal
 /// hosts (which can't be granted individually) become reachable.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+///
+/// Besides reading pages, it calls HTTP APIs: pass `method`, `headers` (for example
+/// `Authorization` or an API key) and `body`. Such requests return the status line and the
+/// relevant response headers before the body, including for error statuses. Binary responses
+/// are described rather than shown.
 pub struct FetchToolInput {
     /// The URL to fetch.
     url: String,
+    /// The HTTP method, such as GET, POST, PUT, PATCH or DELETE. Defaults to GET.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    method: Option<String>,
+    /// Request headers by name, such as `Authorization`, `Accept` or `Content-Type`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    headers: BTreeMap<String, String>,
+    /// The request body, sent as given. Set a matching `Content-Type` header, such as
+    /// `application/json`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    body: Option<String>,
 }
 
 pub struct FetchTool {
@@ -75,19 +209,35 @@ impl FetchTool {
         Self { http_client }
     }
 
-    /// Performs a single HTTP GET *without* following redirects, so the tool can
+    /// Performs a single HTTP request *without* following redirects, so the tool can
     /// re-authorize each hop against the shared network grants before following
     /// it. Returns the redirect target when the server responds with a 3xx, or
     /// the final content converted to Markdown otherwise.
-    async fn fetch_step(http_client: Arc<HttpClientWithUrl>, url: &str) -> Result<FetchStep> {
-        let normalized = normalize_url(url);
+    async fn fetch_step(
+        http_client: Arc<HttpClientWithUrl>,
+        request: &FetchRequest,
+    ) -> Result<(http::StatusCode, FetchStep)> {
+        let normalized = normalize_url(&request.url);
 
-        let mut response = http_client
-            .get(&normalized, AsyncBody::default(), false)
-            .await?;
+        let mut builder = http::Request::builder()
+            .method(request.method.clone())
+            .uri(normalized.as_ref())
+            .follow_redirects(RedirectPolicy::NoFollow);
+        for (name, value) in &request.headers {
+            builder = builder.header(name.as_str(), value.as_str());
+        }
+        let body = match &request.body {
+            Some(body) => AsyncBody::from(body.clone()),
+            None => AsyncBody::default(),
+        };
+        let http_request = builder
+            .body(body)
+            .with_context(|| format!("invalid request to {normalized:?}"))?;
+        let mut response = http_client.send(http_request).await?;
 
         let status = response.status();
-        if status.is_redirection() {
+        // 304 Not Modified is a 3xx without a Location to follow.
+        if status.is_redirection() && status != http::StatusCode::NOT_MODIFIED {
             let location = response
                 .headers()
                 .get("location")
@@ -102,7 +252,7 @@ impl FetchTool {
                 matches!(target.scheme(), "http" | "https"),
                 "refusing to follow redirect to non-HTTP(S) URL {target}"
             );
-            return Ok(FetchStep::Redirect(target.to_string()));
+            return Ok((status, FetchStep::Redirect(target.to_string())));
         }
 
         let mut body = Vec::new();
@@ -112,26 +262,58 @@ impl FetchTool {
             .await
             .context("error reading response body")?;
 
-        if status.is_client_error() {
+        let api_request = request.is_api_request();
+        if status.is_client_error() && !api_request {
             let text = String::from_utf8_lossy(body.as_slice());
             bail!("status error {}, response: {text:?}", status.as_u16());
         }
 
-        let Some(content_type) = response.headers().get("content-type") else {
+        let content_type_header = match response.headers().get("content-type") {
+            Some(value) => Some(value.to_str().context("invalid Content-Type header")?),
+            None => None,
+        };
+        if content_type_header.is_none() && !api_request && !body.is_empty() {
             bail!("missing Content-Type header");
-        };
-        let content_type = content_type
-            .to_str()
-            .context("invalid Content-Type header")?;
+        }
+        let content_type = content_type_of(content_type_header);
 
-        let content_type = if content_type.starts_with("text/plain") {
-            ContentType::Plaintext
-        } else if content_type.starts_with("application/json") {
-            ContentType::Json
+        let (text, saved_bytes) =
+            Self::body_text(content_type, content_type_header, &body, &normalized)?;
+        let text = if api_request {
+            let mut head = format!(
+                "HTTP {} {}",
+                status.as_u16(),
+                status.canonical_reason().unwrap_or_default()
+            );
+            for (name, value) in response.headers() {
+                if SHOWN_RESPONSE_HEADERS.contains(&name.as_str()) {
+                    head.push_str(&format!(
+                        "\n{name}: {}",
+                        String::from_utf8_lossy(value.as_bytes())
+                    ));
+                }
+            }
+            if text.trim().is_empty() {
+                format!("{head}\n\n(empty body)")
+            } else {
+                format!("{head}\n\n{text}")
+            }
         } else {
-            ContentType::Html
+            text
         };
 
+        Ok((status, FetchStep::Complete { text, saved_bytes }))
+    }
+
+    fn body_text(
+        content_type: ContentType,
+        content_type_header: Option<&str>,
+        body: &[u8],
+        normalized: &str,
+    ) -> Result<(String, usize)> {
+        if body.is_empty() {
+            return Ok((String::new(), 0));
+        }
         let text = match content_type {
             ContentType::Html => {
                 let mut handlers: Vec<TagHandler> = vec![
@@ -154,11 +336,16 @@ impl FetchTool {
                     handlers.push(Rc::new(RefCell::new(markdown::CodeHandler)));
                 }
 
-                convert_html_to_markdown(&body[..], &mut handlers)?
+                convert_html_to_markdown(body, &mut handlers)?
             }
-            ContentType::Plaintext => std::str::from_utf8(&body)?.to_owned(),
+            ContentType::Plaintext => String::from_utf8_lossy(body).into_owned(),
+            ContentType::Binary => format!(
+                "Binary response not shown: {} bytes of {}.",
+                body.len(),
+                content_type_header.unwrap_or("unknown type")
+            ),
             ContentType::Json => {
-                let json: serde_json::Value = serde_json::from_slice(&body)?;
+                let json: serde_json::Value = serde_json::from_slice(body)?;
                 let pretty = serde_json::to_string_pretty(&json)?;
 
                 match json_compaction::compact_json(&pretty) {
@@ -169,17 +356,13 @@ impl FetchTool {
                             Some(note) => format!("{text}\n\n{note}"),
                             None => text,
                         };
-                        return Ok(FetchStep::Complete { text, saved_bytes });
+                        return Ok((text, saved_bytes));
                     }
                     None => format!("```json\n{pretty}\n```"),
                 }
             }
         };
-
-        Ok(FetchStep::Complete {
-            text,
-            saved_bytes: 0,
-        })
+        Ok((text, 0))
     }
 }
 
@@ -248,7 +431,17 @@ impl AgentTool for FetchTool {
         _cx: &mut App,
     ) -> SharedString {
         match input {
-            Ok(input) => format!("Fetch {}", MarkdownEscaped(&input.url)).into(),
+            Ok(input) => match input.method.as_deref().map(str::trim) {
+                Some(method) if !method.is_empty() && !method.eq_ignore_ascii_case("GET") => {
+                    format!(
+                        "Fetch {} {}",
+                        method.to_ascii_uppercase(),
+                        MarkdownEscaped(&input.url)
+                    )
+                    .into()
+                }
+                _ => format!("Fetch {}", MarkdownEscaped(&input.url)).into(),
+            },
             Err(_) => "Fetch URL".into(),
         }
     }
@@ -262,6 +455,8 @@ impl AgentTool for FetchTool {
         let http_client = self.http_client.clone();
         cx.spawn(async move |cx| {
             let input: FetchToolInput = input.recv().await.map_err(|e| e.to_string())?;
+            let mut request = FetchRequest::from_input(&input).map_err(|e| e.to_string())?;
+            let api_request = request.is_api_request();
 
             // First, the standard tool-permission gate (honors the fetch tool's
             // allow/deny/confirm rules).
@@ -269,11 +464,16 @@ impl AgentTool for FetchTool {
                 let context =
                     crate::ToolPermissionContext::new(Self::NAME, vec![input.url.clone()]);
 
-                event_stream.authorize(
-                    format!("Fetch {}", MarkdownInlineCode(&input.url)),
-                    context,
-                    cx,
-                )
+                let title = if request.method == http::Method::GET {
+                    format!("Fetch {}", MarkdownInlineCode(&input.url))
+                } else {
+                    format!(
+                        "Fetch {} {}",
+                        request.method,
+                        MarkdownInlineCode(&input.url)
+                    )
+                };
+                event_stream.authorize(title, context, cx)
             });
             futures::select! {
                 result = authorize.fuse() => result.map_err(|e| e.to_string())?,
@@ -307,11 +507,10 @@ impl AgentTool for FetchTool {
                     || event_stream.unsandboxed_access_granted(cx)
             });
 
-            let mut current_url = input.url.clone();
             let mut redirects = 0;
             let text = loop {
                 if !unsandboxed {
-                    let host = host_pattern_for_url(&current_url).map_err(|e| e.to_string())?;
+                    let host = host_pattern_for_url(&request.url).map_err(|e| e.to_string())?;
                     let authorize_host = cx.update(|cx| {
                         let request = SandboxRequest {
                             network: NetworkRequest::Hosts(vec![host]),
@@ -342,7 +541,7 @@ impl AgentTool for FetchTool {
                     // until then this blocks the realistic case of a stably
                     // resolving host that points at forbidden space.
                     let verify_task = cx.background_spawn({
-                        let url = current_url.clone();
+                        let url = request.url.clone();
                         async move { verify_host_not_forbidden(&url) }
                     });
                     futures::select! {
@@ -355,11 +554,11 @@ impl AgentTool for FetchTool {
 
                 let fetch_task = cx.background_spawn({
                     let http_client = http_client.clone();
-                    let url = current_url.clone();
-                    async move { Self::fetch_step(http_client, &url).await }
+                    let request = request.clone();
+                    async move { Self::fetch_step(http_client, &request).await }
                 });
 
-                let step = futures::select! {
+                let (status, step) = futures::select! {
                     result = fetch_task.fuse() => result.map_err(|e| e.to_string())?,
                     _ = event_stream.cancelled_by_user().fuse() => {
                         return Err("Fetch cancelled by user".to_string());
@@ -378,12 +577,12 @@ impl AgentTool for FetchTool {
                                 "exceeded the maximum of {MAX_REDIRECTS} redirects"
                             ));
                         }
-                        current_url = target;
+                        request = request.redirected(status, target);
                     }
                 }
             };
 
-            if text.trim().is_empty() {
+            if text.trim().is_empty() && !api_request {
                 return Err("no textual content found".to_string());
             }
             Ok(text)
@@ -424,6 +623,118 @@ mod tests {
                 "expected {url} to be refused as a forbidden destination"
             );
         }
+    }
+
+    fn input(method: Option<&str>, headers: &[(&str, &str)], body: Option<&str>) -> FetchToolInput {
+        FetchToolInput {
+            url: "https://api.example.com/items".into(),
+            method: method.map(str::to_string),
+            headers: headers
+                .iter()
+                .map(|(name, value)| (name.to_string(), value.to_string()))
+                .collect(),
+            body: body.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn plain_gets_stay_page_reads() {
+        let request = FetchRequest::from_input(&input(None, &[], None)).unwrap();
+        assert_eq!(request.method, http::Method::GET);
+        assert!(!request.is_api_request());
+        let request = FetchRequest::from_input(&input(Some("patch"), &[], None)).unwrap();
+        assert_eq!(request.method, http::Method::PATCH);
+        assert!(request.is_api_request());
+        assert!(FetchRequest::from_input(&input(Some("NOT A METHOD"), &[], None)).is_err());
+    }
+
+    #[test]
+    fn redirects_follow_browser_rules_and_keep_credentials_on_their_host() {
+        let request = FetchRequest::from_input(&input(
+            Some("POST"),
+            &[
+                ("Authorization", "Bearer secret"),
+                ("Content-Type", "application/json"),
+                ("Accept", "application/json"),
+            ],
+            Some("{}"),
+        ))
+        .unwrap();
+
+        let repeated = request.redirected(
+            http::StatusCode::TEMPORARY_REDIRECT,
+            "https://api.example.com/v2/items".into(),
+        );
+        assert_eq!(repeated.method, http::Method::POST);
+        assert_eq!(repeated.body.as_deref(), Some("{}"));
+        assert!(repeated.headers.contains_key("Authorization"));
+
+        let moved = request.redirected(
+            http::StatusCode::SEE_OTHER,
+            "https://cdn.example.net/result".into(),
+        );
+        assert_eq!(moved.method, http::Method::GET);
+        assert_eq!(moved.body, None);
+        assert_eq!(
+            moved.headers.keys().map(String::as_str).collect::<Vec<_>>(),
+            vec!["Accept"]
+        );
+    }
+
+    #[test]
+    fn content_types_pick_how_the_body_is_shown() {
+        assert_eq!(
+            content_type_of(Some("application/problem+json")),
+            ContentType::Json
+        );
+        assert_eq!(
+            content_type_of(Some("text/html; charset=utf-8")),
+            ContentType::Html
+        );
+        assert_eq!(
+            content_type_of(Some("application/xml")),
+            ContentType::Plaintext
+        );
+        assert_eq!(content_type_of(Some("text/csv")), ContentType::Plaintext);
+        assert_eq!(content_type_of(Some("image/png")), ContentType::Binary);
+        assert_eq!(content_type_of(None), ContentType::Plaintext);
+    }
+
+    #[test]
+    fn api_requests_send_method_headers_and_body_and_return_errors_as_content() {
+        let client = http_client::FakeHttpClient::create(|request| async move {
+            assert_eq!(request.method(), http::Method::POST);
+            assert_eq!(request.headers()["x-api-key"], "abc");
+            let mut body = String::new();
+            let mut incoming = request.into_body();
+            incoming.read_to_string(&mut body).await?;
+            assert_eq!(body, r#"{"name":"x"}"#);
+            Ok(http::Response::builder()
+                .status(422)
+                .header("content-type", "application/json")
+                .header("x-request-id", "req-1")
+                .header("server", "noise")
+                .body(AsyncBody::from(r#"{"error":"name taken"}"#.to_string()))?)
+        });
+        let request = FetchRequest::from_input(&input(
+            Some("POST"),
+            &[("x-api-key", "abc")],
+            Some(r#"{"name":"x"}"#),
+        ))
+        .unwrap();
+        let (status, step) =
+            futures::executor::block_on(FetchTool::fetch_step(client, &request)).unwrap();
+        assert_eq!(status.as_u16(), 422);
+        let FetchStep::Complete { text, .. } = step else {
+            panic!("expected a complete response");
+        };
+        assert!(
+            text.starts_with("HTTP 422 Unprocessable Entity\n"),
+            "{text}"
+        );
+        assert!(text.contains("x-request-id: req-1"));
+        assert!(!text.contains("server: noise"));
+        assert!(text.contains("name taken"));
     }
 
     #[test]
