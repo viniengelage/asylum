@@ -21,13 +21,14 @@ use gpui::{
     px, relative,
 };
 use i18n::t;
-use std::time::Duration;
+use std::{rc::Rc, time::Duration};
+use util::ResultExt as _;
 use ui::{
     Color, CommonAnimationExt, ContextMenu, Icon, IconButton, IconName, IconPosition, IconSize,
     Label, LabelSize, PopoverMenu, Tooltip, prelude::*, v_flex,
 };
 use workspace::{
-    StatusItemView, Workspace,
+    StatusItemView, ToolkitEntry, Workspace,
     item::{Item, ItemEvent, ItemHandle},
 };
 
@@ -265,32 +266,29 @@ impl WebPreviewToolkitButton {
 
 impl Render for WebPreviewToolkitButton {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        let workspace = self.workspace.clone();
-        let browser_is_active = self.browser_is_active;
-        let tooltip = if browser_is_active {
-            t!("web_preview.toolkit_button.new_tab")
-        } else {
-            t!("web_preview.tab_label")
-        };
-        workspace::dock::StatusBarButton::new(
-            "toolkit-browser",
-            IconName::ToolWeb,
-            browser_is_active,
-        )
-        .tab_index(0isize)
-        .aria_label(t!("web_preview.tab_label"))
-        .tooltip(move |_window, cx| Tooltip::simple(tooltip.clone(), cx))
-        .on_click(move |_, window, cx| {
-            workspace
-                .update(cx, |workspace, cx| {
-                    Self::activate_or_open(workspace, browser_is_active, window, cx)
-                })
-                .ok();
-        })
+        // The status bar lists it in the toolkit menu instead; see `toolkit_entry`.
+        gpui::Empty
     }
 }
 
 impl StatusItemView for WebPreviewToolkitButton {
+    fn toolkit_entry(&self, _cx: &App) -> Option<ToolkitEntry> {
+        let workspace = self.workspace.clone();
+        let browser_is_active = self.browser_is_active;
+        Some(ToolkitEntry {
+            id: task_agents::toolkit_ids::BROWSER,
+            is_open: browser_is_active,
+            action: Box::new(OpenWebPreview),
+            toggle: Rc::new(move |window, cx| {
+                workspace
+                    .update(cx, |workspace, cx| {
+                        Self::activate_or_open(workspace, browser_is_active, window, cx)
+                    })
+                    .log_err();
+            }),
+        })
+    }
+
     fn set_active_pane_item(
         &mut self,
         active_pane_item: Option<&dyn ItemHandle>,

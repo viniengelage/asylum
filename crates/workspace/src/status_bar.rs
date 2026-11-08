@@ -100,6 +100,12 @@ pub const TOOLKITS: &[ToolkitInfo] = &[
         label: || "Design".into(),
     },
     ToolkitInfo {
+        id: task_agents::toolkit_ids::BROWSER,
+        domain: ToolkitDomain::Frontend,
+        icon: IconName::ToolWeb,
+        label: || i18n::t!("web_preview.tab_label"),
+    },
+    ToolkitInfo {
         id: task_agents::toolkit_ids::API,
         domain: ToolkitDomain::Backend,
         icon: IconName::ArrowRightLeft,

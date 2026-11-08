@@ -92,7 +92,6 @@
   "toolbar.reset_zoom": "Back to 100%",
   "toolbar.stop": "Stop",
   "toolbar.url_placeholder": "Type an address or search",
-  "toolkit_button.new_tab": "New Browser tab",
   "unsupported.detail": "For now the embedded browser only works on macOS.",
   "unsupported.headline": "Web Preview isn't available on this system yet",
   "waiting_for_browser": "Waiting for browser..."
