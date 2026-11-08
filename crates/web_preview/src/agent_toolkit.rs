@@ -309,11 +309,20 @@ enum PageUse {
 
 async fn session_for_active_page(
     page_use: PageUse,
+    activity: SharedString,
     cx: &mut AsyncApp,
 ) -> Result<(CdpSession, PageInfo)> {
     let view = cx
         .update(|cx| active_view(cx))
         .context(t!("web_preview.agent.error.no_browser_tab"))?;
+    let blank = cx.update(|cx| {
+        let view = view.read(cx);
+        view.browser.is_none() && crate::is_blank_url(&view.url)
+    });
+    if blank {
+        anyhow::bail!(t!("web_preview.agent.error.no_page_open"));
+    }
+    view.update(cx, |view, cx| view.note_agent_activity(activity, cx));
     wait_for_browser(&view, cx).await?;
     let info = cx.update(|cx| page_info(&view, cx));
     if page_use == PageUse::PaintOrInput && info.hidden {
@@ -578,9 +587,28 @@ pub fn register_toolkit(cx: &mut App) {
              the page to finish loading.",
             ToolAccess::Act,
             async |project, input: OpenInput, cx| {
+                // A new tab shows its start page and only creates Chromium once it has an
+                // address, so there is no page to drive over CDP yet.
+                let blank_view = cx.update(|cx| {
+                    active_view(cx).filter(|view| {
+                        let view = view.read(cx);
+                        view.browser.is_none() && crate::is_blank_url(&view.url)
+                    })
+                });
                 let has_view = cx.update(|cx| active_view(cx).is_some());
-                if has_view {
-                    let (mut session, _) = session_for_active_page(PageUse::Script, cx).await?;
+                if let Some(view) = blank_view {
+                    view.update(cx, |view, cx| {
+                        view.note_agent_activity(t!("web_preview.agent.action.navigate"), cx);
+                        view.navigate(input.url.clone(), cx);
+                    });
+                    show_view(&view, cx);
+                } else if has_view {
+                    let (mut session, _) = session_for_active_page(
+                        PageUse::Script,
+                        t!("web_preview.agent.action.navigate"),
+                        cx,
+                    )
+                    .await?;
                     let navigation = with_timeout(
                         session.call("Page.navigate", json!({ "url": input.url })),
                         &t!("web_preview.agent.action.navigate"),
@@ -632,8 +660,12 @@ pub fn register_toolkit(cx: &mut App) {
              browser_click and browser_scroll are in the pixels of this image.",
             ToolAccess::Read,
             async |_project, _input: NoInput, cx| {
-                let (mut session, info) =
-                    session_for_active_page(PageUse::PaintOrInput, cx).await?;
+                let (mut session, info) = session_for_active_page(
+                    PageUse::PaintOrInput,
+                    t!("web_preview.agent.action.capture_page"),
+                    cx,
+                )
+                .await?;
                 let (width, height, scale) = with_timeout(
                     session.viewport(),
                     &t!("web_preview.agent.action.measure_page"),
@@ -684,7 +716,12 @@ pub fn register_toolkit(cx: &mut App) {
             "Clicks the page at a point given in the pixels of the latest browser_screenshot.",
             ToolAccess::Act,
             async |_project, input: ClickInput, cx| {
-                let (mut session, _) = session_for_active_page(PageUse::PaintOrInput, cx).await?;
+                let (mut session, _) = session_for_active_page(
+                    PageUse::PaintOrInput,
+                    t!("web_preview.agent.action.click"),
+                    cx,
+                )
+                .await?;
                 let (_, _, scale) = with_timeout(
                     session.viewport(),
                     &t!("web_preview.agent.action.measure_page"),
@@ -727,7 +764,12 @@ pub fn register_toolkit(cx: &mut App) {
             "Types text into the focused element of the page.",
             ToolAccess::Act,
             async |_project, input: TypeInput, cx| {
-                let (mut session, _) = session_for_active_page(PageUse::PaintOrInput, cx).await?;
+                let (mut session, _) = session_for_active_page(
+                    PageUse::PaintOrInput,
+                    t!("web_preview.agent.action.type"),
+                    cx,
+                )
+                .await?;
                 with_timeout(
                     session.call("Input.insertText", json!({ "text": input.text })),
                     &t!("web_preview.agent.action.type"),
@@ -751,7 +793,12 @@ pub fn register_toolkit(cx: &mut App) {
             async |_project, input: KeyInput, cx| {
                 let key = input.key.trim().to_lowercase();
                 let (name, code, key_code) = key_event(&key)?;
-                let (mut session, _) = session_for_active_page(PageUse::PaintOrInput, cx).await?;
+                let (mut session, _) = session_for_active_page(
+                    PageUse::PaintOrInput,
+                    t!("web_preview.agent.action.key"),
+                    cx,
+                )
+                .await?;
                 for event_type in ["rawKeyDown", "keyUp"] {
                     let mut params = json!({
                         "type": event_type,
@@ -782,7 +829,12 @@ pub fn register_toolkit(cx: &mut App) {
             "Scrolls the page with the mouse wheel.",
             ToolAccess::Act,
             async |_project, input: ScrollInput, cx| {
-                let (mut session, _) = session_for_active_page(PageUse::PaintOrInput, cx).await?;
+                let (mut session, _) = session_for_active_page(
+                    PageUse::PaintOrInput,
+                    t!("web_preview.agent.action.scroll"),
+                    cx,
+                )
+                .await?;
                 let (width, height, scale) = with_timeout(
                     session.viewport(),
                     &t!("web_preview.agent.action.measure_page"),
@@ -818,7 +870,12 @@ pub fn register_toolkit(cx: &mut App) {
              assigning `location`.",
             ToolAccess::Act,
             async |_project, input: EvalInput, cx| {
-                let (mut session, _) = session_for_active_page(PageUse::Script, cx).await?;
+                let (mut session, _) = session_for_active_page(
+                    PageUse::Script,
+                    t!("web_preview.agent.action.evaluate"),
+                    cx,
+                )
+                .await?;
                 let value = with_timeout_of(
                     EVAL_TIMEOUT,
                     session.evaluate(&input.expression),
@@ -838,7 +895,12 @@ pub fn register_toolkit(cx: &mut App) {
              requests) buffered since the page loaded.",
             ToolAccess::Read,
             async |_project, _input: NoInput, cx| {
-                let (mut session, info) = session_for_active_page(PageUse::Script, cx).await?;
+                let (mut session, info) = session_for_active_page(
+                    PageUse::Script,
+                    t!("web_preview.agent.action.console"),
+                    cx,
+                )
+                .await?;
                 with_timeout(
                     session.call("Console.enable", json!({})),
                     &t!("web_preview.agent.action.console"),

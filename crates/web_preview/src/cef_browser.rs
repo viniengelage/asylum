@@ -511,7 +511,24 @@ pub struct BrowserState {
     /// Caret / composition rectangles in logical pixels relative to the page, used to place
     /// the IME candidate window.
     pub composition_bounds: Vec<gpui::Bounds<Pixels>>,
+    /// How far the current navigation has loaded, from 0 to 1.
+    pub load_progress: f64,
+    /// Why the main frame's last navigation failed, until the next one starts.
+    pub load_error: Option<LoadError>,
 }
+
+/// A main-frame navigation that failed, as Chromium's net error code and text.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LoadError {
+    pub code: i32,
+    pub text: String,
+    pub url: String,
+}
+
+/// Chromium's `net::ERR_ABORTED`: the navigation was stopped or replaced, which is not a
+/// failure the page should report.
+const NET_ERROR_ABORTED: i32 = -3;
+pub const NET_ERROR_CONNECTION_REFUSED: i32 = -102;
 
 impl Default for BrowserState {
     fn default() -> Self {
@@ -525,6 +542,8 @@ impl Default for BrowserState {
             selected_text: String::new(),
             selected_range: None,
             composition_bounds: Vec::new(),
+            load_progress: 0.,
+            load_error: None,
         }
     }
 }
@@ -808,6 +827,14 @@ wrap_display_handler! {
             });
         }
 
+        fn on_loading_progress_change(&self, _browser: Option<&mut Browser>, progress: f64) {
+            WebPreviewHandler::update_state(&self.inner, |state| {
+                let changed = (state.load_progress - progress).abs() > f64::EPSILON;
+                state.load_progress = progress;
+                changed
+            });
+        }
+
         fn on_address_change(
             &self,
             _browser: Option<&mut Browser>,
@@ -959,6 +986,41 @@ wrap_load_handler! {
                 state.can_go_back = can_go_back != 0;
                 state.can_go_forward = can_go_forward != 0;
                 changed
+            });
+        }
+
+        fn on_load_start(
+            &self,
+            _browser: Option<&mut Browser>,
+            frame: Option<&mut Frame>,
+            _transition_type: TransitionType,
+        ) {
+            if !frame.is_some_and(|frame| frame.is_main() != 0) {
+                return;
+            }
+            WebPreviewHandler::update_state(&self.inner, |state| state.load_error.take().is_some());
+        }
+
+        fn on_load_error(
+            &self,
+            _browser: Option<&mut Browser>,
+            frame: Option<&mut Frame>,
+            error_code: Errorcode,
+            error_text: Option<&CefString>,
+            failed_url: Option<&CefString>,
+        ) {
+            let code = *error_code.as_ref() as i32;
+            if code == NET_ERROR_ABORTED || !frame.is_some_and(|frame| frame.is_main() != 0) {
+                return;
+            }
+            let error = LoadError {
+                code,
+                text: error_text.map(|text| text.to_string()).unwrap_or_default(),
+                url: failed_url.map(|url| url.to_string()).unwrap_or_default(),
+            };
+            WebPreviewHandler::update_state(&self.inner, |state| {
+                state.load_error = Some(error);
+                true
             });
         }
     }
@@ -1626,6 +1688,16 @@ impl CefBrowserInstance {
 
     pub fn stop(&self) {
         self.with_browser(|browser| browser.stop_load());
+    }
+
+    /// Chromium's zoom level, where each step is a factor of 1.2 and 0 is 100%.
+    pub fn set_zoom_level(&self, level: f64) {
+        self.with_browser(|browser| {
+            if let Some(host) = browser.host() {
+                host.set_zoom_level(level);
+            }
+        });
+        request_pump();
     }
 
     pub fn go_back(&self) {

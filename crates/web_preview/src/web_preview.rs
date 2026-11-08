@@ -14,15 +14,17 @@ pub use runtime_discovery::is_valid_request_id;
 
 use editor::Editor;
 use gpui::{
-    App, Bounds, Context, CursorStyle, Entity, EventEmitter, FocusHandle, Focusable,
-    InteractiveElement, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, ParentElement, Pixels, Render, ScrollEvent, SharedString, Styled, Subscription,
-    Task, Window, actions, canvas, div, px,
+    Action as _, AnyElement, App, Bounds, ClipboardItem, Context, CursorStyle, Entity,
+    EventEmitter, FocusHandle, Focusable, FontWeight, Global, InteractiveElement, IntoElement,
+    KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels,
+    Render, ScrollEvent, SharedString, Styled, Subscription, Task, Window, actions, canvas, div,
+    px, relative,
 };
 use i18n::t;
+use std::time::Duration;
 use ui::{
-    Color, HeaderBar, HeaderBarLevel, Icon, IconButton, IconName, IconSize, Label, Tooltip,
-    prelude::*, v_flex,
+    Color, CommonAnimationExt, ContextMenu, Icon, IconButton, IconName, IconPosition, IconSize,
+    Label, LabelSize, PopoverMenu, Tooltip, prelude::*, v_flex,
 };
 use workspace::{
     StatusItemView, Workspace,
@@ -58,8 +60,121 @@ actions!(
         Undo,
         /// Redoes the last undone edit in the page.
         Redo,
+        /// Zooms the page in.
+        ZoomIn,
+        /// Zooms the page out.
+        ZoomOut,
+        /// Puts the page back at 100%.
+        ResetZoom,
+        /// Copies the page's address.
+        CopyUrl,
+        /// Opens the page in the system's browser.
+        OpenInSystemBrowser,
+        /// Swaps the width and height of the device the page is shown at.
+        RotateDevice,
     ]
 );
+
+/// A device size the page can be shown at instead of filling the tab.
+struct DevicePreset {
+    name: &'static str,
+    width: f32,
+    height: f32,
+}
+
+const DEVICE_PRESETS: [DevicePreset; 5] = [
+    DevicePreset {
+        name: "iPhone 15",
+        width: 390.,
+        height: 844.,
+    },
+    DevicePreset {
+        name: "iPhone SE",
+        width: 375.,
+        height: 667.,
+    },
+    DevicePreset {
+        name: "Pixel 8",
+        width: 412.,
+        height: 915.,
+    },
+    DevicePreset {
+        name: "iPad Air",
+        width: 820.,
+        height: 1180.,
+    },
+    DevicePreset {
+        name: "Desktop",
+        width: 1440.,
+        height: 900.,
+    },
+];
+
+/// Chromium steps zoom by a factor of 1.2 per level.
+const ZOOM_STEP_FACTOR: f64 = 1.2;
+const MAX_ZOOM_LEVEL: f64 = 5.;
+
+/// Ports dev servers commonly listen on, checked when a new tab opens.
+const LOCAL_SERVER_PORTS: [u16; 12] = [
+    3000, 3001, 4200, 4321, 5173, 5174, 6006, 8000, 8080, 8081, 8888, 19006,
+];
+const LOCAL_SERVER_PROBE_TIMEOUT: Duration = Duration::from_millis(150);
+
+/// How long the agent chip stays in the rail after the agent's last action on the page.
+const AGENT_ACTIVITY_LINGER: Duration = Duration::from_millis(1500);
+
+const MAX_RECENT_PAGES: usize = 6;
+
+/// Pages visited in this session, newest first, offered by a new tab.
+#[derive(Default)]
+struct RecentPages(Vec<RecentPage>);
+
+impl Global for RecentPages {}
+
+#[derive(Clone)]
+struct RecentPage {
+    title: SharedString,
+    url: SharedString,
+}
+
+/// Why the page's last navigation failed, kept until the next one starts.
+#[derive(Clone, Debug, PartialEq)]
+struct PageLoadError {
+    connection_refused: bool,
+    url: String,
+    text: String,
+}
+
+fn is_blank_url(url: &str) -> bool {
+    url.is_empty() || url == "about:blank"
+}
+
+/// The address split into the part shown in full and the rest, shown muted.
+fn split_address(url: &str) -> (&str, &str) {
+    let without_scheme = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .unwrap_or(url);
+    match without_scheme.find(['/', '?', '#']) {
+        Some(index) => without_scheme.split_at(index),
+        None => (without_scheme, ""),
+    }
+}
+
+fn zoom_percent(level: f64) -> u32 {
+    (ZOOM_STEP_FACTOR.powf(level) * 100.).round() as u32
+}
+
+fn probe_local_servers() -> Vec<u16> {
+    LOCAL_SERVER_PORTS
+        .iter()
+        .copied()
+        .filter(|port| {
+            let address = std::net::SocketAddr::from(([127, 0, 0, 1], *port));
+            std::net::TcpStream::connect_timeout(&address, LOCAL_SERVER_PROBE_TIMEOUT).is_ok()
+        })
+        .collect()
+}
 
 /// How often the poll loop looks for a URL dropped by the `zed browse` utility.
 #[cfg(target_os = "macos")]
@@ -247,6 +362,17 @@ pub struct WebPreviewView {
     /// Hosted inside another view (such as the design viewer's canvas): no URL toolbar, and
     /// invisible to the agent's browser tools and the `zed browse` utility.
     embedded: bool,
+    load_progress: f64,
+    load_error: Option<PageLoadError>,
+    /// An index into `DEVICE_PRESETS`, or `None` to fill the tab.
+    device: Option<usize>,
+    device_rotated: bool,
+    zoom_level: f64,
+    /// What the agent's browser tools last did to this page, while it is recent.
+    agent_activity: Option<SharedString>,
+    _agent_activity_reset: Option<Task<()>>,
+    local_servers: Vec<u16>,
+    _local_servers_probe: Option<Task<()>>,
 }
 
 impl WebPreviewView {
@@ -545,6 +671,9 @@ impl WebPreviewView {
                         if this.title != old_title || this.loading != old_loading {
                             cx.emit(ItemEvent::UpdateTab);
                         }
+                        if old_loading && !this.loading {
+                            this.remember_page(cx);
+                        }
                         if this.url != old_url {
                             cx.emit(WebPreviewEvent::UrlChanged(this.url.clone()));
                         }
@@ -607,6 +736,15 @@ impl WebPreviewView {
             #[cfg(target_os = "macos")]
             cef_installer,
             embedded,
+            load_progress: 0.,
+            load_error: None,
+            device: None,
+            device_rotated: false,
+            zoom_level: 0.,
+            agent_activity: None,
+            _agent_activity_reset: None,
+            local_servers: Vec::new(),
+            _local_servers_probe: None,
         }
     }
 
@@ -726,6 +864,12 @@ impl WebPreviewView {
             self.loading = state.loading;
             self.can_go_back = state.can_go_back;
             self.can_go_forward = state.can_go_forward;
+            self.load_progress = state.load_progress;
+            self.load_error = state.load_error.map(|error| PageLoadError {
+                connection_refused: error.code == cef_browser::NET_ERROR_CONNECTION_REFUSED,
+                url: error.url,
+                text: error.text,
+            });
         }
 
         if let Some(frame) = browser.take_frame() {
@@ -1233,17 +1377,119 @@ impl WebPreviewView {
         }
     }
 
-    fn submit_url(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        let url = self.url_editor.read(cx).text(cx);
+    fn submit_url(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let url = self.url_editor.read(cx).text(cx).trim().to_string();
         if !url.is_empty() {
-            log::info!("web_preview: navigating to {url}");
-            #[cfg(target_os = "macos")]
-            if let Some(ref browser) = self.browser {
-                browser.navigate_to(&url);
-            }
-            runtime_discovery::write_runtime_discovery(&url, self.target_id.as_deref());
+            self.open_address(url, window, cx);
         }
         cx.notify();
+    }
+
+    fn open_address(&mut self, url: String, window: &mut Window, cx: &mut Context<Self>) {
+        log::info!("web_preview: navigating to {url}");
+        #[cfg(target_os = "macos")]
+        if let Some(ref browser) = self.browser {
+            browser.navigate_to(&url);
+        }
+        runtime_discovery::write_runtime_discovery(&url, self.target_id.as_deref());
+        // Without a browser yet (a new tab shows its start page instead), the first layout
+        // creates one and navigates to `self.url`.
+        self.url = url;
+        self.load_error = None;
+        self.browser_focus.focus(window, cx);
+        cx.notify();
+    }
+
+    fn focus_address_bar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let url = if is_blank_url(&self.url) {
+            String::new()
+        } else {
+            self.url.clone()
+        };
+        self.url_editor.update(cx, |editor, cx| {
+            editor.set_text(url, window, cx);
+            editor.select_all(&editor::actions::SelectAll, window, cx);
+        });
+        self.url_editor.focus_handle(cx).focus(window, cx);
+        cx.notify();
+    }
+
+    fn remember_page(&mut self, cx: &mut Context<Self>) {
+        if self.embedded
+            || self.load_error.is_some()
+            || !(self.url.starts_with("http://") || self.url.starts_with("https://"))
+        {
+            return;
+        }
+        let page = RecentPage {
+            title: if self.title.is_empty() {
+                SharedString::from(self.url.clone())
+            } else {
+                SharedString::from(self.title.clone())
+            },
+            url: SharedString::from(self.url.clone()),
+        };
+        let recent = &mut cx.default_global::<RecentPages>().0;
+        recent.retain(|existing| existing.url != page.url);
+        recent.insert(0, page);
+        recent.truncate(MAX_RECENT_PAGES);
+    }
+
+    /// Shows in the rail what the agent's browser tools are doing to the page, for a moment
+    /// after each action.
+    pub(crate) fn note_agent_activity(&mut self, action: SharedString, cx: &mut Context<Self>) {
+        self.agent_activity = Some(action);
+        self._agent_activity_reset = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(AGENT_ACTIVITY_LINGER).await;
+            this.update(cx, |this, cx| {
+                this.agent_activity = None;
+                cx.notify();
+            })
+            .ok();
+        }));
+        cx.notify();
+    }
+
+    fn set_zoom_level(&mut self, level: f64, cx: &mut Context<Self>) {
+        self.zoom_level = level.clamp(-MAX_ZOOM_LEVEL, MAX_ZOOM_LEVEL);
+        #[cfg(target_os = "macos")]
+        if let Some(browser) = &self.browser {
+            browser.set_zoom_level(self.zoom_level);
+        }
+        cx.notify();
+    }
+
+    fn set_device(&mut self, device: Option<usize>, cx: &mut Context<Self>) {
+        self.device = device;
+        self.device_rotated = false;
+        cx.notify();
+    }
+
+    fn copy_url(&mut self, cx: &mut Context<Self>) {
+        if !is_blank_url(&self.url) {
+            cx.write_to_clipboard(ClipboardItem::new_string(self.url.clone()));
+        }
+    }
+
+    fn open_in_system_browser(&mut self, cx: &mut Context<Self>) {
+        if !is_blank_url(&self.url) {
+            cx.open_url(&self.url);
+        }
+    }
+
+    fn probe_local_servers(&mut self, cx: &mut Context<Self>) {
+        if self._local_servers_probe.is_some() {
+            return;
+        }
+        let probe = cx.background_spawn(async move { probe_local_servers() });
+        self._local_servers_probe = Some(cx.spawn(async move |this, cx| {
+            let ports = probe.await;
+            this.update(cx, |this, cx| {
+                this.local_servers = ports;
+                cx.notify();
+            })
+            .ok();
+        }));
     }
 
     fn handle_go_back(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
@@ -1289,6 +1535,465 @@ impl Focusable for WebPreviewView {
     }
 }
 
+impl WebPreviewView {
+    fn render_rail(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let reload_or_stop = if self.loading {
+            IconButton::new("stop", IconName::Close)
+                .icon_size(IconSize::Small)
+                .tooltip(Tooltip::text(t!("web_preview.toolbar.stop")))
+                .on_click(cx.listener(|this, _, window, cx| this.handle_stop(window, cx)))
+        } else {
+            IconButton::new("reload", IconName::RotateCw)
+                .icon_size(IconSize::Small)
+                .tooltip(Tooltip::text(t!("web_preview.toolbar.reload")))
+                .on_click(cx.listener(|this, _, _, cx| this.reload(cx)))
+        };
+        let zoom = zoom_percent(self.zoom_level);
+
+        ui::toolbar_rail(cx)
+            .pl(px(3.))
+            .child(
+                h_flex()
+                    .gap_0p5()
+                    .child(
+                        IconButton::new("back", IconName::ArrowLeft)
+                            .icon_size(IconSize::Small)
+                            .disabled(!self.can_go_back)
+                            .tooltip(Tooltip::text(t!("web_preview.toolbar.back")))
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.handle_go_back(window, cx)),
+                            ),
+                    )
+                    .child(
+                        IconButton::new("forward", IconName::ArrowRight)
+                            .icon_size(IconSize::Small)
+                            .disabled(!self.can_go_forward)
+                            .tooltip(Tooltip::text(t!("web_preview.toolbar.forward")))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.handle_go_forward(window, cx)
+                            })),
+                    )
+                    .child(reload_or_stop),
+            )
+            .child(self.render_address_bar(window, cx))
+            .when_some(self.agent_activity.clone(), |this, action| {
+                this.child(ui::status_chip(
+                    Some(IconName::Sparkle),
+                    t!("web_preview.agent_chip", action = action),
+                    Color::Accent,
+                    cx,
+                ))
+            })
+            .child(
+                h_flex()
+                    .gap_0p5()
+                    .child(self.render_device_menu(cx))
+                    .child(
+                        Button::new("zoom", format!("{zoom}%"))
+                            .label_size(LabelSize::Small)
+                            .color(Color::Muted)
+                            .tooltip(Tooltip::text(t!("web_preview.toolbar.reset_zoom")))
+                            .on_click(cx.listener(|this, _, _, cx| this.set_zoom_level(0., cx))),
+                    )
+                    .child(self.render_more_menu(cx)),
+            )
+    }
+
+    fn render_address_bar(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = cx.theme().colors();
+        let focused = self
+            .url_editor
+            .focus_handle(cx)
+            .contains_focused(window, cx);
+        let show_editor = focused || is_blank_url(&self.url);
+        let leading = if self.load_error.is_some() {
+            Icon::new(IconName::Warning)
+                .size(IconSize::Small)
+                .color(Color::Error)
+                .into_any_element()
+        } else if self.loading {
+            Icon::new(IconName::LoadCircle)
+                .size(IconSize::Small)
+                .color(Color::Muted)
+                .with_rotate_animation(2)
+                .into_any_element()
+        } else if self.url.starts_with("https://") {
+            Icon::new(IconName::Lock)
+                .size(IconSize::Small)
+                .color(Color::Muted)
+                .into_any_element()
+        } else {
+            Icon::new(IconName::Public)
+                .size(IconSize::Small)
+                .color(Color::Muted)
+                .into_any_element()
+        };
+        let (host, rest) = split_address(&self.url);
+        let host_color = if self.load_error.is_some() {
+            Color::Error
+        } else {
+            Color::Default
+        };
+
+        h_flex()
+            .id("address-bar")
+            .relative()
+            .flex_1()
+            .min_w_0()
+            .h(px(26.))
+            .px_2()
+            .gap_1p5()
+            .rounded_md()
+            .overflow_hidden()
+            .bg(colors.element_background)
+            .border_1()
+            .border_color(if focused {
+                colors.border_focused.opacity(0.7)
+            } else {
+                gpui::transparent_black()
+            })
+            .on_action(cx.listener(|this, _: &menu::Confirm, window, cx| {
+                this.submit_url(window, cx);
+            }))
+            .child(leading)
+            .child(if show_editor {
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(self.url_editor.clone())
+                    .into_any_element()
+            } else {
+                h_flex()
+                    .id("address")
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .cursor_text()
+                    .child(
+                        Label::new(SharedString::from(host.to_string()))
+                            .size(LabelSize::Small)
+                            .weight(FontWeight::MEDIUM)
+                            .color(host_color),
+                    )
+                    .child(
+                        Label::new(SharedString::from(rest.to_string()))
+                            .size(LabelSize::Small)
+                            .color(Color::Muted)
+                            .truncate(),
+                    )
+                    .on_click(cx.listener(|this, _, window, cx| this.focus_address_bar(window, cx)))
+                    .into_any_element()
+            })
+            .when(self.loading, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .bottom_0()
+                        .h(px(2.))
+                        // Chromium reports nothing until the response arrives, and an empty
+                        // bar reads as stuck.
+                        .w(relative(self.load_progress.max(0.08) as f32))
+                        .bg(colors.border_focused),
+                )
+            })
+    }
+
+    fn render_device_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let (icon, label) = match self.device.and_then(|index| DEVICE_PRESETS.get(index)) {
+            Some(preset) => (IconName::Smartphone, SharedString::from(preset.name)),
+            None => (IconName::Screen, t!("web_preview.device.responsive")),
+        };
+        let this = cx.weak_entity();
+        let current = self.device;
+        let rotated = self.device_rotated;
+        PopoverMenu::new("device-menu")
+            .trigger_with_tooltip(
+                Button::new("device-menu-button", label)
+                    .label_size(LabelSize::Small)
+                    .color(Color::Muted)
+                    .start_icon(Icon::new(icon).size(IconSize::Small).color(Color::Muted)),
+                Tooltip::text(t!("web_preview.device.tooltip")),
+            )
+            .anchor(gpui::Anchor::TopRight)
+            .menu(move |window, cx| {
+                let this = this.clone();
+                Some(ContextMenu::build(window, cx, move |mut menu, _, _| {
+                    let responsive = this.clone();
+                    menu = menu.toggleable_entry(
+                        t!("web_preview.device.responsive"),
+                        current.is_none(),
+                        IconPosition::Start,
+                        None,
+                        move |_, cx| {
+                            responsive
+                                .update(cx, |this, cx| this.set_device(None, cx))
+                                .ok();
+                        },
+                    );
+                    menu = menu.separator();
+                    for (index, preset) in DEVICE_PRESETS.iter().enumerate() {
+                        let this = this.clone();
+                        menu = menu.toggleable_entry(
+                            format!(
+                                "{} · {} × {}",
+                                preset.name, preset.width as u32, preset.height as u32
+                            ),
+                            current == Some(index),
+                            IconPosition::Start,
+                            None,
+                            move |_, cx| {
+                                this.update(cx, |this, cx| this.set_device(Some(index), cx))
+                                    .ok();
+                            },
+                        );
+                    }
+                    if current.is_some() {
+                        let rotate = this.clone();
+                        menu = menu.separator().toggleable_entry(
+                            t!("web_preview.device.rotate"),
+                            rotated,
+                            IconPosition::Start,
+                            Some(RotateDevice.boxed_clone()),
+                            move |_, cx| {
+                                rotate
+                                    .update(cx, |this, cx| {
+                                        this.device_rotated = !this.device_rotated;
+                                        cx.notify();
+                                    })
+                                    .ok();
+                            },
+                        );
+                    }
+                    menu
+                }))
+            })
+    }
+
+    fn render_more_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let this = cx.weak_entity();
+        PopoverMenu::new("browser-more-menu")
+            .trigger_with_tooltip(
+                IconButton::new("browser-more-button", IconName::Ellipsis)
+                    .icon_size(IconSize::Small),
+                Tooltip::text(t!("web_preview.toolbar.more")),
+            )
+            .anchor(gpui::Anchor::TopRight)
+            .menu(move |window, cx| {
+                let this = this.clone();
+                Some(ContextMenu::build(window, cx, move |menu, _, _| {
+                    let devtools = this.clone();
+                    let copy = this.clone();
+                    let system = this;
+                    menu.entry(
+                        t!("web_preview.toolbar.open_devtools"),
+                        Some(OpenDevTools.boxed_clone()),
+                        move |window, cx| {
+                            devtools
+                                .update(cx, |this, cx| this.handle_open_devtools(window, cx))
+                                .ok();
+                        },
+                    )
+                    .entry(
+                        t!("web_preview.toolbar.copy_url"),
+                        Some(CopyUrl.boxed_clone()),
+                        move |_, cx| {
+                            copy.update(cx, |this, cx| this.copy_url(cx)).ok();
+                        },
+                    )
+                    .entry(
+                        t!("web_preview.toolbar.open_in_system_browser"),
+                        None,
+                        move |_, cx| {
+                            system
+                                .update(cx, |this, cx| this.open_in_system_browser(cx))
+                                .ok();
+                        },
+                    )
+                }))
+            })
+    }
+
+    fn render_start_page(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        self.probe_local_servers(cx);
+        let recent: Vec<RecentPage> = cx
+            .try_global::<RecentPages>()
+            .map(|recent| recent.0.clone())
+            .unwrap_or_default();
+        let row = |id: SharedString,
+                   icon: IconName,
+                   title: SharedString,
+                   detail: SharedString,
+                   url: String,
+                   cx: &mut Context<Self>| {
+            h_flex()
+                .id(id)
+                .w_full()
+                .h(px(30.))
+                .px_2()
+                .gap_2()
+                .rounded_md()
+                .cursor_pointer()
+                .hover(|this| this.bg(cx.theme().colors().element_hover))
+                .child(Icon::new(icon).size(IconSize::Small).color(Color::Muted))
+                .child(Label::new(title).size(LabelSize::Small))
+                .child(
+                    Label::new(detail)
+                        .size(LabelSize::Small)
+                        .color(Color::Muted)
+                        .truncate(),
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.open_address(url.clone(), window, cx);
+                }))
+        };
+
+        let mut list = v_flex().w(px(520.)).max_w_full().gap_0p5();
+        if !self.local_servers.is_empty() {
+            list = list.child(
+                div()
+                    .px_2()
+                    .pb_1()
+                    .child(ui::section_label(t!("web_preview.start.local_servers"))),
+            );
+            for port in self.local_servers.clone() {
+                let address = format!("localhost:{port}");
+                list = list.child(row(
+                    SharedString::from(format!("server-{port}")),
+                    IconName::Server,
+                    SharedString::from(address.clone()),
+                    SharedString::default(),
+                    format!("http://{address}"),
+                    cx,
+                ));
+            }
+        }
+        if !recent.is_empty() {
+            list = list.child(
+                div()
+                    .px_2()
+                    .pt_3()
+                    .pb_1()
+                    .child(ui::section_label(t!("web_preview.start.recent"))),
+            );
+            for (index, page) in recent.into_iter().enumerate() {
+                list = list.child(row(
+                    SharedString::from(format!("recent-{index}")),
+                    IconName::History,
+                    page.title.clone(),
+                    page.url.clone(),
+                    page.url.to_string(),
+                    cx,
+                ));
+            }
+        }
+        if self.local_servers.is_empty()
+            && cx
+                .try_global::<RecentPages>()
+                .is_none_or(|recent| recent.0.is_empty())
+        {
+            return ui::EmptyState::new(IconName::Public, t!("web_preview.start.empty_title"))
+                .description(t!("web_preview.start.empty_description"))
+                .into_any_element();
+        }
+        v_flex()
+            .size_full()
+            .items_center()
+            .pt_8()
+            .child(list)
+            .into_any_element()
+    }
+
+    fn render_load_error(&self, error: &PageLoadError, cx: &mut Context<Self>) -> AnyElement {
+        let (host, _) = split_address(&error.url);
+        let headline = if error.connection_refused {
+            t!("web_preview.load_error.refused_headline", host = host)
+        } else {
+            t!("web_preview.load_error.headline", host = host)
+        };
+        let detail = if error.connection_refused {
+            t!("web_preview.load_error.refused_detail")
+        } else {
+            SharedString::from(error.text.clone())
+        };
+        ui::EmptyState::new(IconName::Warning, headline)
+            .tone(ui::EmptyStateTone::Error)
+            .description(detail)
+            .action(
+                ui::primary_button(
+                    "retry",
+                    Some(IconName::RotateCw),
+                    t!("web_preview.load_error.retry"),
+                    None,
+                    cx,
+                )
+                .on_click(cx.listener(|this, _, _, cx| this.reload(cx))),
+            )
+            .into_any_element()
+    }
+
+    /// Fills the tab with the page, or with a device preset shows it at that size, centered
+    /// on the canvas with its name and size above.
+    fn frame_page(&self, page: AnyElement, cx: &mut Context<Self>) -> AnyElement {
+        if self.embedded {
+            return page;
+        }
+        let colors = cx.theme().colors();
+        let Some(preset) = self.device.and_then(|index| DEVICE_PRESETS.get(index)) else {
+            return v_flex()
+                .flex_1()
+                .w_full()
+                .min_h_0()
+                .rounded_md()
+                .overflow_hidden()
+                .child(page)
+                .into_any_element();
+        };
+        let (width, height) = if self.device_rotated {
+            (preset.height, preset.width)
+        } else {
+            (preset.width, preset.height)
+        };
+        v_flex()
+            .flex_1()
+            .w_full()
+            .min_h_0()
+            .items_center()
+            .gap_2()
+            .pt_3()
+            .rounded_md()
+            .overflow_hidden()
+            .bg(colors.editor_background)
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(
+                        Label::new(preset.name)
+                            .size(LabelSize::Small)
+                            .weight(FontWeight::MEDIUM),
+                    )
+                    .child(
+                        Label::new(format!("{} × {}", width as u32, height as u32))
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted)
+                            .buffer_font(cx),
+                    ),
+            )
+            .child(
+                v_flex()
+                    .flex_none()
+                    .w(px(width))
+                    .h(px(height))
+                    .rounded_md()
+                    .border_1()
+                    .border_color(colors.border_variant)
+                    .overflow_hidden()
+                    .child(page),
+            )
+            .into_any_element()
+    }
+}
+
 impl Render for WebPreviewView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if !is_supported() {
@@ -1302,93 +2007,207 @@ impl Render for WebPreviewView {
                 );
         }
 
-        let can_go_back = self.can_go_back;
-        let can_go_forward = self.can_go_forward;
-        let loading = self.loading;
-
         #[cfg(target_os = "macos")]
         let install_prompt =
             (!self.cef_installer.read(cx).is_installed()).then(|| self.render_cef_install(cx));
         #[cfg(not(target_os = "macos"))]
         let install_prompt: Option<gpui::AnyElement> = None;
 
-        // The browser is an item inside a pane, so the pane's tab bar is the topmost strip here
-        // and this row is a secondary strip belonging to the content, like the editor's
-        // breadcrumb toolbar.
-        let toolbar = HeaderBar::new("web-preview-toolbar")
-            .level(HeaderBarLevel::Content)
-            .start_children(vec![
-                IconButton::new("back", IconName::ArrowLeft)
-                    .icon_size(IconSize::Small)
-                    .disabled(!can_go_back)
-                    .tooltip(Tooltip::text(t!("web_preview.toolbar.back")))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.handle_go_back(window, cx);
+        let page: AnyElement = if let Some(prompt) = install_prompt {
+            prompt
+        } else if let Some(ref error) = self.error {
+            ui::EmptyState::new(IconName::Warning, error.headline.clone())
+                .tone(ui::EmptyStateTone::Error)
+                .detail(error.detail.clone())
+                .into_any_element()
+        } else if let Some(error) = self.load_error.clone() {
+            self.render_load_error(&error, cx)
+        } else if !self.embedded && is_blank_url(&self.url) {
+            self.render_start_page(cx)
+        } else {
+            {
+                let entity = cx.entity().downgrade();
+                #[cfg(target_os = "macos")]
+                let paint_entity = cx.entity().downgrade();
+                #[cfg(target_os = "macos")]
+                let input_focus = self.browser_focus.clone();
+                #[cfg(target_os = "macos")]
+                let frame = self.latest_frame.clone();
+                #[cfg(not(target_os = "macos"))]
+                let frame: Option<()> = None;
+                #[cfg(target_os = "macos")]
+                let frame_element = frame.as_ref().map(Self::render_frame);
+                #[cfg(not(target_os = "macos"))]
+                let frame_element: Option<gpui::AnyElement> = None;
+
+                #[cfg(target_os = "macos")]
+                let browser_cursor = self
+                    .browser
+                    .as_ref()
+                    .and_then(|browser| browser.current_cursor())
+                    .unwrap_or(CursorStyle::Arrow);
+                #[cfg(not(target_os = "macos"))]
+                let browser_cursor = CursorStyle::Arrow;
+
+                let mut content = div()
+                    .id("browser-content")
+                    .flex_1()
+                    .w_full()
+                    .overflow_hidden()
+                    .track_focus(&self.browser_focus);
+                content.style().mouse_cursor = Some(browser_cursor);
+                content
+                    .key_context("WebPreview")
+                    .on_action(cx.listener(|this, _: &SelectAll, _window, _cx| {
+                        #[cfg(target_os = "macos")]
+                        this.frame_command(cef_browser::FrameCommand::SelectAll);
                     }))
-                    .into_any_element(),
-                IconButton::new("forward", IconName::ArrowRight)
-                    .icon_size(IconSize::Small)
-                    .disabled(!can_go_forward)
-                    .tooltip(Tooltip::text(t!("web_preview.toolbar.forward")))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.handle_go_forward(window, cx);
+                    .on_action(cx.listener(|this, _: &Copy, _window, _cx| {
+                        #[cfg(target_os = "macos")]
+                        this.frame_command(cef_browser::FrameCommand::Copy);
                     }))
-                    .into_any_element(),
-                if loading {
-                    IconButton::new("stop", IconName::Close)
-                        .icon_size(IconSize::Small)
-                        .tooltip(Tooltip::text(t!("web_preview.toolbar.stop")))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.handle_stop(window, cx);
-                        }))
-                        .into_any_element()
-                } else {
-                    IconButton::new("reload", IconName::RotateCw)
-                        .icon_size(IconSize::Small)
-                        .tooltip(Tooltip::text(t!("web_preview.toolbar.reload")))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.reload(cx);
-                        }))
-                        .into_any_element()
-                },
-            ])
-            .child(
-                ui::text_field(
-                    self.url_editor
-                        .focus_handle(cx)
-                        .contains_focused(window, cx),
-                    cx,
-                )
-                .id("url-bar")
-                .flex_1()
-                .on_action(cx.listener(|this, _: &menu::Confirm, window, cx| {
-                    this.submit_url(window, cx);
-                }))
-                .child(self.url_editor.clone()),
-            )
-            .end_children(vec![
-                IconButton::new("go", IconName::ArrowRight)
-                    .icon_size(IconSize::Small)
-                    .tooltip(Tooltip::text(t!("web_preview.toolbar.navigate")))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.submit_url(window, cx);
+                    .on_action(cx.listener(|this, _: &Cut, _window, _cx| {
+                        #[cfg(target_os = "macos")]
+                        this.frame_command(cef_browser::FrameCommand::Cut);
                     }))
-                    .into_any_element(),
-                IconButton::new("devtools", IconName::MagnifyingGlass)
-                    .icon_size(IconSize::Small)
-                    .tooltip(Tooltip::text(t!("web_preview.toolbar.open_devtools")))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.handle_open_devtools(window, cx);
+                    .on_action(cx.listener(|this, _: &Paste, _window, _cx| {
+                        #[cfg(target_os = "macos")]
+                        this.frame_command(cef_browser::FrameCommand::Paste);
                     }))
-                    .into_any_element(),
-            ])
-            .when(loading, |this| {
-                this.end_child(
-                    Label::new(t!("web_preview.toolbar.loading"))
-                        .size(ui::LabelSize::XSmall)
-                        .color(Color::Muted),
-                )
-            });
+                    .on_action(cx.listener(|this, _: &Undo, _window, _cx| {
+                        #[cfg(target_os = "macos")]
+                        this.frame_command(cef_browser::FrameCommand::Undo);
+                    }))
+                    .on_action(cx.listener(|this, _: &Redo, _window, _cx| {
+                        #[cfg(target_os = "macos")]
+                        this.frame_command(cef_browser::FrameCommand::Redo);
+                    }))
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                        #[cfg(target_os = "macos")]
+                        this.forward_key(&event.keystroke, event.is_held, true, window, cx);
+                    }))
+                    .on_key_up(cx.listener(|this, event: &gpui::KeyUpEvent, window, cx| {
+                        #[cfg(target_os = "macos")]
+                        this.forward_key(&event.keystroke, false, false, window, cx);
+                    }))
+                    .on_modifiers_changed(cx.listener(
+                        |this, event: &gpui::ModifiersChangedEvent, window, _cx| {
+                            #[cfg(target_os = "macos")]
+                            this.forward_modifiers(event, window);
+                        },
+                    ))
+                    .child(
+                        canvas(
+                            move |bounds, window: &mut Window, cx: &mut App| {
+                                #[cfg(target_os = "macos")]
+                                entity
+                                    .update(cx, |this, _cx| {
+                                        this.scale_factor = window.scale_factor();
+                                        this.ensure_browser(bounds);
+                                    })
+                                    .ok();
+                                bounds
+                            },
+                            move |_bounds, bounds: Bounds<Pixels>, _window, _cx| {
+                                #[cfg(target_os = "macos")]
+                                {
+                                    Self::register_drag_listeners(
+                                        paint_entity.clone(),
+                                        bounds,
+                                        _window,
+                                    );
+                                    // Re-registered every frame: input handlers live for
+                                    // one frame only.
+                                    _window.handle_input(
+                                        &input_focus,
+                                        WebPreviewInputHandler {
+                                            view: paint_entity,
+                                            bounds,
+                                            marked_range: None,
+                                        },
+                                        _cx,
+                                    );
+                                }
+                            },
+                        )
+                        .absolute()
+                        .size_full(),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                            this.handle_mouse_down(event, window, cx);
+                        }),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                            this.handle_mouse_down(event, window, cx);
+                        }),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Middle,
+                        cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                            this.handle_mouse_down(event, window, cx);
+                        }),
+                    )
+                    // Mouse-up is handled by a window-level listener registered during
+                    // paint, because `Interactivity::on_mouse_up` only fires while the
+                    // hitbox is hovered — releasing outside the page would otherwise leave
+                    // the renderer believing the button is still down.
+                    .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, _cx| {
+                        #[cfg(target_os = "macos")]
+                        this.forward_mouse_move(event.position, &event.modifiers, false, window);
+                    }))
+                    .on_mouse_exit(cx.listener(
+                        |this, event: &gpui::MouseExitEvent, window, _cx| {
+                            #[cfg(target_os = "macos")]
+                            // Mid-drag the pointer is still "in" the page as far as the
+                            // renderer is concerned; telling it otherwise cancels the drag.
+                            if this.pressed_buttons == 0 {
+                                this.forward_mouse_move(
+                                    event.position,
+                                    &event.modifiers,
+                                    true,
+                                    window,
+                                );
+                            }
+                        },
+                    ))
+                    .on_scroll(cx.listener(|this, event: &ScrollEvent, window, _cx| {
+                        #[cfg(target_os = "macos")]
+                        if let (Some(browser), Some((x, y))) =
+                            (&this.browser, this.browser_point(event.position))
+                        {
+                            let delta_x = f32::from(event.delta.pixel_delta(px(20.0)).x) as i32;
+                            let delta_y = f32::from(event.delta.pixel_delta(px(20.0)).y) as i32;
+                            let mut modifiers = gpui_modifiers_to_cef(
+                                &event.modifiers,
+                                window.capslock().on,
+                                this.pressed_buttons,
+                            );
+                            // Trackpads report pixel deltas; without this Chromium
+                            // steps by lines and the scroll feels notched.
+                            if matches!(event.delta, gpui::ScrollDelta::Pixels(_)) {
+                                modifiers |= cef_browser::event_flags::PRECISION_SCROLLING_DELTA;
+                            }
+                            browser.send_mouse_wheel(x, y, delta_x, delta_y, modifiers);
+                        }
+                    }))
+                    .when_some(frame_element, |this, element| this.child(element))
+                    .when(frame.is_none() && self.error.is_none(), |this| {
+                        this.child(
+                            div().size_full().items_center().justify_center().child(
+                                Label::new(t!("web_preview.waiting_for_browser"))
+                                    .size(ui::LabelSize::Small)
+                                    .color(Color::Muted),
+                            ),
+                        )
+                    })
+                    .into_any_element()
+            }
+        };
+        let page = self.frame_page(page, cx);
 
         v_flex()
             .id("web-preview-view")
@@ -1404,7 +2223,26 @@ impl Render for WebPreviewView {
                 this.handle_go_forward(window, cx);
             }))
             .on_action(cx.listener(|this, _: &FocusUrlBar, window, cx| {
-                this.url_editor.focus_handle(cx).focus(window, cx);
+                this.focus_address_bar(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ZoomIn, _, cx| {
+                this.set_zoom_level(this.zoom_level + 1., cx);
+            }))
+            .on_action(cx.listener(|this, _: &ZoomOut, _, cx| {
+                this.set_zoom_level(this.zoom_level - 1., cx);
+            }))
+            .on_action(cx.listener(|this, _: &ResetZoom, _, cx| {
+                this.set_zoom_level(0., cx);
+            }))
+            .on_action(cx.listener(|this, _: &CopyUrl, _, cx| this.copy_url(cx)))
+            .on_action(cx.listener(|this, _: &OpenInSystemBrowser, _, cx| {
+                this.open_in_system_browser(cx);
+            }))
+            .on_action(cx.listener(|this, _: &RotateDevice, _, cx| {
+                if this.device.is_some() {
+                    this.device_rotated = !this.device_rotated;
+                    cx.notify();
+                }
             }))
             .on_action(cx.listener(|this, _: &OpenDevTools, window, cx| {
                 this.handle_open_devtools(window, cx);
@@ -1412,203 +2250,10 @@ impl Render for WebPreviewView {
             .on_action(cx.listener(|this, _: &SubmitUrl, window, cx| {
                 this.submit_url(window, cx);
             }))
-            .when(!self.embedded, |this| this.child(toolbar))
-            .child(if let Some(prompt) = install_prompt {
-                prompt
-            } else if let Some(ref error) = self.error {
-                ui::EmptyState::new(IconName::Warning, error.headline.clone())
-                    .tone(ui::EmptyStateTone::Error)
-                    .detail(error.detail.clone())
-                    .into_any_element()
-            } else {
-                {
-                    let entity = cx.entity().downgrade();
-                    #[cfg(target_os = "macos")]
-                    let paint_entity = cx.entity().downgrade();
-                    #[cfg(target_os = "macos")]
-                    let input_focus = self.browser_focus.clone();
-                    #[cfg(target_os = "macos")]
-                    let frame = self.latest_frame.clone();
-                    #[cfg(not(target_os = "macos"))]
-                    let frame: Option<()> = None;
-                    #[cfg(target_os = "macos")]
-                    let frame_element = frame.as_ref().map(Self::render_frame);
-                    #[cfg(not(target_os = "macos"))]
-                    let frame_element: Option<gpui::AnyElement> = None;
-
-                    #[cfg(target_os = "macos")]
-                    let browser_cursor = self
-                        .browser
-                        .as_ref()
-                        .and_then(|browser| browser.current_cursor())
-                        .unwrap_or(CursorStyle::Arrow);
-                    #[cfg(not(target_os = "macos"))]
-                    let browser_cursor = CursorStyle::Arrow;
-
-                    let mut content = div()
-                        .id("browser-content")
-                        .flex_1()
-                        .w_full()
-                        .overflow_hidden()
-                        .track_focus(&self.browser_focus);
-                    content.style().mouse_cursor = Some(browser_cursor);
-                    content
-                        .key_context("WebPreview")
-                        .on_action(cx.listener(|this, _: &SelectAll, _window, _cx| {
-                            #[cfg(target_os = "macos")]
-                            this.frame_command(cef_browser::FrameCommand::SelectAll);
-                        }))
-                        .on_action(cx.listener(|this, _: &Copy, _window, _cx| {
-                            #[cfg(target_os = "macos")]
-                            this.frame_command(cef_browser::FrameCommand::Copy);
-                        }))
-                        .on_action(cx.listener(|this, _: &Cut, _window, _cx| {
-                            #[cfg(target_os = "macos")]
-                            this.frame_command(cef_browser::FrameCommand::Cut);
-                        }))
-                        .on_action(cx.listener(|this, _: &Paste, _window, _cx| {
-                            #[cfg(target_os = "macos")]
-                            this.frame_command(cef_browser::FrameCommand::Paste);
-                        }))
-                        .on_action(cx.listener(|this, _: &Undo, _window, _cx| {
-                            #[cfg(target_os = "macos")]
-                            this.frame_command(cef_browser::FrameCommand::Undo);
-                        }))
-                        .on_action(cx.listener(|this, _: &Redo, _window, _cx| {
-                            #[cfg(target_os = "macos")]
-                            this.frame_command(cef_browser::FrameCommand::Redo);
-                        }))
-                        .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                            #[cfg(target_os = "macos")]
-                            this.forward_key(&event.keystroke, event.is_held, true, window, cx);
-                        }))
-                        .on_key_up(cx.listener(|this, event: &gpui::KeyUpEvent, window, cx| {
-                            #[cfg(target_os = "macos")]
-                            this.forward_key(&event.keystroke, false, false, window, cx);
-                        }))
-                        .on_modifiers_changed(cx.listener(
-                            |this, event: &gpui::ModifiersChangedEvent, window, _cx| {
-                                #[cfg(target_os = "macos")]
-                                this.forward_modifiers(event, window);
-                            },
-                        ))
-                        .child(
-                            canvas(
-                                move |bounds, window: &mut Window, cx: &mut App| {
-                                    #[cfg(target_os = "macos")]
-                                    entity
-                                        .update(cx, |this, _cx| {
-                                            this.scale_factor = window.scale_factor();
-                                            this.ensure_browser(bounds);
-                                        })
-                                        .ok();
-                                    bounds
-                                },
-                                move |_bounds, bounds: Bounds<Pixels>, _window, _cx| {
-                                    #[cfg(target_os = "macos")]
-                                    {
-                                        Self::register_drag_listeners(
-                                            paint_entity.clone(),
-                                            bounds,
-                                            _window,
-                                        );
-                                        // Re-registered every frame: input handlers live for
-                                        // one frame only.
-                                        _window.handle_input(
-                                            &input_focus,
-                                            WebPreviewInputHandler {
-                                                view: paint_entity,
-                                                bounds,
-                                                marked_range: None,
-                                            },
-                                            _cx,
-                                        );
-                                    }
-                                },
-                            )
-                            .absolute()
-                            .size_full(),
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, event: &MouseDownEvent, window, cx| {
-                                this.handle_mouse_down(event, window, cx);
-                            }),
-                        )
-                        .on_mouse_down(
-                            MouseButton::Right,
-                            cx.listener(|this, event: &MouseDownEvent, window, cx| {
-                                this.handle_mouse_down(event, window, cx);
-                            }),
-                        )
-                        .on_mouse_down(
-                            MouseButton::Middle,
-                            cx.listener(|this, event: &MouseDownEvent, window, cx| {
-                                this.handle_mouse_down(event, window, cx);
-                            }),
-                        )
-                        // Mouse-up is handled by a window-level listener registered during
-                        // paint, because `Interactivity::on_mouse_up` only fires while the
-                        // hitbox is hovered — releasing outside the page would otherwise leave
-                        // the renderer believing the button is still down.
-                        .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, _cx| {
-                            #[cfg(target_os = "macos")]
-                            this.forward_mouse_move(
-                                event.position,
-                                &event.modifiers,
-                                false,
-                                window,
-                            );
-                        }))
-                        .on_mouse_exit(cx.listener(
-                            |this, event: &gpui::MouseExitEvent, window, _cx| {
-                                #[cfg(target_os = "macos")]
-                                // Mid-drag the pointer is still "in" the page as far as the
-                                // renderer is concerned; telling it otherwise cancels the drag.
-                                if this.pressed_buttons == 0 {
-                                    this.forward_mouse_move(
-                                        event.position,
-                                        &event.modifiers,
-                                        true,
-                                        window,
-                                    );
-                                }
-                            },
-                        ))
-                        .on_scroll(cx.listener(|this, event: &ScrollEvent, window, _cx| {
-                            #[cfg(target_os = "macos")]
-                            if let (Some(browser), Some((x, y))) =
-                                (&this.browser, this.browser_point(event.position))
-                            {
-                                let delta_x = f32::from(event.delta.pixel_delta(px(20.0)).x) as i32;
-                                let delta_y = f32::from(event.delta.pixel_delta(px(20.0)).y) as i32;
-                                let mut modifiers = gpui_modifiers_to_cef(
-                                    &event.modifiers,
-                                    window.capslock().on,
-                                    this.pressed_buttons,
-                                );
-                                // Trackpads report pixel deltas; without this Chromium
-                                // steps by lines and the scroll feels notched.
-                                if matches!(event.delta, gpui::ScrollDelta::Pixels(_)) {
-                                    modifiers |=
-                                        cef_browser::event_flags::PRECISION_SCROLLING_DELTA;
-                                }
-                                browser.send_mouse_wheel(x, y, delta_x, delta_y, modifiers);
-                            }
-                        }))
-                        .when_some(frame_element, |this, element| this.child(element))
-                        .when(frame.is_none() && self.error.is_none(), |this| {
-                            this.child(
-                                div().size_full().items_center().justify_center().child(
-                                    Label::new(t!("web_preview.waiting_for_browser"))
-                                        .size(ui::LabelSize::Small)
-                                        .color(Color::Muted),
-                                ),
-                            )
-                        })
-                        .into_any_element()
-                }
+            .when(!self.embedded, |this| {
+                this.p_2().gap_2().child(self.render_rail(window, cx))
             })
+            .child(page)
     }
 }
 
@@ -2140,5 +2785,38 @@ impl workspace::item::ProjectItem for WebPreviewView {
     ) -> Self {
         let url = item.read(cx).url.clone();
         Self::new_with_url(url, window, cx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_blank_url, split_address, zoom_percent};
+
+    #[test]
+    fn addresses_split_into_host_and_rest() {
+        assert_eq!(
+            split_address("http://localhost:3000/faturas/2026-11"),
+            ("localhost:3000", "/faturas/2026-11")
+        );
+        assert_eq!(
+            split_address("https://docs.expo.dev?tab=router"),
+            ("docs.expo.dev", "?tab=router")
+        );
+        assert_eq!(split_address("https://example.com"), ("example.com", ""));
+        assert_eq!(split_address("about:blank"), ("about:blank", ""));
+    }
+
+    #[test]
+    fn zoom_levels_read_as_percentages() {
+        assert_eq!(zoom_percent(0.), 100);
+        assert_eq!(zoom_percent(1.), 120);
+        assert_eq!(zoom_percent(-1.), 83);
+    }
+
+    #[test]
+    fn blank_pages_are_new_tabs() {
+        assert!(is_blank_url(""));
+        assert!(is_blank_url("about:blank"));
+        assert!(!is_blank_url("http://localhost:3000"));
     }
 }

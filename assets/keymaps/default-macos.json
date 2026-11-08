@@ -1460,6 +1460,12 @@
       "cmd-[": "web_preview::GoBack",
       "cmd-]": "web_preview::GoForward",
       "cmd-alt-i": "web_preview::OpenDevTools",
+      "cmd-=": "web_preview::ZoomIn",
+      "cmd-+": "web_preview::ZoomIn",
+      "cmd--": "web_preview::ZoomOut",
+      "cmd-0": "web_preview::ResetZoom",
+      "cmd-shift-c": "web_preview::CopyUrl",
+      "cmd-alt-r": "web_preview::RotateDevice",
       // Bound to menu::Cancel/workspace::Unfollow in outer contexts; the page needs it to
       // close its own dialogs, so unbind and let it fall through to the key forwarder.
       "escape": null,
@@ -1817,6 +1823,12 @@
     "use_key_equivalents": true,
     "bindings": {
       "cmd-l": "design::MentionLayer",
+      // The canvas is a page of the embedded browser, whose own zoom bindings would
+      // otherwise win over the design viewer's.
+      "cmd-=": "design::ZoomIn",
+      "cmd-+": "design::ZoomIn",
+      "cmd--": "design::ZoomOut",
+      "cmd-0": "design::FitToScreen",
     },
   },
   {
