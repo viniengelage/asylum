@@ -29,6 +29,9 @@ use crate::{
 };
 
 const DESCRIBE_SCRIPT: &str = include_str!("../assets/describe.js");
+/// Change whenever describe.js changes its output: the cache is keyed by the page's content,
+/// so summaries from an older script would otherwise be served forever.
+const STRUCTURE_CACHE_EXTENSION: &str = "v2.txt";
 const SCREENS_DIR_NAME: &str = "screens";
 const MAX_JSX_CHARS: usize = 30_000;
 
@@ -329,7 +332,7 @@ async fn structure(
     page: &PageEntry,
     screen: &Screen,
 ) -> anyhow::Result<String> {
-    let path = node_cache_path(fig_path, page, &screen.id, "txt");
+    let path = node_cache_path(fig_path, page, &screen.id, STRUCTURE_CACHE_EXTENSION);
     if fs.is_file(&path).await {
         return fs.load(&path).await;
     }
@@ -424,6 +427,7 @@ fn color_value(color: &Tokened<render::Color>) -> String {
 }
 
 const MAX_SUMMARY_TEXT_CHARS: usize = 120;
+const MAX_SUMMARY_CHILDREN: usize = 40;
 
 fn layer_title(page: &PageEntry, screen: &Screen, path: &[&Layer]) -> String {
     let names: Vec<&str> = path.iter().map(|layer| layer.name.as_str()).collect();
@@ -552,7 +556,37 @@ fn layer_summary(page: &PageEntry, screen: &Screen, path: &[&Layer]) -> String {
         ));
     }
     if !layer.children.is_empty() {
-        lines.push(format!("Children: {}", layer.children.len()));
+        lines.push(format!(
+            "Children ({}), readable with design_node by appending their name to this path:",
+            layer.children.len()
+        ));
+        lines.extend(
+            layer
+                .children
+                .iter()
+                .take(MAX_SUMMARY_CHILDREN)
+                .map(|child| {
+                    let mut line = format!(
+                        "- {} · {} · {}",
+                        child.name,
+                        kind_name(child.kind),
+                        size(child.bounds.width, child.bounds.height)
+                    );
+                    if !child.children.is_empty() {
+                        line.push_str(&format!(" · {} children", child.children.len()));
+                    }
+                    if !child.visible {
+                        line.push_str(" · hidden");
+                    }
+                    line
+                }),
+        );
+        if layer.children.len() > MAX_SUMMARY_CHILDREN {
+            lines.push(format!(
+                "- … {} more",
+                layer.children.len() - MAX_SUMMARY_CHILDREN
+            ));
+        }
     }
     lines.join("\n")
 }
@@ -1602,6 +1636,12 @@ mod tests {
         assert!(summary.contains("Radius: 8\n"));
         assert!(summary.contains("Instance of: Button/Primary."));
         assert!(summary.ends_with("Values without token (warnings): radius 8"));
+
+        let card_summary = layer_summary(page, screen, &[&card]);
+        assert!(card_summary.ends_with(
+            "Children (1), readable with design_node by appending their name to this path:\n\
+             - botão · instance · 100×40"
+        ));
     }
 
     #[test]

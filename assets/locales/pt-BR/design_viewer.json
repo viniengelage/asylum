@@ -37,7 +37,7 @@
   "focus.previous": "Tela anterior",
   "focus.reference_copied": "Referência copiada",
   "hint": "Clique numa tela para focar · ← → navega · ⌘0 ajusta",
-  "hint_focused": "Clique seleciona a camada · ⌘ clique atravessa grupos · Esc sobe um nível · ⌥ mostra distâncias",
+  "hint_focused": "Clique seleciona a camada · Duplo clique entra nela · ⌘ clique pega a mais interna · Esc sobe um nível · ⌥ mostra distâncias",
   "inspector.align_center": "centro",
   "inspector.align_end": "fim",
   "inspector.align_space_between": "espaço entre",

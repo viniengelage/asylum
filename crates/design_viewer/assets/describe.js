@@ -1,4 +1,4 @@
-const MAX_DEPTH = 6
+const MAX_DEPTH = 10
 const MAX_LINES = 400
 const MAX_TEXT = 120
 
@@ -26,11 +26,12 @@ function walk(target, depth) {
     line += ` · "${target.characters.replace(/\s+/g, ' ').slice(0, MAX_TEXT)}"`
   }
   lines.push(line)
-  // An instance's layers come from its component, so its name says enough.
-  if (target.type === 'INSTANCE' || target.type === 'TEXT') return
+  if (target.type === 'TEXT') return
   if (!('children' in target) || target.children.length === 0) return
-  if (depth >= MAX_DEPTH) {
-    lines.push(`${indent}  … ${target.children.length} children`)
+  // An instance's layers come from its component, so they are only pointed at, like the
+  // layers past MAX_DEPTH; design_node reads them by path.
+  if (target.type === 'INSTANCE' || depth >= MAX_DEPTH) {
+    lines.push(`${indent}  … ${target.children.length} children (read with design_node)`)
     return
   }
   for (const child of target.children) walk(child, depth + 1)

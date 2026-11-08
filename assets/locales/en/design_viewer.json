@@ -37,7 +37,7 @@
   "focus.previous": "Previous screen",
   "focus.reference_copied": "Reference copied",
   "hint": "Click a screen to focus · ← → navigates · ⌘0 fits",
-  "hint_focused": "Click selects a layer · ⌘-click goes through groups · Esc goes up a level · ⌥ shows distances",
+  "hint_focused": "Click selects a layer · Double-click goes inside it · ⌘-click picks the innermost · Esc goes up a level · ⌥ shows distances",
   "inspector.align_center": "center",
   "inspector.align_end": "end",
   "inspector.align_space_between": "space between",

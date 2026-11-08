@@ -322,7 +322,7 @@ impl DesignView {
     fn hover_at(&mut self, position: Option<Point<Pixels>>, deep: bool, cx: &mut Context<Self>) {
         let hovered = position
             .and_then(|position| self.page_point(position))
-            .and_then(|point| layer_at(self.focused_layers()?, point, deep))
+            .and_then(|point| self.layer_under(point, deep, false))
             .map(|layer| layer.id.clone());
         if self.hovered_layer != hovered {
             self.hovered_layer = hovered;
@@ -330,7 +330,28 @@ impl DesignView {
         }
     }
 
-    fn release_at(&mut self, position: Point<Pixels>, deep: bool, cx: &mut Context<Self>) {
+    /// The layer a pointer at `point` targets: with `deep` the innermost one, otherwise one at
+    /// the level of the current selection, or one level into it when `enter` (a double click).
+    fn layer_under(&self, point: (f64, f64), deep: bool, enter: bool) -> Option<&Layer> {
+        let layers = self.focused_layers()?;
+        if deep {
+            return layer_at(layers, point, true);
+        }
+        let selected = self
+            .selected_layer
+            .as_ref()
+            .and_then(|id| layer_path(layers, id))
+            .unwrap_or_default();
+        layer_at_selection_level(layers, &selected, point, enter)
+    }
+
+    fn release_at(
+        &mut self,
+        position: Point<Pixels>,
+        deep: bool,
+        enter: bool,
+        cx: &mut Context<Self>,
+    ) {
         let Some(start) = self.pointer_down.take() else {
             return;
         };
@@ -353,8 +374,7 @@ impl DesignView {
             return;
         }
         let selected = self
-            .focused_layers()
-            .and_then(|layers| layer_at(layers, point, deep))
+            .layer_under(point, deep, enter)
             .map(|layer| layer.id.clone());
         if let Some(id) = &selected {
             self.reveal_layer(id);
@@ -1840,7 +1860,12 @@ fn register_canvas_listeners(
             return;
         }
         view.update(cx, |this, cx| {
-            this.release_at(event.position, event.modifiers.platform, cx)
+            this.release_at(
+                event.position,
+                event.modifiers.platform,
+                event.click_count >= 2,
+                cx,
+            )
         })
         .ok();
     });
@@ -1869,6 +1894,29 @@ fn layer_at(layers: &[Layer], point: (f64, f64), deep: bool) -> Option<&Layer> {
     } else {
         Some(hit)
     }
+}
+
+/// Like Figma, a click picks among the siblings of the selection (or, failing that, of each of
+/// its ancestors under the pointer) instead of always the screen's direct children, so nested
+/// layers are reachable without holding ⌘.
+fn layer_at_selection_level<'a>(
+    layers: &'a [Layer],
+    selected: &[&'a Layer],
+    point: (f64, f64),
+    enter: bool,
+) -> Option<&'a Layer> {
+    let levels = if enter {
+        selected.len()
+    } else {
+        selected.len().saturating_sub(1)
+    };
+    selected
+        .iter()
+        .take(levels)
+        .rev()
+        .filter(|ancestor| ancestor.visible && contains(&ancestor.bounds, point))
+        .find_map(|ancestor| layer_at(&ancestor.children, point, false))
+        .or_else(|| layer_at(layers, point, false))
 }
 
 /// Every layer named `name` (ignoring ASCII case), each with its ancestors, outermost first.
@@ -2583,7 +2631,59 @@ impl workspace::item::ProjectItem for DesignView {
 
 #[cfg(test)]
 mod tests {
-    use super::split_page_name;
+    use super::{layer_at_selection_level, layer_path, split_page_name};
+    use crate::render::LayerKind;
+    use crate::{Bounds, Layer};
+
+    fn layer(id: &str, x: f64, width: f64, children: Vec<Layer>) -> Layer {
+        Layer {
+            id: id.into(),
+            name: id.into(),
+            kind: LayerKind::Frame,
+            bounds: Bounds {
+                x,
+                y: 0.,
+                width,
+                height: 100.,
+            },
+            visible: true,
+            component: None,
+            auto_layout: None,
+            sizing: None,
+            fill: None,
+            radius: None,
+            stroke: None,
+            shadow: None,
+            text: None,
+            unbound: Vec::new(),
+            children,
+        }
+    }
+
+    #[test]
+    fn clicks_reach_nested_layers_through_the_selection() {
+        let icon = layer("icon", 10., 10., Vec::new());
+        let label = layer("label", 30., 20., Vec::new());
+        let button = layer("button", 0., 60., vec![icon, label]);
+        let title = layer("title", 70., 20., Vec::new());
+        let card = layer("card", 0., 100., vec![button, title]);
+        let footer = layer("footer", 200., 50., Vec::new());
+        let layers = vec![card, footer];
+        let pick = |selected: Option<&str>, x: f64, enter: bool| {
+            let path = selected
+                .and_then(|id| layer_path(&layers, id))
+                .unwrap_or_default();
+            layer_at_selection_level(&layers, &path, (x, 50.), enter).map(|layer| layer.id.as_str())
+        };
+
+        assert_eq!(pick(None, 12., false), Some("card"));
+        assert_eq!(pick(Some("card"), 12., true), Some("button"));
+        assert_eq!(pick(Some("button"), 12., true), Some("icon"));
+        assert_eq!(pick(Some("icon"), 35., false), Some("label"));
+        assert_eq!(pick(Some("icon"), 75., false), Some("title"));
+        assert_eq!(pick(Some("icon"), 210., false), Some("footer"));
+        assert_eq!(pick(Some("card"), 95., true), Some("card"));
+    }
 
     #[test]
     fn page_names_lose_their_number_prefix() {
