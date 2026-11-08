@@ -15,6 +15,13 @@ const HOST_DIGEST_LENGTH: usize = 32;
 /// Firefox switched `moz_cookies.expiry` from seconds to milliseconds; no cookie expires
 /// after year 5138, so anything bigger is milliseconds.
 const FIREFOX_EXPIRY_MILLISECONDS_THRESHOLD: i64 = 100_000_000_000;
+/// Seconds between the Unix epoch and 2001-01-01, the origin of Apple's absolute time.
+const UNIX_TO_APPLE_EPOCH_SECONDS: f64 = 978_307_200.;
+/// Where Safari keeps its cookies since it became sandboxed, and where it kept them before.
+const SAFARI_COOKIE_FILES: [&str; 2] = [
+    "Library/Containers/com.apple.Safari/Data/Library/Cookies/Cookies.binarycookies",
+    "Library/Cookies/Cookies.binarycookies",
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BrowserKind {
@@ -24,6 +31,7 @@ pub enum BrowserKind {
     Edge,
     Chromium,
     Firefox,
+    Safari,
 }
 
 impl BrowserKind {
@@ -44,6 +52,7 @@ impl BrowserKind {
             BrowserKind::Edge => "Microsoft Edge",
             BrowserKind::Chromium => "Chromium",
             BrowserKind::Firefox => "Firefox",
+            BrowserKind::Safari => "Safari",
         }
     }
 
@@ -62,6 +71,7 @@ impl BrowserKind {
             BrowserKind::Brave => "B",
             BrowserKind::Edge => "E",
             BrowserKind::Firefox => "F",
+            BrowserKind::Safari => "S",
         }
     }
 
@@ -74,6 +84,7 @@ impl BrowserKind {
             BrowserKind::Edge => "Microsoft Edge",
             BrowserKind::Chromium => "Chromium",
             BrowserKind::Firefox => "Firefox",
+            BrowserKind::Safari => "Safari",
         }
     }
 
@@ -86,7 +97,7 @@ impl BrowserKind {
             BrowserKind::Brave => Some(("Brave Safe Storage", "Brave")),
             BrowserKind::Edge => Some(("Microsoft Edge Safe Storage", "Microsoft Edge")),
             BrowserKind::Chromium => Some(("Chromium Safe Storage", "Chromium")),
-            BrowserKind::Firefox => None,
+            BrowserKind::Firefox | BrowserKind::Safari => None,
         }
     }
 
@@ -155,11 +166,55 @@ impl ImportedCookie {
 }
 
 pub fn detect_sources() -> Vec<BrowserSource> {
-    let Some(support) = dirs::home_dir().map(|home| home.join("Library/Application Support"))
-    else {
+    let Some(home) = dirs::home_dir() else {
         return Vec::new();
     };
-    detect_sources_in(&support)
+    let mut sources = detect_sources_in(&home.join("Library/Application Support"));
+    // Safari ships with macOS, and its folder can't even be listed without Full Disk
+    // Access, so it is always offered and the modal explains when it is out of reach.
+    sources.push(BrowserSource {
+        kind: BrowserKind::Safari,
+        profiles: vec![SourceProfile {
+            name: "Safari".into(),
+            directory: home.join("Library/Safari"),
+        }],
+    });
+    sources
+}
+
+/// Raised when macOS keeps a browser's files away from Asylum until the user grants it Full
+/// Disk Access, which is always the case for Safari's.
+#[derive(Debug)]
+pub struct FullDiskAccessRequired;
+
+impl std::fmt::Display for FullDiskAccessRequired {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("macOS needs Asylum to have Full Disk Access to read this browser")
+    }
+}
+
+impl std::error::Error for FullDiskAccessRequired {}
+
+fn read_protected(path: &Path) -> Result<Option<Vec<u8>>> {
+    match std::fs::read(path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            Err(FullDiskAccessRequired.into())
+        }
+        Err(error) => Err(error).with_context(|| format!("reading {}", path.display())),
+    }
+}
+
+/// Whether Asylum may read Safari's data, which takes Full Disk Access.
+pub fn safari_readable() -> bool {
+    let Some(home) = dirs::home_dir() else {
+        return false;
+    };
+    !matches!(
+        std::fs::read_dir(home.join("Library/Safari")),
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied
+    )
 }
 
 fn detect_sources_in(support: &Path) -> Vec<BrowserSource> {
@@ -262,6 +317,10 @@ pub fn read_bookmarks(kind: BrowserKind, profile: &Path) -> Result<Vec<Bookmark>
     match kind {
         BrowserKind::Firefox => read_firefox_bookmarks(profile),
         BrowserKind::Arc => read_arc_pinned_tabs(profile),
+        BrowserKind::Safari => match read_protected(&profile.join("Bookmarks.plist"))? {
+            Some(bytes) => parse_safari_bookmarks(&bytes),
+            None => Ok(Vec::new()),
+        },
         _ => match std::fs::read_to_string(profile.join("Bookmarks")) {
             Ok(text) => parse_chromium_bookmarks(&text),
             // A profile that never saved a bookmark has no file.
@@ -484,6 +543,7 @@ fn read_firefox_bookmarks(profile: &Path) -> Result<Vec<Bookmark>> {
 /// browser's storage password, which makes macOS ask the user.
 pub async fn read_cookies(kind: BrowserKind, profile: &Path) -> Result<Vec<ImportedCookie>> {
     match kind.keychain_item() {
+        None if kind == BrowserKind::Safari => read_safari_cookies(),
         None => read_firefox_cookies(profile),
         Some((service, account)) => {
             let password = keychain_password(service, account).await?;
@@ -659,6 +719,148 @@ fn read_firefox_cookies(profile: &Path) -> Result<Vec<ImportedCookie>> {
             },
         )
         .collect())
+}
+
+/// Safari's bookmarks: a tree of lists and leaves, with the Reading List and History kept
+/// in it as well.
+fn parse_safari_bookmarks(bytes: &[u8]) -> Result<Vec<Bookmark>> {
+    fn walk(
+        node: &plist::Dictionary,
+        folder: Option<&str>,
+        bookmarks: &mut Vec<Bookmark>,
+        depth: usize,
+    ) {
+        if depth > 32 {
+            return;
+        }
+        let text = |key: &str| node.get(key).and_then(plist::Value::as_string);
+        match text("WebBookmarkType") {
+            Some("WebBookmarkTypeLeaf") => {
+                let Some(url) = text("URLString").filter(|url| url.starts_with("http")) else {
+                    return;
+                };
+                let title = node
+                    .get("URIDictionary")
+                    .and_then(plist::Value::as_dictionary)
+                    .and_then(|uri| uri.get("title"))
+                    .and_then(plist::Value::as_string)
+                    .filter(|title| !title.is_empty())
+                    .unwrap_or(url);
+                bookmarks.push(Bookmark {
+                    title: title.to_string(),
+                    url: url.to_string(),
+                    folder: folder.map(str::to_string),
+                });
+            }
+            Some("WebBookmarkTypeList") => {
+                let title = text("Title");
+                if title == Some("com.apple.ReadingList") {
+                    return;
+                }
+                // The favorites bar and the menu are Safari's own roots, not folders the
+                // user made.
+                let folder = match title {
+                    _ if depth == 0 => None,
+                    Some("BookmarksBar" | "BookmarksMenu") | None => folder,
+                    Some(title) => Some(title),
+                };
+                for child in node
+                    .get("Children")
+                    .and_then(plist::Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(plist::Value::as_dictionary)
+                {
+                    walk(child, folder, bookmarks, depth + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let root = plist::Value::from_reader(std::io::Cursor::new(bytes))
+        .context("reading Safari's Bookmarks.plist")?;
+    let root = root
+        .as_dictionary()
+        .ok_or_else(|| anyhow!("Safari's Bookmarks.plist is not a dictionary"))?;
+    let mut bookmarks = Vec::new();
+    walk(root, None, &mut bookmarks, 0);
+    Ok(bookmarks)
+}
+
+fn read_safari_cookies() -> Result<Vec<ImportedCookie>> {
+    let home = dirs::home_dir().ok_or_else(|| anyhow!("no home directory"))?;
+    for file in SAFARI_COOKIE_FILES {
+        if let Some(bytes) = read_protected(&home.join(file))? {
+            return parse_binary_cookies(&bytes);
+        }
+    }
+    Ok(Vec::new())
+}
+
+/// `Cookies.binarycookies`: a big-endian header listing page sizes, then pages of
+/// little-endian cookie records whose strings sit at offsets inside each record.
+fn parse_binary_cookies(bytes: &[u8]) -> Result<Vec<ImportedCookie>> {
+    fn slice(bytes: &[u8], start: usize, length: usize) -> Result<&[u8]> {
+        bytes
+            .get(start..start.checked_add(length).ok_or_else(|| anyhow!("offset overflow"))?)
+            .ok_or_else(|| anyhow!("the cookie file is truncated"))
+    }
+    fn u32_be(bytes: &[u8], at: usize) -> Result<usize> {
+        let field: [u8; 4] = slice(bytes, at, 4)?.try_into()?;
+        Ok(u32::from_be_bytes(field) as usize)
+    }
+    fn u32_le(bytes: &[u8], at: usize) -> Result<usize> {
+        let field: [u8; 4] = slice(bytes, at, 4)?.try_into()?;
+        Ok(u32::from_le_bytes(field) as usize)
+    }
+    fn f64_le(bytes: &[u8], at: usize) -> Result<f64> {
+        let field: [u8; 8] = slice(bytes, at, 8)?.try_into()?;
+        Ok(f64::from_le_bytes(field))
+    }
+    fn string_at(record: &[u8], offset: usize) -> Result<String> {
+        let tail = record
+            .get(offset..)
+            .ok_or_else(|| anyhow!("a cookie string is out of bounds"))?;
+        let end = tail.iter().position(|byte| *byte == 0).unwrap_or(tail.len());
+        Ok(String::from_utf8_lossy(&tail[..end]).into_owned())
+    }
+
+    if slice(bytes, 0, 4)? != b"cook" {
+        bail!("not a Safari cookie file");
+    }
+    let page_count = u32_be(bytes, 4)?;
+    let mut page_sizes = Vec::with_capacity(page_count.min(4096));
+    for index in 0..page_count {
+        page_sizes.push(u32_be(bytes, 8 + index * 4)?);
+    }
+    let mut page_start = 8 + page_count * 4;
+    let mut cookies = Vec::new();
+    for page_size in page_sizes {
+        let page = slice(bytes, page_start, page_size)?;
+        page_start += page_size;
+        let cookie_count = u32_le(page, 4)?;
+        for index in 0..cookie_count {
+            let record_start = u32_le(page, 8 + index * 4)?;
+            let record_size = u32_le(page, record_start)?;
+            let record = slice(page, record_start, record_size)?;
+            let flags = u32_le(record, 8)?;
+            let expires = f64_le(record, 40)?;
+            cookies.push(ImportedCookie {
+                domain: string_at(record, u32_le(record, 16)?)?,
+                name: string_at(record, u32_le(record, 20)?)?,
+                path: string_at(record, u32_le(record, 24)?)?,
+                value: string_at(record, u32_le(record, 28)?)?,
+                secure: flags & 1 != 0,
+                http_only: flags & 4 != 0,
+                expires: (expires > 0.).then(|| {
+                    unix_to_chromium_time((expires + UNIX_TO_APPLE_EPOCH_SECONDS) as i64)
+                }),
+                same_site: SameSite::Unspecified,
+            });
+        }
+    }
+    Ok(cookies)
 }
 
 fn firefox_expiry_seconds(expiry: i64) -> i64 {
@@ -888,6 +1090,135 @@ impl BrowserLibrary {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn safari_bookmarks_skip_the_reading_list_and_its_own_roots() {
+        let leaf = |title: &str, url: &str| {
+            plist::Value::Dictionary(plist::Dictionary::from_iter([
+                ("WebBookmarkType".to_string(), plist::Value::from("WebBookmarkTypeLeaf")),
+                ("URLString".to_string(), plist::Value::from(url)),
+                (
+                    "URIDictionary".to_string(),
+                    plist::Value::Dictionary(plist::Dictionary::from_iter([(
+                        "title".to_string(),
+                        plist::Value::from(title),
+                    )])),
+                ),
+            ]))
+        };
+        let list = |title: &str, children: Vec<plist::Value>| {
+            plist::Value::Dictionary(plist::Dictionary::from_iter([
+                ("WebBookmarkType".to_string(), plist::Value::from("WebBookmarkTypeList")),
+                ("Title".to_string(), plist::Value::from(title)),
+                ("Children".to_string(), plist::Value::Array(children)),
+            ]))
+        };
+        let root = list(
+            "",
+            vec![
+                list(
+                    "BookmarksBar",
+                    vec![
+                        leaf("GitHub", "https://github.com/"),
+                        list("Trix", vec![leaf("", "https://trix.com.br/")]),
+                    ],
+                ),
+                list("BookmarksMenu", vec![leaf("Apple", "https://apple.com/")]),
+                list(
+                    "com.apple.ReadingList",
+                    vec![leaf("Later", "https://example.com/")],
+                ),
+            ],
+        );
+        let mut bytes = Vec::new();
+        plist::to_writer_binary(&mut bytes, &root).expect("serializing the fixture");
+        let bookmarks = parse_safari_bookmarks(&bytes).expect("parsing");
+        let summary: Vec<(&str, &str, Option<&str>)> = bookmarks
+            .iter()
+            .map(|bookmark| {
+                (
+                    bookmark.title.as_str(),
+                    bookmark.url.as_str(),
+                    bookmark.folder.as_deref(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                ("GitHub", "https://github.com/", None),
+                ("https://trix.com.br/", "https://trix.com.br/", Some("Trix")),
+                ("Apple", "https://apple.com/", None),
+            ]
+        );
+    }
+
+    fn binary_cookie_record(domain: &str, name: &str, path: &str, value: &str, flags: u32) -> Vec<u8> {
+        const HEADER: usize = 56;
+        let mut strings = Vec::new();
+        let mut offsets = Vec::new();
+        for text in [domain, name, path, value] {
+            offsets.push((HEADER + strings.len()) as u32);
+            strings.extend_from_slice(text.as_bytes());
+            strings.push(0);
+        }
+        let size = (HEADER + strings.len()) as u32;
+        let mut record = Vec::new();
+        record.extend_from_slice(&size.to_le_bytes());
+        record.extend_from_slice(&0u32.to_le_bytes());
+        record.extend_from_slice(&flags.to_le_bytes());
+        record.extend_from_slice(&0u32.to_le_bytes());
+        for offset in offsets {
+            record.extend_from_slice(&offset.to_le_bytes());
+        }
+        record.extend_from_slice(&0u64.to_le_bytes());
+        // 2030-01-01T00:00:00Z in Apple's absolute time.
+        record.extend_from_slice(&915_148_800f64.to_le_bytes());
+        record.extend_from_slice(&0f64.to_le_bytes());
+        record.extend_from_slice(&strings);
+        record
+    }
+
+    #[test]
+    fn safari_binary_cookies_parse() {
+        let records = [
+            binary_cookie_record(".github.com", "user_session", "/", "abc", 5),
+            binary_cookie_record("example.com", "theme", "/docs", "dark", 0),
+        ];
+        let header = 8 + records.len() * 4 + 4;
+        let mut page = Vec::new();
+        page.extend_from_slice(&0x0000_0100u32.to_be_bytes());
+        page.extend_from_slice(&(records.len() as u32).to_le_bytes());
+        let mut offset = header;
+        for record in &records {
+            page.extend_from_slice(&(offset as u32).to_le_bytes());
+            offset += record.len();
+        }
+        page.extend_from_slice(&0u32.to_le_bytes());
+        for record in &records {
+            page.extend_from_slice(record);
+        }
+        let mut file = b"cook".to_vec();
+        file.extend_from_slice(&1u32.to_be_bytes());
+        file.extend_from_slice(&(page.len() as u32).to_be_bytes());
+        file.extend_from_slice(&page);
+
+        let cookies = parse_binary_cookies(&file).expect("parsing");
+        assert_eq!(cookies.len(), 2);
+        let session = &cookies[0];
+        assert_eq!(
+            (session.domain.as_str(), session.name.as_str(), session.value.as_str()),
+            (".github.com", "user_session", "abc")
+        );
+        assert!(session.secure && session.http_only && !session.is_host_only());
+        assert_eq!(session.expires, Some(unix_to_chromium_time(1_893_456_000)));
+        let theme = &cookies[1];
+        assert_eq!((theme.path.as_str(), theme.secure), ("/docs", false));
+        assert!(theme.is_host_only());
+
+        assert!(parse_binary_cookies(b"cook\0\0\0\x01").is_err());
+        assert!(parse_binary_cookies(b"nope").is_err());
+    }
 
     #[test]
     fn chromium_bookmarks_keep_their_top_folder() {

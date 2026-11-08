@@ -43,6 +43,7 @@ aes = "0.8"
 cbc = "0.1"
 dirs.workspace = true
 pbkdf2 = { version = "0.12", features = ["hmac"] }
+plist.workspace = true
 sha1 = "0.10"
 sha2.workspace = true
 sqlez.workspace = true

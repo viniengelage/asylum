@@ -21260,6 +21260,7 @@ dependencies = [
  "objc2-io-surface",
  "paths",
  "pbkdf2 0.12.2",
+ "plist",
  "project",
  "schemars 1.0.4",
  "serde",

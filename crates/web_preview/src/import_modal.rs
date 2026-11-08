@@ -1,5 +1,6 @@
 use crate::browser_import::{
-    BrowserKind, BrowserLibrary, BrowserSource, CookieKey, ImportRecord, KeychainDenied,
+    BrowserKind, BrowserLibrary, BrowserSource, CookieKey, FullDiskAccessRequired, ImportRecord,
+    KeychainDenied,
 };
 use crate::cef_browser;
 use gpui::{
@@ -15,6 +16,10 @@ use workspace::{ModalView, Workspace};
 
 /// How many logged-in sites the summary names before folding the rest into a count.
 const SHOWN_SITES: usize = 4;
+/// The Full Disk Access list in System Settings, the only place macOS lets the user hand
+/// Safari's data to another app.
+const FULL_DISK_ACCESS_SETTINGS: &str =
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles";
 
 pub fn open(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
     workspace.toggle_modal(window, cx, ImportModal::new);
@@ -37,6 +42,7 @@ struct ImportOutcome {
 enum CookieFailure {
     NotRequested,
     KeychainDenied,
+    FullDiskAccess,
     Failed(String),
 }
 
@@ -47,6 +53,7 @@ pub struct ImportModal {
     selected_profile: usize,
     import_bookmarks: bool,
     import_cookies: bool,
+    safari_readable: bool,
     stage: Stage,
     _task: Option<Task<()>>,
 }
@@ -65,11 +72,17 @@ impl ImportModal {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus_handle = cx.focus_handle();
         focus_handle.focus(window, cx);
-        let detect = cx.background_spawn(async move { crate::browser_import::detect_sources() });
+        let detect = cx.background_spawn(async move {
+            (
+                crate::browser_import::detect_sources(),
+                crate::browser_import::safari_readable(),
+            )
+        });
         let task = cx.spawn(async move |this, cx| {
-            let sources = detect.await;
+            let (sources, safari_readable) = detect.await;
             this.update(cx, |this, cx| {
                 this.sources = sources;
+                this.safari_readable = safari_readable;
                 this.stage = Stage::Choosing;
                 cx.notify();
             })
@@ -82,6 +95,7 @@ impl ImportModal {
             selected_profile: 0,
             import_bookmarks: true,
             import_cookies: true,
+            safari_readable: true,
             stage: Stage::Detecting,
             _task: Some(task),
         }
@@ -89,6 +103,13 @@ impl ImportModal {
 
     fn source(&self) -> Option<&BrowserSource> {
         self.sources.get(self.selected_source)
+    }
+
+    fn needs_full_disk_access(&self) -> bool {
+        !self.safari_readable
+            && self
+                .source()
+                .is_some_and(|source| source.kind == BrowserKind::Safari)
     }
 
     fn select_source(&mut self, index: usize, cx: &mut Context<Self>) {
@@ -177,6 +198,9 @@ impl ImportModal {
                     },
                     Err(error) if error.downcast_ref::<KeychainDenied>().is_some() => {
                         (Err(CookieFailure::KeychainDenied), Vec::new(), Vec::new())
+                    }
+                    Err(error) if error.downcast_ref::<FullDiskAccessRequired>().is_some() => {
+                        (Err(CookieFailure::FullDiskAccess), Vec::new(), Vec::new())
                     }
                     Err(error) => {
                         log::error!("importing cookies from {}: {error:#}", kind.name());
@@ -366,6 +390,59 @@ impl ImportModal {
                             }),
                     ),
             );
+        }
+
+        if self.needs_full_disk_access() {
+            let warning = Color::Warning.color(cx);
+            return body
+                .child(
+                    v_flex()
+                        .w_full()
+                        .gap_2()
+                        .p_2p5()
+                        .rounded(Radius::Md.rems())
+                        .bg(warning.opacity(0.08))
+                        .border_1()
+                        .border_color(cx.theme().colors().border_variant)
+                        .child(
+                            h_flex()
+                                .items_start()
+                                .gap_2()
+                                .child(
+                                    Icon::new(IconName::Warning)
+                                        .size(IconSize::Small)
+                                        .color(Color::Warning),
+                                )
+                                .child(
+                                    v_flex()
+                                        .min_w_0()
+                                        .gap_0p5()
+                                        .child(
+                                            Label::new(t!("web_preview.import.full_disk_title"))
+                                                .size(LabelSize::Small)
+                                                .weight(FontWeight::MEDIUM),
+                                        )
+                                        .child(
+                                            Label::new(t!("web_preview.import.full_disk_detail"))
+                                                .size(LabelSize::XSmall)
+                                                .color(Color::Muted),
+                                        ),
+                                ),
+                        )
+                        .child(
+                            h_flex().pl_6().child(
+                                secondary_button(
+                                    "browser-import-full-disk",
+                                    Some((IconName::Settings, Color::Muted)),
+                                    t!("web_preview.import.full_disk_open"),
+                                    true,
+                                    cx,
+                                )
+                                .on_click(|_, _, cx| cx.open_url(FULL_DISK_ACCESS_SETTINGS)),
+                            ),
+                        ),
+                )
+                .into_any_element();
         }
 
         let keychain_service = self
@@ -560,6 +637,10 @@ impl ImportModal {
                 Some(t!("web_preview.import.keychain_denied")),
                 Color::Warning,
             ),
+            Err(CookieFailure::FullDiskAccess) => (
+                Some(t!("web_preview.import.full_disk_detail")),
+                Color::Warning,
+            ),
             Err(CookieFailure::Failed(error)) => (
                 Some(t!(
                     "web_preview.import.cookies_failed",
@@ -638,8 +719,9 @@ impl Render for ImportModal {
                 )
             }
             Stage::Choosing => {
-                let can_import =
-                    self.source().is_some() && (self.import_bookmarks || self.import_cookies);
+                let can_import = self.source().is_some()
+                    && (self.import_bookmarks || self.import_cookies)
+                    && !self.needs_full_disk_access();
                 modal_footer(cx)
                     .child(div().flex_1())
                     .child(
