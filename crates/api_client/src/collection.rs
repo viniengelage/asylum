@@ -531,6 +531,9 @@ impl Collection {
             return draft.clone();
         }
         match &self.spec {
+            Some(spec) if spec.operation(operation_key).is_none() => {
+                ad_hoc_draft(operation_key).unwrap_or_default()
+            }
             Some(spec) => config::initial_draft(spec, operation_key),
             None => RequestDraft::default(),
         }
@@ -684,6 +687,16 @@ impl Collection {
             .spec
             .as_ref()
             .with_context(|| t!("api_client.collection.error_spec_not_loaded").to_string())?;
+        let with_ad_hoc;
+        let spec = match ad_hoc_operation(spec, operation_key, draft) {
+            Some(operation) => {
+                let mut copy = Spec::clone(spec);
+                copy.operations.push(operation);
+                with_ad_hoc = copy;
+                &with_ad_hoc
+            }
+            None => spec.as_ref(),
+        };
         let mut prepared = send::prepare(
             spec,
             operation_key,
@@ -1262,6 +1275,77 @@ type SendResult = std::result::Result<
     (PreparedRequest, ReceivedResponse),
     Box<(Option<PreparedRequest>, anyhow::Error)>,
 >;
+
+/// The key of an operation the spec doesn't document, called as `METHOD /path` (against the
+/// environment's `baseUrl`) or `METHOD https://…`. `None` when `target` is neither.
+pub fn ad_hoc_operation_key(method: &str, target: &str) -> Option<String> {
+    let method = method.trim().to_ascii_uppercase();
+    let known = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
+    let target = target.trim();
+    let is_target =
+        target.starts_with('/') || target.starts_with("https://") || target.starts_with("http://");
+    (known.contains(&method.as_str()) && is_target).then(|| format!("{method} {target}"))
+}
+
+/// What a draft for an undocumented operation starts with: the target as its URL.
+fn ad_hoc_draft(operation_key: &str) -> Option<RequestDraft> {
+    let (method, target) = operation_key.split_once(' ')?;
+    ad_hoc_operation_key(method, target)?;
+    Some(RequestDraft {
+        url: if target.starts_with('/') {
+            format!("{{{{baseUrl}}}}{target}")
+        } else {
+            target.to_string()
+        },
+        ..RequestDraft::default()
+    })
+}
+
+/// A stand-in for an operation missing from the spec, so it goes through the same headers,
+/// login and cookies as the documented ones. Its body kind follows the draft, since there is
+/// no schema to say it.
+fn ad_hoc_operation(
+    spec: &Spec,
+    operation_key: &str,
+    draft: &RequestDraft,
+) -> Option<spec::Operation> {
+    if spec.operation(operation_key).is_some() {
+        return None;
+    }
+    let (method, path) = operation_key.split_once(' ')?;
+    ad_hoc_operation_key(method, path)?;
+    let content_type = draft
+        .headers
+        .iter()
+        .find(|header| header.enabled && header.name.eq_ignore_ascii_case("content-type"))
+        .map(|header| header.value.clone());
+    let request_body = if draft.form.iter().any(|field| field.enabled) {
+        Some(content_type.unwrap_or_else(|| "multipart/form-data".to_string()))
+    } else {
+        content_type
+    }
+    .map(|content_type| spec::RequestBody {
+        content_type,
+        other_content_types: Vec::new(),
+        required: false,
+        schema: None,
+        example: None,
+    });
+    Some(spec::Operation {
+        key: operation_key.to_string(),
+        method: method.to_string(),
+        path: path.to_string(),
+        operation_id: None,
+        summary: None,
+        description: None,
+        tags: Vec::new(),
+        deprecated: false,
+        parameters: Vec::new(),
+        request_body,
+        responses: Vec::new(),
+        security: None,
+    })
+}
 
 async fn send_with_retries(
     this: &WeakEntity<Collection>,
@@ -1909,6 +1993,25 @@ paths:
         assert!(
             !text.contains("\"new\""),
             "tokens never go to the collection file"
+        );
+
+        let ad_hoc = ad_hoc_operation_key("post", "/reports/7").unwrap();
+        assert_eq!(ad_hoc, "POST /reports/7");
+        assert_eq!(ad_hoc_operation_key("FETCH", "/x"), None);
+        assert_eq!(ad_hoc_operation_key("GET", "reports"), None);
+        let mut draft = collection.read_with(cx, |collection, _| collection.draft(&ad_hoc));
+        assert_eq!(draft.url, "{{baseUrl}}/reports/7");
+        draft.body = Some(r#"{"format":"csv"}"#.to_string());
+        let ad_hoc_exchange = collection
+            .update(cx, |collection, cx| {
+                collection.send(ad_hoc.clone(), draft, cx)
+            })
+            .await;
+        assert_eq!(ad_hoc_exchange.error, None);
+        assert_eq!(
+            requests.lock().last().map(String::as_str),
+            Some("POST /reports/7 Bearer new cookie=sid=s1"),
+            "an operation missing from the spec still gets the login and the cookies"
         );
 
         assert_eq!(exchange.cookies_set.len(), 1);

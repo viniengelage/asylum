@@ -2,7 +2,7 @@
 //! requests through them, with the same environments, login and headers as the API panel.
 
 use crate::collection::{self, Collection};
-use crate::config::{HeaderEntry, ParamEntry};
+use crate::config::{FormField, HeaderEntry, ParamEntry};
 use crate::schema::Validation;
 use anyhow::{Context as _, Result, anyhow};
 use collections::HashMap;
@@ -102,8 +102,14 @@ struct OperationsInput {
 #[derive(Deserialize, JsonSchema)]
 struct SendInput {
     /// The operation as `METHOD /path` (e.g. `GET /users/{id}`) or its operationId, as listed
-    /// by api_operations.
+    /// by api_operations. An endpoint the spec doesn't document can be called the same way,
+    /// `METHOD /path` against the environment's baseUrl or `METHOD https://full/url`, and still
+    /// gets the collection's headers, login and cookies.
     operation: String,
+    /// The collection title, only needed when the project has more than one and the operation
+    /// is not in any spec.
+    #[serde(default)]
+    collection: Option<String>,
     /// Values for `{placeholders}` in the path.
     #[serde(default)]
     path_params: BTreeMap<String, String>,
@@ -112,9 +118,43 @@ struct SendInput {
     /// Extra headers; the collection's headers and the login token are added automatically.
     #[serde(default)]
     headers: BTreeMap<String, String>,
-    /// The request body, usually JSON text.
+    /// The request body: a JSON value (object, array…) is sent as JSON, a string as given.
+    /// `{{variables}}` of the environment are filled in either way.
     #[serde(default)]
-    body: Option<String>,
+    body: Option<serde_json::Value>,
+    /// Fields of a form or multipart body, for operations that take one. A value starting
+    /// with `@` sends the file at that path, like curl.
+    #[serde(default)]
+    form: BTreeMap<String, String>,
+}
+
+fn body_text(body: serde_json::Value) -> (String, bool) {
+    match body {
+        serde_json::Value::String(text) => (text, false),
+        other => (
+            serde_json::to_string_pretty(&other).unwrap_or_else(|_| other.to_string()),
+            true,
+        ),
+    }
+}
+
+fn form_fields(form: BTreeMap<String, String>) -> Vec<FormField> {
+    form.into_iter()
+        .map(|(name, value)| match value.strip_prefix('@') {
+            Some(path) => FormField {
+                name,
+                value: path.to_string(),
+                is_file: true,
+                enabled: true,
+            },
+            None => FormField {
+                name,
+                value,
+                is_file: false,
+                enabled: true,
+            },
+        })
+        .collect()
 }
 
 fn operations(
@@ -236,9 +276,25 @@ fn send(project: Entity<Project>, input: SendInput, cx: &mut App) -> Task<Result
                 Some((collection.clone(), operation.key.clone()))
             })
         });
-        let (collection, operation_key) = found.with_context(|| {
-            format!("A operação `{wanted}` não existe no spec. Use api_operations para ver as disponíveis.")
-        })?;
+        let (collection, operation_key) = match found {
+            Some(found) => found,
+            None => {
+                let ad_hoc = wanted
+                    .split_once(char::is_whitespace)
+                    .and_then(|(method, target)| collection::ad_hoc_operation_key(method, target))
+                    .with_context(|| {
+                        format!(
+                            "A operação `{wanted}` não existe no spec. Use api_operations para ver \
+                             as disponíveis, ou chame um endpoint fora do spec como `MÉTODO /caminho` \
+                             ou `MÉTODO https://url`."
+                        )
+                    })?;
+                let collection = cx.update(|cx| {
+                    pick_collection(&collections, input.collection.as_deref(), cx)
+                })?;
+                (collection, ad_hoc)
+            }
+        };
 
         let exchange = collection
             .update(cx, |collection, cx| {
@@ -257,8 +313,27 @@ fn send(project: Entity<Project>, input: SendInput, cx: &mut App) -> Task<Result
                         enabled: true,
                     });
                 }
-                if input.body.is_some() {
-                    draft.body = input.body;
+                if let Some(body) = input.body {
+                    let (text, is_json) = body_text(body);
+                    let has_content_type = draft.headers.iter().any(|header| {
+                        header.enabled && header.name.eq_ignore_ascii_case("content-type")
+                    });
+                    let documented = collection
+                        .spec
+                        .as_ref()
+                        .and_then(|spec| spec.operation(&operation_key))
+                        .is_some_and(|operation| operation.request_body.is_some());
+                    if is_json && !has_content_type && !documented {
+                        draft.headers.push(HeaderEntry {
+                            name: "Content-Type".to_string(),
+                            value: "application/json".to_string(),
+                            enabled: true,
+                        });
+                    }
+                    draft.body = Some(text);
+                }
+                if !input.form.is_empty() {
+                    draft.form = form_fields(input.form);
                 }
                 collection.send(operation_key.clone(), draft, cx)
             })
@@ -327,6 +402,39 @@ fn send(project: Entity<Project>, input: SendInput, cx: &mut App) -> Task<Result
     })
 }
 
+fn pick_collection(
+    collections: &[Entity<Collection>],
+    wanted: Option<&str>,
+    cx: &App,
+) -> Result<Entity<Collection>> {
+    let titles = || {
+        collections
+            .iter()
+            .map(|collection| collection.read(cx).title())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    match wanted {
+        Some(wanted) => collections
+            .iter()
+            .find(|collection| {
+                collection
+                    .read(cx)
+                    .title()
+                    .eq_ignore_ascii_case(wanted.trim())
+            })
+            .cloned()
+            .with_context(|| format!("A coleção `{wanted}` não existe. Coleções: {}", titles())),
+        None => match collections {
+            [only] => Ok(only.clone()),
+            _ => Err(anyhow!(
+                "O projeto tem mais de uma coleção; diga qual em `collection`: {}",
+                titles()
+            )),
+        },
+    }
+}
+
 pub fn register_toolkit(cx: &mut App) {
     task_agents::register_toolkit(
         Toolkit {
@@ -349,6 +457,9 @@ pub fn register_toolkit(cx: &mut App) {
                     t!("api_client.toolkit.send_title"),
                     "Sends a request for one operation of the project's API collection, using its \
                      environment, headers and login (renewing the token and retrying once on 401). \
+                     Also calls endpoints missing from the spec (`METHOD /path` or `METHOD \
+                     https://url`) with the same headers, login and cookies. The body may be a \
+                     JSON value or text, and `form` sends form or multipart fields and files. \
                      Returns the status, the schema check and the body.",
                     ToolAccess::Act,
                     send,

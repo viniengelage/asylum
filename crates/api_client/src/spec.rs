@@ -192,7 +192,7 @@ pub struct Tag {
     pub description: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Spec {
     pub format: SpecFormat,
     pub version_string: String,
