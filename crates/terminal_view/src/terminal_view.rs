@@ -1341,7 +1341,7 @@ fn subscribe_for_terminal_events(
                 }
 
                 Event::Open(maybe_navigation_target) => match maybe_navigation_target {
-                    MaybeNavigationTarget::Url(url) => cx.open_url(url),
+                    MaybeNavigationTarget::Url(url) => open_url(url, window, cx),
                     MaybeNavigationTarget::PathLike(path_like_target) => open_path_like_target(
                         &workspace,
                         terminal_view,
@@ -1360,6 +1360,21 @@ fn subscribe_for_terminal_events(
         },
     );
     vec![terminal_subscription, terminal_events_subscription]
+}
+
+/// Web pages open in the embedded browser, which hands them to the system browser itself
+/// when it is turned off; other schemes (mailto:, vscode:, ...) only make sense outside.
+fn open_url(url: &str, window: &mut Window, cx: &mut App) {
+    if url.starts_with("http://") || url.starts_with("https://") {
+        window.dispatch_action(
+            Box::new(zed_actions::web_preview::OpenUrlInWebPreview {
+                url: url.to_owned(),
+            }),
+            cx,
+        );
+    } else {
+        cx.open_url(url);
+    }
 }
 
 fn regex_search_for_query(query: &SearchQuery) -> Option<Search> {
