@@ -30,6 +30,7 @@ project.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 schemars.workspace = true
+settings.workspace = true
 task_agents.workspace = true
 smallvec.workspace = true
 ui.workspace = true
@@ -72,4 +73,4 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
     "NSWindow",
     "NSResponder",
 ] }
-objc2-foundation = { version = "0.3", default-features = false }
+objc2-foundation.workspace = true

@@ -2,7 +2,6 @@ use crate::browser_import::{
     BrowserKind, BrowserLibrary, BrowserSource, CookieKey, FullDiskAccessRequired, ImportRecord,
     KeychainDenied,
 };
-use crate::cef_browser;
 use gpui::{
     App, Context, DismissEvent, EventEmitter, FocusHandle, Focusable, FontWeight, Render,
     SharedString, Task, Window,
@@ -179,7 +178,7 @@ impl ImportModal {
                     _ if !import_cookies => {
                         (Err(CookieFailure::NotRequested), Vec::new(), Vec::new())
                     }
-                    Ok(cookies) => match cef_browser::import_cookies(&cookies) {
+                    Ok(cookies) => match crate::import_cookies_into_engine(&cookies, cx) {
                         Ok(accepted) => {
                             let keys = cookies
                                 .iter()

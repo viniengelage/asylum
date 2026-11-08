@@ -62,6 +62,7 @@
   "error.cef_unavailable_headline": "Chromium Embedded Framework indisponível",
   "error.no_frame_detail": "O Chromium iniciou, mas não desenhou nada em {seconds} segundos, o que geralmente significa que o processo de renderização não conseguiu subir. O log do Zed tem as entradas de web_preview com o motivo.",
   "error.no_frame_headline": "O browser não desenhou nenhum frame",
+  "error.webkit_unavailable_headline": "O WebKit não conseguiu abrir a página",
   "import.another": "Importar de outro",
   "import.bookmarks": "Favoritos",
   "import.bookmarks_detail": "Aparecem na nova aba, sem duplicar os que já estão aqui",

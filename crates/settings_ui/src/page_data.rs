@@ -234,6 +234,21 @@ fn browser_page() -> SettingsPage {
         "Asylum",
         ui::IconName::Public,
         Box::new([
+            SettingsPageItem::SectionHeader("Engine"),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: "Browser Engine",
+                description: "Chromium is downloaded the first time the browser opens and is what the agent's browser tools drive. WebKit ships with macOS, starts instantly and uses less memory. Open tabs keep their engine until reopened.",
+                field: Box::new(SettingField {
+                    organization_override: None,
+                    json_path: Some("browser_engine"),
+                    pick: |settings_content| settings_content.browser_engine.as_ref(),
+                    write: |settings_content, value, _| {
+                        settings_content.browser_engine = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
             SettingsPageItem::SectionHeader("Agent Toolkit"),
             toolkit_field!(
                 "Browser Tools",

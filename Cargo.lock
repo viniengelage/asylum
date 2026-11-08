@@ -21265,6 +21265,7 @@ dependencies = [
  "schemars 1.0.4",
  "serde",
  "serde_json",
+ "settings",
  "sha1",
  "sha2 0.10.9",
  "smallvec",

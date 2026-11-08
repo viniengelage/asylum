@@ -232,6 +232,13 @@ pub struct SettingsContent {
     /// Default: system
     pub ui_language: Option<UiLanguageContent>,
 
+    /// The engine behind the built-in browser on macOS. "chromium" downloads Chromium the
+    /// first time the browser opens and is what the agent's browser tools drive; "webkit"
+    /// uses the WebKit that ships with macOS.
+    ///
+    /// Default: chromium
+    pub browser_engine: Option<BrowserEngineContent>,
+
     /// Configuration for the collab panel visual settings.
     pub collaboration_panel: Option<PanelSettingsContent>,
 
@@ -416,7 +423,7 @@ fallible_options::flattened_deserialize!(SettingsContent {
     sections: { project, theme, extension, workspace, editor, remote },
     options: {
         call_hierarchy, command_palette, file_finder, git_panel, tabs, tab_bar, tab_switcher, status_bar, toolkit, preview_tabs, agent,
-        agent_servers, audio, auto_update, base_keymap, ui_language, collaboration_panel, debugger, diagnostics,
+        agent_servers, audio, auto_update, base_keymap, ui_language, browser_engine, collaboration_panel, debugger, diagnostics,
         git,
         global_lsp_settings, image_viewer, design, markdown_preview, repl, helix_mode, hide_mouse,
         journal, log, line_indicator_format, language_models, copilot, outline_panel, project_panel,
@@ -551,6 +558,31 @@ pub enum UiLanguageContent {
     English,
     #[serde(rename = "pt-BR")]
     PortugueseBrazil,
+}
+
+/// The engine behind the built-in browser.
+///
+/// Default: chromium
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    MergeFrom,
+    PartialEq,
+    Eq,
+    Default,
+    strum::VariantArray,
+    strum::VariantNames,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum BrowserEngineContent {
+    #[default]
+    Chromium,
+    #[serde(rename = "webkit")]
+    WebKit,
 }
 
 impl strum::VariantNames for UiLanguageContent {

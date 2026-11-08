@@ -11,6 +11,8 @@ mod cef_paths;
 #[cfg(target_os = "macos")]
 mod import_modal;
 mod runtime_discovery;
+#[cfg(target_os = "macos")]
+mod webkit_browser;
 
 #[cfg(target_os = "macos")]
 pub use runtime_discovery::browser_cache_dir_for_profile;
@@ -25,6 +27,7 @@ use gpui::{
     px, relative,
 };
 use i18n::t;
+use settings::{RegisterSetting, Settings};
 use std::{rc::Rc, time::Duration};
 use ui::{
     Color, CommonAnimationExt, ContextMenu, Icon, IconButton, IconName, IconPosition, IconSize,
@@ -191,6 +194,8 @@ fn probe_local_servers() -> Vec<u16> {
 /// How often the poll loop looks for a URL dropped by the `zed browse` utility.
 #[cfg(target_os = "macos")]
 const BROWSE_REQUEST_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
+#[cfg(target_os = "macos")]
+const WEBKIT_SYNC_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// How long a browser gets to paint its first frame before we stop trusting the GPU to
 /// deliver them. Even `about:blank` paints immediately, so this is generous.
@@ -222,6 +227,39 @@ pub const fn is_supported() -> bool {
 
 /// Registers the browser toolkit agents use to drive the embedded Chromium.
 #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
+#[derive(RegisterSetting)]
+struct BrowserEngineSettings {
+    engine: settings::BrowserEngineContent,
+}
+
+impl Settings for BrowserEngineSettings {
+    fn from_settings(content: &settings::SettingsContent) -> Self {
+        Self {
+            engine: content.browser_engine.unwrap_or_default(),
+        }
+    }
+}
+
+/// Whether new browser tabs use the system's WebKit instead of Chromium.
+#[cfg(target_os = "macos")]
+fn webkit_selected(cx: &App) -> bool {
+    BrowserEngineSettings::get_global(cx).engine == settings::BrowserEngineContent::WebKit
+}
+
+/// Writes imported cookies into the engine new tabs use, so they are there when the user
+/// opens the sites.
+#[cfg(target_os = "macos")]
+pub(crate) fn import_cookies_into_engine(
+    cookies: &[browser_import::ImportedCookie],
+    cx: &App,
+) -> anyhow::Result<usize> {
+    if webkit_selected(cx) {
+        webkit_browser::import_cookies(cookies)
+    } else {
+        cef_browser::import_cookies(cookies)
+    }
+}
+
 pub fn register_agent_toolkit(cx: &mut App) {
     #[cfg(target_os = "macos")]
     agent_toolkit::register_toolkit(cx);
@@ -360,6 +398,12 @@ pub struct WebPreviewView {
     browser: Option<cef_browser::CefBrowserInstance>,
     #[cfg(target_os = "macos")]
     latest_frame: Option<cef_browser::BrowserFrame>,
+    /// Set when the tab was opened with WebKit as the engine; a tab keeps its engine for
+    /// as long as it lives.
+    #[cfg(target_os = "macos")]
+    uses_webkit: bool,
+    #[cfg(target_os = "macos")]
+    webkit: Option<webkit_browser::WebKitPage>,
     /// Whether the pane is showing another item, in which case nothing can see what CEF
     /// paints.
     hidden: bool,
@@ -545,11 +589,23 @@ impl WebPreviewView {
             }
         });
 
+        // Embedded pages sit inside canvases full of GPUI overlays, which a native view would
+        // cover, so they stay on Chromium.
+        #[cfg(target_os = "macos")]
+        let uses_webkit = !embedded && webkit_selected(cx);
+        #[cfg(target_os = "macos")]
+        let webkit_release = cx.on_release_in(window, |this, window, _cx| {
+            if let Some(mut page) = this.webkit.take() {
+                page.unmount(window);
+            }
+        });
+
         // Without a browser there is nothing to pump or repaint, so the loop is macOS-only.
         #[cfg(target_os = "macos")]
         let poll_task = cx.spawn(async move |this, cx| {
             let mut delay = std::time::Duration::from_millis(1);
             let mut last_browse_check = std::time::Instant::now();
+            let mut last_webkit_sync = std::time::Instant::now();
             #[cfg(target_os = "macos")]
             let mut channel: Option<cef_browser::BrowserChannel> = None;
             #[cfg(target_os = "macos")]
@@ -605,6 +661,10 @@ impl WebPreviewView {
                                 if let Some(ref browser) = this.browser {
                                     browser.navigate_to(&url);
                                 }
+                                #[cfg(target_os = "macos")]
+                                if let Some(page) = &this.webkit {
+                                    page.navigate_to(&url);
+                                }
                                 runtime_discovery::write_runtime_discovery(
                                     &url,
                                     this.target_id.as_deref(),
@@ -620,6 +680,20 @@ impl WebPreviewView {
                 // to hand the view must not touch the entity at all, let alone redraw the pane.
                 #[cfg(target_os = "macos")]
                 {
+                    // WebKit runs on AppKit's own loop and is only read here, at a pace that
+                    // keeps the address bar and progress current.
+                    if uses_webkit {
+                        if last_webkit_sync.elapsed() >= WEBKIT_SYNC_INTERVAL {
+                            last_webkit_sync = std::time::Instant::now();
+                            if this
+                                .update(cx, |this, cx| this.sync_webkit_state(cx))
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
+                        continue;
+                    }
                     let Some(current_channel) = channel.as_ref() else {
                         continue;
                     };
@@ -741,12 +815,18 @@ impl WebPreviewView {
                 ];
                 #[cfg(target_os = "macos")]
                 subscriptions.push(installer_subscription);
+                #[cfg(target_os = "macos")]
+                subscriptions.push(webkit_release);
                 subscriptions
             },
             #[cfg(target_os = "macos")]
             browser: None,
             #[cfg(target_os = "macos")]
             latest_frame: None,
+            #[cfg(target_os = "macos")]
+            uses_webkit,
+            #[cfg(target_os = "macos")]
+            webkit: None,
             hidden: false,
             error: None,
             target_id: None,
@@ -869,6 +949,94 @@ impl WebPreviewView {
             },
         )
         .into_any_element()
+    }
+
+    #[cfg(target_os = "macos")]
+    fn sync_webkit_state(&mut self, cx: &mut Context<Self>) {
+        let Some(page) = &self.webkit else {
+            return;
+        };
+        let state = page.state();
+        let load_error = state.load_error.map(|error| PageLoadError {
+            connection_refused: error.connection_refused,
+            url: error.url,
+            text: error.text,
+        });
+        // A failed navigation leaves WebKit's URL on the last page that loaded, while the
+        // error page is about the address the user asked for.
+        let url = if state.url.is_empty() || load_error.is_some() {
+            self.url.clone()
+        } else {
+            state.url
+        };
+        let title = if state.title.is_empty() {
+            self.title.clone()
+        } else {
+            state.title
+        };
+        let changed = url != self.url
+            || title != self.title
+            || state.loading != self.loading
+            || state.can_go_back != self.can_go_back
+            || state.can_go_forward != self.can_go_forward
+            || (state.load_progress - self.load_progress).abs() > f64::EPSILON
+            || load_error != self.load_error;
+        if !changed {
+            return;
+        }
+        let tab_changed = title != self.title || state.loading != self.loading;
+        let url_changed = url != self.url;
+        let finished_loading = self.loading && !state.loading;
+        self.url = url;
+        self.title = title;
+        self.loading = state.loading;
+        self.can_go_back = state.can_go_back;
+        self.can_go_forward = state.can_go_forward;
+        self.load_progress = state.load_progress;
+        self.load_error = load_error;
+        if tab_changed {
+            cx.emit(ItemEvent::UpdateTab);
+        }
+        if finished_loading {
+            self.remember_page(cx);
+        }
+        if url_changed {
+            cx.emit(WebPreviewEvent::UrlChanged(self.url.clone()));
+        }
+        cx.notify();
+    }
+
+    #[cfg(target_os = "macos")]
+    fn ensure_webkit(&mut self, bounds: Bounds<Pixels>, window: &Window) {
+        if let Some(page) = &mut self.webkit {
+            page.place(bounds, window);
+            self.last_bounds = Some(bounds);
+            return;
+        }
+        if self.error.is_some() {
+            return;
+        }
+        match webkit_browser::WebKitPage::new() {
+            Ok(mut page) => {
+                if self.zoom_level != 0. {
+                    page.set_zoom_level(self.zoom_level);
+                }
+                if !is_blank_url(&self.url) {
+                    page.navigate_to(&self.url);
+                }
+                page.set_hidden(self.hidden);
+                page.place(bounds, window);
+                self.last_bounds = Some(bounds);
+                self.webkit = Some(page);
+            }
+            Err(error) => {
+                log::error!("web_preview: {error:#}");
+                self.error = Some(PreviewError {
+                    headline: t!("web_preview.error.webkit_unavailable_headline"),
+                    detail: format!("{error:#}").into(),
+                });
+            }
+        }
     }
 
     /// Pulls state and any newly painted frame out of CEF.
@@ -1371,12 +1539,20 @@ impl WebPreviewView {
         if let Some(ref browser) = self.browser {
             browser.set_hidden(hidden);
         }
+        #[cfg(target_os = "macos")]
+        if let Some(page) = &mut self.webkit {
+            page.set_hidden(hidden);
+        }
     }
 
     pub fn navigate(&mut self, url: String, cx: &mut Context<Self>) {
         #[cfg(target_os = "macos")]
         if let Some(browser) = &self.browser {
             browser.navigate_to(&url);
+        }
+        #[cfg(target_os = "macos")]
+        if let Some(page) = &self.webkit {
+            page.navigate_to(&url);
         }
         self.url = url;
         cx.notify();
@@ -1387,6 +1563,10 @@ impl WebPreviewView {
         if let Some(browser) = &self.browser {
             browser.reload();
         }
+        #[cfg(target_os = "macos")]
+        if let Some(page) = &self.webkit {
+            page.reload();
+        }
         cx.notify();
     }
 
@@ -1396,6 +1576,10 @@ impl WebPreviewView {
         #[cfg(target_os = "macos")]
         if let Some(browser) = &self.browser {
             browser.execute_javascript(code);
+        }
+        #[cfg(target_os = "macos")]
+        if let Some(page) = &self.webkit {
+            page.execute_javascript(code);
         }
     }
 
@@ -1412,6 +1596,10 @@ impl WebPreviewView {
         #[cfg(target_os = "macos")]
         if let Some(ref browser) = self.browser {
             browser.navigate_to(&url);
+        }
+        #[cfg(target_os = "macos")]
+        if let Some(page) = &self.webkit {
+            page.navigate_to(&url);
         }
         runtime_discovery::write_runtime_discovery(&url, self.target_id.as_deref());
         // Without a browser yet (a new tab shows its start page instead), the first layout
@@ -1478,6 +1666,10 @@ impl WebPreviewView {
         if let Some(browser) = &self.browser {
             browser.set_zoom_level(self.zoom_level);
         }
+        #[cfg(target_os = "macos")]
+        if let Some(page) = &self.webkit {
+            page.set_zoom_level(self.zoom_level);
+        }
         cx.notify();
     }
 
@@ -1529,7 +1721,14 @@ impl WebPreviewView {
             .into_iter()
             .map(|cookie| (cookie.url, cookie.name))
             .collect();
-        if let Err(error) = cef_browser::delete_cookies(&cookies) {
+        // Cookies only ever went into the engine selected at import time, but which one
+        // that was isn't recorded, so both are cleaned. CEF is left alone if it never ran.
+        if let Err(error) = webkit_browser::delete_cookies(&cookies) {
+            log::error!("deleting imported cookies from WebKit: {error:#}");
+        }
+        if !webkit_selected(cx)
+            && let Err(error) = cef_browser::delete_cookies(&cookies)
+        {
             log::error!("deleting imported cookies: {error:#}");
         }
         cx.notify();
@@ -1762,6 +1961,10 @@ impl WebPreviewView {
         if let Some(ref browser) = self.browser {
             browser.go_back();
         }
+        #[cfg(target_os = "macos")]
+        if let Some(page) = &self.webkit {
+            page.go_back();
+        }
         cx.notify();
     }
 
@@ -1769,6 +1972,10 @@ impl WebPreviewView {
         #[cfg(target_os = "macos")]
         if let Some(ref browser) = self.browser {
             browser.go_forward();
+        }
+        #[cfg(target_os = "macos")]
+        if let Some(page) = &self.webkit {
+            page.go_forward();
         }
         cx.notify();
     }
@@ -1778,6 +1985,10 @@ impl WebPreviewView {
         if let Some(ref browser) = self.browser {
             browser.open_devtools();
         }
+        #[cfg(target_os = "macos")]
+        if let Some(page) = &self.webkit {
+            page.open_inspector();
+        }
         cx.notify();
     }
 
@@ -1785,6 +1996,10 @@ impl WebPreviewView {
         #[cfg(target_os = "macos")]
         if let Some(ref browser) = self.browser {
             browser.stop();
+        }
+        #[cfg(target_os = "macos")]
+        if let Some(page) = &self.webkit {
+            page.stop();
         }
         cx.notify();
     }
@@ -2364,10 +2579,24 @@ impl Render for WebPreviewView {
         }
 
         #[cfg(target_os = "macos")]
-        let install_prompt =
-            (!self.cef_installer.read(cx).is_installed()).then(|| self.render_cef_install(cx));
+        let install_prompt = (!self.uses_webkit && !self.cef_installer.read(cx).is_installed())
+            .then(|| self.render_cef_install(cx));
         #[cfg(not(target_os = "macos"))]
         let install_prompt: Option<gpui::AnyElement> = None;
+
+        // The WebKit page is a native view drawn above everything GPUI paints, so it has to
+        // get out of the way whenever the tab shows one of its own screens instead.
+        #[cfg(target_os = "macos")]
+        {
+            let showing_page = install_prompt.is_none()
+                && self.error.is_none()
+                && self.load_error.is_none()
+                && (self.embedded || !is_blank_url(&self.url));
+            let hidden = self.hidden || !showing_page;
+            if let Some(page) = &mut self.webkit {
+                page.set_hidden(hidden);
+            }
+        }
 
         let page: AnyElement = if let Some(prompt) = install_prompt {
             prompt
@@ -2459,7 +2688,11 @@ impl Render for WebPreviewView {
                                 entity
                                     .update(cx, |this, _cx| {
                                         this.scale_factor = window.scale_factor();
-                                        this.ensure_browser(bounds);
+                                        if this.uses_webkit {
+                                            this.ensure_webkit(bounds, window);
+                                        } else {
+                                            this.ensure_browser(bounds);
+                                        }
                                     })
                                     .ok();
                                 bounds
