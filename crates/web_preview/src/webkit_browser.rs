@@ -1,5 +1,7 @@
 use crate::browser_import::{ImportedCookie, SameSite};
 use anyhow::{Context as _, Result, anyhow};
+use block2::RcBlock;
+use futures::channel::oneshot;
 use gpui::{Bounds, Pixels, Window};
 use objc2::rc::{Allocated, Retained};
 use objc2::runtime::{AnyClass, AnyObject, Bool, NSObject, NSObjectProtocol, Sel};
@@ -7,7 +9,7 @@ use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, class, define_class,
 use objc2_app_kit::{NSResponder, NSView};
 use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 use sha2::{Digest, Sha256};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 #[link(name = "WebKit", kind = "framework")]
@@ -26,6 +28,110 @@ const URL_ERROR_CANNOT_CONNECT: isize = -1004;
 /// `WebKitErrorFrameLoadInterruptedByPolicyChange`: a download or a page WebKit won't show,
 /// not a failure to load.
 const WEBKIT_ERROR_POLICY_CHANGE: isize = 102;
+const EVENT_LEFT_MOUSE_DOWN: usize = 1;
+const EVENT_LEFT_MOUSE_UP: usize = 2;
+const EVENT_KEY_DOWN: usize = 10;
+const EVENT_KEY_UP: usize = 11;
+/// `NSEventModifierFlagFunction`, which AppKit sets on arrow keys.
+const FUNCTION_KEY_FLAG: usize = 1 << 23;
+const BITMAP_FILE_TYPE_PNG: usize = 4;
+const USER_SCRIPT_AT_DOCUMENT_START: isize = 0;
+/// Script results cross from the page as JSON text, so any value comes back the way
+/// Chromium's `returnByValue` gives it.
+const RETURN_AS_JSON: &str =
+    "return JSON.stringify(value === undefined ? null : value) ?? 'null';";
+
+/// Keeps the page's console and failed loads, so the agent's `browser_console` can read
+/// them without a debugging protocol.
+const CONSOLE_RECORDER: &str = r#"(() => {
+  if (window.__asylumConsole) return;
+  const entries = [];
+  Object.defineProperty(window, '__asylumConsole', { value: entries });
+  const record = (level, text) => {
+    entries.push(`[${level}] ${text}`);
+    if (entries.length > 500) entries.shift();
+  };
+  const describe = (value) => {
+    if (typeof value === 'string') return value;
+    if (value instanceof Error) return value.stack || String(value);
+    try { return JSON.stringify(value); } catch { return String(value); }
+  };
+  for (const level of ['log', 'info', 'warn', 'error', 'debug']) {
+    const original = console[level];
+    console[level] = function (...args) {
+      record(level === 'warn' ? 'warning' : level, args.map(describe).join(' '));
+      return original.apply(this, args);
+    };
+  }
+  window.addEventListener('error', (event) => {
+    const target = event.target;
+    if (target && target !== window && (target.src || target.href)) {
+      record('error · network', `failed to load ${target.src || target.href}`);
+    } else if (event.filename) {
+      // Without a file name it is the agent's own evaluation, or an opaque cross-origin
+      // script, and the message is only "Script error.".
+      record('error · javascript', `${event.message} (${event.filename}:${event.lineno})`);
+    }
+  }, true);
+  window.addEventListener('unhandledrejection', (event) => {
+    record('error · javascript', `unhandled rejection: ${describe(event.reason)}`);
+  });
+  const originalFetch = window.fetch;
+  if (originalFetch) {
+    window.fetch = function (...args) {
+      return originalFetch.apply(this, args).then((response) => {
+        if (!response.ok) record('error · network', `${response.status} ${response.url}`);
+        return response;
+      }, (error) => {
+        record('error · network', `fetch failed: ${describe(args[0])} (${error})`);
+        throw error;
+      });
+    };
+  }
+  const originalSend = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.send = function (...args) {
+    this.addEventListener('loadend', () => {
+      if (this.status === 0 || this.status >= 400) {
+        record('error · network', `${this.status} ${this.responseURL}`);
+      }
+    });
+    return originalSend.apply(this, args);
+  };
+})();"#;
+
+const INSERT_TEXT: &str = r#"const element = document.activeElement;
+if (!element || element === document.body || element === document.documentElement) {
+  return 'no-focus';
+}
+if (document.execCommand('insertText', false, text)) return 'inserted';
+if ('value' in element) {
+  try {
+    const start = element.selectionStart ?? element.value.length;
+    const end = element.selectionEnd ?? start;
+    element.setRangeText(text, start, end, 'end');
+  } catch {
+    element.value += text;
+  }
+  element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+  return 'inserted';
+}
+return 'no-focus';"#;
+
+/// Wheel events made outside AppKit don't reach WebKit, so the nearest scrollable element
+/// under the point is scrolled instead.
+const SCROLL_AT_POINT: &str = r#"const deltaY = Number(delta);
+let node = document.elementFromPoint(Number(x), Number(y));
+while (node && node !== document.body && node !== document.documentElement) {
+  const overflow = getComputedStyle(node).overflowY;
+  if (/(auto|scroll|overlay)/.test(overflow) && node.scrollHeight > node.clientHeight) break;
+  node = node.parentElement;
+}
+if (node && node !== document.body && node !== document.documentElement) {
+  node.scrollBy(0, deltaY);
+} else {
+  window.scrollBy(0, deltaY);
+}
+return 'scrolled';"#;
 
 extern_class!(
     #[unsafe(super(NSView, NSResponder, NSObject))]
@@ -213,6 +319,17 @@ impl WebKitPage {
             let enabled: Retained<AnyObject> = msg_send![class!(NSNumber), numberWithBool: Bool::YES];
             let key = NSString::from_str("developerExtrasEnabled");
             let _: () = msg_send![&*preferences, setValue: &*enabled, forKey: &*key];
+            let content_controller: Retained<AnyObject> =
+                msg_send![&*configuration, userContentController];
+            let source = NSString::from_str(CONSOLE_RECORDER);
+            let allocated: Allocated<AnyObject> = msg_send![class!(WKUserScript), alloc];
+            let script: Retained<AnyObject> = msg_send![
+                allocated,
+                initWithSource: &*source,
+                injectionTime: USER_SCRIPT_AT_DOCUMENT_START,
+                forMainFrameOnly: Bool::YES
+            ];
+            let _: () = msg_send![&*content_controller, addUserScript: &*script];
 
             let frame = NSRect::new(NSPoint::new(0., 0.), NSSize::new(800., 600.));
             let allocated: Allocated<AsylumWebView> = AsylumWebView::alloc(main_thread);
@@ -277,6 +394,9 @@ impl WebKitPage {
     }
 
     pub fn navigate_to(&self, url: &str) {
+        // The previous page's failure would otherwise describe this navigation until
+        // WebKit reports that it started.
+        self.events.borrow_mut().load_error = None;
         let address = if !url.contains("://") && !url.starts_with("about:") {
             format!("https://{url}")
         } else {
@@ -346,6 +466,213 @@ impl WebKitPage {
         }
     }
 
+    /// Evaluates `expression` as a single expression, awaiting a promise, and resolves to
+    /// its value as JSON text. The expression is compiled as part of the call, which
+    /// pages' content security policies don't block the way they block `eval`.
+    pub fn evaluate_expression(&self, expression: &str) -> PendingResult<String> {
+        let body = format!("const value = await (\n{expression}\n);\n{RETURN_AS_JSON}");
+        self.call_javascript(&body, &[])
+    }
+
+    /// Evaluates `script` like the console does, for statements that aren't a single
+    /// expression.
+    pub fn evaluate_script(&self, script: &str) -> PendingResult<String> {
+        let body = format!("const value = await (0, eval)(script);\n{RETURN_AS_JSON}");
+        self.call_javascript(&body, &[("script", script)])
+    }
+
+    /// Inserts text into the page's focused element, resolving to `"no-focus"` when
+    /// nothing takes text.
+    pub fn insert_text(&self, text: &str) -> PendingResult<String> {
+        self.call_javascript(INSERT_TEXT, &[("text", text)])
+    }
+
+    /// Scrolls at a point given in CSS pixels.
+    pub fn scroll(&self, x: f64, y: f64, delta_y: f64) -> PendingResult<String> {
+        self.call_javascript(
+            SCROLL_AT_POINT,
+            &[
+                ("x", &x.to_string()),
+                ("y", &y.to_string()),
+                ("delta", &delta_y.to_string()),
+            ],
+        )
+    }
+
+    /// What the page wrote to its console since it loaded, oldest first.
+    pub fn console_entries(&self) -> PendingResult<String> {
+        self.evaluate_expression("window.__asylumConsole ? [...window.__asylumConsole] : []")
+    }
+
+    fn call_javascript(&self, body: &str, arguments: &[(&str, &str)]) -> PendingResult<String> {
+        let (sender, receiver) = oneshot::channel();
+        let sender = Cell::new(Some(sender));
+        let handler = RcBlock::new(move |result: *mut AnyObject, error: *mut AnyObject| {
+            let Some(sender) = sender.take() else {
+                return;
+            };
+            // SAFETY: WebKit passes either null or a live object for each argument.
+            let outcome = unsafe {
+                if let Some(error) = error.as_ref() {
+                    Err(anyhow!(javascript_error_message(error)))
+                } else {
+                    Ok(result
+                        .as_ref()
+                        .and_then(|result| result.downcast_ref::<NSString>())
+                        .map(|text| text.to_string())
+                        .unwrap_or_else(|| "null".to_string()))
+                }
+            };
+            if sender.send(outcome).is_err() {
+                log::debug!("web_preview: a WebKit script finished after its caller gave up");
+            }
+        });
+        unsafe {
+            let body = NSString::from_str(body);
+            let dictionary: Retained<AnyObject> = msg_send![class!(NSMutableDictionary), new];
+            for (key, value) in arguments {
+                let key = NSString::from_str(key);
+                let value = NSString::from_str(value);
+                let _: () = msg_send![&*dictionary, setObject: &*value, forKey: &*key];
+            }
+            let world: Retained<AnyObject> = msg_send![class!(WKContentWorld), pageWorld];
+            let _: () = msg_send![
+                &*self.web_view,
+                callAsyncJavaScript: &*body,
+                arguments: &*dictionary,
+                inFrame: std::ptr::null_mut::<AnyObject>(),
+                inContentWorld: &*world,
+                completionHandler: &*handler
+            ];
+        }
+        receiver
+    }
+
+    /// Captures what the page shows as PNG, at the display's pixel density.
+    pub fn snapshot(&self) -> PendingResult<Vec<u8>> {
+        let (sender, receiver) = oneshot::channel();
+        let sender = Cell::new(Some(sender));
+        let handler = RcBlock::new(move |image: *mut AnyObject, error: *mut AnyObject| {
+            let Some(sender) = sender.take() else {
+                return;
+            };
+            // SAFETY: WebKit passes either null or a live object for each argument.
+            let outcome = unsafe {
+                match (image.as_ref(), error.as_ref()) {
+                    (Some(image), _) => png_from_image(image),
+                    (None, Some(error)) => Err(anyhow!(error_description(error))),
+                    (None, None) => Err(anyhow!("WebKit returned no snapshot")),
+                }
+            };
+            if sender.send(outcome).is_err() {
+                log::debug!("web_preview: a WebKit snapshot finished after its caller gave up");
+            }
+        });
+        let _: () = unsafe {
+            msg_send![
+                &*self.web_view,
+                takeSnapshotWithConfiguration: std::ptr::null_mut::<AnyObject>(),
+                completionHandler: &*handler
+            ]
+        };
+        receiver
+    }
+
+    /// Clicks at a point given in CSS pixels with real AppKit events, so the page sees a
+    /// trusted click the way it would from the user.
+    pub fn click(&self, x: f64, y: f64, click_count: u32) -> Result<()> {
+        let (window, window_number) = self.host_window()?;
+        let zoom = self.page_zoom();
+        unsafe {
+            let location: NSPoint = msg_send![
+                &*self.web_view,
+                convertPoint: NSPoint::new(x * zoom, y * zoom),
+                toView: std::ptr::null_mut::<AnyObject>()
+            ];
+            let _: Bool = msg_send![&*window, makeFirstResponder: &*self.web_view];
+            for count in 1..=click_count.max(1) {
+                for event_type in [EVENT_LEFT_MOUSE_DOWN, EVENT_LEFT_MOUSE_UP] {
+                    let event: Option<Retained<AnyObject>> = msg_send![
+                        class!(NSEvent),
+                        mouseEventWithType: event_type,
+                        location: location,
+                        modifierFlags: 0usize,
+                        timestamp: system_uptime(),
+                        windowNumber: window_number,
+                        context: std::ptr::null_mut::<AnyObject>(),
+                        eventNumber: 0isize,
+                        clickCount: count as isize,
+                        pressure: if event_type == EVENT_LEFT_MOUSE_DOWN { 1.0f32 } else { 0.0f32 }
+                    ];
+                    let event = event.context("AppKit couldn't make a mouse event")?;
+                    if event_type == EVENT_LEFT_MOUSE_DOWN {
+                        let _: () = msg_send![&*self.web_view, mouseDown: &*event];
+                    } else {
+                        let _: () = msg_send![&*self.web_view, mouseUp: &*event];
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Presses a key named the way the DOM names it (`Enter`, `ArrowUp`, ...).
+    pub fn press_key(&self, key: &str) -> Result<()> {
+        let (characters, key_code, flags) = match key {
+            "Enter" => ("\r".to_string(), 36u16, 0usize),
+            "Tab" => ("\t".to_string(), 48, 0),
+            "Backspace" => ("\u{7f}".to_string(), 51, 0),
+            "Escape" => ("\u{1b}".to_string(), 53, 0),
+            "ArrowUp" => ('\u{F700}'.to_string(), 126, FUNCTION_KEY_FLAG),
+            "ArrowDown" => ('\u{F701}'.to_string(), 125, FUNCTION_KEY_FLAG),
+            "ArrowLeft" => ('\u{F702}'.to_string(), 123, FUNCTION_KEY_FLAG),
+            "ArrowRight" => ('\u{F703}'.to_string(), 124, FUNCTION_KEY_FLAG),
+            other => anyhow::bail!("WebKit has no key code for {other}"),
+        };
+        let (window, window_number) = self.host_window()?;
+        let characters = NSString::from_str(&characters);
+        unsafe {
+            let _: Bool = msg_send![&*window, makeFirstResponder: &*self.web_view];
+            for event_type in [EVENT_KEY_DOWN, EVENT_KEY_UP] {
+                let event: Option<Retained<AnyObject>> = msg_send![
+                    class!(NSEvent),
+                    keyEventWithType: event_type,
+                    location: NSPoint::new(0., 0.),
+                    modifierFlags: flags,
+                    timestamp: system_uptime(),
+                    windowNumber: window_number,
+                    context: std::ptr::null_mut::<AnyObject>(),
+                    characters: &*characters,
+                    charactersIgnoringModifiers: &*characters,
+                    isARepeat: Bool::NO,
+                    keyCode: key_code
+                ];
+                let event = event.context("AppKit couldn't make a key event")?;
+                if event_type == EVENT_KEY_DOWN {
+                    let _: () = msg_send![&*self.web_view, keyDown: &*event];
+                } else {
+                    let _: () = msg_send![&*self.web_view, keyUp: &*event];
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn host_window(&self) -> Result<(Retained<AnyObject>, isize)> {
+        let window: Option<Retained<AnyObject>> = unsafe { msg_send![&*self.web_view, window] };
+        let window = window.context("the page isn't on screen")?;
+        let window_number: isize = unsafe { msg_send![&*window, windowNumber] };
+        Ok((window, window_number))
+    }
+
+    fn page_zoom(&self) -> f64 {
+        if responds_to(&self.web_view, sel!(pageZoom)) {
+            unsafe { msg_send![&*self.web_view, pageZoom] }
+        } else {
+            1.0
+        }
+    }
+
     pub fn state(&self) -> WebKitState {
         unsafe {
             let url: Option<Retained<AnyObject>> = msg_send![&*self.web_view, URL];
@@ -371,6 +698,60 @@ impl WebKitPage {
                 load_error: self.events.borrow().load_error.clone(),
             }
         }
+    }
+}
+
+pub type PendingResult<T> = oneshot::Receiver<Result<T>>;
+
+fn system_uptime() -> f64 {
+    unsafe {
+        let process: Retained<AnyObject> = msg_send![class!(NSProcessInfo), processInfo];
+        msg_send![&*process, systemUptime]
+    }
+}
+
+fn error_description(error: &AnyObject) -> String {
+    let text: Option<Retained<NSString>> = unsafe { msg_send![error, localizedDescription] };
+    text.map(|text| text.to_string()).unwrap_or_default()
+}
+
+/// The exception the page threw, which WebKit keeps apart from its generic description.
+fn javascript_error_message(error: &AnyObject) -> String {
+    let user_info: Option<Retained<AnyObject>> = unsafe { msg_send![error, userInfo] };
+    user_info
+        .and_then(|user_info| {
+            let key = NSString::from_str("WKJavaScriptExceptionMessage");
+            let value: Option<Retained<AnyObject>> =
+                unsafe { msg_send![&*user_info, objectForKey: &*key] };
+            value
+        })
+        .and_then(|value| value.downcast::<NSString>().ok())
+        .map(|message| message.to_string())
+        .unwrap_or_else(|| error_description(error))
+}
+
+fn png_from_image(image: &AnyObject) -> Result<Vec<u8>> {
+    unsafe {
+        let tiff: Option<Retained<AnyObject>> = msg_send![image, TIFFRepresentation];
+        let tiff = tiff.context("the snapshot has no bitmap")?;
+        let representation: Option<Retained<AnyObject>> =
+            msg_send![class!(NSBitmapImageRep), imageRepWithData: &*tiff];
+        let representation = representation.context("the snapshot has no bitmap")?;
+        let properties: Retained<AnyObject> = msg_send![class!(NSDictionary), dictionary];
+        let png: Option<Retained<AnyObject>> = msg_send![
+            &*representation,
+            representationUsingType: BITMAP_FILE_TYPE_PNG,
+            properties: &*properties
+        ];
+        let png = png.context("the snapshot couldn't be encoded as PNG")?;
+        let length: usize = msg_send![&*png, length];
+        let mut bytes = vec![0u8; length];
+        let _: () = msg_send![
+            &*png,
+            getBytes: bytes.as_mut_ptr().cast::<std::ffi::c_void>(),
+            length: length
+        ];
+        Ok(bytes)
     }
 }
 

@@ -579,8 +579,8 @@ pub enum UiLanguageContent {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum BrowserEngineContent {
-    #[default]
     Chromium,
+    #[default]
     #[serde(rename = "webkit")]
     WebKit,
 }

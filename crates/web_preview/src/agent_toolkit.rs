@@ -1,4 +1,5 @@
 use crate::WebPreviewView;
+use crate::webkit_browser::WebKitPage;
 use anyhow::{Context as _, Result, anyhow};
 use async_tungstenite::tungstenite::Message;
 use base64::Engine as _;
@@ -49,13 +50,8 @@ fn active_view(cx: &App) -> Option<Entity<WebPreviewView>> {
     views
         .iter()
         .rev()
-        .find(|view| !view.read(cx).hidden && view.read(cx).browser.is_some())
-        .or_else(|| {
-            views
-                .iter()
-                .rev()
-                .find(|view| view.read(cx).browser.is_some())
-        })
+        .find(|view| !view.read(cx).hidden && view.read(cx).has_page())
+        .or_else(|| views.iter().rev().find(|view| view.read(cx).has_page()))
         .or_else(|| views.last())
         .cloned()
 }
@@ -66,10 +62,40 @@ struct PageInfo {
     loading: bool,
     hidden: bool,
     target_id: Option<String>,
+    /// Why the last navigation failed. Only WebKit reports this; a failed Chromium page
+    /// shows up as a `chrome-error://` address instead.
+    load_error: Option<String>,
+}
+
+impl WebPreviewView {
+    fn has_page(&self) -> bool {
+        self.browser.is_some() || self.webkit.is_some()
+    }
 }
 
 fn page_info(view: &Entity<WebPreviewView>, cx: &App) -> PageInfo {
     let view = view.read(cx);
+    // Read straight from WebKit: the tab's own copy is refreshed on a timer and still
+    // describes the previous page right after a navigation is requested.
+    if let Some(page) = &view.webkit {
+        let state = page.state();
+        return PageInfo {
+            url: if state.url.is_empty() {
+                view.url.clone()
+            } else {
+                state.url
+            },
+            title: if state.title.is_empty() {
+                view.title.clone()
+            } else {
+                state.title
+            },
+            loading: state.loading,
+            hidden: view.hidden,
+            target_id: None,
+            load_error: state.load_error.map(|error| error.text),
+        };
+    }
     let state = view
         .browser
         .as_ref()
@@ -86,6 +112,7 @@ fn page_info(view: &Entity<WebPreviewView>, cx: &App) -> PageInfo {
         loading: state.as_ref().map_or(view.loading, |state| state.loading),
         hidden: view.hidden,
         target_id: view.target_id.clone(),
+        load_error: None,
     }
 }
 
@@ -240,6 +267,71 @@ impl CdpSession {
         }
         Ok(result["result"]["value"].clone())
     }
+}
+
+/// A page the tools drive: over DevTools for Chromium, or by calling into the WebKit
+/// view in-process.
+enum PageSession {
+    Cdp(CdpSession),
+    WebKit(WebKitSession),
+}
+
+struct WebKitSession {
+    view: Entity<WebPreviewView>,
+    cx: AsyncApp,
+}
+
+impl WebKitSession {
+    fn with_page<T>(&self, operation: impl FnOnce(&WebKitPage) -> T) -> Result<T> {
+        self.cx
+            .update(|cx| self.view.read(cx).webkit.as_ref().map(operation))
+            .context(t!("web_preview.agent.error.no_page_open"))
+    }
+
+    async fn wait<T>(&self, pending: crate::webkit_browser::PendingResult<T>) -> Result<T> {
+        pending
+            .await
+            .map_err(|_| anyhow!(t!("web_preview.agent.error.no_page_open")))?
+    }
+
+    async fn evaluate(&self, expression: &str) -> Result<Value> {
+        let pending = self.with_page(|page| page.evaluate_expression(expression))?;
+        let json = match self.wait(pending).await {
+            Ok(json) => json,
+            // Statements, or several expressions, don't compile as one expression.
+            Err(error) if error.to_string().contains("SyntaxError") => {
+                let pending = self.with_page(|page| page.evaluate_script(expression))?;
+                self.wait(pending).await?
+            }
+            Err(error) => return Err(error),
+        };
+        serde_json::from_str(&json).context(t!("web_preview.agent.error.javascript_exception"))
+    }
+}
+
+impl PageSession {
+    async fn connect(view: &Entity<WebPreviewView>, info: &PageInfo, cx: &AsyncApp) -> Result<Self> {
+        if cx.update(|cx| view.read(cx).uses_webkit) {
+            return Ok(Self::WebKit(WebKitSession {
+                view: view.clone(),
+                cx: cx.clone(),
+            }));
+        }
+        with_timeout(
+            CdpSession::connect(info.target_id.as_deref(), &info.url),
+            &t!("web_preview.agent.action.connect"),
+            cx,
+        )
+        .await
+        .map(Self::Cdp)
+    }
+
+    async fn evaluate(&mut self, expression: &str) -> Result<Value> {
+        match self {
+            Self::Cdp(session) => session.evaluate(expression).await,
+            Self::WebKit(session) => session.evaluate(expression).await,
+        }
+    }
 
     /// Maps screenshot pixels back to CSS pixels: screenshots are taken in CSS pixels, scaled
     /// down so the longest side fits the model's image budget.
@@ -251,6 +343,199 @@ impl CdpSession {
         let height = size[1].as_f64().unwrap_or(800.0).max(1.0);
         let scale = task_agents::screenshot_scale(width as u32, height as u32);
         Ok((width, height, scale))
+    }
+
+    /// A PNG of the visible page. Chromium draws it at the requested size; WebKit at the
+    /// display's density, so the caller resizes it.
+    async fn screenshot(&mut self, width: f64, height: f64, scale: f64) -> Result<Vec<u8>> {
+        match self {
+            Self::Cdp(session) => {
+                let result = session
+                    .call(
+                        "Page.captureScreenshot",
+                        json!({
+                            "format": "png",
+                            "clip": { "x": 0, "y": 0, "width": width, "height": height, "scale": scale },
+                        }),
+                    )
+                    .await?;
+                let data = result["data"]
+                    .as_str()
+                    .context(t!("web_preview.agent.error.no_image"))?;
+                Ok(base64::engine::general_purpose::STANDARD.decode(data)?)
+            }
+            Self::WebKit(session) => {
+                let pending = session.with_page(|page| page.snapshot())?;
+                session.wait(pending).await
+            }
+        }
+    }
+
+    async fn click(&mut self, x: f64, y: f64, click_count: u32) -> Result<()> {
+        match self {
+            Self::Cdp(session) => {
+                for event_type in ["mouseMoved", "mousePressed", "mouseReleased"] {
+                    session
+                        .call(
+                            "Input.dispatchMouseEvent",
+                            json!({
+                                "type": event_type,
+                                "x": x,
+                                "y": y,
+                                "button": if event_type == "mouseMoved" { "none" } else { "left" },
+                                "clickCount": if event_type == "mouseMoved" { 0 } else { click_count },
+                            }),
+                        )
+                        .await?;
+                }
+                Ok(())
+            }
+            Self::WebKit(session) => session.with_page(|page| page.click(x, y, click_count))?,
+        }
+    }
+
+    async fn insert_text(&mut self, text: &str) -> Result<()> {
+        match self {
+            Self::Cdp(session) => {
+                session
+                    .call("Input.insertText", json!({ "text": text }))
+                    .await?;
+                Ok(())
+            }
+            Self::WebKit(session) => {
+                let pending = session.with_page(|page| page.insert_text(text))?;
+                let outcome = session.wait(pending).await?;
+                anyhow::ensure!(
+                    outcome != "no-focus",
+                    t!("web_preview.agent.error.no_focused_element")
+                );
+                Ok(())
+            }
+        }
+    }
+
+    async fn press_key(&mut self, name: &str, code: &str, key_code: i64) -> Result<()> {
+        match self {
+            Self::Cdp(session) => {
+                for event_type in ["rawKeyDown", "keyUp"] {
+                    let mut params = json!({
+                        "type": event_type,
+                        "key": name,
+                        "code": code,
+                        "windowsVirtualKeyCode": key_code,
+                        "nativeVirtualKeyCode": key_code,
+                    });
+                    if name == "Enter" && event_type == "rawKeyDown" {
+                        params["type"] = json!("keyDown");
+                        params["text"] = json!("\r");
+                    }
+                    session.call("Input.dispatchKeyEvent", params).await?;
+                }
+                Ok(())
+            }
+            Self::WebKit(session) => session.with_page(|page| page.press_key(name))?,
+        }
+    }
+
+    async fn scroll(&mut self, x: f64, y: f64, delta_y: f64) -> Result<()> {
+        match self {
+            Self::Cdp(session) => {
+                session
+                    .call(
+                        "Input.dispatchMouseEvent",
+                        json!({ "type": "mouseWheel", "x": x, "y": y, "deltaX": 0, "deltaY": delta_y }),
+                    )
+                    .await?;
+                Ok(())
+            }
+            Self::WebKit(session) => {
+                let pending = session.with_page(|page| page.scroll(x, y, delta_y))?;
+                session.wait(pending).await?;
+                Ok(())
+            }
+        }
+    }
+
+    async fn navigate(&mut self, url: &str) -> Result<()> {
+        match self {
+            Self::Cdp(session) => {
+                let navigation = session
+                    .call("Page.navigate", json!({ "url": url }))
+                    .await?;
+                if let Some(error) = navigation["errorText"]
+                    .as_str()
+                    .filter(|error| !error.is_empty())
+                {
+                    anyhow::bail!(t!(
+                        "web_preview.agent.error.navigation_failed",
+                        url = url,
+                        error = error
+                    ));
+                }
+                Ok(())
+            }
+            Self::WebKit(session) => {
+                let url = url.to_string();
+                session.view.update(&mut session.cx, |view, cx| view.navigate(url, cx));
+                Ok(())
+            }
+        }
+    }
+
+    /// Console messages and browser log entries buffered since the page loaded.
+    async fn console_lines(&mut self, cx: &AsyncApp) -> Result<Vec<String>> {
+        match self {
+            Self::Cdp(session) => {
+                with_timeout(
+                    session.call("Console.enable", json!({})),
+                    &t!("web_preview.agent.action.console"),
+                    cx,
+                )
+                .await?;
+                with_timeout(
+                    session.call("Log.enable", json!({})),
+                    &t!("web_preview.agent.action.log"),
+                    cx,
+                )
+                .await?;
+                session.collect_events(CONSOLE_COLLECT_TIME, cx).await;
+                Ok(session
+                    .events
+                    .iter()
+                    .filter_map(|event| match event["method"].as_str()? {
+                        "Console.messageAdded" => {
+                            let message = &event["params"]["message"];
+                            Some(format!(
+                                "[{}] {}",
+                                message["level"].as_str().unwrap_or("log"),
+                                message["text"].as_str().unwrap_or_default()
+                            ))
+                        }
+                        "Log.entryAdded" => {
+                            let entry = &event["params"]["entry"];
+                            Some(format!(
+                                "[{} · {}] {}{}",
+                                entry["level"].as_str().unwrap_or("info"),
+                                entry["source"].as_str().unwrap_or("browser"),
+                                entry["text"].as_str().unwrap_or_default(),
+                                entry["url"]
+                                    .as_str()
+                                    .map(|url| format!(" ({url})"))
+                                    .unwrap_or_default()
+                            ))
+                        }
+                        _ => None,
+                    })
+                    .collect())
+            }
+            Self::WebKit(session) => {
+                let pending = session.with_page(|page| page.console_entries())?;
+                let json = with_timeout(session.wait(pending), &t!("web_preview.agent.action.console"), cx)
+                    .await?;
+                let entries: Vec<String> = serde_json::from_str(&json)?;
+                Ok(entries)
+            }
+        }
     }
 }
 
@@ -311,13 +596,13 @@ async fn session_for_active_page(
     page_use: PageUse,
     activity: SharedString,
     cx: &mut AsyncApp,
-) -> Result<(CdpSession, PageInfo)> {
+) -> Result<(PageSession, PageInfo)> {
     let view = cx
         .update(|cx| active_view(cx))
         .context(t!("web_preview.agent.error.no_browser_tab"))?;
     let blank = cx.update(|cx| {
         let view = view.read(cx);
-        view.browser.is_none() && crate::is_blank_url(&view.url)
+        !view.has_page() && crate::is_blank_url(&view.url)
     });
     if blank {
         anyhow::bail!(t!("web_preview.agent.error.no_page_open"));
@@ -328,12 +613,7 @@ async fn session_for_active_page(
     if page_use == PageUse::PaintOrInput && info.hidden {
         anyhow::bail!(t!("web_preview.agent.error.tab_hidden"));
     }
-    let session = with_timeout(
-        CdpSession::connect(info.target_id.as_deref(), &info.url),
-        &t!("web_preview.agent.action.connect"),
-        cx,
-    )
-    .await?;
+    let session = PageSession::connect(&view, &info, cx).await?;
     Ok((session, info))
 }
 
@@ -353,14 +633,14 @@ async fn wait_for_browser(view: &Entity<WebPreviewView>, cx: &mut AsyncApp) -> R
                     headline = error.headline,
                     detail = error.detail
                 ))
-            } else if !crate::cef_paths::is_installed() {
+            } else if !view.uses_webkit && !crate::cef_paths::is_installed() {
                 Some(t!("web_preview.agent.error.chromium_not_downloaded"))
             } else {
                 None
             };
             (
-                view.browser.is_some(),
-                view.target_id.is_some(),
+                view.has_page(),
+                view.uses_webkit || view.target_id.is_some(),
                 failure,
                 view.last_bounds.is_none(),
             )
@@ -381,6 +661,8 @@ async fn wait_for_browser(view: &Entity<WebPreviewView>, cx: &mut AsyncApp) -> R
         if started_at.elapsed() > BROWSER_START_TIMEOUT {
             anyhow::bail!(if needs_screen {
                 t!("web_preview.agent.error.tab_not_on_screen")
+            } else if cx.update(|cx| view.read(cx).uses_webkit) {
+                t!("web_preview.agent.error.webkit_start_timeout")
             } else {
                 t!("web_preview.agent.error.chromium_start_timeout")
             });
@@ -437,14 +719,14 @@ async fn wait_until_loaded(navigating_to: &str, cx: &mut AsyncApp) -> Result<Pag
     let mut session = None;
     loop {
         let info = cx.update(|cx| page_info(&view, cx));
+        if info.load_error.is_some() {
+            anyhow::bail!(t!(
+                "web_preview.agent.error.page_failed_to_load",
+                url = navigating_to
+            ));
+        }
         if session.is_none() {
-            session = with_timeout(
-                CdpSession::connect(info.target_id.as_deref(), &info.url),
-                &t!("web_preview.agent.action.connect"),
-                cx,
-            )
-            .await
-            .log_err();
+            session = PageSession::connect(&view, &info, cx).await.log_err();
         }
         // A navigation replaces the page's JavaScript context, so an evaluation that
         // fails here is simply retried on the next round.
@@ -469,7 +751,9 @@ async fn wait_until_loaded(navigating_to: &str, cx: &mut AsyncApp) -> Result<Pag
                 ));
             }
             let left_blank_page = url != "about:blank" || navigating_to == "about:blank";
-            if ready_state == "complete" && left_blank_page {
+            // WebKit reports a requested navigation as loading right away, while the
+            // previous document still answers `complete`.
+            if ready_state == "complete" && left_blank_page && !info.loading {
                 return Ok(PageInfo {
                     url,
                     title,
@@ -592,7 +876,7 @@ pub fn register_toolkit(cx: &mut App) {
                 let blank_view = cx.update(|cx| {
                     active_view(cx).filter(|view| {
                         let view = view.read(cx);
-                        view.browser.is_none() && crate::is_blank_url(&view.url)
+                        !view.has_page() && crate::is_blank_url(&view.url)
                     })
                 });
                 let has_view = cx.update(|cx| active_view(cx).is_some());
@@ -609,22 +893,12 @@ pub fn register_toolkit(cx: &mut App) {
                         cx,
                     )
                     .await?;
-                    let navigation = with_timeout(
-                        session.call("Page.navigate", json!({ "url": input.url })),
+                    with_timeout(
+                        session.navigate(&input.url),
                         &t!("web_preview.agent.action.navigate"),
                         cx,
                     )
                     .await?;
-                    if let Some(error) = navigation["errorText"]
-                        .as_str()
-                        .filter(|error| !error.is_empty())
-                    {
-                        anyhow::bail!(t!(
-                            "web_preview.agent.error.navigation_failed",
-                            url = input.url,
-                            error = error
-                        ));
-                    }
                 } else {
                     let target = cx.update(|cx| {
                         workspace::AppState::global(cx)
@@ -672,26 +946,31 @@ pub fn register_toolkit(cx: &mut App) {
                     cx,
                 )
                 .await?;
-                let result = with_timeout(
-                    session.call(
-                        "Page.captureScreenshot",
-                        json!({
-                            "format": "png",
-                            "clip": { "x": 0, "y": 0, "width": width, "height": height, "scale": scale },
-                        }),
-                    ),
+                let png = with_timeout(
+                    session.screenshot(width, height, scale),
                     &t!("web_preview.agent.action.capture_page"),
                     cx,
                 )
                 .await?;
-                let data = result["data"]
-                    .as_str()
-                    .context(t!("web_preview.agent.error.no_image"))?;
-                let png = base64::engine::general_purpose::STANDARD.decode(data)?;
                 let screenshot = cx
                     .background_spawn(async move {
                         let image =
                             image::load_from_memory_with_format(&png, image::ImageFormat::Png)?;
+                        // Click coordinates are read as CSS pixels times `scale`, so the image
+                        // has to be exactly that size whatever density it was drawn at.
+                        let target_width = (width * scale).round().max(1.0) as u32;
+                        let target_height = (height * scale).round().max(1.0) as u32;
+                        let image = if image.width() == target_width
+                            && image.height() == target_height
+                        {
+                            image
+                        } else {
+                            image.resize_exact(
+                                target_width,
+                                target_height,
+                                image::imageops::FilterType::Triangle,
+                            )
+                        };
                         scale_screenshot(image)
                     })
                     .await?;
@@ -731,23 +1010,12 @@ pub fn register_toolkit(cx: &mut App) {
                 let x = input.x / scale;
                 let y = input.y / scale;
                 let click_count = input.click_count.unwrap_or(1).clamp(1, 3);
-                for event_type in ["mouseMoved", "mousePressed", "mouseReleased"] {
-                    with_timeout(
-                        session.call(
-                            "Input.dispatchMouseEvent",
-                            json!({
-                                "type": event_type,
-                                "x": x,
-                                "y": y,
-                                "button": if event_type == "mouseMoved" { "none" } else { "left" },
-                                "clickCount": if event_type == "mouseMoved" { 0 } else { click_count },
-                            }),
-                        ),
-                        &t!("web_preview.agent.action.click"),
-                        cx,
-                    )
-                    .await?;
-                }
+                with_timeout(
+                    session.click(x, y, click_count),
+                    &t!("web_preview.agent.action.click"),
+                    cx,
+                )
+                .await?;
                 Ok(ToolkitOutput::text(
                     t!(
                         "web_preview.agent.output.clicked",
@@ -771,7 +1039,7 @@ pub fn register_toolkit(cx: &mut App) {
                 )
                 .await?;
                 with_timeout(
-                    session.call("Input.insertText", json!({ "text": input.text })),
+                    session.insert_text(&input.text),
                     &t!("web_preview.agent.action.type"),
                     cx,
                 )
@@ -799,25 +1067,12 @@ pub fn register_toolkit(cx: &mut App) {
                     cx,
                 )
                 .await?;
-                for event_type in ["rawKeyDown", "keyUp"] {
-                    let mut params = json!({
-                        "type": event_type,
-                        "key": name,
-                        "code": code,
-                        "windowsVirtualKeyCode": key_code,
-                        "nativeVirtualKeyCode": key_code,
-                    });
-                    if name == "Enter" && event_type == "rawKeyDown" {
-                        params["type"] = json!("keyDown");
-                        params["text"] = json!("\r");
-                    }
-                    with_timeout(
-                        session.call("Input.dispatchKeyEvent", params),
-                        &t!("web_preview.agent.action.key"),
-                        cx,
-                    )
-                    .await?;
-                }
+                with_timeout(
+                    session.press_key(name, code, key_code),
+                    &t!("web_preview.agent.action.key"),
+                    cx,
+                )
+                .await?;
                 Ok(ToolkitOutput::text(
                     t!("web_preview.agent.output.key_pressed", key = key).to_string(),
                 ))
@@ -844,10 +1099,7 @@ pub fn register_toolkit(cx: &mut App) {
                 let x = input.x.map_or(width / 2.0, |x| x / scale);
                 let y = input.y.map_or(height / 2.0, |y| y / scale);
                 with_timeout(
-                    session.call(
-                        "Input.dispatchMouseEvent",
-                        json!({ "type": "mouseWheel", "x": x, "y": y, "deltaX": 0, "deltaY": input.delta_y }),
-                    ),
+                    session.scroll(x, y, input.delta_y),
                     &t!("web_preview.agent.action.scroll"),
                     cx,
                 )
@@ -901,47 +1153,7 @@ pub fn register_toolkit(cx: &mut App) {
                     cx,
                 )
                 .await?;
-                with_timeout(
-                    session.call("Console.enable", json!({})),
-                    &t!("web_preview.agent.action.console"),
-                    cx,
-                )
-                .await?;
-                with_timeout(
-                    session.call("Log.enable", json!({})),
-                    &t!("web_preview.agent.action.log"),
-                    cx,
-                )
-                .await?;
-                session.collect_events(CONSOLE_COLLECT_TIME, cx).await;
-                let lines = session
-                    .events
-                    .iter()
-                    .filter_map(|event| match event["method"].as_str()? {
-                        "Console.messageAdded" => {
-                            let message = &event["params"]["message"];
-                            Some(format!(
-                                "[{}] {}",
-                                message["level"].as_str().unwrap_or("log"),
-                                message["text"].as_str().unwrap_or_default()
-                            ))
-                        }
-                        "Log.entryAdded" => {
-                            let entry = &event["params"]["entry"];
-                            Some(format!(
-                                "[{} · {}] {}{}",
-                                entry["level"].as_str().unwrap_or("info"),
-                                entry["source"].as_str().unwrap_or("browser"),
-                                entry["text"].as_str().unwrap_or_default(),
-                                entry["url"]
-                                    .as_str()
-                                    .map(|url| format!(" ({url})"))
-                                    .unwrap_or_default()
-                            ))
-                        }
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>();
+                let lines = session.console_lines(cx).await?;
                 let body = if lines.is_empty() {
                     t!("web_preview.agent.output.console_empty").to_string()
                 } else {
@@ -976,8 +1188,13 @@ mod tests {
     fn test_cdp_session_against_chromium() {
         let result: Result<()> = smol::block_on(async {
             let mut session = CdpSession::connect(None, "https://example.com/").await?;
-            let (width, height, scale) = session.viewport().await?;
+            let size = session
+                .evaluate("[window.innerWidth, window.innerHeight]")
+                .await?;
+            let width = size[0].as_f64().unwrap_or_default();
+            let height = size[1].as_f64().unwrap_or_default();
             anyhow::ensure!(width > 0.0 && height > 0.0);
+            let scale = task_agents::screenshot_scale(width as u32, height as u32);
             let shot = session
                 .call(
                     "Page.captureScreenshot",

@@ -27,9 +27,9 @@
   "base_keymap": "Asylum",
   // The language of Asylum's own interface: "system" (follows the OS), "en" or "pt-BR".
   "ui_language": "system",
-  // The engine behind the built-in browser on macOS: "chromium" (downloaded on first use,
-  // and what the agent's browser tools drive) or "webkit" (ships with macOS).
-  "browser_engine": "chromium",
+  // The engine behind the built-in browser on macOS: "webkit" (ships with macOS) or
+  // "chromium" (downloaded on first use).
+  "browser_engine": "webkit",
   // The name of a font to use for rendering text in the editor
   // ".AsylumMono" currently aliases to "IBM Plex Mono",
   // but this may change in the future.

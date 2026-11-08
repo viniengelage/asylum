@@ -140,7 +140,7 @@
   "Choose whether to use the selected light or dark icon theme or to follow your OS appearance configuration.": "Escolha se usa o tema de ícones claro ou escuro selecionado ou se segue a aparência do sistema.",
   "Choose whether to use the selected light or dark theme or to follow your OS appearance configuration.": "Escolha se usa o tema claro ou escuro selecionado ou se segue a aparência do sistema.",
   "Chromium": "Chromium",
-  "Chromium is downloaded the first time the browser opens and is what the agent's browser tools drive. WebKit ships with macOS, starts instantly and uses less memory. Open tabs keep their engine until reopened.": "O Chromium é baixado na primeira vez que o navegador abre e é o que as ferramentas de navegador do agente controlam. O WebKit vem com o macOS, abre na hora e usa menos memória. As abas abertas mantêm o motor até serem reabertas.",
+  "WebKit ships with macOS, starts instantly and uses less memory. Chromium is downloaded the first time the browser opens. The agent's browser tools work with both. Open tabs keep their engine until reopened.": "O WebKit vem com o macOS, abre na hora e usa menos memória. O Chromium é baixado na primeira vez que o navegador abre. As ferramentas de navegador do agente funcionam com os dois. As abas abertas mantêm o motor até serem reabertas.",
   "Clear": "Limpar",
   "ClickUp": "ClickUp",
   "Close Panel on Toggle": "Fechar painel ao alternar",

@@ -21239,6 +21239,7 @@ dependencies = [
  "async-tar",
  "async-tungstenite",
  "base64 0.22.1",
+ "block2 0.6.2",
  "cbc",
  "cef",
  "dirs",

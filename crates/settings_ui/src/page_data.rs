@@ -237,7 +237,7 @@ fn browser_page() -> SettingsPage {
             SettingsPageItem::SectionHeader("Engine"),
             SettingsPageItem::SettingItem(SettingItem {
                 title: "Browser Engine",
-                description: "Chromium is downloaded the first time the browser opens and is what the agent's browser tools drive. WebKit ships with macOS, starts instantly and uses less memory. Open tabs keep their engine until reopened.",
+                description: "WebKit ships with macOS, starts instantly and uses less memory. Chromium is downloaded the first time the browser opens. The agent's browser tools work with both. Open tabs keep their engine until reopened.",
                 field: Box::new(SettingField {
                     organization_override: None,
                     json_path: Some("browser_engine"),
