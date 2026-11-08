@@ -61,7 +61,7 @@ use std::{
     process,
     rc::Rc,
     sync::{Arc, LazyLock, OnceLock},
-    time::{Duration, Instant},
+    time::Instant,
 };
 use theme::{ActiveTheme, GlobalTheme, ThemeRegistry};
 use theme_settings::load_user_theme;
@@ -1109,7 +1109,7 @@ fn main() {
                                     break;
                                 }
                                 cx.background_executor()
-                                    .timer(Duration::from_millis(200))
+                                    .timer(std::time::Duration::from_millis(200))
                                     .await;
                             }
                             let Some(window) = window else {
@@ -1596,9 +1596,13 @@ pub(crate) async fn restore_or_create_workspace(
     app_state: Arc<AppState>,
     cx: &mut AsyncApp,
 ) -> Result<()> {
+    #[cfg(target_os = "macos")]
     let launch_folders = cx
         .background_spawn(async { zed::app_profiles::launch_folders() })
         .await;
+    // App profiles, and with them launch folders, only exist on macOS.
+    #[cfg(not(target_os = "macos"))]
+    let launch_folders: Vec<PathBuf> = Vec::new();
     if launch_folders.is_empty() {
         return restore_session_or_create_workspace(app_state, cx).await;
     }
