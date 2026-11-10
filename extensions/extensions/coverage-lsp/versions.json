@@ -11,6 +11,23 @@
    "provides": [
     "language-servers"
    ],
+   "published_at": "2026-11-10T12:21:11Z",
+   "repository": "https://github.com/fargies/coverage-lsp",
+   "schema_version": 1,
+   "version": "1.0.5",
+   "wasm_api_version": "0.7.0"
+  },
+  {
+   "authors": [
+    "Sylvain Fargier <fargier.sylvain@gmail.com>"
+   ],
+   "description": "Code Coverage Language Server",
+   "download_count": 0,
+   "id": "coverage-lsp",
+   "name": "Coverage LSP",
+   "provides": [
+    "language-servers"
+   ],
    "published_at": "2026-11-01T11:11:19Z",
    "repository": "https://github.com/fargies/coverage-lsp",
    "schema_version": 1,
