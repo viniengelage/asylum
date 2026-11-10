@@ -165,65 +165,59 @@ fn tinted_row(tone: StatusTone, cx: &App) -> Div {
         .border_color(color.opacity(0.33))
 }
 
-fn render_script_lines(
-    script: &Script,
-    highlighted: Option<usize>,
-    cx: &App,
-) -> impl IntoElement {
+fn render_script_lines(script: &Script, highlighted: Option<usize>, cx: &App) -> impl IntoElement {
     let warning = StatusTone::Warning.color(cx);
     let error = StatusTone::Error.color(cx);
-    v_flex()
-        .py_1()
-        .children(script.lines.iter().map(|line| {
-            let is_off = matches!(line.kind, LineKind::Off { .. });
-            h_flex()
-                .min_h(px(22.))
-                .px_3()
-                .gap_3()
-                .when(is_off, |this| this.bg(warning.opacity(0.08)))
-                .when(highlighted == Some(line.number), |this| {
-                    this.bg(error.opacity(0.12))
-                })
-                .child(
-                    div().flex_none().w(px(28.)).child(
-                        Label::new(line.number.to_string())
+    v_flex().py_1().children(script.lines.iter().map(|line| {
+        let is_off = matches!(line.kind, LineKind::Off { .. });
+        h_flex()
+            .min_h(px(22.))
+            .px_3()
+            .gap_3()
+            .when(is_off, |this| this.bg(warning.opacity(0.08)))
+            .when(highlighted == Some(line.number), |this| {
+                this.bg(error.opacity(0.12))
+            })
+            .child(
+                div().flex_none().w(px(28.)).child(
+                    Label::new(line.number.to_string())
+                        .size(LabelSize::XSmall)
+                        .buffer_font(cx)
+                        .color(Color::Muted),
+                ),
+            )
+            .child(
+                div().flex_1().min_w_0().child(
+                    Label::new(line.text.clone())
+                        .size(LabelSize::Small)
+                        .buffer_font(cx)
+                        .single_line(),
+                ),
+            )
+            .map(|this| match &line.kind {
+                LineKind::Off { call: Some(call) } => this.child(ui::status_chip(
+                    Some(IconName::Warning),
+                    t!("api_client.request.script_line_off", call = call),
+                    Color::Warning,
+                    cx,
+                )),
+                LineKind::Capture { variable, path } => this.child(
+                    h_flex()
+                        .flex_none()
+                        .gap_1p5()
+                        .child(
+                            Label::new(t!(
+                                "api_client.request.script_becomes_capture",
+                                path = path
+                            ))
                             .size(LabelSize::XSmall)
-                            .buffer_font(cx)
                             .color(Color::Muted),
-                    ),
-                )
-                .child(
-                    div().flex_1().min_w_0().child(
-                        Label::new(line.text.clone())
-                            .size(LabelSize::Small)
-                            .buffer_font(cx)
-                            .single_line(),
-                    ),
-                )
-                .map(|this| match &line.kind {
-                    LineKind::Off { call: Some(call) } => this.child(ui::status_chip(
-                        Some(IconName::Warning),
-                        t!("api_client.request.script_line_off", call = call),
-                        Color::Warning,
-                        cx,
-                    )),
-                    LineKind::Capture { variable, path } => this.child(
-                        h_flex()
-                            .flex_none()
-                            .gap_1p5()
-                            .child(
-                                Label::new(t!(
-                                    "api_client.request.script_becomes_capture",
-                                    path = path
-                                ))
-                                .size(LabelSize::XSmall)
-                                .color(Color::Muted),
-                            )
-                            .child(variable_chip(format!("{{{{{variable}}}}}"), cx)),
-                    ),
-                    _ => this,
-                })
-        }))
+                        )
+                        .child(variable_chip(format!("{{{{{variable}}}}}"), cx)),
+                ),
+                _ => this,
+            })
+    }))
 }
 
 fn tests_label(tests: &[TestResult]) -> String {
@@ -2670,9 +2664,7 @@ impl ApiRequestView {
                 } else {
                     t!("api_client.request.scripts_before_send")
                 };
-                let highlighted = self
-                    .highlighted_script_line
-                    .filter(|_| listen == "test");
+                let highlighted = self.highlighted_script_line.filter(|_| listen == "test");
                 ui::card(cx)
                     .overflow_hidden()
                     .child(
@@ -2710,9 +2702,12 @@ impl ApiRequestView {
 
     fn render_tests(&self, exchange: &Exchange, cx: &mut Context<Self>) -> AnyElement {
         if exchange.tests.is_empty() {
-            return EmptyState::new(IconName::ListTodo, t!("api_client.request.tests_empty_title"))
-                .description(t!("api_client.request.tests_empty_description"))
-                .into_any_element();
+            return EmptyState::new(
+                IconName::ListTodo,
+                t!("api_client.request.tests_empty_title"),
+            )
+            .description(t!("api_client.request.tests_empty_description"))
+            .into_any_element();
         }
         let captured: Vec<(String, String)> = exchange
             .captures
@@ -2755,7 +2750,9 @@ impl ApiRequestView {
                                         .flex_none()
                                         .gap_1p5()
                                         .child(
-                                            Label::new(path).size(LabelSize::XSmall).buffer_font(cx),
+                                            Label::new(path)
+                                                .size(LabelSize::XSmall)
+                                                .buffer_font(cx),
                                         )
                                         .child(
                                             Label::new("→")
@@ -2814,13 +2811,10 @@ impl ApiRequestView {
                         .child(ui::status_pill(pill, tone, cx))
                         .when(test.outcome != Outcome::Off, |this| {
                             this.child(
-                                Label::new(format!(
-                                    "{:.2} ms",
-                                    test.elapsed.as_secs_f64() * 1000.
-                                ))
-                                .size(LabelSize::XSmall)
-                                .buffer_font(cx)
-                                .color(Color::Muted),
+                                Label::new(format!("{:.2} ms", test.elapsed.as_secs_f64() * 1000.))
+                                    .size(LabelSize::XSmall)
+                                    .buffer_font(cx)
+                                    .color(Color::Muted),
                             )
                         }),
                 )

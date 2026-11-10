@@ -3,8 +3,8 @@
 
 use crate::{
     config::{
-        self, CaptureRule, CollectionFile, Environment, ImportedScript, LoginConfig, MergeOutcome,
-        PostmanImport, RequestDraft, SavedRequest,
+        self, BodyKind, CaptureRule, CollectionFile, Environment, HeaderEntry, ImportedScript,
+        LoginBodyFormat, LoginConfig, MergeOutcome, PostmanImport, RequestDraft, SavedRequest,
     },
     cookies::{Cookie, CookieJar},
     jsonpath,
@@ -889,29 +889,48 @@ impl Collection {
     }
 
     /// Logs in with the saved credentials, replacing the current session.
-    pub fn login(&mut self, cx: &mut Context<Self>) -> Task<Result<TimelineStep>> {
+    pub fn login(&mut self, cx: &mut Context<Self>) -> Task<Result<TimelineStep, FailedRenewal>> {
         self.login_status = LoginStatus::LoggingIn;
         cx.notify();
+        let operation_key = self
+            .file
+            .auth
+            .login
+            .as_ref()
+            .map(|login| login.operation.clone());
         let prepared = self.login_request();
         cx.spawn(async move |this, cx| {
-            let result = async {
-                let (login, prepared) = prepared?;
-                let (step, response, _) = run_step(&this, &prepared, "login", cx).await;
-                let response = response?;
-                let session = session_from_response(&login, &response)?;
-                anyhow::Ok((step, session))
-            }
-            .await;
+            let result = match prepared {
+                Ok((login, prepared)) => {
+                    let (mut step, response, _) = run_step(&this, &prepared, "login", cx).await;
+                    match response.and_then(|response| session_from_response(&login, &response)) {
+                        Ok(session) => Ok((step, session)),
+                        Err(error) => {
+                            step.note = failed_note(&error);
+                            Err(FailedRenewal {
+                                steps: vec![step],
+                                error,
+                            })
+                        }
+                    }
+                }
+                Err(error) => Err(FailedRenewal {
+                    steps: operation_key
+                        .map(|key| vec![unsent_step(&key, &error)])
+                        .unwrap_or_default(),
+                    error,
+                }),
+            };
             this.update(cx, |this, cx| match result {
                 Ok((step, session)) => {
                     this.login_status = LoginStatus::Idle;
                     this.set_session(session, cx);
                     Ok(step)
                 }
-                Err(error) => {
-                    this.login_status = LoginStatus::Failed(format!("{error:#}").into());
+                Err(failure) => {
+                    this.login_status = LoginStatus::Failed(format!("{:#}", failure.error).into());
                     cx.notify();
-                    Err(error)
+                    Err(failure)
                 }
             })?
         })
@@ -924,22 +943,7 @@ impl Collection {
             .login
             .clone()
             .with_context(|| t!("api_client.collection.error_no_login").to_string())?;
-        let spec = self
-            .spec
-            .as_ref()
-            .with_context(|| t!("api_client.collection.error_spec_not_loaded").to_string())?;
-        let operation = spec.operation(&login.operation).with_context(|| {
-            t!(
-                "api_client.send.error_operation_gone",
-                operation = &login.operation
-            )
-            .to_string()
-        })?;
-        let draft = RequestDraft {
-            url: format!("{{{{baseUrl}}}}{}", operation.path),
-            body: Some(login.body.clone()),
-            ..RequestDraft::default()
-        };
+        let draft = self.auth_draft(&login, &login.operation, Some(login.body.clone()))?;
         let prepared = self.prepare(&login.operation, &draft)?;
         if let Some(missing) = prepared.missing.first() {
             return Err(anyhow!(
@@ -964,75 +968,127 @@ impl Collection {
             .refresh_operation
             .clone()
             .with_context(|| t!("api_client.collection.error_no_refresh").to_string())?;
-        let spec = self
-            .spec
-            .as_ref()
-            .with_context(|| t!("api_client.collection.error_spec_not_loaded").to_string())?;
-        let operation = spec.operation(&operation_key).with_context(|| {
-            t!(
-                "api_client.send.error_operation_gone",
-                operation = &operation_key
-            )
-            .to_string()
-        })?;
-        let draft = RequestDraft {
-            url: format!("{{{{baseUrl}}}}{}", operation.path),
-            body: login.refresh_body.clone(),
-            ..RequestDraft::default()
-        };
+        let draft = self.auth_draft(&login, &operation_key, login.refresh_body.clone())?;
         let prepared = self.prepare(&operation_key, &draft)?;
         Ok((login, prepared))
     }
 
+    /// The draft of the login or refresh request: the operation's own server (else `baseUrl`)
+    /// and the body in the format the login asks for.
+    fn auth_draft(
+        &self,
+        login: &LoginConfig,
+        operation_key: &str,
+        body: Option<String>,
+    ) -> Result<RequestDraft> {
+        let spec = self
+            .spec
+            .as_ref()
+            .with_context(|| t!("api_client.collection.error_spec_not_loaded").to_string())?;
+        let operation_gone = || {
+            t!(
+                "api_client.send.error_operation_gone",
+                operation = operation_key
+            )
+            .to_string()
+        };
+        let (url, documented_kind) = match spec.operation(operation_key) {
+            Some(operation) => (
+                operation.url_template(),
+                operation
+                    .request_body
+                    .as_ref()
+                    .map(|body| BodyKind::for_content_type(&body.content_type)),
+            ),
+            None => (
+                ad_hoc_draft(operation_key)
+                    .with_context(operation_gone)?
+                    .url,
+                None,
+            ),
+        };
+        let as_form = match login.format {
+            Some(LoginBodyFormat::Form) => true,
+            Some(LoginBodyFormat::Json) => false,
+            None => documented_kind == Some(BodyKind::UrlEncoded),
+        };
+        let content_type = if as_form {
+            Some("application/x-www-form-urlencoded")
+        } else if documented_kind != Some(BodyKind::Json) {
+            Some("application/json")
+        } else {
+            None
+        };
+        Ok(RequestDraft {
+            url,
+            headers: content_type
+                .filter(|_| body.is_some())
+                .map(|content_type| HeaderEntry {
+                    name: "Content-Type".to_string(),
+                    value: content_type.to_string(),
+                    enabled: true,
+                })
+                .into_iter()
+                .collect(),
+            body,
+            ..RequestDraft::default()
+        })
+    }
+
     /// Refreshes the token, falling back to logging in again.
-    pub fn renew(&mut self, cx: &mut Context<Self>) -> Task<Result<Vec<TimelineStep>>> {
+    pub fn renew(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<Vec<TimelineStep>, FailedRenewal>> {
         if !self.can_refresh() {
             let login = self.login(cx);
-            return cx.background_spawn(async move { Ok(vec![login.await?]) });
+            return cx.background_spawn(async move { login.await.map(|step| vec![step]) });
         }
         let prepared = self.refresh_request();
         cx.spawn(async move |this, cx| {
-            let refreshed = async {
-                let (login, prepared) = prepared?;
-                let (step, response, _) = run_step(
-                    &this,
-                    &prepared,
-                    &t!("api_client.collection.step_refreshed"),
-                    cx,
-                )
-                .await;
-                let session =
-                    response.and_then(|response| session_from_response(&login, &response));
-                anyhow::Ok((step, session))
-            }
-            .await;
             let mut steps = Vec::new();
-            match refreshed {
-                Ok((step, Ok(session))) => {
-                    steps.push(step);
-                    this.update(cx, |this, cx| this.set_session(session, cx))?;
-                    return Ok(steps);
-                }
-                Ok((mut step, Err(error))) => {
-                    step.note = t!(
-                        "api_client.collection.step_failed",
-                        error = format!("{error:#}")
+            match prepared {
+                Ok((login, prepared)) => {
+                    let (mut step, response, _) = run_step(
+                        &this,
+                        &prepared,
+                        &t!("api_client.collection.step_refreshed"),
+                        cx,
                     )
-                    .to_string();
-                    steps.push(step);
+                    .await;
+                    match response.and_then(|response| session_from_response(&login, &response)) {
+                        Ok(session) => {
+                            steps.push(step);
+                            this.update(cx, |this, cx| this.set_session(session, cx))?;
+                            return Ok(steps);
+                        }
+                        Err(error) => {
+                            step.note = failed_note(&error);
+                            steps.push(step);
+                        }
+                    }
                 }
                 Err(error) => log::warn!("API: renovação indisponível: {error:#}"),
             }
             let login = this.update(cx, |this, cx| this.can_log_in().then(|| this.login(cx)))?;
             match login {
-                Some(login) => {
-                    steps.push(login.await?);
-                    Ok(steps)
-                }
-                None => Err(anyhow!(
-                    "{}",
-                    t!("api_client.collection.error_token_expired")
-                )),
+                Some(login) => match login.await {
+                    Ok(step) => {
+                        steps.push(step);
+                        Ok(steps)
+                    }
+                    Err(mut failure) => {
+                        steps.append(&mut failure.steps);
+                        Err(FailedRenewal {
+                            steps,
+                            error: failure.error,
+                        })
+                    }
+                },
+                None => Err(FailedRenewal {
+                    steps,
+                    error: anyhow!("{}", t!("api_client.collection.error_token_expired")),
+                }),
             }
         })
     }
@@ -1082,8 +1138,8 @@ impl Collection {
     pub fn start_login(&mut self, cx: &mut Context<Self>) {
         let login = self.login(cx);
         self.login_task = Some(cx.background_spawn(async move {
-            if let Err(error) = login.await {
-                log::info!("API: login falhou: {error:#}");
+            if let Err(failure) = login.await {
+                log::info!("API: login falhou: {:#}", failure.error);
             }
         }));
     }
@@ -1277,13 +1333,16 @@ type SendResult = std::result::Result<
 >;
 
 /// The key of an operation the spec doesn't document, called as `METHOD /path` (against the
-/// environment's `baseUrl`) or `METHOD https://…`. `None` when `target` is neither.
+/// environment's `baseUrl`), `METHOD https://…` or `METHOD {{someUrl}}/path`. `None` when
+/// `target` is none of these.
 pub fn ad_hoc_operation_key(method: &str, target: &str) -> Option<String> {
     let method = method.trim().to_ascii_uppercase();
     let known = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
     let target = target.trim();
-    let is_target =
-        target.starts_with('/') || target.starts_with("https://") || target.starts_with("http://");
+    let is_target = target.starts_with('/')
+        || target.starts_with("https://")
+        || target.starts_with("http://")
+        || target.starts_with("{{");
     (known.contains(&method.as_str()) && is_target).then(|| format!("{method} {target}"))
 }
 
@@ -1319,8 +1378,16 @@ fn ad_hoc_operation(
         .iter()
         .find(|header| header.enabled && header.name.eq_ignore_ascii_case("content-type"))
         .map(|header| header.value.clone());
-    let request_body = if draft.form.iter().any(|field| field.enabled) {
-        Some(content_type.unwrap_or_else(|| "multipart/form-data".to_string()))
+    let enabled_fields = || draft.form.iter().filter(|field| field.enabled);
+    let request_body = if enabled_fields().next().is_some() {
+        let has_file = enabled_fields().any(|field| field.is_file);
+        Some(content_type.unwrap_or_else(|| {
+            if has_file {
+                "multipart/form-data".to_string()
+            } else {
+                "application/x-www-form-urlencoded".to_string()
+            }
+        }))
     } else {
         content_type
     }
@@ -1344,6 +1411,7 @@ fn ad_hoc_operation(
         request_body,
         responses: Vec::new(),
         security: None,
+        servers: Vec::new(),
     })
 }
 
@@ -1363,7 +1431,10 @@ async fn send_with_retries(
     if let Some(renewal) = renewal {
         match renewal.await {
             Ok(steps) => timeline.extend(steps),
-            Err(error) => log::info!("API: renovação antecipada falhou: {error:#}"),
+            Err(failure) => {
+                log::info!("API: renovação antecipada falhou: {:#}", failure.error);
+                timeline.extend(failure.steps);
+            }
         }
     }
 
@@ -1399,8 +1470,9 @@ async fn send_with_retries(
         .map_err(|error| Box::new((Some(prepared.clone()), error)))?;
     match renewal.await {
         Ok(steps) => timeline.extend(steps),
-        Err(error) => {
-            log::info!("API: renovação depois do 401 falhou: {error:#}");
+        Err(failure) => {
+            log::info!("API: renovação depois do 401 falhou: {:#}", failure.error);
+            timeline.extend(failure.steps);
             return Ok((prepared, response));
         }
     }
@@ -1457,6 +1529,43 @@ async fn run_step(
             .unwrap_or_else(|_| started.elapsed()),
     };
     (step, result, cookies)
+}
+
+/// A login or token refresh that didn't work, with the requests it made on the way so the
+/// exchange shows them.
+#[derive(Debug)]
+pub struct FailedRenewal {
+    pub steps: Vec<TimelineStep>,
+    pub error: anyhow::Error,
+}
+
+impl From<anyhow::Error> for FailedRenewal {
+    fn from(error: anyhow::Error) -> Self {
+        Self {
+            steps: Vec::new(),
+            error,
+        }
+    }
+}
+
+fn failed_note(error: &anyhow::Error) -> String {
+    t!(
+        "api_client.collection.step_failed",
+        error = format!("{error:#}")
+    )
+    .to_string()
+}
+
+/// A request that couldn't even be built, so the timeline still says it was tried.
+fn unsent_step(operation_key: &str, error: &anyhow::Error) -> TimelineStep {
+    let (method, path) = operation_key.split_once(' ').unwrap_or(("", operation_key));
+    TimelineStep {
+        method: method.to_string(),
+        path: path.to_string(),
+        status: None,
+        note: failed_note(error),
+        elapsed: Duration::ZERO,
+    }
 }
 
 fn session_from_response(login: &LoginConfig, response: &ReceivedResponse) -> Result<Session> {
@@ -1748,7 +1857,7 @@ pub async fn discover(fs: &Arc<dyn Fs>, root: &Path) -> Vec<PathBuf> {
 mod tests {
     use super::*;
     use fs::FakeFs;
-    use gpui::TestAppContext;
+    use gpui::{Entity, TestAppContext};
     use http_client::{AsyncBody, FakeHttpClient, Response};
     use parking_lot::Mutex;
     use std::{future::Future, pin::Pin};
@@ -1999,6 +2108,10 @@ paths:
         assert_eq!(ad_hoc, "POST /reports/7");
         assert_eq!(ad_hoc_operation_key("FETCH", "/x"), None);
         assert_eq!(ad_hoc_operation_key("GET", "reports"), None);
+        assert_eq!(
+            ad_hoc_operation_key("post", "{{authUrl}}/token").as_deref(),
+            Some("POST {{authUrl}}/token")
+        );
         let mut draft = collection.read_with(cx, |collection, _| collection.draft(&ad_hoc));
         assert_eq!(draft.url, "{{baseUrl}}/reports/7");
         draft.body = Some(r#"{"format":"csv"}"#.to_string());
@@ -2064,6 +2177,193 @@ paths:
         let state: StoredState = serde_json::from_str(&state).unwrap();
         assert_eq!(state.captured.get("userId").map(String::as_str), Some("7"));
         assert_eq!(state.cookies.cookies[0].name, "sid");
+    }
+
+    const KEYCLOAK_SPEC: &str = r##"
+openapi: 3.0.3
+info: { title: Backoffice, version: "1" }
+security: [{ bearerAuth: [] }]
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer }
+paths:
+  /auth/realms/backoffice/protocol/openid-connect/token:
+    servers: [{ url: '{{authUrl}}' }]
+    post:
+      security: []
+      requestBody:
+        content: { application/x-www-form-urlencoded: { schema: { properties: { grant_type: { type: string }, username: { type: string }, password: { type: string } } } } }
+      responses: { '200': { description: ok } }
+  /me:
+    get:
+      responses: { '200': { description: ok } }
+"##;
+
+    #[gpui::test]
+    async fn logs_in_on_the_operation_server_with_a_form_body(cx: &mut TestAppContext) {
+        const TOKEN_PATH: &str = "/auth/realms/backoffice/protocol/openid-connect/token";
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree(
+            "/project",
+            serde_json::json!({ "openapi.yml": KEYCLOAK_SPEC }),
+        )
+        .await;
+        let keychain = Arc::new(MemoryKeychain::default());
+        let session = serde_json::to_vec(&Session {
+            token: Some("old".to_string()),
+            refresh_token: None,
+            expires_at: None,
+        })
+        .unwrap();
+        keychain
+            .0
+            .lock()
+            .insert(session_url("backoffice"), ("asylum".to_string(), session));
+
+        let requests: Arc<Mutex<Vec<String>>> = Arc::default();
+        let http_client = FakeHttpClient::create({
+            let requests = requests.clone();
+            move |mut request| {
+                let requests = requests.clone();
+                async move {
+                    let header = |name: &str| {
+                        request
+                            .headers()
+                            .get(name)
+                            .map(|value| value.to_str().unwrap_or("").to_string())
+                            .unwrap_or_default()
+                    };
+                    let authorization = header("authorization");
+                    let content_type = header("content-type");
+                    let mut body = String::new();
+                    futures::AsyncReadExt::read_to_string(request.body_mut(), &mut body)
+                        .await
+                        .unwrap();
+                    let method = request.method().to_string();
+                    let host = request.uri().host().unwrap_or("").to_string();
+                    let path = request.uri().path().to_string();
+                    requests.lock().push(
+                        format!("{method} {host}{path} {authorization}{content_type} {body}")
+                            .trim_end()
+                            .to_string(),
+                    );
+                    let (status, response_body) =
+                        match (host.as_str(), path.as_str(), authorization.as_str()) {
+                            ("api.test", "/me", "Bearer new") => (200, r#"{"id":7}"#),
+                            ("api.test", "/me", _) => (401, r#"{"message":"jwt expired"}"#),
+                            ("keycloak.test", TOKEN_PATH, _)
+                                if content_type == "application/x-www-form-urlencoded" =>
+                            {
+                                (200, r#"{"access_token":"new","expires_in":300}"#)
+                            }
+                            _ => (404, "{}"),
+                        };
+                    Ok(Response::builder()
+                        .status(status)
+                        .header("content-type", "application/json")
+                        .body(AsyncBody::from(response_body.to_string()))
+                        .unwrap())
+                }
+            }
+        });
+        cx.update(|cx| {
+            cx.set_global(db::AppDatabase::test_new());
+            cx.set_global(zed_credentials_provider::ZedCredentialsProvider(
+                keychain.clone(),
+            ));
+            cx.set_http_client(http_client);
+        });
+
+        let file_path = cx
+            .update(|cx| {
+                let fs: Arc<dyn Fs> = fs.clone();
+                cx.spawn(async move |cx| {
+                    create(
+                        fs,
+                        PathBuf::from("/project"),
+                        PathBuf::from("/project/openapi.yml"),
+                        cx,
+                    )
+                    .await
+                })
+            })
+            .await
+            .unwrap();
+        let collection =
+            cx.new(|cx| Collection::new(PathBuf::from("/project"), file_path, fs.clone(), cx));
+        cx.run_until_parked();
+        let login_key = format!("POST {TOKEN_PATH}");
+        collection.update(cx, |collection, cx| {
+            assert!(collection.spec.is_some(), "{:?}", collection.spec_error);
+            assert_eq!(
+                collection.draft(&login_key).url,
+                format!("{{{{authUrl}}}}{TOKEN_PATH}"),
+                "the path's own server replaces baseUrl"
+            );
+            collection.update_file(
+                |file| {
+                    file.environments[0].set("baseUrl", "https://api.test".to_string());
+                    file.environments[0].set("authUrl", "https://wrong.test".to_string());
+                    file.auth.login = Some(LoginConfig {
+                        operation: login_key.clone(),
+                        scheme: "bearerAuth".to_string(),
+                        body: r#"{"grant_type":"password","username":"{{secret.username}}","password":"{{secret.password}}"}"#
+                            .to_string(),
+                        token_path: "$.access_token".to_string(),
+                        expires_in_path: Some("$.expires_in".to_string()),
+                        ..LoginConfig::default()
+                    });
+                },
+                cx,
+            );
+            collection.set_secret("username", "vini".to_string(), cx);
+            collection.set_secret("password", "a&b".to_string(), cx);
+        });
+
+        let send_me = |collection: &Entity<Collection>, cx: &mut TestAppContext| {
+            collection.update(cx, |collection, cx| {
+                let draft = collection.draft("GET /me");
+                collection.send("GET /me".to_string(), draft, cx)
+            })
+        };
+
+        let failed = send_me(&collection, cx).await;
+        assert_eq!(
+            failed.response.as_ref().map(|response| response.status),
+            Some(401)
+        );
+        let login_step = failed
+            .timeline
+            .iter()
+            .find(|step| step.path == TOKEN_PATH)
+            .expect("the failed login shows in the exchange");
+        assert_eq!(login_step.status, Some(404));
+        assert!(login_step.note.contains("404"), "{}", login_step.note);
+
+        collection.update(cx, |collection, cx| {
+            collection.update_file(
+                |file| file.environments[0].set("authUrl", "https://keycloak.test".to_string()),
+                cx,
+            );
+        });
+        requests.lock().clear();
+        let exchange = send_me(&collection, cx).await;
+        assert_eq!(exchange.error, None);
+        assert_eq!(
+            exchange.response.as_ref().map(|response| response.status),
+            Some(200)
+        );
+        assert_eq!(
+            *requests.lock(),
+            vec![
+                "GET api.test/me Bearer old".to_string(),
+                format!(
+                    "POST keycloak.test{TOKEN_PATH} application/x-www-form-urlencoded \
+                     grant_type=password&username=vini&password=a%26b"
+                ),
+                "GET api.test/me Bearer new".to_string(),
+            ]
+        );
     }
 
     #[gpui::test]

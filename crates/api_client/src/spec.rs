@@ -144,9 +144,24 @@ pub struct Operation {
     pub responses: Vec<ResponseSpec>,
     /// `None` inherits the document's default.
     pub security: Option<SecurityRequirements>,
+    /// The operation's own `servers` (or its path's), which take the place of `baseUrl`.
+    pub servers: Vec<Server>,
 }
 
 impl Operation {
+    /// Where the request goes: the operation's first own server, or the environment's
+    /// `baseUrl`. A server can be a `{{variable}}`, so each environment picks its own.
+    pub fn base_url(&self) -> String {
+        self.servers
+            .first()
+            .map(|server| server.url.clone())
+            .unwrap_or_else(|| "{{baseUrl}}".to_string())
+    }
+
+    pub fn url_template(&self) -> String {
+        format!("{}{}", self.base_url(), self.path)
+    }
+
     pub fn title(&self) -> String {
         self.summary
             .clone()
@@ -686,6 +701,10 @@ pub fn from_document(document: Value, mut warnings: Vec<String>) -> Result<Spec>
                 .and_then(Value::as_array)
                 .cloned()
                 .unwrap_or_default();
+            let path_servers = match format {
+                SpecFormat::Swagger2 => Vec::new(),
+                _ => openapi_servers(item),
+            };
             for method in [
                 "get", "put", "post", "delete", "options", "head", "patch", "trace",
             ] {
@@ -699,6 +718,7 @@ pub fn from_document(document: Value, mut warnings: Vec<String>) -> Result<Spec>
                     method,
                     operation,
                     &shared_parameters,
+                    &path_servers,
                     &mut warnings,
                 ));
             }
@@ -736,6 +756,7 @@ fn string_field(value: &Value, key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// The `servers` of the document, a path item or an operation.
 fn openapi_servers(document: &Value) -> Vec<Server> {
     let Some(servers) = document.get("servers").and_then(Value::as_array) else {
         return Vec::new();
@@ -861,6 +882,7 @@ fn read_operation(
     method: &str,
     operation: &Value,
     shared_parameters: &[Value],
+    path_servers: &[Server],
     warnings: &mut Vec<String>,
 ) -> Operation {
     let method = method.to_ascii_uppercase();
@@ -1031,6 +1053,12 @@ fn read_operation(
         request_body,
         responses,
         security: operation.get("security").map(read_security),
+        servers: match format {
+            SpecFormat::Swagger2 => Vec::new(),
+            _ => Some(openapi_servers(operation))
+                .filter(|servers| !servers.is_empty())
+                .unwrap_or_else(|| path_servers.to_vec()),
+        },
     }
 }
 

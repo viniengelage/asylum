@@ -1198,7 +1198,11 @@ impl ApiPanel {
                     }
                     if has_login && logged_in {
                         collection_entity.update(cx, |collection, cx| {
-                            collection.renew(cx).detach_and_log_err(cx)
+                            let renewal = collection.renew(cx);
+                            cx.background_spawn(async move {
+                                renewal.await.map_err(|failure| failure.error)
+                            })
+                            .detach_and_log_err(cx)
                         });
                     } else if has_login && has_credentials {
                         collection_entity.update(cx, |collection, cx| collection.start_login(cx));
@@ -2005,6 +2009,13 @@ impl ApiPanel {
                     .map(|scheme| scheme.name.clone())
             })
             .unwrap_or_default();
+        let format = collection
+            .read(cx)
+            .file
+            .auth
+            .login
+            .as_ref()
+            .and_then(|login| login.format);
         let login = form.login_operation.clone().map(|operation| LoginConfig {
             operation,
             scheme,
@@ -2014,6 +2025,7 @@ impl ApiPanel {
             expires_in_path: optional(&form.expires_in_path),
             refresh_operation: form.refresh_operation.clone(),
             refresh_body: optional(&form.refresh_body),
+            format,
         });
         let headers: Vec<HeaderEntry> = form
             .headers

@@ -136,6 +136,19 @@ pub struct LoginConfig {
     pub refresh_operation: Option<String>,
     #[serde(default)]
     pub refresh_body: Option<String>,
+    /// How `body` and `refresh_body` go out. Without it, the operation's request body in the
+    /// spec decides, and JSON when there is none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<LoginBodyFormat>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LoginBodyFormat {
+    Json,
+    /// `application/x-www-form-urlencoded`, built from the fields of the JSON object in `body`;
+    /// what OAuth token endpoints like Keycloak's accept.
+    Form,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -449,6 +462,7 @@ pub fn guess_login(spec: &Spec) -> Option<LoginConfig> {
         expires_in_path,
         refresh_operation: refresh_operation.map(|refresh| refresh.key.clone()),
         refresh_body,
+        format: None,
     })
 }
 
@@ -497,7 +511,7 @@ pub fn initial_draft(spec: &Spec, operation_key: &str) -> RequestDraft {
             .unwrap_or_default()
     };
     RequestDraft {
-        url: format!("{{{{baseUrl}}}}{}", operation.path),
+        url: operation.url_template(),
         path_params: operation
             .parameters
             .iter()
@@ -1251,7 +1265,8 @@ fn apply_request_auth(
 }
 
 /// What a Postman script writes to mean the response body.
-pub(crate) const RESPONSE_EXPRESSIONS: [&str; 2] = ["pm.response.json()", "JSON.parse(responseBody)"];
+pub(crate) const RESPONSE_EXPRESSIONS: [&str; 2] =
+    ["pm.response.json()", "JSON.parse(responseBody)"];
 
 const SET_CALLS: [&str; 4] = [
     "pm.environment.set(",

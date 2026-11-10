@@ -12,8 +12,13 @@ pub enum LineKind {
     Plain,
     /// The line can't run here. `call` names what stops it on the line that starts it, and is
     /// `None` on the lines inside a block that is off as a whole.
-    Off { call: Option<String> },
-    Capture { variable: String, path: String },
+    Off {
+        call: Option<String>,
+    },
+    Capture {
+        variable: String,
+        path: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -249,11 +254,13 @@ fn check(assertion: &Assertion, status: u16, body: Option<&Value>) -> Option<Fai
                 pattern: pattern.source.clone(),
             })
         }
-        Assertion::Exist { subject, path } => select(path)
-            .is_none_or(Value::is_null)
-            .then(|| Failure::Exist {
-                subject: subject.clone(),
-            }),
+        Assertion::Exist { subject, path } => {
+            select(path)
+                .is_none_or(Value::is_null)
+                .then(|| Failure::Exist {
+                    subject: subject.clone(),
+                })
+        }
     }
 }
 
@@ -347,7 +354,10 @@ fn test_opener(line: &str) -> Option<(String, &str)> {
     }
     let arrow = after_comma.find("=>")?;
     let expression = after_comma[arrow + 2..].trim();
-    let expression = expression.strip_suffix(';').unwrap_or(expression).trim_end();
+    let expression = expression
+        .strip_suffix(';')
+        .unwrap_or(expression)
+        .trim_end();
     Some((name, expression.strip_suffix(')').unwrap_or(expression)))
 }
 
@@ -584,7 +594,8 @@ mod tests {
 
     #[test]
     fn checks_the_status() {
-        let source = "pm.test(\"Status is 201\", function () {\n    pm.response.to.have.status(201);\n});";
+        let source =
+            "pm.test(\"Status is 201\", function () {\n    pm.response.to.have.status(201);\n});";
         assert_eq!(
             outcomes(source, &response(201, "{}")),
             vec![Outcome::Passed]
@@ -614,7 +625,10 @@ mod tests {
         assert!(script.tests[0].runnable);
         assert_eq!(script.tests[0].line, 2);
         let body = r#"{"pix":{"status":"PENDING"},"items":[{"amount":10}]}"#;
-        assert_eq!(outcomes(source, &response(200, body)), vec![Outcome::Passed]);
+        assert_eq!(
+            outcomes(source, &response(200, body)),
+            vec![Outcome::Passed]
+        );
         let body = r#"{"pix":{"status":"PAID"},"items":[{"amount":10}]}"#;
         assert_eq!(
             outcomes(source, &response(200, body)),

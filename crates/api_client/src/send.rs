@@ -501,19 +501,49 @@ pub fn prepare(
         url.push_str(&encoded.join("&"));
     }
 
-    let body_kind = operation
-        .request_body
-        .as_ref()
-        .map(|body| BodyKind::for_content_type(&body.content_type))
+    // A Content-Type typed on the request says what its body is, over the spec's.
+    let body_kind = draft
+        .headers
+        .iter()
+        .find(|header| header.enabled && header.name.eq_ignore_ascii_case("content-type"))
+        .map(|header| BodyKind::for_content_type(&header.value))
+        .or_else(|| {
+            operation
+                .request_body
+                .as_ref()
+                .map(|body| BodyKind::for_content_type(&body.content_type))
+        })
         .unwrap_or(BodyKind::Json);
+    let text_body = draft.body.as_ref().filter(|body| !body.trim().is_empty());
+    let fields: Vec<_> = draft
+        .form
+        .iter()
+        .filter(|field| field.enabled && !field.name.trim().is_empty())
+        .collect();
     let body = if body_kind.is_form() {
-        let fields: Vec<_> = draft
-            .form
-            .iter()
-            .filter(|field| field.enabled && !field.name.trim().is_empty())
-            .collect();
         if fields.is_empty() {
-            None
+            // No form fields, but a body written by hand: a JSON object becomes the fields,
+            // anything else (`a=1&b=2`) goes out as written.
+            text_body.map(|body| {
+                let object = (body_kind == BodyKind::UrlEncoded)
+                    .then(|| serde_json::from_str::<serde_json::Value>(body).ok())
+                    .flatten();
+                match object {
+                    Some(serde_json::Value::Object(object)) => PreparedBody::UrlEncoded(
+                        object
+                            .into_iter()
+                            .map(|(name, value)| {
+                                let value = match value {
+                                    serde_json::Value::String(text) => text,
+                                    other => other.to_string(),
+                                };
+                                (name, fill(&value))
+                            })
+                            .collect(),
+                    ),
+                    _ => PreparedBody::Text(fill(body)),
+                }
+            })
         } else if body_kind == BodyKind::UrlEncoded {
             Some(PreparedBody::UrlEncoded(
                 fields
@@ -540,11 +570,7 @@ pub fn prepare(
             })
         }
     } else {
-        draft
-            .body
-            .as_ref()
-            .filter(|body| !body.trim().is_empty())
-            .map(|body| PreparedBody::Text(typed_json_body(spec, operation, fill(body))))
+        text_body.map(|body| PreparedBody::Text(typed_json_body(spec, operation, fill(body))))
     };
 
     let mut headers: Vec<(String, String)> = Vec::new();
@@ -987,6 +1013,48 @@ paths:
             "Content-Type".to_string(),
             "application/x-www-form-urlencoded".to_string()
         )));
+    }
+
+    #[test]
+    fn a_content_type_on_the_request_decides_the_body() {
+        let spec = spec();
+        let form_header = HeaderEntry {
+            name: "Content-Type".to_string(),
+            value: "application/x-www-form-urlencoded".to_string(),
+            enabled: true,
+        };
+        let draft = RequestDraft {
+            url: "{{baseUrl}}/login".to_string(),
+            headers: vec![form_header],
+            body: Some(r#"{"grant_type":"password","client":"{{baseUrl}}","days":30}"#.to_string()),
+            ..RequestDraft::default()
+        };
+        let prepared = prepare(&spec, "POST /login", &draft, &[], &variables).unwrap();
+        assert_eq!(
+            prepared.body,
+            Some(PreparedBody::UrlEncoded(vec![
+                ("grant_type".to_string(), "password".to_string()),
+                ("client".to_string(), "https://api.trix.com.br".to_string()),
+                ("days".to_string(), "30".to_string()),
+            ]))
+        );
+        assert!(prepared.headers.contains(&(
+            "Content-Type".to_string(),
+            "application/x-www-form-urlencoded".to_string()
+        )));
+
+        let draft = RequestDraft {
+            body: Some("grant_type=password&client={{baseUrl}}".to_string()),
+            ..draft
+        };
+        let prepared = prepare(&spec, "POST /login", &draft, &[], &variables).unwrap();
+        assert_eq!(
+            prepared.body,
+            Some(PreparedBody::Text(
+                "grant_type=password&client=https://api.trix.com.br".to_string()
+            )),
+            "a body written by hand isn't dropped for having no form fields"
+        );
     }
 
     #[test]
