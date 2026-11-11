@@ -99,7 +99,7 @@ impl ProjectContext {
     }
 }
 
-/// A note saved by the agent or the user under `.zed/learnings/` (or the
+/// A note saved by the agent or the user under `.asylum/learnings/` (or the
 /// personal learnings directory) that is shown to the model in every thread.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize)]
 pub struct LearningContext {

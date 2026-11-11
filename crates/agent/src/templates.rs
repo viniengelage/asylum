@@ -168,11 +168,11 @@ mod tests {
     fn test_system_prompt_renders_learnings() {
         let project = prompt_store::ProjectContext::default().with_learnings(vec![
             prompt_store::LearningContext {
-                location: "app/.zed/learnings/run-tests.md".to_string(),
+                location: "app/.asylum/learnings/run-tests.md".to_string(),
                 text: Some("# Run tests\n\nUse the script.".to_string()),
             },
             prompt_store::LearningContext {
-                location: "app/.zed/learnings/too-big.md".to_string(),
+                location: "app/.asylum/learnings/too-big.md".to_string(),
                 text: None,
             },
         ]);
@@ -196,12 +196,12 @@ mod tests {
         assert!(rendered.contains("## Learnings"), "{rendered}");
         assert!(
             rendered.contains(
-                "`app/.zed/learnings/run-tests.md`:\n``````\n# Run tests\n\nUse the script.\n``````"
+                "`app/.asylum/learnings/run-tests.md`:\n``````\n# Run tests\n\nUse the script.\n``````"
             ),
             "{rendered}"
         );
         assert!(
-            rendered.contains("`app/.zed/learnings/too-big.md` (not included to save context"),
+            rendered.contains("`app/.asylum/learnings/too-big.md` (not included to save context"),
             "{rendered}"
         );
         assert!(

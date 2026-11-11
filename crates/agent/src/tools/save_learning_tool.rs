@@ -25,7 +25,7 @@ pub struct SaveLearningToolInput {
     pub title: String,
     /// The learning itself, in Markdown. Keep it to a few lines: state the fact, then why it matters and how to apply it.
     pub content: String,
-    /// Where to save the learning. `project` learnings are saved in the project's `.zed/learnings/` folder and are shared with the team when committed. `personal` learnings are private to the user and apply to every project.
+    /// Where to save the learning. `project` learnings are saved in the project's `.asylum/learnings/` folder and are shared with the team when committed. `personal` learnings are private to the user and apply to every project.
     pub scope: LearningScope,
     /// For `project` learnings in projects with several root directories: the name of the root directory the learning belongs to.
     #[serde(default)]
@@ -226,12 +226,12 @@ mod tests {
 
         let output = task.await.expect("saving should succeed");
         assert!(
-            output.contains("root/.zed/learnings/sidebar-tests-need-dyld.md"),
+            output.contains("root/.asylum/learnings/sidebar-tests-need-dyld.md"),
             "{output}"
         );
         let saved = fs
             .load(Path::new(path!(
-                "/root/.zed/learnings/sidebar-tests-need-dyld.md"
+                "/root/.asylum/learnings/sidebar-tests-need-dyld.md"
             )))
             .await
             .expect("learning file should exist");

@@ -7944,7 +7944,7 @@ mod internal_tests {
         });
 
         fs.insert_tree(
-            "/a/.zed/learnings",
+            "/a/.asylum/learnings",
             json!({
                 "build.md": "# Build\n\nUse the script.\n",
                 "notes.txt": "not a learning",
@@ -7957,7 +7957,7 @@ mod internal_tests {
             assert_eq!(
                 state.project_context.read(cx).learnings(),
                 &[prompt_store::LearningContext {
-                    location: "a/.zed/learnings/build.md".into(),
+                    location: "a/.asylum/learnings/build.md".into(),
                     text: Some("# Build\n\nUse the script.".into()),
                 }]
             );

@@ -2,8 +2,8 @@
 //! preferences that are shown to the model in every thread, so a new session
 //! starts from what earlier sessions already worked out.
 //!
-//! Project learnings live in `.zed/learnings/` and are committed with the
-//! code. Personal learnings live in the Zed config directory and apply to
+//! Project learnings live in `.asylum/learnings/` and are committed with the
+//! code. Personal learnings live in the Asylum config directory and apply to
 //! every project.
 
 use anyhow::{Context as _, Result};
@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 use util::rel_path::RelPath;
 
-pub const PROJECT_LEARNINGS_DIR: &str = ".zed/learnings";
+pub const PROJECT_LEARNINGS_DIR: &str = ".asylum/learnings";
 const LEARNING_FILE_EXTENSION: &str = "md";
 /// Learnings are meant to be a few lines each; larger files are skipped so a
 /// stray document doesn't end up in every prompt.
@@ -40,7 +40,7 @@ pub struct LoadedLearning {
     pub text: String,
 }
 
-/// Loads `.zed/learnings/*.md` from the given worktrees. Callers must only
+/// Loads `.asylum/learnings/*.md` from the given worktrees. Callers must only
 /// pass trusted worktrees: learnings go straight into the system prompt.
 pub async fn load_project_learnings(
     project: &Entity<Project>,
@@ -232,9 +232,9 @@ mod tests {
         let selected = select_prompt_learnings(
             vec![learning("~/personal.md", &big)],
             vec![
-                learning("root/.zed/learnings/a.md", "short"),
-                learning("root/.zed/learnings/b.md", "this one does not fit"),
-                learning("root/.zed/learnings/empty.md", ""),
+                learning("root/.asylum/learnings/a.md", "short"),
+                learning("root/.asylum/learnings/b.md", "this one does not fit"),
+                learning("root/.asylum/learnings/empty.md", ""),
             ],
         );
 
@@ -246,11 +246,11 @@ mod tests {
                     text: Some(big),
                 },
                 LearningContext {
-                    location: "root/.zed/learnings/a.md".to_string(),
+                    location: "root/.asylum/learnings/a.md".to_string(),
                     text: Some("short".to_string()),
                 },
                 LearningContext {
-                    location: "root/.zed/learnings/b.md".to_string(),
+                    location: "root/.asylum/learnings/b.md".to_string(),
                     text: None,
                 },
             ]
