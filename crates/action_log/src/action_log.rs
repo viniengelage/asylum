@@ -152,8 +152,13 @@ impl ActionLog {
             .tracked_buffers
             .entry(buffer.clone())
             .or_insert_with(|| {
-                let open_lsp_handle = self.project.update(cx, |project, cx| {
-                    project.register_buffer_with_language_servers(&buffer, cx)
+                // Buffers the agent only reads stay out of the language servers: a read
+                // in a sibling git worktree makes servers like tsserver load that whole
+                // checkout, and enough of them run it out of memory.
+                let open_lsp_handle = is_created.then(|| {
+                    self.project.update(cx, |project, cx| {
+                        project.register_buffer_with_language_servers(&buffer, cx)
+                    })
                 });
 
                 let text_snapshot = buffer.read(cx).text_snapshot();
@@ -197,7 +202,7 @@ impl ActionLog {
                     version: buffer.read(cx).version(),
                     diff,
                     diff_update: diff_update_tx,
-                    _open_lsp_handle: open_lsp_handle,
+                    open_lsp_handle: open_lsp_handle,
                     _maintain_diff: cx.spawn({
                         let buffer = buffer.clone();
                         async move |this, cx| {
@@ -597,7 +602,13 @@ impl ActionLog {
             self.update_file_read_time(&buffer, cx);
         }
         let new_version = buffer.read(cx).version();
-        let tracked_buffer = self.track_buffer_internal(buffer, false, cx);
+        let project = self.project.clone();
+        let tracked_buffer = self.track_buffer_internal(buffer.clone(), false, cx);
+        if tracked_buffer.open_lsp_handle.is_none() {
+            tracked_buffer.open_lsp_handle = Some(project.update(cx, |project, cx| {
+                project.register_buffer_with_language_servers(&buffer, cx)
+            }));
+        }
         if let TrackedBufferStatus::Deleted = tracked_buffer.status {
             tracked_buffer.status = TrackedBufferStatus::Modified;
         }
@@ -1275,7 +1286,7 @@ pub struct TrackedBuffer {
     diff: Entity<BufferDiff>,
     snapshot: text::BufferSnapshot,
     diff_update: mpsc::UnboundedSender<(ChangeAuthor, text::BufferSnapshot)>,
-    _open_lsp_handle: OpenLspBufferHandle,
+    open_lsp_handle: Option<OpenLspBufferHandle>,
     _maintain_diff: Task<()>,
     _subscription: Subscription,
 }
