@@ -21,7 +21,7 @@ mod tunnel;
 mod write_guard;
 
 pub use agent_schema::describe_for_agent;
-pub use agent_toolkit::register_toolkit as register_agent_toolkit;
+pub use agent_toolkit::{register_toolkit as register_agent_toolkit, terminal_write_reason};
 pub use catalog::{ColumnInfo, Relation, RelationKind, list_columns, list_relations};
 pub use connection::{Environment, SavedConnection};
 pub use panel::DatabasePanel;

@@ -858,6 +858,9 @@ fn main() {
         cx.set_global(agent::DatabaseSchemaSource(std::sync::Arc::new(
             database_client::describe_for_agent,
         )));
+        cx.set_global(agent::DatabaseWriteGuard(std::sync::Arc::new(
+            database_client::terminal_write_reason,
+        )));
         sidebar::register_agent_toolkits(cx);
         web_preview::register_agent_toolkit(cx);
         api_client::register_agent_toolkit(cx);

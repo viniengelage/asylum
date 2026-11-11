@@ -437,14 +437,36 @@ async fn run_terminal_tool(
     let selection = input.selection;
     let sandbox_input = input.sandbox.clone().unwrap_or_default();
 
+    let database_write_guard = cx.update(|cx| {
+        cx.try_global::<crate::DatabaseWriteGuard>()
+            .cloned()
+            .map(|guard| (guard.0)(project.clone(), input.command.clone(), cx))
+    });
+    let database_write_reason = match database_write_guard {
+        Some(task) => task.await,
+        None => None,
+    };
+
     let (working_dir, authorize, sandboxing, is_local_project, wsl_zed_release) =
         cx.update(|cx| {
             let working_dir =
                 working_dir(&input.cd, &project, cx).map_err(|err| err.to_string())?;
             let context =
                 crate::ToolPermissionContext::new(TerminalTool::NAME, vec![input.command.clone()]);
-            let authorize =
-                event_stream.authorize(SharedString::new(input.command.clone()), context, cx);
+            let title = SharedString::new(input.command.clone());
+            // The connection's "confirm writes" has to win over the terminal's always-allow
+            // rules, which were granted for commands in general and not for this database.
+            let authorize = match database_write_reason {
+                Some(reason) => {
+                    event_stream.update_fields(|update| update.content(vec![reason.into()]));
+                    event_stream.authorize_toolkit_tool_always_prompt(
+                        title,
+                        context.once_only(),
+                        cx,
+                    )
+                }
+                None => event_stream.authorize(title, context, cx),
+            };
             let sandboxing =
                 input.sandbox.is_some() && sandboxing_enabled_for_project(project.read(cx), cx);
             let is_local_project = project.read(cx).is_local();

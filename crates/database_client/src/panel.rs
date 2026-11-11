@@ -125,6 +125,20 @@ enum ActiveItem {
     Query(PathBuf),
 }
 
+/// The folder whose connections the panel shows: the first visible worktree that is a directory.
+pub(crate) fn project_root(project: &Entity<Project>, cx: &App) -> Option<PathBuf> {
+    project
+        .read(cx)
+        .visible_worktrees(cx)
+        .find(|worktree| {
+            worktree
+                .read(cx)
+                .root_entry()
+                .is_some_and(|entry| entry.is_dir())
+        })
+        .map(|worktree| worktree.read(cx).abs_path().to_path_buf())
+}
+
 pub struct DatabasePanel {
     workspace: WeakEntity<Workspace>,
     project: Entity<Project>,
@@ -221,16 +235,7 @@ impl DatabasePanel {
     }
 
     fn project_root(&self, cx: &App) -> Option<PathBuf> {
-        self.project
-            .read(cx)
-            .visible_worktrees(cx)
-            .find(|worktree| {
-                worktree
-                    .read(cx)
-                    .root_entry()
-                    .is_some_and(|entry| entry.is_dir())
-            })
-            .map(|worktree| worktree.read(cx).abs_path().to_path_buf())
+        project_root(&self.project, cx)
     }
 
     pub fn root(&self) -> Option<&Path> {
@@ -324,6 +329,10 @@ impl DatabasePanel {
 
     pub(crate) fn is_loaded(&self) -> bool {
         self.loaded
+    }
+
+    pub(crate) fn saved_connections(&self) -> impl Iterator<Item = &SavedConnection> {
+        self.connections.iter().map(|stored| &stored.connection)
     }
 
     /// For the debug hook: connects to the saved connection with this id, if there is one.

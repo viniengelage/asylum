@@ -466,10 +466,14 @@ impl TableView {
             self.discard_edits(cx);
             return;
         }
-        if self.connection.environment != Environment::Prod {
+        let risk = if self.connection.environment == Environment::Prod {
+            Risk::ProductionWrite
+        } else if self.connection.confirm_writes {
+            Risk::Write
+        } else {
             self.write(updates, cx);
             return;
-        }
+        };
         let this = cx.weak_entity();
         let connection = self.connection.clone();
         let preview = edits::preview(&updates);
@@ -478,7 +482,7 @@ impl TableView {
                 WriteGuard::new(
                     connection,
                     preview,
-                    Risk::ProductionWrite,
+                    risk,
                     true,
                     Some(
                         "As alterações rodam numa transação: se alguma linha mudou desde que a \

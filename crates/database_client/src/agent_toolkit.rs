@@ -4,13 +4,14 @@
 
 use crate::{
     agent_schema::PanelRegistry,
-    connection::SavedConnection,
-    panel::{ActiveState, DatabasePanel},
+    connection::{self, Environment, SavedConnection},
+    panel::{self, ActiveState, DatabasePanel},
     query_view::{self, AgentWriteMode},
     statements,
 };
 use anyhow::{Context as _, anyhow};
-use gpui::{App, AppContext as _, Entity, Window};
+use db::kvp::KeyValueStore;
+use gpui::{App, AppContext as _, Entity, Task, Window};
 use i18n::t;
 use project::Project;
 use schemars::JsonSchema;
@@ -20,6 +21,7 @@ use task_agents::{
     DatabaseColumn, DatabaseConnectionInfo, DatabaseQueryResult, DatabaseWriteResult,
     SqlEditorSource, SqlEditorTab, ToolAccess, Toolkit, ToolkitOutput, ToolkitTool,
 };
+use util::ResultExt as _;
 
 const DEFAULT_ROW_LIMIT: usize = 100;
 const MAX_ROW_LIMIT: usize = 1000;
@@ -406,6 +408,131 @@ fn focus_sql_editor(
     query_view::activate(&view, window, cx)
 }
 
+const SQL_CLIENTS: &[&str] = &["psql", "pgcli", "usql", "mysql", "mariadb", "sqlite3"];
+
+const SCHEMA_OBJECTS: &[&str] = &[
+    "table",
+    "schema",
+    "database",
+    "index",
+    "view",
+    "materialized",
+    "function",
+    "procedure",
+    "type",
+    "sequence",
+    "extension",
+    "trigger",
+    "role",
+    "user",
+    "or",
+    "unique",
+    "temp",
+    "temporary",
+];
+
+/// Whether a shell command runs SQL that writes through a command-line client. A `.sql` file
+/// (`psql -f`, `< dump.sql`) counts as a write, since its SQL isn't in the command.
+fn command_writes_sql(command: &str) -> bool {
+    let words = command
+        .split(|character: char| {
+            !(character.is_alphanumeric() || matches!(character, '_' | '-' | '/' | '.'))
+        })
+        .filter(|word| !word.is_empty())
+        .map(str::to_lowercase)
+        .collect::<Vec<_>>();
+    let word = |index: usize| words.get(index).map(String::as_str);
+    let runs_client = words.iter().enumerate().any(|(index, word)| {
+        let name = word.rsplit('/').next().unwrap_or(word);
+        SQL_CLIENTS.contains(&name)
+            || (name == "prisma"
+                && words.get(index + 1).map(String::as_str) == Some("db")
+                && words.get(index + 2).map(String::as_str) == Some("execute"))
+    });
+    if !runs_client {
+        return false;
+    }
+    if command.to_lowercase().contains(".sql") {
+        return true;
+    }
+    words.iter().enumerate().any(|(index, current)| {
+        let next = word(index + 1);
+        match current.as_str() {
+            "insert" | "merge" => next == Some("into"),
+            "delete" => next == Some("from"),
+            "update" => words[index + 1..].iter().any(|later| later == "set"),
+            "truncate" => true,
+            "drop" | "alter" | "create" => next.is_some_and(|next| SCHEMA_OBJECTS.contains(&next)),
+            "copy" => word(index + 2) == Some("from"),
+            "grant" | "revoke" => true,
+            _ => false,
+        }
+    })
+}
+
+/// The connection that makes a write ask first: one the command names by its database, or
+/// else any connection of the project that asks, since the command may reach it some other way.
+fn confirming_connection<'a>(
+    connections: &'a [SavedConnection],
+    command: &str,
+) -> Option<&'a SavedConnection> {
+    let asks = |connection: &&SavedConnection| {
+        connection.confirm_writes || connection.environment == Environment::Prod
+    };
+    let command = command.to_lowercase();
+    connections
+        .iter()
+        .filter(asks)
+        .find(|connection| command.contains(&connection.database.to_lowercase()))
+        .or_else(|| connections.iter().find(asks))
+}
+
+fn write_reason(connections: &[SavedConnection], command: &str) -> Option<String> {
+    confirming_connection(connections, command).map(|connection| {
+        t!(
+            "database_client.agent_guard.reason",
+            connection = connection.name.clone(),
+            environment = connection.environment.label()
+        )
+        .to_string()
+    })
+}
+
+/// For the agent's terminal: why this command has to be confirmed every time, when it writes
+/// SQL and a connection of the project has "confirm writes" on (or is production).
+pub fn terminal_write_reason(
+    project: Entity<Project>,
+    command: String,
+    cx: &mut App,
+) -> Task<Option<String>> {
+    if !command_writes_sql(&command) {
+        return Task::ready(None);
+    }
+    if let Some(panel) = cx
+        .try_global::<PanelRegistry>()
+        .and_then(|registry| registry.panel(&project))
+    {
+        let panel = panel.read(cx);
+        if panel.is_loaded() {
+            let connections = panel.saved_connections().cloned().collect::<Vec<_>>();
+            return Task::ready(write_reason(&connections, &command));
+        }
+    }
+    let Some(root) = panel::project_root(&project, cx) else {
+        return Task::ready(None);
+    };
+    let profile_connections = connection::load_profile(&KeyValueStore::global(cx), &root);
+    let fs = project.read(cx).fs().clone();
+    cx.background_spawn(async move {
+        let mut connections = connection::load_project(fs.as_ref(), &root)
+            .await
+            .log_err()
+            .unwrap_or_default();
+        connections.extend(profile_connections.log_err().unwrap_or_default());
+        write_reason(&connections, &command)
+    })
+}
+
 pub fn register_toolkit(cx: &mut App) {
     task_agents::register_toolkit(
         Toolkit {
@@ -456,7 +583,30 @@ pub fn register_toolkit(cx: &mut App) {
 
 #[cfg(test)]
 mod tests {
-    use super::single_source;
+    use super::{command_writes_sql, single_source};
+
+    #[test]
+    fn finds_sql_writes_in_terminal_commands() {
+        assert!(command_writes_sql(
+            "psql -h localhost -U app -d trix_core -c \"update payments set status = 'paid' where id = 9312\""
+        ));
+        assert!(command_writes_sql(
+            "docker exec -i db psql -U app -d app <<'SQL'\nBEGIN;\nINSERT INTO users (id) VALUES ('u');\nSQL"
+        ));
+        assert!(command_writes_sql("psql -d app -f migrations/001.sql"));
+        assert!(command_writes_sql("mysql app < dump.sql"));
+        assert!(command_writes_sql(
+            "/opt/homebrew/opt/libpq/bin/psql app -c 'truncate audit'"
+        ));
+        assert!(command_writes_sql(
+            "npx prisma db execute --stdin <<< 'drop table x'"
+        ));
+        assert!(!command_writes_sql(
+            "psql -d app -c \"select id, updated_at from payments where status = 'update'\""
+        ));
+        assert!(!command_writes_sql("grep -rn 'delete from' src"));
+        assert!(!command_writes_sql("psql -l"));
+    }
 
     #[test]
     fn names_the_single_relation_a_select_reads() {

@@ -43,6 +43,8 @@ pub enum Risk {
     Ddl,
     /// Any write on a production connection.
     ProductionWrite,
+    /// Any other write on a connection with "confirm writes" on.
+    Write,
 }
 
 /// Why this statement needs a confirmation on this connection, if it does.
@@ -53,6 +55,7 @@ pub fn risk(kind: StatementKind, connection: &SavedConnection) -> Option<Risk> {
         StatementKind::Write { every_row: true } if asks => Some(Risk::EveryRow),
         StatementKind::Ddl if asks => Some(Risk::Ddl),
         StatementKind::Write { .. } if production => Some(Risk::ProductionWrite),
+        StatementKind::Write { .. } if connection.confirm_writes => Some(Risk::Write),
         _ => None,
     }
 }
@@ -407,7 +410,7 @@ mod tests {
     }
 
     #[test]
-    fn production_asks_before_any_write() {
+    fn production_and_confirm_writes_ask_before_any_write() {
         let mut connection = SavedConnection {
             id: "a".into(),
             name: "trix".into(),
@@ -426,7 +429,8 @@ mod tests {
         assert_eq!(risk(wipe, &connection), None);
         connection.confirm_writes = true;
         assert_eq!(risk(wipe, &connection), Some(Risk::EveryRow));
-        assert_eq!(risk(write, &connection), None);
+        assert_eq!(risk(write, &connection), Some(Risk::Write));
+        assert_eq!(risk(StatementKind::Read, &connection), None);
         assert_eq!(risk(StatementKind::Ddl, &connection), Some(Risk::Ddl));
         connection.environment = Environment::Prod;
         connection.confirm_writes = false;

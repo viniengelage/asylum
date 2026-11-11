@@ -19,6 +19,16 @@ pub struct DatabaseSchemaSource(
 
 impl Global for DatabaseSchemaSource {}
 
+/// Installed by the app with the database panel. Given the thread's project and a terminal
+/// command, resolves to why the command must be confirmed every time (it writes to a database
+/// whose connection asks before writes), or `None` when the usual terminal rules apply.
+#[derive(Clone)]
+pub struct DatabaseWriteGuard(
+    pub Arc<dyn Fn(Entity<Project>, String, &mut App) -> Task<Option<String>>>,
+);
+
+impl Global for DatabaseWriteGuard {}
+
 /// Read the schema of the Postgres database the user has connected in the Banco panel.
 ///
 /// Without `table`, lists every schema with its tables and views and their estimated row

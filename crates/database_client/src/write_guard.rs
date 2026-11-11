@@ -248,6 +248,10 @@ impl Render for WriteGuard {
             Risk::Ddl if production => t!("database_client.guard.title_ddl_prod"),
             Risk::Ddl => t!("database_client.guard.title_ddl"),
             Risk::ProductionWrite => t!("database_client.guard.title_prod_write"),
+            Risk::Write => t!(
+                "database_client.guard.title_write",
+                database = self.connection.database.clone()
+            ),
         };
         let table = target_table(&self.statement);
         let reach = match (&self.estimate, self.risk) {
@@ -279,6 +283,10 @@ impl Render for WriteGuard {
             ),
             (None, Risk::EveryRow) => (
                 t!("database_client.guard.reach_no_where").to_string(),
+                Some(t!("database_client.guard.estimating").to_string()),
+            ),
+            (None, Risk::Write) => (
+                t!("database_client.guard.reach_confirm_writes").to_string(),
                 Some(t!("database_client.guard.estimating").to_string()),
             ),
             (None, _) => (
