@@ -757,5 +757,6 @@
   "options_menu.mcp_summary.needs_auth": "{count} need sign-in",
   "options_menu.mcp_summary.enabled": "on: {count}",
   "options_menu.mcp_attention.error": "{name}: error",
-  "options_menu.mcp_attention.needs_auth": "{name}: needs sign-in"
+  "options_menu.mcp_attention.needs_auth": "{name}: needs sign-in",
+  "options_menu.thread_context": "Thread context"
 }

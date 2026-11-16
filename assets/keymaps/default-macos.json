@@ -272,6 +272,7 @@
     "use_key_equivalents": true,
     "bindings": {
       "f2": "agent::RenameSelectedThread",
+      "cmd-alt-e": "agent::EditThreadContext",
       "cmd-n": "agent::NewThread",
       "cmd-alt-c": "agent::OpenSettings",
       "cmd-alt-m": "agent::ToggleOptionsMenu",

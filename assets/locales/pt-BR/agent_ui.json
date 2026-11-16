@@ -757,5 +757,6 @@
   "options_menu.mcp_summary.needs_auth": "{count} precisa entrar",
   "options_menu.mcp_summary.enabled": "ligados: {count}",
   "options_menu.mcp_attention.error": "{name}: erro",
-  "options_menu.mcp_attention.needs_auth": "{name}: precisa entrar"
+  "options_menu.mcp_attention.needs_auth": "{name}: precisa entrar",
+  "options_menu.thread_context": "Contexto da thread"
 }

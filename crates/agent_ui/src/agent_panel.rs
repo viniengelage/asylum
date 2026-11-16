@@ -531,6 +531,11 @@ pub fn init(cx: &mut App) {
                         panel.update(cx, |panel, cx| panel.manage_skills(action, window, cx));
                     }
                 })
+                .register_action(|workspace, _: &crate::EditThreadContext, window, cx| {
+                    if let Some(panel) = workspace.panel::<AgentPanel>(cx) {
+                        panel.update(cx, |panel, cx| panel.edit_thread_context(window, cx));
+                    }
+                })
                 .register_action(|_workspace, _: &crate::ManageMcpServers, window, cx| {
                     window.dispatch_action(
                         Box::new(zed_actions::OpenSettingsAt {
@@ -5737,6 +5742,59 @@ impl AgentPanel {
         });
     }
 
+    fn edit_thread_context(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(thread_id) = self.active_thread_id(cx) else {
+            return;
+        };
+        let Some(workspace) = self.workspace.upgrade() else {
+            return;
+        };
+        let metadata = ThreadMetadataStore::global(cx).read(cx).entry(thread_id).cloned();
+        let title = metadata
+            .as_ref()
+            .map(|metadata| metadata.display_title())
+            .unwrap_or_else(|| crate::DEFAULT_THREAD_TITLE.into());
+        let main_root = metadata
+            .as_ref()
+            .and_then(|metadata| metadata.main_worktree_paths().paths().first().cloned());
+        let scope = match &main_root {
+            Some(root) => notes::NoteScope::Project(root.clone()),
+            None => notes::NoteScope::Global,
+        };
+        let subtitle: SharedString = main_root
+            .as_ref()
+            .and_then(|root| root.file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default()
+            .into();
+        let panel = cx.entity().downgrade();
+        workspace.update(cx, |workspace, cx| {
+            workspace.toggle_modal(window, cx, move |window, cx| {
+                notes::ThreadContextEditor::new(
+                    thread_id.to_key_string(),
+                    scope,
+                    title,
+                    subtitle,
+                    move |new_title, window, cx| {
+                        panel
+                            .update(cx, |panel, cx| {
+                                if let Some(view) = panel.conversation_view_for_id(&thread_id, cx)
+                                    && let Some(thread_view) = view.read(cx).root_thread_view()
+                                {
+                                    thread_view.update(cx, |thread_view, cx| {
+                                        thread_view.rename(new_title, window, cx)
+                                    });
+                                }
+                            })
+                            .log_err();
+                    },
+                    window,
+                    cx,
+                )
+            });
+        });
+    }
+
     fn handle_regenerate_thread_title(
         conversation_view: Entity<ConversationView>,
         workspace: WeakEntity<Workspace>,
@@ -5876,11 +5934,17 @@ impl AgentPanel {
                                 }
 
                                 if conversation_view.read(cx).root_thread_view().is_some() {
-                                    menu = menu.item(action_item(
-                                        t!("agent_ui.options_menu.open_as_markdown"),
-                                        IconName::FileMarkdown,
-                                        Box::new(OpenActiveThreadAsMarkdown),
-                                    ));
+                                    menu = menu
+                                        .item(action_item(
+                                            t!("agent_ui.options_menu.thread_context"),
+                                            IconName::Notepad,
+                                            Box::new(crate::EditThreadContext),
+                                        ))
+                                        .item(action_item(
+                                            t!("agent_ui.options_menu.open_as_markdown"),
+                                            IconName::FileMarkdown,
+                                            Box::new(OpenActiveThreadAsMarkdown),
+                                        ));
                                 }
                             }
 

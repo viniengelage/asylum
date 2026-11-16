@@ -300,6 +300,8 @@ actions!(
     [
         /// Opens the MCP servers page of the settings, where servers are added, signed in and toggled.
         ManageMcpServers,
+        /// Edits the active thread's title and the context note the user keeps for it.
+        EditThreadContext,
         /// Toggles the menu to create new agent threads.
         ToggleNewThreadMenu,
         /// Toggles the options menu for agent settings and preferences.
