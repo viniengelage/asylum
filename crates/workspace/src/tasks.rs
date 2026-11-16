@@ -2,7 +2,9 @@ use std::process::ExitStatus;
 
 use anyhow::Result;
 use collections::HashSet;
-use gpui::{AppContext, AsyncWindowContext, Context, Entity, Task, TaskExt, WeakEntity};
+use gpui::{
+    AppContext, AsyncWindowContext, Context, Entity, SharedString, Task, TaskExt, WeakEntity,
+};
 use language::Buffer;
 use project::{TaskSourceKind, WorktreeId};
 use remote::ConnectionState;
@@ -44,6 +46,15 @@ impl Workspace {
                 | ConnectionState::Reconnecting,
             ) => {
                 log::warn!("Cannot schedule tasks when disconnected from a remote host");
+                struct TaskWhileDisconnected;
+                self.show_toast(
+                    Toast::new(
+                        NotificationId::unique::<TaskWhileDisconnected>(),
+                        i18n::t!("workspace.task_disconnected").to_string(),
+                    )
+                    .autohide(),
+                    cx,
+                );
                 return;
             }
         }
@@ -56,6 +67,24 @@ impl Workspace {
                 spawn_in_terminal,
                 omit_history,
                 window,
+                cx,
+            );
+        } else {
+            // Resolution fails when a variable the task uses has no value here (no open
+            // file, no selection…); without this the task silently does nothing.
+            struct UnresolvedTask;
+            self.show_toast(
+                Toast::new(
+                    NotificationId::composite::<UnresolvedTask>(SharedString::from(
+                        task_to_resolve.label.clone(),
+                    )),
+                    i18n::t!(
+                        "workspace.task_unresolved",
+                        label = task_to_resolve.label.as_str()
+                    )
+                    .to_string(),
+                )
+                .autohide(),
                 cx,
             );
         }

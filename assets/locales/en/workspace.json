@@ -19,5 +19,7 @@
   "toolkit.settings.display_inline": "Inline",
   "toolkit.settings.display_menu": "Menu",
   "toolkit.show_as_menu": "Show as menu",
-  "toolkit.title": "Toolkit"
+  "toolkit.title": "Toolkit",
+  "task_unresolved": "“{label}” did not run: a variable it uses has no value here (open a file or give it a :default)",
+  "task_disconnected": "Tasks can't run while the remote host is disconnected"
 }

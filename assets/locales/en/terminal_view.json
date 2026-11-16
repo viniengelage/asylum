@@ -10,5 +10,7 @@
   "panel.split_right": "Split Right",
   "panel.split_up": "Split Up",
   "panel.zoom_in": "Zoom In",
-  "panel.zoom_out": "Zoom Out"
+  "panel.zoom_out": "Zoom Out",
+  "task_already_running": "“{label}” is still running; the new run starts when it ends",
+  "task_restart_now": "Restart now"
 }

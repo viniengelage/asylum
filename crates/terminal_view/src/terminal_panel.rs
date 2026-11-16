@@ -20,7 +20,7 @@ use project::{Fs, Project};
 
 use settings::{Settings, TerminalDockPosition};
 use task::{RevealStrategy, RevealTarget, Shell, ShellBuilder, SpawnInTerminal, TaskId};
-use terminal::{Terminal, terminal_settings::TerminalSettings};
+use terminal::{TaskStatus, Terminal, terminal_settings::TerminalSettings};
 use ui::{
     ButtonLike, Clickable, CommonAnimationExt, ContextMenu, FluentBuilder, PopoverMenu,
     SplitButton, TabStyle, Toggleable, Tooltip, button_group, group_icon_button, prelude::*,
@@ -31,13 +31,15 @@ use workspace::{
     ActivatePaneUp, ActivatePreviousPane, DraggedTab, ItemId, MoveItemToPane,
     MoveItemToPaneInDirection, MovePaneDown, MovePaneLeft, MovePaneRight, MovePaneUp, Pane,
     PaneGroup, SplitDirection, SplitDown, SplitLeft, SplitMode, SplitRight, SplitUp, SwapPaneDown,
-    SwapPaneLeft, SwapPaneRight, SwapPaneUp, ToggleZoom, Workspace,
+    SwapPaneLeft, SwapPaneRight, SwapPaneUp, Toast, ToggleZoom, Workspace,
     dock::{DockPosition, Panel, PanelEvent, PanelHandle},
     item::SerializableItem,
-    move_active_item, pane,
+    move_active_item, notifications::NotificationId, pane,
 };
 
 use anyhow::{Result, anyhow};
+
+struct TaskAlreadyRunning;
 use zed_actions::assistant::InlineAssist;
 
 const TERMINAL_PANEL_KEY: &str = "TerminalPanel";
@@ -706,6 +708,8 @@ impl TerminalPanel {
             );
         }
 
+        self.warn_task_already_running(&task, &terminals_for_task, cx);
+
         let (tx, rx) = oneshot::channel();
 
         self.deferred_tasks.insert(
@@ -733,6 +737,47 @@ impl TerminalPanel {
         );
 
         cx.spawn(async move |_, _| rx.await?)
+    }
+
+    /// A rerun of a task that is still running waits for it to finish. For a long-running task
+    /// (a dev server, `expo start`) that is forever, so say so and offer to stop the old run.
+    fn warn_task_already_running(
+        &self,
+        task: &SpawnInTerminal,
+        terminals_for_task: &[(usize, Entity<Pane>, Entity<TerminalView>)],
+        cx: &mut Context<Self>,
+    ) {
+        let running: Vec<WeakEntity<Terminal>> = terminals_for_task
+            .iter()
+            .filter_map(|(_, _, terminal_view)| {
+                let terminal = terminal_view.read(cx).terminal().clone();
+                let is_running = terminal
+                    .read(cx)
+                    .task()
+                    .is_some_and(|task| task.status == TaskStatus::Running);
+                is_running.then(|| terminal.downgrade())
+            })
+            .collect();
+        if running.is_empty() {
+            return;
+        }
+        let toast = Toast::new(
+            NotificationId::composite::<TaskAlreadyRunning>(SharedString::from(task.id.0.clone())),
+            i18n::t!("terminal_view.task_already_running", label = task.label.as_str()).to_string(),
+        )
+        .on_click(
+            i18n::t!("terminal_view.task_restart_now").to_string(),
+            move |_window, cx| {
+                for terminal in &running {
+                    terminal
+                        .update(cx, |terminal, _| terminal.kill_active_task())
+                        .log_err();
+                }
+            },
+        );
+        self.workspace
+            .update(cx, |workspace, cx| workspace.show_toast(toast, cx))
+            .log_err();
     }
 
     fn spawn_in_new_terminal(

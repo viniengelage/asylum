@@ -46,7 +46,8 @@ use feature_flags::{
 use fs::Fs;
 
 use gpui::{
-    Action as _, AnyElement, App, AsyncApp, Bounds, ClickEvent, ClipboardItem, Context,
+    Action as _, AnyElement, App, AsyncApp, BackgroundExecutor, Bounds, ClickEvent,
+    ClipboardItem, Context,
     DismissEvent, Entity, EntityId, FocusHandle, Focusable, FontWeight, Hsla, KeyContext,
     KeyDownEvent, ListState, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     ObjectFit, Pixels, Point, Render, Role, SharedString, Stateful, StyledImage as _, Task,
@@ -11681,20 +11682,27 @@ impl Sidebar {
             }))
     }
 
-    fn spawn_ios_terminal_task(
+    /// Runs one of the project's Expo commands in a task terminal. The command is the project's
+    /// own package.json script, run with the package manager its lockfile names, so the device
+    /// toolbar does what `yarn start` / `npm run ios` would; `npx expo` covers projects without one.
+    fn spawn_expo_task(
         &mut self,
         workspace: &Entity<Workspace>,
-        task_name: &str,
-        label: &str,
-        command: &str,
-        arguments: Vec<String>,
+        platform: DevicePlatform,
+        script: ExpoScript,
+        label: SharedString,
+        device_id: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let project = workspace.read(cx).project().clone();
         if !project.read(cx).is_local() {
-            self.ios_simulator_error = Some(t!("sidebar.ios.requires_local_project"));
-            cx.notify();
+            self.report_device_task_error(
+                workspace,
+                platform,
+                t!("sidebar.ios.requires_local_project"),
+                cx,
+            );
             return;
         }
         let Some(project_directory) = project
@@ -11702,40 +11710,104 @@ impl Sidebar {
             .active_project_directory(cx)
             .map(|path| path.to_path_buf())
         else {
-            self.ios_simulator_error = Some(t!("sidebar.devices.no_project_directory"));
-            cx.notify();
+            self.report_device_task_error(
+                workspace,
+                platform,
+                t!("sidebar.devices.no_project_directory"),
+                cx,
+            );
             return;
         };
+        let fs = project.read(cx).fs().clone();
+        let workspace = workspace.clone();
+        cx.spawn_in(window, async move |this, cx| {
+            let (command, arguments) =
+                resolve_expo_command(fs, &project_directory, platform, script, device_id).await;
+            let command_label = std::iter::once(command.as_str())
+                .chain(arguments.iter().map(String::as_str))
+                .join(" ");
+            let platform_key = match platform {
+                DevicePlatform::Ios => "ios",
+                DevicePlatform::Android => "android",
+            };
+            let script_key = match script {
+                ExpoScript::Start => "start",
+                ExpoScript::Run => "build",
+            };
+            let task = SpawnInTerminal {
+                id: TaskId(format!(
+                    "{platform_key}-{script_key}-{}",
+                    project_directory.display()
+                )),
+                full_label: label.to_string(),
+                label: label.to_string(),
+                command: Some(command),
+                args: arguments,
+                command_label,
+                cwd: Some(project_directory),
+                env: HashMap::default(),
+                use_new_terminal: true,
+                allow_concurrent_runs: false,
+                reveal: RevealStrategy::Always,
+                reveal_target: RevealTarget::Dock,
+                hide: HideStrategy::Never,
+                shell: Shell::System,
+                show_summary: true,
+                show_command: true,
+                show_rerun: true,
+                save: SaveStrategy::None,
+            };
+            let run = workspace.update_in(cx, |workspace, window, cx| {
+                workspace.spawn_in_terminal(task, window, cx)
+            })?;
+            this.update(cx, |this, cx| {
+                if platform == DevicePlatform::Ios {
+                    this.ios_simulator_error = None;
+                }
+                cx.notify();
+            })?;
+            // Resolves when the task ends; only a failure to start is worth reporting here,
+            // the terminal shows the command's own exit.
+            if let Some(Err(error)) = run.await {
+                this.update(cx, |this, cx| {
+                    this.report_device_task_error(
+                        &workspace,
+                        platform,
+                        SharedString::from(error.to_string()),
+                        cx,
+                    );
+                })?;
+            }
+            anyhow::Ok(())
+        })
+        .detach_and_log_err(cx);
+    }
 
-        let command_label = std::iter::once(command)
-            .chain(arguments.iter().map(String::as_str))
-            .join(" ");
-        let task = SpawnInTerminal {
-            id: TaskId(format!("ios-{task_name}-{}", project_directory.display())),
-            full_label: label.to_owned(),
-            label: label.to_owned(),
-            command: Some(command.to_owned()),
-            args: arguments,
-            command_label,
-            cwd: Some(project_directory),
-            env: HashMap::default(),
-            use_new_terminal: true,
-            allow_concurrent_runs: false,
-            reveal: RevealStrategy::Always,
-            reveal_target: RevealTarget::Dock,
-            hide: HideStrategy::Never,
-            shell: Shell::System,
-            show_summary: true,
-            show_command: true,
-            show_rerun: true,
-            save: SaveStrategy::None,
-        };
-
-        workspace.update(cx, |workspace, cx| {
-            workspace.spawn_in_terminal(task, window, cx).detach();
-        });
-        self.ios_simulator_error = None;
-        cx.notify();
+    fn report_device_task_error(
+        &mut self,
+        workspace: &Entity<Workspace>,
+        platform: DevicePlatform,
+        message: SharedString,
+        cx: &mut Context<Self>,
+    ) {
+        match platform {
+            DevicePlatform::Ios => {
+                self.ios_simulator_error = Some(message);
+                cx.notify();
+            }
+            DevicePlatform::Android => {
+                struct AndroidDeviceTaskError;
+                workspace.update(cx, |workspace, cx| {
+                    workspace.show_toast(
+                        Toast::new(
+                            NotificationId::unique::<AndroidDeviceTaskError>(),
+                            message.to_string(),
+                        ),
+                        cx,
+                    );
+                });
+            }
+        }
     }
 
     fn build_expo_ios(
@@ -11749,13 +11821,12 @@ impl Sidebar {
             cx.notify();
             return;
         };
-
-        self.spawn_ios_terminal_task(
+        self.spawn_expo_task(
             workspace,
-            "build",
-            &t!("sidebar.tasks.build_ios"),
-            "yarn",
-            vec!["ios".to_owned(), "--device".to_owned(), udid],
+            DevicePlatform::Ios,
+            ExpoScript::Run,
+            t!("sidebar.tasks.build_ios"),
+            Some(udid),
             window,
             cx,
         );
@@ -11772,80 +11843,35 @@ impl Sidebar {
             cx.notify();
             return;
         }
-
-        self.spawn_ios_terminal_task(
+        self.spawn_expo_task(
             workspace,
-            "start",
-            &t!("sidebar.tasks.start_expo_ios"),
-            "yarn",
-            vec!["expo".to_owned(), "start".to_owned()],
+            DevicePlatform::Ios,
+            ExpoScript::Start,
+            t!("sidebar.tasks.start_expo_ios"),
+            None,
             window,
             cx,
         );
 
+        // The installed app only connects once Metro answers; opening it earlier shows the
+        // "could not connect to development server" screen.
         let workspace = workspace.clone();
-        cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(Duration::from_secs(3)).await;
+        let executor = cx.background_executor().clone();
+        cx.spawn_in(window, async move |this, cx| {
+            let ready = wait_for_port(executor, METRO_PORT, METRO_READY_TIMEOUT).await;
             this.update_in(cx, |this, window, cx| {
-                this.launch_installed_expo_ios(&workspace, window, cx);
+                if ready {
+                    this.launch_installed_expo_ios(&workspace, window, cx);
+                } else {
+                    this.ios_simulator_error = Some(t!(
+                        "sidebar.devices.metro_not_ready",
+                        port = METRO_PORT
+                    ));
+                    cx.notify();
+                }
             })
         })
         .detach_and_log_err(cx);
-    }
-
-    fn spawn_terminal_task(
-        &mut self,
-        workspace: &Entity<Workspace>,
-        platform: &str,
-        task_name: &str,
-        label: &str,
-        command: &str,
-        arguments: Vec<String>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let project = workspace.read(cx).project().clone();
-        if !project.read(cx).is_local() {
-            return;
-        }
-        let Some(project_directory) = project
-            .read(cx)
-            .active_project_directory(cx)
-            .map(|path| path.to_path_buf())
-        else {
-            return;
-        };
-
-        let command_label = std::iter::once(command)
-            .chain(arguments.iter().map(String::as_str))
-            .join(" ");
-        let task = SpawnInTerminal {
-            id: TaskId(format!(
-                "{platform}-{task_name}-{}",
-                project_directory.display()
-            )),
-            full_label: label.to_owned(),
-            label: label.to_owned(),
-            command: Some(command.to_owned()),
-            args: arguments,
-            command_label,
-            cwd: Some(project_directory),
-            env: HashMap::default(),
-            use_new_terminal: true,
-            allow_concurrent_runs: false,
-            reveal: RevealStrategy::Always,
-            reveal_target: RevealTarget::Dock,
-            hide: HideStrategy::Never,
-            shell: Shell::System,
-            show_summary: true,
-            show_command: true,
-            show_rerun: true,
-            save: SaveStrategy::None,
-        };
-
-        workspace.update(cx, |workspace, cx| {
-            workspace.spawn_in_terminal(task, window, cx).detach();
-        });
     }
 
     fn build_expo_android(
@@ -11854,13 +11880,12 @@ impl Sidebar {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.spawn_terminal_task(
+        self.spawn_expo_task(
             workspace,
-            "android",
-            "build",
-            &t!("sidebar.tasks.build_android"),
-            "yarn",
-            vec!["android".to_owned()],
+            DevicePlatform::Android,
+            ExpoScript::Run,
+            t!("sidebar.tasks.build_android"),
+            None,
             window,
             cx,
         );
@@ -11872,17 +11897,12 @@ impl Sidebar {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.spawn_terminal_task(
+        self.spawn_expo_task(
             workspace,
-            "android",
-            "start",
-            &t!("sidebar.tasks.start_expo_android"),
-            "yarn",
-            vec![
-                "expo".to_owned(),
-                "start".to_owned(),
-                "--android".to_owned(),
-            ],
+            DevicePlatform::Android,
+            ExpoScript::Start,
+            t!("sidebar.tasks.start_expo_android"),
+            None,
             window,
             cx,
         );
@@ -12687,6 +12707,110 @@ fn expo_bundle_identifier(
                 field = pointer.trim_start_matches('/').replace('/', ".")
             )
         })
+}
+
+const METRO_PORT: u16 = 8081;
+const METRO_READY_TIMEOUT: Duration = Duration::from_secs(120);
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ExpoScript {
+    /// Metro (`expo start`).
+    Start,
+    /// Build, install and open the app (`expo run:<platform>`).
+    Run,
+}
+
+async fn resolve_expo_command(
+    fs: Arc<dyn Fs>,
+    project_directory: &Path,
+    platform: DevicePlatform,
+    script: ExpoScript,
+    device_id: Option<String>,
+) -> (String, Vec<String>) {
+    let package_manager = if fs.is_file(&project_directory.join("yarn.lock")).await {
+        "yarn"
+    } else if fs.is_file(&project_directory.join("pnpm-lock.yaml")).await {
+        "pnpm"
+    } else if fs.is_file(&project_directory.join("bun.lockb")).await
+        || fs.is_file(&project_directory.join("bun.lock")).await
+    {
+        "bun"
+    } else {
+        "npm"
+    };
+    let scripts: HashSet<String> = fs
+        .load(&project_directory.join("package.json"))
+        .await
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|package| {
+            package
+                .get("scripts")?
+                .as_object()
+                .map(|scripts| scripts.keys().cloned().collect())
+        })
+        .unwrap_or_default();
+    let platform_name = match platform {
+        DevicePlatform::Ios => "ios",
+        DevicePlatform::Android => "android",
+    };
+    let (script_name, extra, expo_arguments) = match script {
+        ExpoScript::Start => {
+            let extra: Vec<String> = match platform {
+                DevicePlatform::Android => vec!["--android".to_string()],
+                DevicePlatform::Ios => Vec::new(),
+            };
+            ("start", extra, vec!["expo".to_string(), "start".to_string()])
+        }
+        ExpoScript::Run => {
+            let extra: Vec<String> = device_id
+                .map(|id| vec!["--device".to_string(), id])
+                .unwrap_or_default();
+            (
+                platform_name,
+                extra,
+                vec!["expo".to_string(), format!("run:{platform_name}")],
+            )
+        }
+    };
+    if scripts.contains(script_name) {
+        let mut arguments = match package_manager {
+            "yarn" => vec![script_name.to_string()],
+            _ => vec!["run".to_string(), script_name.to_string()],
+        };
+        // npm only forwards arguments after `--`.
+        if package_manager == "npm" && !extra.is_empty() {
+            arguments.push("--".to_string());
+        }
+        arguments.extend(extra);
+        (package_manager.to_string(), arguments)
+    } else {
+        let mut arguments = expo_arguments;
+        arguments.extend(extra);
+        ("npx".to_string(), arguments)
+    }
+}
+
+async fn wait_for_port(executor: BackgroundExecutor, port: u16, timeout: Duration) -> bool {
+    let started = std::time::Instant::now();
+    loop {
+        let reachable = executor
+            .spawn(async move {
+                std::net::TcpStream::connect_timeout(
+                    &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
+                    Duration::from_millis(300),
+                )
+                .is_ok()
+            })
+            .await;
+        if reachable {
+            return true;
+        }
+        if started.elapsed() > timeout {
+            return false;
+        }
+        executor.timer(Duration::from_millis(500)).await;
+    }
 }
 
 async fn resolve_expo_bundle_identifier(

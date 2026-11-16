@@ -97,6 +97,8 @@ actions!(
     [
         /// Reruns the last executed task in the terminal.
         RerunTask,
+        /// Stops the task running in the terminal.
+        StopTask,
     ]
 );
 
@@ -732,6 +734,10 @@ impl TerminalView {
         cx.notify();
     }
 
+    fn stop_task(&mut self, _: &StopTask, _window: &mut Window, cx: &mut Context<Self>) {
+        self.terminal.update(cx, |terminal, _| terminal.kill_active_task());
+    }
+
     fn rerun_task(&mut self, _: &RerunTask, window: &mut Window, cx: &mut Context<Self>) {
         if self.read_only {
             return;
@@ -1194,6 +1200,26 @@ impl TerminalView {
         self.terminal = terminal;
     }
 
+    fn stop_button(&self) -> Option<IconButton> {
+        if self.read_only {
+            return None;
+        }
+        let terminal = self.terminal.downgrade();
+        Some(
+            IconButton::new("stop-icon", IconName::Stop)
+                .icon_size(IconSize::Small)
+                .size(ButtonSize::Compact)
+                .icon_color(Color::Error)
+                .shape(ui::IconButtonShape::Square)
+                .tooltip(move |_window, cx| Tooltip::for_action("Stop task", &StopTask, cx))
+                .on_click(move |_, _window, cx| {
+                    terminal
+                        .update(cx, |terminal, _| terminal.kill_active_task())
+                        .log_err();
+                }),
+        )
+    }
+
     fn rerun_button(&self, task: &TaskState) -> Option<IconButton> {
         if self.read_only || !task.spawned_task.show_rerun {
             return None;
@@ -1555,6 +1581,7 @@ impl Render for TerminalView {
             .on_action(cx.listener(TerminalView::show_character_palette))
             .on_action(cx.listener(TerminalView::select_all))
             .on_action(cx.listener(TerminalView::rerun_task))
+            .on_action(cx.listener(TerminalView::stop_task))
             .on_action(cx.listener(TerminalView::rename_terminal))
             .on_key_down(cx.listener(Self::key_down))
             .on_mouse_down(
@@ -1695,7 +1722,7 @@ impl Item for TerminalView {
                 TaskStatus::Running => (
                     IconName::PlayFilled,
                     Color::Disabled,
-                    self.rerun_button(terminal_task),
+                    self.stop_button(),
                 ),
                 TaskStatus::Unknown => (
                     IconName::Warning,

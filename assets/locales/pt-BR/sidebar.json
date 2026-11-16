@@ -395,5 +395,6 @@
   "ios_manager.create_other_version": "Criar com outra versão…",
   "ios_manager.ios_version": "Versão do iOS",
   "ios_manager.edit_footer": "O idioma vale a partir da próxima inicialização; nada é apagado.",
-  "thread.edit": "Editar thread (título e contexto)"
+  "thread.edit": "Editar thread (título e contexto)",
+  "devices.metro_not_ready": "O Metro não respondeu em :{port}. Veja o terminal do Metro."
 }

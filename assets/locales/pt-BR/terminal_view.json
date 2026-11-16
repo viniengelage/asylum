@@ -10,5 +10,7 @@
   "panel.split_right": "Dividir à direita",
   "panel.split_up": "Dividir para cima",
   "panel.zoom_in": "Ampliar",
-  "panel.zoom_out": "Reduzir"
+  "panel.zoom_out": "Reduzir",
+  "task_already_running": "“{label}” ainda está rodando; a nova execução começa quando ele terminar",
+  "task_restart_now": "Reiniciar agora"
 }
