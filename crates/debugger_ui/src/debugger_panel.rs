@@ -686,6 +686,16 @@ impl DebugPanel {
             .as_ref()
             .map(|session| session.read(cx).running_state())
             .and_then(|state| state.read(cx).thread_status(cx))
+            .or_else(|| {
+                // js-debug (and so React Native) keeps the threads in a child session; the parent
+                // has none, which used to read as "exited" and disable every control.
+                let children = self.sessions_with_children.get(active_session.as_ref()?)?;
+                children.iter().find_map(|child| {
+                    let child = child.upgrade()?;
+                    let running_state = child.read(cx).running_state().clone();
+                    running_state.read(cx).thread_status(cx)
+                })
+            })
             .unwrap_or(project::debugger::session::ThreadStatus::Exited);
 
         Some(

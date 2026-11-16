@@ -59,7 +59,8 @@ use util::ResultExt;
 use variable_list::VariableList;
 use workspace::{
     ActivePaneDecorator, DraggedTab, Item, ItemHandle, Member, Pane, PaneGroup, SplitDirection,
-    Workspace, item::TabContentParams, move_item, pane::Event,
+    Toast, Workspace, item::TabContentParams, move_item, notifications::NotificationId,
+    pane::Event,
 };
 
 static PROCESS_ID_PLACEHOLDER: LazyLock<String> =
@@ -938,6 +939,22 @@ impl RunningState {
                     SessionEvent::Threads => {
                         let threads = this.session.update(cx, |this, cx| this.threads(cx));
                         this.select_current_thread(&threads, window, cx);
+                    }
+                    SessionEvent::RequestFailed(message) => {
+                        struct DebugRequestFailed;
+                        let message = message.clone();
+                        this.workspace
+                            .update(cx, |workspace, cx| {
+                                workspace.show_toast(
+                                    Toast::new(
+                                        NotificationId::unique::<DebugRequestFailed>(),
+                                        message.to_string(),
+                                    )
+                                    .autohide(),
+                                    cx,
+                                );
+                            })
+                            .log_err();
                     }
                     SessionEvent::CapabilitiesLoaded => {
                         let capabilities = this.capabilities(cx);

@@ -570,11 +570,42 @@ impl RunningMode {
 
         let request_clone = request.clone();
         let connection = self.client.clone();
+        let executor = self.executor.clone();
         self.executor.spawn(async move {
             let args = request_clone.to_dap();
-            let response = connection.request::<R::DapRequest>(args).await?;
+            let command = <R::DapRequest as dap::requests::Request>::COMMAND;
+            let response = match dap_request_timeout(command) {
+                Some(timeout) => {
+                    let response = connection.request::<R::DapRequest>(args).fuse();
+                    let timer = executor.timer(timeout).fuse();
+                    futures::pin_mut!(response, timer);
+                    futures::select_biased! {
+                        response = response => response?,
+                        _ = timer => anyhow::bail!(
+                            "the debug adapter did not answer `{command}` within {} s",
+                            timeout.as_secs()
+                        ),
+                    }
+                }
+                None => connection.request::<R::DapRequest>(args).await?,
+            };
             request.response_from_dap(response)
         })
+    }
+}
+
+/// How long to wait for the adapter before giving up on a request. A hung adapter used to leave
+/// the thread "stepping" forever with every control disabled, and Stop waiting on it too.
+/// Launch and attach are left alone: attaching to a React Native app legitimately takes minutes.
+fn dap_request_timeout(command: &str) -> Option<Duration> {
+    match command {
+        "launch" | "attach" | "initialize" | "configurationDone" | "runInTerminal"
+        | "startDebugging" => None,
+        "next" | "stepIn" | "stepOut" | "stepBack" | "reverseContinue" | "continue" | "pause"
+        | "terminate" | "disconnect" | "restart" | "restartFrame" | "terminateThreads" => {
+            Some(Duration::from_secs(10))
+        }
+        _ => Some(Duration::from_secs(30)),
     }
 }
 
@@ -807,6 +838,9 @@ pub enum SessionEvent {
     DataBreakpointInfo,
     ConsoleOutput,
     HistoricSnapshotSelected,
+    /// A step, continue or pause failed or timed out; the UI should say so instead of
+    /// leaving the controls looking stuck.
+    RequestFailed(SharedString),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2130,15 +2164,17 @@ impl Session {
         thread_id: ThreadId,
     ) -> impl FnOnce(&mut Self, Result<T::Response>, &mut Context<Self>) -> Option<T::Response> + 'static
     {
-        move |this, response, cx| match response.log_err() {
-            Some(response) => {
+        move |this, response, cx| match response {
+            Ok(response) => {
                 this.breakpoint_store.update(cx, |store, cx| {
                     store.remove_active_position(Some(this.session_id()), cx)
                 });
                 Some(response)
             }
-            None => {
+            Err(error) => {
+                log::error!("{error:#}");
                 this.active_snapshot.thread_states.stop_thread(thread_id);
+                cx.emit(SessionEvent::RequestFailed(format!("{error:#}").into()));
                 cx.notify();
                 None
             }
@@ -2153,8 +2189,8 @@ impl Session {
         &mut Context<Self>,
     ) -> Option<dap::ContinueResponse>
     + 'static {
-        move |this, response, cx| match response.log_err() {
-            Some(response) => {
+        move |this, response, cx| match response {
+            Ok(response) => {
                 if response.all_threads_continued.unwrap_or(true) {
                     this.active_snapshot.thread_states.continue_all_threads();
                 } else {
@@ -2169,8 +2205,10 @@ impl Session {
                 cx.notify();
                 Some(response)
             }
-            None => {
+            Err(error) => {
+                log::error!("{error:#}");
                 this.active_snapshot.thread_states.stop_thread(thread_id);
+                cx.emit(SessionEvent::RequestFailed(format!("{error:#}").into()));
                 cx.notify();
                 None
             }

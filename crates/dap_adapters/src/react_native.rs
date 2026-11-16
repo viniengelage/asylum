@@ -9,7 +9,6 @@ use gpui::AsyncApp;
 use serde_json::{Value, json};
 use std::{path::PathBuf, sync::OnceLock};
 use task::{DebugScenario, ZedDebugConfig};
-use util::ResultExt;
 
 use crate::{javascript::JsDebugAdapter, *};
 
@@ -315,20 +314,27 @@ impl DebugAdapter for ReactNativeExpoDebugAdapter {
                 "Checking latest version of {}...",
                 JsDebugAdapter::ADAPTER_NPM_NAME
             ));
-            if let Some(version) = JsDebugAdapter::default()
+            match JsDebugAdapter::default()
                 .fetch_latest_adapter_version(delegate)
                 .await
-                .log_err()
             {
-                adapters::download_adapter_from_github(
-                    JsDebugAdapter::ADAPTER_NAME.into(),
-                    version,
-                    adapters::DownloadedFileType::GzipTar,
-                    delegate.as_ref(),
-                )
-                .await?;
-            } else {
-                delegate.output_to_console("JavaScript debug adapter is up to date".to_owned());
+                Ok(version) => {
+                    adapters::download_adapter_from_github(
+                        JsDebugAdapter::ADAPTER_NAME.into(),
+                        version,
+                        adapters::DownloadedFileType::GzipTar,
+                        delegate.as_ref(),
+                    )
+                    .await?;
+                }
+                // Not knowing the latest version is not the same as being up to date: say so,
+                // and carry on with whatever version is installed.
+                Err(error) => {
+                    log::warn!("checking the JavaScript debug adapter version: {error:#}");
+                    delegate.output_to_console(format!(
+                        "Could not check for a newer JavaScript debug adapter ({error:#}); using the installed one"
+                    ));
+                }
             }
         }
 
