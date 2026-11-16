@@ -2,6 +2,7 @@ mod palette;
 mod panel;
 mod quick_note;
 mod store;
+mod thread_context;
 
 use std::path::PathBuf;
 use std::time::SystemTime;
@@ -16,8 +17,10 @@ use workspace::Workspace;
 pub use palette::NotesPalette;
 pub use panel::NotesPanel;
 pub use quick_note::QuickNote;
+pub use thread_context::ThreadContextEditor;
 pub use store::{
-    NewNote, Note, NoteKind, NoteScope, NotesStore, PIN_SLOTS, global_notes_dir, title_from_text,
+    NewNote, Note, NoteKind, NoteScope, NotesStore, PIN_SLOTS, context_line, global_notes_dir,
+    title_from_text,
 };
 pub use zed_actions::notes::InsertText;
 

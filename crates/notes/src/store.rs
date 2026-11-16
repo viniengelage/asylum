@@ -98,6 +98,27 @@ pub fn title_from_text(text: &str) -> String {
     title
 }
 
+/// The first paragraph of a note as plain text, for one-line previews such as the thread list.
+pub fn context_line(body: &str) -> String {
+    body.split("\n\n")
+        .map(|paragraph| {
+            paragraph
+                .lines()
+                .map(|line| {
+                    line.trim()
+                        .trim_start_matches('#')
+                        .trim_start_matches("- ")
+                        .trim_start_matches("* ")
+                        .trim()
+                })
+                .filter(|line| !line.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .find(|paragraph| !paragraph.is_empty())
+        .unwrap_or_default()
+}
+
 pub fn parse_note(path: &Path, text: &str, scope: NoteScope, modified: SystemTime) -> Note {
     let (frontmatter, body) = split_frontmatter(text);
     let (frontmatter, invalid) = match frontmatter {
@@ -397,6 +418,54 @@ impl NotesStore {
             this.update(cx, |this, cx| this.reload(scope, cx))?.await;
             Ok(())
         })
+    }
+
+    /// The note that holds a thread's context, written from the thread's "Edit thread" popover.
+    pub fn note_for_thread(&self, thread_key: &str) -> Option<&Note> {
+        self.notes
+            .values()
+            .flatten()
+            .find(|note| note.thread.as_deref() == Some(thread_key))
+    }
+
+    /// Creates, rewrites or (when the body is empty) deletes the context note of a thread.
+    pub fn save_thread_context(
+        &mut self,
+        thread_key: String,
+        title: String,
+        body: String,
+        scope: NoteScope,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<()>> {
+        if let Some(note) = self.note_for_thread(&thread_key).cloned() {
+            if body.trim().is_empty() {
+                return self.delete(&note, cx);
+            }
+            let text = serialize_note(
+                &title,
+                note.kind,
+                note.pin,
+                &note.tags,
+                Some(&thread_key),
+                &body,
+            );
+            return self.write(&note, text, cx);
+        }
+        if body.trim().is_empty() {
+            return Task::ready(Ok(()));
+        }
+        let created = self.create(
+            NewNote {
+                title,
+                body,
+                kind: NoteKind::Note,
+                scope,
+                pin: None,
+                thread: Some(thread_key),
+            },
+            cx,
+        );
+        cx.background_spawn(async move { created.await.map(|_| ()) })
     }
 
     pub fn delete(&mut self, note: &Note, cx: &mut Context<Self>) -> Task<Result<()>> {

@@ -394,5 +394,6 @@
   "ios_manager.version_fixed_detail": "simctl can't change a simulator's runtime. To test on another version, create a new simulator with the same model — Duplicate keeps iOS {version}.",
   "ios_manager.create_other_version": "Create with another version…",
   "ios_manager.ios_version": "iOS version",
-  "ios_manager.edit_footer": "The language applies from the next start; nothing is erased."
+  "ios_manager.edit_footer": "The language applies from the next start; nothing is erased.",
+  "thread.edit": "Edit thread (title and context)"
 }

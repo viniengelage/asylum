@@ -17259,6 +17259,7 @@ dependencies = [
  "log",
  "menu",
  "node_runtime",
+ "notes",
  "notifications",
  "platform_title_bar",
  "pretty_assertions",

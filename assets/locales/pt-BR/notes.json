@@ -45,5 +45,13 @@
   "time.days": "há {count} dias",
   "time.hours": "há {count} h",
   "time.minutes": "há {count} min",
-  "time.now": "agora"
+  "time.now": "agora",
+  "thread_context.heading": "Editar thread",
+  "thread_context.title": "Título",
+  "thread_context.context": "Contexto",
+  "thread_context.markdown": "Markdown",
+  "thread_context.saved": "Markdown · salvo",
+  "thread_context.placeholder": "Para que serve esta thread? O que foi decidido, o que falta?",
+  "thread_context.hint": "A primeira linha aparece na lista. Fica numa nota ligada a esta thread.",
+  "thread_context.done": "Pronto"
 }

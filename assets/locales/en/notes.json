@@ -45,5 +45,13 @@
   "time.days": "{count} d ago",
   "time.hours": "{count} h ago",
   "time.minutes": "{count} min ago",
-  "time.now": "now"
+  "time.now": "now",
+  "thread_context.heading": "Edit thread",
+  "thread_context.title": "Title",
+  "thread_context.context": "Context",
+  "thread_context.markdown": "Markdown",
+  "thread_context.saved": "Markdown · saved",
+  "thread_context.placeholder": "What is this thread for? What was decided, what is missing?",
+  "thread_context.hint": "The first line shows in the thread list. Saved as a note tied to this thread.",
+  "thread_context.done": "Done"
 }

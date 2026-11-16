@@ -1547,6 +1547,7 @@ pub struct Sidebar {
     project_header_new_thread_menu_handles: HashMap<usize, PopoverMenuHandle<ContextMenu>>,
     project_header_menu_ix: Option<usize>,
     worktree_default_branches: HashMap<ProjectGroupKey, DefaultBranchCache>,
+    observing_notes: bool,
     _subscriptions: Vec<gpui::Subscription>,
     _draft_editor_observations: Vec<gpui::Subscription>,
     update_task: Option<Task<()>>,
@@ -1750,6 +1751,7 @@ impl Sidebar {
             project_header_new_thread_menu_handles: HashMap::new(),
             project_header_menu_ix: None,
             worktree_default_branches: HashMap::new(),
+            observing_notes: false,
             _subscriptions: Vec::new(),
             _draft_editor_observations: Vec::new(),
             update_task: None,
@@ -2703,8 +2705,17 @@ impl Sidebar {
                 let workspace_matched = !workspace_highlight_positions.is_empty();
 
                 let mut matched_threads: Vec<Arc<ThreadEntry>> = Vec::new();
+                let notes_store = notes::NotesStore::try_global(cx);
+                let lowercase_query = query.to_lowercase();
                 for mut thread in threads {
                     let mut worktree_matched = false;
+                    // The user's context note counts as part of the thread when searching.
+                    let context_matched = notes_store.as_ref().is_some_and(|store| {
+                        store
+                            .read(cx)
+                            .note_for_thread(&thread.metadata.thread_id.to_key_string())
+                            .is_some_and(|note| note.body.to_lowercase().contains(&lowercase_query))
+                    });
                     {
                         let thread = Arc::make_mut(&mut thread);
                         let title = thread.metadata.display_title();
@@ -2724,6 +2735,7 @@ impl Sidebar {
                     if workspace_matched
                         || !thread.highlight_positions.is_empty()
                         || worktree_matched
+                        || context_matched
                     {
                         matched_threads.push(thread);
                     }
@@ -2888,6 +2900,7 @@ impl Sidebar {
             self.entry_shapes(multi_workspace.read(cx)).collect();
 
         self.rebuild_contents(cx);
+        self.watch_thread_context_notes(cx);
         self.refresh_task_agents(cx);
         self.refresh_refilled_draft_times(cx);
         self.refresh_draft_editor_observations(cx);
@@ -4327,6 +4340,79 @@ impl Sidebar {
             }
             _ => {}
         }
+    }
+
+    /// Thread context notes live in each thread's project; the store only reads folders it was
+    /// asked to watch, so the sidebar asks for every project that has a listed thread.
+    fn watch_thread_context_notes(&mut self, cx: &mut Context<Self>) {
+        let roots: HashSet<PathBuf> = self
+            .contents
+            .entries
+            .iter()
+            .filter_map(|entry| match entry {
+                ListEntry::Thread(thread) => {
+                    thread.metadata.main_worktree_paths().paths().first().cloned()
+                }
+                _ => None,
+            })
+            .collect();
+        if roots.is_empty() {
+            return;
+        }
+        let store = notes::NotesStore::global(cx);
+        if !self.observing_notes {
+            self.observing_notes = true;
+            cx.observe(&store, |_, _, cx| cx.notify()).detach();
+        }
+        store.update(cx, |store, cx| {
+            for root in roots {
+                store.watch_project(root, cx);
+            }
+        });
+    }
+
+    fn open_thread_context_editor(
+        &mut self,
+        metadata: &ThreadMetadata,
+        title: SharedString,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(workspace) = self.active_workspace(cx) else {
+            return;
+        };
+        let main_root = metadata.main_worktree_paths().paths().first().cloned();
+        let scope = match &main_root {
+            Some(root) => notes::NoteScope::Project(root.clone()),
+            None => notes::NoteScope::Global,
+        };
+        let subtitle: SharedString = main_root
+            .as_ref()
+            .and_then(|root| root.file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default()
+            .into();
+        let thread_id = metadata.thread_id;
+        let sidebar = cx.entity().downgrade();
+        workspace.update(cx, |workspace, cx| {
+            workspace.toggle_modal(window, cx, move |window, cx| {
+                notes::ThreadContextEditor::new(
+                    thread_id.to_key_string(),
+                    scope,
+                    title,
+                    subtitle,
+                    move |new_title, window, cx| {
+                        sidebar
+                            .update(cx, |sidebar, cx| {
+                                sidebar.apply_thread_rename(thread_id, new_title, window, cx)
+                            })
+                            .log_err();
+                    },
+                    window,
+                    cx,
+                )
+            });
+        });
     }
 
     fn apply_thread_rename(
@@ -7189,8 +7275,15 @@ impl Sidebar {
             .then(|| thread.metadata.task_agent.clone())
             .flatten()
             .map(|command| SharedString::from(format!("/{command}")));
+        let thread_context = notes::NotesStore::try_global(cx).and_then(|store| {
+            store
+                .read(cx)
+                .note_for_thread(&thread.metadata.thread_id.to_key_string())
+                .map(|note| SharedString::from(notes::context_line(&note.body)))
+        });
         let thread_item = ThreadItem::new(id, title.clone())
             .base_bg(sidebar_bg)
+            .when_some(thread_context, |this, context| this.context(context))
             .icon(icon)
             .when_some(agent_label, |this, label| this.agent_label(label))
             .when(is_draft, |this| {
@@ -7232,27 +7325,12 @@ impl Sidebar {
                     .hover_background(button_hover_bg)
                     .active_background(button_active_bg)
                     .icon_size(IconSize::Small)
-                    .tooltip({
-                        let focus_handle = focus_handle.clone();
-                        move |_window, cx| {
-                            Tooltip::for_action_in(
-                                "Rename Thread",
-                                &RenameSelectedThread,
-                                &focus_handle,
-                                cx,
-                            )
-                        }
-                    })
+                    .tooltip(Tooltip::text(t!("sidebar.thread.edit")))
                     .on_click({
                         let title = title.clone();
+                        let metadata = metadata.clone();
                         cx.listener(move |this, _, window, cx| {
-                            this.start_renaming_entry(
-                                ix,
-                                RenameTarget::Thread(thread_id_for_actions),
-                                title.clone(),
-                                window,
-                                cx,
-                            );
+                            this.open_thread_context_editor(&metadata, title.clone(), window, cx);
                         })
                     });
 

@@ -43,6 +43,7 @@ pub struct ThreadItem {
     custom_icon_from_external_svg: Option<SharedString>,
     title: SharedString,
     title_slot: Option<AnyElement>,
+    context: Option<SharedString>,
     title_label_color: Option<Color>,
     title_generating: bool,
     highlight_positions: Vec<usize>,
@@ -78,6 +79,7 @@ impl ThreadItem {
             icon_visible: true,
             custom_icon_from_external_svg: None,
             title: title.into(),
+            context: None,
             title_slot: None,
             title_label_color: None,
             title_generating: false,
@@ -160,6 +162,13 @@ impl ThreadItem {
 
     pub fn title_label_color(mut self, color: Color) -> Self {
         self.title_label_color = Some(color);
+        self
+    }
+
+    /// The user's own line about what the thread is for, shown under the title.
+    pub fn context(mut self, context: impl Into<SharedString>) -> Self {
+        let context = context.into();
+        self.context = (!context.trim().is_empty()).then_some(context);
         self
     }
 
@@ -502,6 +511,22 @@ impl RenderOnce for ThreadItem {
                         })
                     }),
             )
+            .when_some(self.context, |this, context| {
+                this.child(
+                    h_flex()
+                        .gap_1p5()
+                        .items_start()
+                        .child(icon_container())
+                        .child(
+                            div().min_w_0().flex_1().child(
+                                Label::new(context)
+                                    .size(LabelSize::Small)
+                                    .color(Color::Muted)
+                                    .line_clamp(2),
+                            ),
+                        ),
+                )
+            })
             .when(has_metadata, |this| {
                 this.child(
                     h_flex()
