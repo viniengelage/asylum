@@ -25,6 +25,12 @@ estacionar ou colar.
 - Editor aceita blocos customizados (`BlockProperties`, usados em diagnostics/hover).
 - `markdown_preview` já renderiza imagens (`RetainAllImageCache`), útil como referência de carregamento.
 
+**Descoberto em 2026-11-16:** o editor do Zed já salva imagem colada num `.md` ao lado do arquivo e insere
+`![…](…)` (`editor/src/clipboard.rs`, `paste_item`). Nas notas isso já funciona (fica ao lado da nota, não
+em `assets/`). Falta o bloco inline e a nota rápida.
+
+**Feito em aad1535a6a:** `Mention::Note { content, images }` — `@nota` manda as imagens locais da nota.
+
 ## Fase 1 — colar e arrastar + bloco inline
 
 1. `notes::assets_dir(note_path)` + `save_image(note, bytes, ext) -> relative_path` (nome

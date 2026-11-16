@@ -44,6 +44,10 @@ O contexto é **uma nota do sistema de Notas ligada à thread**, não um campo n
 4. Busca da sidebar procura também no contexto.
 5. Arquivar não apaga a nota. Apagar a thread pergunta se apaga a nota junto.
 
+**Feito em a4857e2d82:** o "Editar thread" abre como modal do workspace (`notes::ThreadContextEditor`),
+não como popover ancorado ao lápis: o lápis só existe com o mouse sobre a linha, e o popover fecharia ao
+mover o mouse para ele. A chave da nota é o `ThreadId` (`to_key_string`), não o `session_id`.
+
 ## Fase 2 — topo da conversa
 
 1. Card embaixo da barra da thread no agent_panel:

@@ -64,6 +64,8 @@ Tasks:
 2. Ação `task::Stop` (e `task::Restart`) chamando `kill_active_task`; botão na aba do terminal ao lado do rerun.
 3. Variável faltando → toast dizendo qual; saída ≠ 0 → aviso na aba (não só log).
 4. Args: quotar cada arg (`shlex::try_quote`) em vez de `build_no_quote`; teste com arg com espaço.
+   **Adiado (2026-11-16):** é comportamento do upstream e quebraria tasks que contam com glob/expansão
+   do shell nos args. Rever junto com o editor de task (fase 2), talvez como opção por task.
 5. Dock Devices: gerar `TaskTemplate` a partir dos scripts do projeto (`start`, `ios`, `android`; detectar
    gerenciador pelo lockfile como o typescript.rs já faz), passar pelo `schedule_task` normal (histórico,
    toast, rerun), esperar o Metro responder em `:8081/status` antes de abrir o app (no lugar do timer de 3 s).
