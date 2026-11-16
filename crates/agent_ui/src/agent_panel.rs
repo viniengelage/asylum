@@ -60,7 +60,6 @@ use editor::{Editor, MultiBuffer};
 use extension_host::ExtensionStore;
 use feature_flags::{CreateThreadToolFeatureFlag, FeatureFlagAppExt as _};
 
-use context_server::ContextServerId;
 use fs::Fs;
 use futures::FutureExt as _;
 use gpui::{
@@ -254,93 +253,112 @@ fn open_global_rules(workspace: &mut Workspace, window: &mut Window, cx: &mut Co
         .detach_and_log_err(cx);
 }
 
-fn add_context_server_entries(
-    mut menu: ContextMenu,
-    store: &Entity<ContextServerStore>,
-    cx: &App,
-) -> ContextMenu {
-    let on_demand_servers = &AgentSettings::get_global(cx).on_demand_context_servers;
-    let servers: Vec<_> = {
-        let store = store.read(cx);
-        store
-            .server_ids()
-            .iter()
-            .map(|id| {
-                let enabled = store.is_server_enabled(id, cx);
-                let status = store
-                    .status_for_server(id)
-                    .unwrap_or(ContextServerStatus::Stopped);
-                let on_demand = on_demand_servers
-                    .iter()
-                    .any(|server| server == id.0.as_ref());
-                (id.clone(), enabled, status, on_demand)
-            })
-            .collect()
-    };
-    if servers.is_empty() {
-        return menu;
-    }
-    for (id, enabled, status, on_demand) in servers {
-        let state = if !enabled {
-            t!("agent_ui.options_menu.mcp_status.off")
-        } else {
-            match status {
-                ContextServerStatus::Running => t!("agent_ui.options_menu.mcp_status.running"),
-                ContextServerStatus::Starting => t!("agent_ui.options_menu.mcp_status.starting"),
-                ContextServerStatus::Stopped if on_demand => {
-                    t!("agent_ui.options_menu.mcp_status.on_demand")
-                }
-                ContextServerStatus::Stopped => t!("agent_ui.options_menu.mcp_status.stopped"),
-                ContextServerStatus::Error(_) => t!("agent_ui.options_menu.mcp_status.error"),
-                ContextServerStatus::AuthRequired
-                | ContextServerStatus::ClientSecretRequired { .. } => {
-                    t!("agent_ui.options_menu.mcp_status.needs_auth")
-                }
-                ContextServerStatus::Authenticating => {
-                    t!("agent_ui.options_menu.mcp_status.authenticating")
-                }
-            }
-        };
-        let store = store.clone();
-        menu = menu.toggleable_entry(
-            format!("{} · {}", id.0, state),
-            enabled,
-            IconPosition::Start,
-            None,
-            move |_window, cx| set_context_server_enabled(&store, &id, !enabled, cx),
-        );
-    }
-    menu.separator()
+/// What the options menu shows next to "MCP servers": a count when all is well, the
+/// servers that need attention otherwise. The list itself lives in the settings page.
+struct McpSummary {
+    enabled: usize,
+    failing: Vec<SharedString>,
+    needs_auth: Vec<SharedString>,
 }
 
-fn set_context_server_enabled(
-    store: &Entity<ContextServerStore>,
-    id: &ContextServerId,
-    enabled: bool,
-    cx: &mut App,
-) {
-    store.update(cx, |store, cx| {
-        if enabled {
-            if let Some(server) = store.get_server(id) {
-                store.start_server(server, cx);
-            }
-        } else {
-            store.stop_server(id, cx).log_err();
+fn mcp_summary(store: &Entity<ContextServerStore>, cx: &App) -> McpSummary {
+    let store = store.read(cx);
+    let mut summary = McpSummary {
+        enabled: 0,
+        failing: Vec::new(),
+        needs_auth: Vec::new(),
+    };
+    for id in store.server_ids() {
+        if !store.is_server_enabled(id, cx) {
+            continue;
         }
-    });
-    let id = id.0.clone();
-    update_settings_file(<dyn Fs>::global(cx), cx, move |settings, _| {
-        settings
-            .project
-            .context_servers
-            .entry(id)
-            .or_insert_with(|| settings::ContextServerSettingsContent::Extension {
-                enabled,
-                remote: false,
-                settings: serde_json::json!({}),
-            })
-            .set_enabled(enabled);
-    });
+        summary.enabled += 1;
+        match store.status_for_server(id) {
+            Some(ContextServerStatus::Error(_)) => {
+                summary.failing.push(SharedString::from(id.0.clone()))
+            }
+            Some(
+                ContextServerStatus::AuthRequired | ContextServerStatus::ClientSecretRequired { .. },
+            ) => summary.needs_auth.push(SharedString::from(id.0.clone())),
+            _ => {}
+        }
+    }
+    summary
+}
+
+fn render_mcp_menu_entry(summary: &McpSummary, cx: &App) -> AnyElement {
+    let trailing = if !summary.failing.is_empty() {
+        ui::status_pill(
+            t!(
+                "agent_ui.options_menu.mcp_summary.error",
+                count = summary.failing.len()
+            ),
+            ui::StatusTone::Error,
+            cx,
+        )
+        .into_any_element()
+    } else if !summary.needs_auth.is_empty() {
+        ui::status_pill(
+            t!(
+                "agent_ui.options_menu.mcp_summary.needs_auth",
+                count = summary.needs_auth.len()
+            ),
+            ui::StatusTone::Warning,
+            cx,
+        )
+        .into_any_element()
+    } else {
+        Label::new(t!(
+            "agent_ui.options_menu.mcp_summary.enabled",
+            count = summary.enabled
+        ))
+        .size(LabelSize::Small)
+        .color(Color::Muted)
+        .into_any_element()
+    };
+    h_flex()
+        .w_full()
+        .gap_1p5()
+        .child(
+            Icon::new(IconName::Server)
+                .size(IconSize::Small)
+                .color(Color::Muted),
+        )
+        .child(div().flex_1().child(Label::new(t!("agent_ui.options_menu.mcp_servers"))))
+        .child(trailing)
+        .child(
+            Icon::new(IconName::ArrowUpRight)
+                .size(IconSize::XSmall)
+                .color(Color::Muted),
+        )
+        .into_any_element()
+}
+
+fn render_mcp_attention_aside(summary: &McpSummary) -> Option<ui::DocumentationAside> {
+    if summary.failing.is_empty() && summary.needs_auth.is_empty() {
+        return None;
+    }
+    let failing = summary.failing.clone();
+    let needs_auth = summary.needs_auth.clone();
+    Some(ui::DocumentationAside::new(
+        ui::DocumentationSide::Right,
+        Rc::new(move |_cx| {
+            v_flex()
+                .gap_0p5()
+                .children(failing.iter().map(|name| {
+                    Label::new(t!("agent_ui.options_menu.mcp_attention.error", name = name))
+                        .size(LabelSize::Small)
+                }))
+                .children(needs_auth.iter().map(|name| {
+                    Label::new(t!(
+                        "agent_ui.options_menu.mcp_attention.needs_auth",
+                        name = name
+                    ))
+                    .size(LabelSize::Small)
+                }))
+                .into_any_element()
+        }),
+    ))
 }
 
 fn open_project_rules(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
@@ -512,6 +530,15 @@ pub fn init(cx: &mut App) {
                         workspace.focus_panel::<AgentPanel>(window, cx);
                         panel.update(cx, |panel, cx| panel.manage_skills(action, window, cx));
                     }
+                })
+                .register_action(|_workspace, _: &crate::ManageMcpServers, window, cx| {
+                    window.dispatch_action(
+                        Box::new(zed_actions::OpenSettingsAt {
+                            path: "context_servers".to_string(),
+                            target: None,
+                        }),
+                        cx,
+                    );
                 })
                 .register_action(|workspace, _: &OpenGlobalAgentsMdRules, window, cx| {
                     open_global_rules(workspace, window, cx);
@@ -5903,36 +5930,18 @@ impl AgentPanel {
                                 );
                             }
 
+                            let summary = mcp_summary(&context_server_store, cx);
+                            let aside = render_mcp_attention_aside(&summary);
                             menu = menu
-                                .submenu_with_icon(
-                                    t!("agent_ui.options_menu.mcp_servers"),
-                                    IconName::Server,
-                                    {
-                                        let context_server_store = context_server_store.clone();
-                                        move |mut menu, _window, cx| {
-                                        menu = add_context_server_entries(
-                                            menu,
-                                            &context_server_store,
+                                .custom_entry_with_docs(
+                                    move |_window, cx| render_mcp_menu_entry(&summary, cx),
+                                    |window, cx| {
+                                        window.dispatch_action(
+                                            Box::new(crate::ManageMcpServers),
                                             cx,
-                                        );
-                                        menu.action(
-                                            t!("agent_ui.options_menu.add_server"),
-                                            Box::new(zed_actions::OpenSettingsAt {
-                                                path: "context_servers".to_string(),
-                                                target: None,
-                                            }),
                                         )
-                                        .action(
-                                            t!("agent_ui.options_menu.install_servers"),
-                                            Box::new(zed_actions::Extensions {
-                                                category_filter: Some(
-                                                    zed_actions::ExtensionCategoryFilter::ContextServers,
-                                                ),
-                                                id: None,
-                                            }),
-                                        )
-                                    }
                                     },
+                                    aside,
                                 )
                                 .separator();
                         }

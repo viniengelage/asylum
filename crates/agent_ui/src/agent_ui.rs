@@ -298,6 +298,8 @@ pub(crate) fn agent_sidebar_side(cx: &App) -> &'static str {
 actions!(
     agent,
     [
+        /// Opens the MCP servers page of the settings, where servers are added, signed in and toggled.
+        ManageMcpServers,
         /// Toggles the menu to create new agent threads.
         ToggleNewThreadMenu,
         /// Toggles the options menu for agent settings and preferences.
