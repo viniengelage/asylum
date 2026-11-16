@@ -48,6 +48,11 @@ pub enum Mention {
         tracked_buffers: Vec<Entity<Buffer>>,
     },
     Image(MentionImage),
+    /// A note from the Notes dock: its markdown and the images it links to.
+    Note {
+        content: String,
+        images: Vec<MentionImage>,
+    },
     Link,
 }
 
@@ -162,7 +167,9 @@ impl MentionSet {
                 self.confirm_mention_for_sql_query(abs_path, cx)
             }
             MentionUri::Logs { id, .. } => self.confirm_mention_for_logs(id, cx),
-            MentionUri::Note { abs_path, .. } => self.confirm_mention_for_note(abs_path, cx),
+            MentionUri::Note { abs_path, .. } => {
+                self.confirm_mention_for_note(abs_path, supports_images, cx)
+            }
             MentionUri::ProjectItem {
                 project_id,
                 item_id,
@@ -375,7 +382,9 @@ impl MentionSet {
                 self.confirm_mention_for_sql_query(abs_path, cx)
             }
             MentionUri::Logs { id, .. } => self.confirm_mention_for_logs(id, cx),
-            MentionUri::Note { abs_path, .. } => self.confirm_mention_for_note(abs_path, cx),
+            MentionUri::Note { abs_path, .. } => {
+                self.confirm_mention_for_note(abs_path, supports_images, cx)
+            }
             MentionUri::ProjectItem {
                 project_id,
                 item_id,
@@ -546,18 +555,44 @@ impl MentionSet {
     fn confirm_mention_for_note(
         &self,
         abs_path: PathBuf,
+        supports_images: bool,
         cx: &mut Context<Self>,
     ) -> Task<Result<Mention>> {
         let fs = <dyn fs::Fs>::global(cx);
-        cx.background_spawn(async move {
+        cx.spawn(async move |_, cx| {
             let content = fs
                 .load(&abs_path)
                 .await
                 .with_context(|| format!("reading note {}", abs_path.display()))?;
-            Ok(Mention::Text {
-                content,
-                tracked_buffers: Vec::new(),
-            })
+            let image_paths = if supports_images {
+                note_image_paths(&content, abs_path.parent().unwrap_or(&abs_path))
+            } else {
+                Vec::new()
+            };
+            let mut images = Vec::new();
+            for image_path in image_paths {
+                // A missing or unreadable image shouldn't drop the note's text.
+                let Some(bytes) = fs.load_bytes(&image_path).await.log_err() else {
+                    continue;
+                };
+                let Some(format) = image::guess_format(&bytes)
+                    .ok()
+                    .and_then(image_format_from_external_content)
+                else {
+                    continue;
+                };
+                let image = Arc::new(Image::from_bytes(format, bytes));
+                let image = cx
+                    .update(|cx| LanguageModelImage::from_image(image, cx))
+                    .await;
+                if let Some(image) = image {
+                    images.push(MentionImage {
+                        data: image.source,
+                        format: LanguageModelImage::FORMAT,
+                    });
+                }
+            }
+            Ok(Mention::Note { content, images })
         })
     }
 
@@ -929,6 +964,22 @@ mod tests {
     use theme;
     use util::path;
 
+    #[test]
+    fn note_image_paths_resolve_local_images_only() {
+        let note_directory = Path::new("/project/.zed/notes");
+        let markdown = "Antes:\n![antes](assets/pin-1.png)\n![depois](assets/pin-2.jpg \"title\")\n\
+            ![remota](https://example.com/a.png) ![svg](assets/icon.svg)\n\
+            ![de novo](assets/pin-1.png) ![absoluta](/tmp/shot.webp) [link](not-an-image.png)";
+        assert_eq!(
+            note_image_paths(markdown, note_directory),
+            vec![
+                note_directory.join("assets/pin-1.png"),
+                note_directory.join("assets/pin-2.jpg"),
+                Path::new("/tmp/shot.webp").to_path_buf(),
+            ]
+        );
+    }
+
     fn init_test(cx: &mut TestAppContext) {
         let settings_store = cx.update(SettingsStore::test);
         cx.set_global(settings_store);
@@ -1168,6 +1219,40 @@ fn image_format_from_external_content(format: image::ImageFormat) -> Option<Imag
 
 // Case-insensitive so that e.g. `foo.PNG` is recognized the same as `foo.png`.
 // SVG is excluded because it is handled separately.
+/// Local images a note links to with `![alt](path)`, resolved against the note's folder.
+/// Remote URLs are left out: the note's text already carries them.
+fn note_image_paths(markdown: &str, note_directory: &Path) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    let mut rest = markdown;
+    while let Some(start) = rest.find("![") {
+        rest = &rest[start + 2..];
+        let Some(close) = rest.find("](") else {
+            break;
+        };
+        rest = &rest[close + 2..];
+        let Some(end) = rest.find(')') else {
+            break;
+        };
+        let target = rest[..end].trim();
+        // `![alt](path "title")` keeps only the path.
+        let target = target.split_whitespace().next().unwrap_or_default();
+        rest = &rest[end + 1..];
+        if target.is_empty() || target.contains("://") || target.starts_with("data:") {
+            continue;
+        }
+        let path = Path::new(target);
+        let path = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            note_directory.join(path)
+        };
+        if is_raster_image_path(&path) && !paths.contains(&path) {
+            paths.push(path);
+        }
+    }
+    paths
+}
+
 fn is_raster_image_path(path: &Path) -> bool {
     let Some(extension) = path.extension().and_then(OsStr::to_str) else {
         return false;

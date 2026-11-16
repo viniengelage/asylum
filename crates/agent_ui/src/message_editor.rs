@@ -2295,12 +2295,31 @@ fn build_chunks_from_creases(
         if crease_range.start.0 > ix {
             chunks.push(text[ix..crease_range.start.0].into());
         }
-        chunks.push(mention_to_content_block(
-            &uri,
-            mention.as_ref(),
-            supports_embedded_context,
-            &mut tracked_buffers,
-        ));
+        if let Some(Mention::Note { content, images }) = mention.as_ref() {
+            // A note goes as its text plus one image block per image it links to.
+            chunks.push(mention_to_content_block(
+                &uri,
+                Some(&Mention::Text {
+                    content: content.clone(),
+                    tracked_buffers: Vec::new(),
+                }),
+                supports_embedded_context,
+                &mut tracked_buffers,
+            ));
+            chunks.extend(images.iter().map(|image| {
+                acp_v2::ContentBlock::Image(acp_v2::ImageContent::new(
+                    image.data.clone(),
+                    image.format.mime_type(),
+                ))
+            }));
+        } else {
+            chunks.push(mention_to_content_block(
+                &uri,
+                mention.as_ref(),
+                supports_embedded_context,
+                &mut tracked_buffers,
+            ));
+        }
         ix = crease_range.end.0;
     }
 
