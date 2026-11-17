@@ -46,9 +46,8 @@ use feature_flags::{
 use fs::Fs;
 
 use gpui::{
-    Action as _, AnyElement, App, AsyncApp, BackgroundExecutor, Bounds, ClickEvent,
-    ClipboardItem, Context,
-    DismissEvent, Entity, EntityId, FocusHandle, Focusable, FontWeight, Hsla, KeyContext,
+    Action as _, AnyElement, App, AsyncApp, BackgroundExecutor, Bounds, ClickEvent, ClipboardItem,
+    Context, DismissEvent, Entity, EntityId, FocusHandle, Focusable, FontWeight, Hsla, KeyContext,
     KeyDownEvent, ListState, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     ObjectFit, Pixels, Point, Render, Role, SharedString, Stateful, StyledImage as _, Task,
     TaskExt, WeakEntity, Window, WindowBackgroundAppearance, WindowHandle, canvas, img,
@@ -4351,9 +4350,12 @@ impl Sidebar {
             .entries
             .iter()
             .filter_map(|entry| match entry {
-                ListEntry::Thread(thread) => {
-                    thread.metadata.main_worktree_paths().paths().first().cloned()
-                }
+                ListEntry::Thread(thread) => thread
+                    .metadata
+                    .main_worktree_paths()
+                    .paths()
+                    .first()
+                    .cloned(),
                 _ => None,
             })
             .collect();
@@ -11863,10 +11865,8 @@ impl Sidebar {
                 if ready {
                     this.launch_installed_expo_ios(&workspace, window, cx);
                 } else {
-                    this.ios_simulator_error = Some(t!(
-                        "sidebar.devices.metro_not_ready",
-                        port = METRO_PORT
-                    ));
+                    this.ios_simulator_error =
+                        Some(t!("sidebar.devices.metro_not_ready", port = METRO_PORT));
                     cx.notify();
                 }
             })
@@ -12760,7 +12760,11 @@ async fn resolve_expo_command(
                 DevicePlatform::Android => vec!["--android".to_string()],
                 DevicePlatform::Ios => Vec::new(),
             };
-            ("start", extra, vec!["expo".to_string(), "start".to_string()])
+            (
+                "start",
+                extra,
+                vec!["expo".to_string(), "start".to_string()],
+            )
         }
         ExpoScript::Run => {
             let extra: Vec<String> = device_id

@@ -2878,7 +2878,9 @@ impl Terminal {
                     .get(mouse_cell_index)
                     .and_then(|cell| cell.hyperlink())
                 {
-                    cx.emit(Event::Open(MaybeNavigationTarget::Url(link.uri().to_owned())));
+                    cx.emit(Event::Open(MaybeNavigationTarget::Url(
+                        link.uri().to_owned(),
+                    )));
                 } else if e.modifiers.secondary(cx) {
                     self.events
                         .push_back(InternalEvent::FindHyperlink(position, true));
@@ -3223,6 +3225,11 @@ impl Terminal {
 
     pub fn task(&self) -> Option<&TaskState> {
         self.task.as_ref()
+    }
+
+    /// How the terminal's process exited, once it has.
+    pub fn exit_status(&self) -> Option<ExitStatus> {
+        self.child_exited
     }
 
     pub fn wait_for_completed_task(&self, cx: &App) -> Task<Option<ExitStatus>> {

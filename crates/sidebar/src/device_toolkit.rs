@@ -1083,6 +1083,26 @@ async fn close_device(
 }
 
 pub fn register_toolkit(cx: &mut App) {
+    task_agents::register_device_source(
+        task_agents::DeviceSource {
+            active: std::sync::Arc::new(|cx| {
+                let target = resolve_device(None, cx).ok()?;
+                Some(match target {
+                    DeviceTarget::Ios { udid, name, .. } => task_agents::ActiveDevice {
+                        id: udid.into(),
+                        platform: "ios".into(),
+                        name: name.into(),
+                    },
+                    DeviceTarget::Android { serial, .. } => task_agents::ActiveDevice {
+                        id: serial.clone().into(),
+                        platform: "android".into(),
+                        name: serial.into(),
+                    },
+                })
+            }),
+        },
+        cx,
+    );
     let tools = vec![
         ToolkitTool::new(
             "device_list",

@@ -4954,6 +4954,7 @@ dependencies = [
  "fuzzy",
  "gpui",
  "hex",
+ "i18n",
  "indoc",
  "itertools 0.14.0",
  "language",
@@ -16056,6 +16057,37 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fae8ee26b0371a29a77d2b2d6b3ae13aa81def6f9bf1b1b92a32d279a5e709b7"
 
 [[package]]
+name = "runs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "collections",
+ "db",
+ "editor",
+ "fs",
+ "fuzzy",
+ "gpui",
+ "i18n",
+ "log",
+ "picker",
+ "project",
+ "regex",
+ "schemars 1.0.4",
+ "serde",
+ "serde_json",
+ "task",
+ "task_agents",
+ "tasks_ui",
+ "terminal",
+ "terminal_view",
+ "text",
+ "ui",
+ "util",
+ "workspace",
+ "zed_actions",
+]
+
+[[package]]
 name = "runtimelib"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -23414,6 +23446,7 @@ dependencies = [
  "repo_hosting",
  "reqwest_client",
  "rope",
+ "runs",
  "sandbox",
  "search",
  "semver",

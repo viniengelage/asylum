@@ -801,7 +801,18 @@
       "cmd-k shift-up": "workspace::SwapPaneUp",
       "cmd-k shift-down": "workspace::SwapPaneDown",
       "cmd-shift-x": "zed::Extensions",
-      "f5": "debugger::Rerun",
+      "f5": "runs::RunActive",
+      "cmd-f5": "runs::DebugActive",
+      "shift-f5": "runs::StopActive",
+      "ctrl-alt-1": ["runs::RunFavorite", { "slot": 1 }],
+      "ctrl-alt-2": ["runs::RunFavorite", { "slot": 2 }],
+      "ctrl-alt-3": ["runs::RunFavorite", { "slot": 3 }],
+      "ctrl-alt-4": ["runs::RunFavorite", { "slot": 4 }],
+      "ctrl-alt-5": ["runs::RunFavorite", { "slot": 5 }],
+      "ctrl-alt-6": ["runs::RunFavorite", { "slot": 6 }],
+      "ctrl-alt-7": ["runs::RunFavorite", { "slot": 7 }],
+      "ctrl-alt-8": ["runs::RunFavorite", { "slot": 8 }],
+      "ctrl-alt-9": ["runs::RunFavorite", { "slot": 9 }],
       "cmd-w": ["pane::CloseActiveItem", { "close_pinned": false }],
       "ctrl-alt-w": "workspace::CloseActiveDock",
     },
@@ -811,7 +822,7 @@
     "use_key_equivalents": true,
     "bindings": {
       "cmd-n": "workspace::NewFile",
-      "cmd-shift-r": "task::Spawn",
+      "cmd-shift-r": "runs::OpenPicker",
       // All task parameters are captured and unchanged between reruns by default.
       // Use the `"reevaluate_context"` parameter to control this.
       "cmd-alt-r": ["task::Rerun", { "reevaluate_context": false }],
@@ -844,6 +855,13 @@
     "bindings": {
       "space": "menu::Confirm",
       "shift-r": "agent::RenameSelectedThread",
+    },
+  },
+  {
+    "context": "RunPicker",
+    "use_key_equivalents": true,
+    "bindings": {
+      "cmd-s": "runs::ToggleFavorite",
     },
   },
   {

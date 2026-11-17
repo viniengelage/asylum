@@ -261,6 +261,8 @@ pub(crate) enum StatusItemZone {
     Docks,
     /// Buttons for the left dock's panels and project search: ways to find a file.
     Navigation,
+    /// What runs the project: the active run, its device and the play and debug buttons.
+    Run,
     /// Project state: diagnostics, git and language servers. Where left items go.
     Status,
     /// Facts about the active editor, such as the cursor position and language. Where right
@@ -276,7 +278,7 @@ impl StatusItemZone {
     fn has_capsule(self) -> bool {
         matches!(
             self,
-            Self::Docks | Self::Navigation | Self::Status | Self::Panels
+            Self::Docks | Self::Navigation | Self::Run | Self::Status | Self::Panels
         )
     }
 
@@ -285,6 +287,7 @@ impl StatusItemZone {
             Self::Profile => "status-bar-profile",
             Self::Docks => "status-bar-docks",
             Self::Navigation => "status-bar-navigation",
+            Self::Run => "status-bar-run",
             Self::Status => "status-bar-status",
             Self::EditorInfo => "status-bar-editor-info",
             Self::Toolkit => "status-bar-toolkit",
@@ -384,6 +387,7 @@ impl StatusBar {
                 &[
                     StatusItemZone::Docks,
                     StatusItemZone::Navigation,
+                    StatusItemZone::Run,
                     StatusItemZone::Status,
                 ],
                 cx,
@@ -757,6 +761,14 @@ impl StatusBar {
         T: 'static + StatusItemView,
     {
         self.add_zoned_item(StatusItemZone::Navigation, item, window, cx);
+    }
+
+    /// Adds an item to the run zone, between the ways to find a file and the project state.
+    pub fn add_run_item<T>(&mut self, item: Entity<T>, window: &mut Window, cx: &mut Context<Self>)
+    where
+        T: 'static + StatusItemView,
+    {
+        self.add_zoned_item(StatusItemZone::Run, item, window, cx);
     }
 
     /// Adds an item to the left edge, with the buttons that show and hide whole docks.

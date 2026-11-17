@@ -1102,6 +1102,35 @@ pub fn run_github_step(
     }
 }
 
+/// The device the Devices dock has selected, which runs target by default.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ActiveDevice {
+    /// The simulator UDID on iOS, the adb serial on Android.
+    pub id: SharedString,
+    /// `ios` or `android`, as `ASYLUM_DEVICE_PLATFORM` gives it to tasks.
+    pub platform: SharedString,
+    pub name: SharedString,
+}
+
+type ResolveActiveDevice = Arc<dyn Fn(&App) -> Option<ActiveDevice>>;
+
+/// Installed by the Devices dock, so runs can target its device without depending on it.
+#[derive(Clone)]
+pub struct DeviceSource {
+    pub active: ResolveActiveDevice,
+}
+
+impl Global for DeviceSource {}
+
+pub fn register_device_source(source: DeviceSource, cx: &mut App) {
+    cx.set_global(source);
+}
+
+pub fn active_device(cx: &App) -> Option<ActiveDevice> {
+    cx.try_global::<DeviceSource>()
+        .and_then(|source| (source.active)(cx))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
