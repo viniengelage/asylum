@@ -875,6 +875,7 @@ fn main() {
         repo_hosting::register_agent_toolkit(cx);
         github_projects::register_agent_toolkit(cx);
         clickup::register_agent_toolkit(cx);
+        app_releases::register_agent_toolkit(cx);
         onboarding::init(cx);
         settings_ui::init(cx);
         keymap_editor::init(cx);

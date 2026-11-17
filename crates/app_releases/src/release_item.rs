@@ -2,8 +2,8 @@
 //! TestFlight groups, Play tracks and release notes.
 
 use crate::{
-    app_store_connect,
-    google_play::{self, PRODUCTION_TRACK, TrackChange},
+    app_store_connect::{self, PhasedReleaseState},
+    google_play::{self, LocalizedText, PRODUCTION_TRACK, TrackChange},
     model::{Platform, PlatformTimeline, Release, StepKind, StepState},
     state_tone, status_label, step_title,
     store::{ReleasesStore, StoreWrite},
@@ -73,6 +73,9 @@ pub struct ReleaseView {
     what_to_test_locale: Entity<InputField>,
     write_state: WriteState,
     write_task: Option<Task<()>>,
+    ios_notes: NotesEditor,
+    android_notes: NotesEditor,
+    notes_task: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -104,6 +107,9 @@ impl ReleaseView {
             what_to_test_locale,
             write_state: WriteState::Idle,
             write_task: None,
+            ios_notes: NotesEditor::Closed,
+            android_notes: NotesEditor::Closed,
+            notes_task: None,
             _subscriptions: subscriptions,
         }
     }
@@ -717,6 +723,10 @@ impl ReleaseView {
                 Platform::Ios => self.render_ios_actions(timeline, cx),
                 Platform::Android => self.render_android_actions(timeline, cx),
             })
+            .children(match timeline.platform {
+                Platform::Ios => self.render_app_store_launch(timeline, cx),
+                Platform::Android => self.render_play_notes(timeline, cx),
+            })
             .into_any_element()
     }
 
@@ -895,6 +905,451 @@ impl Render for ReleaseView {
                     ),
             )
             .child(div().flex_1().min_h_0().child(content))
+    }
+}
+
+/// A language of the release notes being edited.
+struct NoteRow {
+    /// The App Store localization id, or the Play language code.
+    id: String,
+    locale: String,
+    original: String,
+    input: Entity<InputField>,
+}
+
+enum NotesEditor {
+    Closed,
+    Loading,
+    Open(Vec<NoteRow>),
+    Failed(SharedString),
+}
+
+/// App Store states from which a version can be sent to App Review.
+const SUBMITTABLE_STATES: [&str; 4] = [
+    "PREPARE_FOR_SUBMISSION",
+    "DEVELOPER_REJECTED",
+    "REJECTED",
+    "METADATA_REJECTED",
+];
+
+fn note_rows(
+    notes: Vec<(String, String, String)>,
+    window: &mut Window,
+    cx: &mut Context<ReleaseView>,
+) -> Vec<NoteRow> {
+    notes
+        .into_iter()
+        .map(|(id, locale, text)| {
+            let input = cx.new(|cx| InputField::new(window, cx, &locale));
+            let editor = input.read(cx).editor().clone();
+            editor.set_text(&text, window, cx);
+            NoteRow {
+                id,
+                locale,
+                original: text,
+                input,
+            }
+        })
+        .collect()
+}
+
+impl ReleaseView {
+    fn open_ios_notes(&mut self, version_id: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.ios_notes = NotesEditor::Loading;
+        cx.notify();
+        let task = self
+            .store
+            .update(cx, |store, cx| store.fetch_version_notes(version_id, cx));
+        self.notes_task = Some(cx.spawn_in(window, async move |this, cx| {
+            let result = task.await;
+            this.update_in(cx, |this, window, cx| {
+                this.ios_notes = match result {
+                    Ok(localizations) => NotesEditor::Open(note_rows(
+                        localizations
+                            .into_iter()
+                            .map(|localization| {
+                                (localization.id, localization.locale, localization.text)
+                            })
+                            .collect(),
+                        window,
+                        cx,
+                    )),
+                    Err(error) => NotesEditor::Failed(format!("{error:#}").into()),
+                };
+                cx.notify();
+            })
+            .log_err();
+        }));
+    }
+
+    fn open_android_notes(
+        &mut self,
+        timeline: &PlatformTimeline,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut notes: Vec<(String, String, String)> = timeline
+            .notes
+            .iter()
+            .map(|note| {
+                (
+                    note.language.clone(),
+                    note.language.clone(),
+                    note.text.clone(),
+                )
+            })
+            .collect();
+        if notes.is_empty() {
+            notes.push(("en-US".into(), "en-US".into(), String::new()));
+        }
+        self.android_notes = NotesEditor::Open(note_rows(notes, window, cx));
+        cx.notify();
+    }
+
+    fn save_ios_notes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let NotesEditor::Open(rows) = &self.ios_notes else {
+            return;
+        };
+        let changed: Vec<(String, String, String)> = rows
+            .iter()
+            .filter_map(|row| {
+                let text = row.input.read(cx).text(cx).trim().to_string();
+                (text != row.original).then(|| (row.id.clone(), row.locale.clone(), text))
+            })
+            .collect();
+        if changed.is_empty() {
+            self.write_state = WriteState::Failed(t!("app_releases.launch.notes_unchanged"));
+            cx.notify();
+            return;
+        }
+        let locales = changed
+            .iter()
+            .map(|(_, locale, _)| locale.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        self.confirm_write(
+            t!("app_releases.launch.notes_title", locales = locales),
+            t!("app_releases.launch.notes_detail_ios"),
+            StoreWrite::VersionNotes {
+                notes: changed
+                    .into_iter()
+                    .map(|(id, _, text)| (id, text))
+                    .collect(),
+            },
+            window,
+            cx,
+        );
+    }
+
+    fn save_android_notes(
+        &mut self,
+        track: String,
+        version_code: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let NotesEditor::Open(rows) = &self.android_notes else {
+            return;
+        };
+        let notes: Vec<LocalizedText> = rows
+            .iter()
+            .filter_map(|row| {
+                let text = row.input.read(cx).text(cx).trim().to_string();
+                (!text.is_empty()).then(|| LocalizedText {
+                    language: row.locale.clone(),
+                    text,
+                })
+            })
+            .collect();
+        let locales = notes
+            .iter()
+            .map(|note| note.language.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        self.confirm_write(
+            t!("app_releases.launch.notes_title", locales = locales),
+            t!("app_releases.write.commit_detail"),
+            StoreWrite::Play(TrackChange::SetNotes {
+                track,
+                version_code,
+                notes,
+            }),
+            window,
+            cx,
+        );
+    }
+
+    fn render_notes_editor(
+        &self,
+        editor: &NotesEditor,
+        id: &'static str,
+        on_save: impl Fn(&mut Self, &mut Window, &mut Context<Self>) + 'static,
+        cx: &Context<Self>,
+    ) -> Option<AnyElement> {
+        match editor {
+            NotesEditor::Closed => None,
+            NotesEditor::Loading => Some(
+                Label::new(t!("app_releases.launch.notes_loading"))
+                    .size(LabelSize::XSmall)
+                    .color(Color::Muted)
+                    .into_any_element(),
+            ),
+            NotesEditor::Failed(message) => Some(
+                error_callout(t!("app_releases.launch.notes_failed"), message.clone(), cx)
+                    .into_any_element(),
+            ),
+            NotesEditor::Open(rows) => Some(
+                v_flex()
+                    .gap_2()
+                    .children(rows.iter().map(|row| {
+                        v_flex()
+                            .gap_1()
+                            .child(
+                                Label::new(row.locale.clone())
+                                    .size(LabelSize::XSmall)
+                                    .buffer_font(cx)
+                                    .color(Color::Muted),
+                            )
+                            .child(row.input.clone())
+                    }))
+                    .child(
+                        h_flex().justify_end().child(
+                            secondary_button(
+                                id,
+                                None,
+                                t!("app_releases.launch.save_notes"),
+                                true,
+                                cx,
+                            )
+                            .on_click(
+                                cx.listener(move |this, _, window, cx| on_save(this, window, cx)),
+                            ),
+                        ),
+                    )
+                    .into_any_element(),
+            ),
+        }
+    }
+
+    fn render_app_store_launch(
+        &self,
+        timeline: &PlatformTimeline,
+        cx: &Context<Self>,
+    ) -> Option<AnyElement> {
+        let version_id = timeline.ids.asc_version_id.clone()?;
+        let state = timeline.ids.asc_version_state.clone().unwrap_or_default();
+        let version = self.version.clone();
+        let has_app_id = self.app_store_app_id(cx).is_some();
+        let mut buttons: Vec<AnyElement> = Vec::new();
+
+        if has_app_id && SUBMITTABLE_STATES.contains(&state.as_str()) {
+            let version_id = version_id.clone();
+            let title = t!("app_releases.launch.submit_title", version = version);
+            buttons.push(
+                primary_button(
+                    "release-submit-review",
+                    Some(IconName::Send),
+                    t!("app_releases.launch.submit"),
+                    None,
+                    cx,
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.confirm_write(
+                        title.clone(),
+                        t!("app_releases.launch.submit_detail"),
+                        StoreWrite::SubmitForReview {
+                            version_id: version_id.clone(),
+                        },
+                        window,
+                        cx,
+                    )
+                }))
+                .into_any_element(),
+            );
+        }
+
+        if state == "PENDING_DEVELOPER_RELEASE" {
+            let version_id = version_id.clone();
+            let title = t!("app_releases.launch.release_title", version = version);
+            buttons.push(
+                primary_button(
+                    "release-release-version",
+                    None,
+                    t!("app_releases.launch.release"),
+                    None,
+                    cx,
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.confirm_write(
+                        title.clone(),
+                        t!("app_releases.launch.release_detail"),
+                        StoreWrite::ReleaseVersion {
+                            version_id: version_id.clone(),
+                        },
+                        window,
+                        cx,
+                    )
+                }))
+                .into_any_element(),
+            );
+        }
+
+        let phased_button = |id: &'static str,
+                             label: SharedString,
+                             title: SharedString,
+                             write: StoreWrite,
+                             buttons: &mut Vec<AnyElement>| {
+            buttons.push(
+                secondary_button(id, None, label, true, cx)
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.confirm_write(
+                            title.clone(),
+                            t!("app_releases.launch.phased_detail"),
+                            write.clone(),
+                            window,
+                            cx,
+                        )
+                    }))
+                    .into_any_element(),
+            );
+        };
+        match timeline.ids.asc_phased_release.clone() {
+            None if state != "READY_FOR_SALE" && state != "READY_FOR_DISTRIBUTION" => {
+                phased_button(
+                    "release-phased-start",
+                    t!("app_releases.launch.phased_start"),
+                    t!("app_releases.launch.phased_start_title", version = version),
+                    StoreWrite::StartPhasedRelease {
+                        version_id: version_id.clone(),
+                    },
+                    &mut buttons,
+                );
+            }
+            Some((phased_release_id, PhasedReleaseState::Active)) => {
+                phased_button(
+                    "release-phased-pause",
+                    t!("app_releases.launch.phased_pause"),
+                    t!("app_releases.launch.phased_pause_title", version = version),
+                    StoreWrite::SetPhasedRelease {
+                        phased_release_id: phased_release_id.clone(),
+                        state: PhasedReleaseState::Paused,
+                    },
+                    &mut buttons,
+                );
+                phased_button(
+                    "release-phased-complete",
+                    t!("app_releases.launch.phased_complete"),
+                    t!(
+                        "app_releases.launch.phased_complete_title",
+                        version = version
+                    ),
+                    StoreWrite::SetPhasedRelease {
+                        phased_release_id,
+                        state: PhasedReleaseState::Complete,
+                    },
+                    &mut buttons,
+                );
+            }
+            Some((phased_release_id, PhasedReleaseState::Paused)) => {
+                phased_button(
+                    "release-phased-resume",
+                    t!("app_releases.launch.phased_resume"),
+                    t!("app_releases.launch.phased_resume_title", version = version),
+                    StoreWrite::SetPhasedRelease {
+                        phased_release_id,
+                        state: PhasedReleaseState::Active,
+                    },
+                    &mut buttons,
+                );
+            }
+            _ => {}
+        }
+
+        let notes_button = matches!(self.ios_notes, NotesEditor::Closed | NotesEditor::Failed(_))
+            .then(|| {
+                let version_id = version_id.clone();
+                secondary_button(
+                    "release-edit-ios-notes",
+                    Some((IconName::Pencil, Color::Muted)),
+                    t!("app_releases.launch.edit_notes"),
+                    true,
+                    cx,
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.open_ios_notes(version_id.clone(), window, cx)
+                }))
+                .into_any_element()
+            });
+
+        Some(
+            v_flex()
+                .gap_2()
+                .pt_2()
+                .child(section_label(t!("app_releases.launch.app_store")))
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .flex_wrap()
+                        .children(buttons)
+                        .children(notes_button),
+                )
+                .children(self.render_notes_editor(
+                    &self.ios_notes,
+                    "release-save-ios-notes",
+                    |this, window, cx| this.save_ios_notes(window, cx),
+                    cx,
+                ))
+                .into_any_element(),
+        )
+    }
+
+    fn render_play_notes(
+        &self,
+        timeline: &PlatformTimeline,
+        cx: &Context<Self>,
+    ) -> Option<AnyElement> {
+        self.package(cx)?;
+        let version_code = timeline.build.clone()?;
+        let track = timeline
+            .tracks
+            .iter()
+            .find(|track| track.track == PRODUCTION_TRACK)
+            .or_else(|| timeline.tracks.last())?
+            .track
+            .clone();
+        let notes_button = matches!(self.android_notes, NotesEditor::Closed).then(|| {
+            let timeline = timeline.clone();
+            secondary_button(
+                "release-edit-play-notes",
+                Some((IconName::Pencil, Color::Muted)),
+                t!("app_releases.launch.edit_notes"),
+                true,
+                cx,
+            )
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.open_android_notes(&timeline, window, cx)
+            }))
+            .into_any_element()
+        });
+        Some(
+            v_flex()
+                .gap_2()
+                .pt_2()
+                .child(section_label(t!(
+                    "app_releases.launch.play_notes",
+                    track = track
+                )))
+                .children(notes_button)
+                .children(self.render_notes_editor(
+                    &self.android_notes,
+                    "release-save-play-notes",
+                    move |this, window, cx| {
+                        this.save_android_notes(track.clone(), version_code.clone(), window, cx)
+                    },
+                    cx,
+                ))
+                .into_any_element(),
+        )
     }
 }
 

@@ -3,6 +3,7 @@
 
 mod accounts;
 mod accounts_view;
+mod agent_toolkit;
 mod app_store_connect;
 mod dock;
 mod eas;
@@ -11,6 +12,7 @@ mod model;
 mod release_item;
 mod store;
 
+pub use agent_toolkit::register_toolkit as register_agent_toolkit;
 pub use dock::ReleasesPanel;
 pub use store::{AccountsStore, ReleasesStore};
 

@@ -654,13 +654,38 @@ impl ReleasesStore {
         let package = self
             .app_for_folder(folder)
             .and_then(|app| app.link.package.clone());
+        let app_store_app_id = self
+            .app_for_folder(folder)
+            .and_then(|app| app.app_store_app_id.clone());
         let http_client = self.accounts.read(cx).http_client();
         cx.spawn(async move |this, cx| {
             cx.background_spawn(async move {
-                send_write(&http_client, &accounts, package, write).await
+                send_write(&http_client, &accounts, package, app_store_app_id, write).await
             })
             .await?;
             this.update(cx, |this, cx| this.refresh(cx))
+        })
+    }
+}
+
+impl ReleasesStore {
+    /// What's New of every language of an App Store version, for editing.
+    pub fn fetch_version_notes(
+        &self,
+        version_id: String,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<Vec<asc::Localization>>> {
+        let accounts = self.accounts.read(cx);
+        let Some(credentials) = accounts
+            .accounts()
+            .and_then(|accounts| accounts.app_store.as_ref())
+            .map(|account| account.credentials())
+        else {
+            return Task::ready(Err(missing_account(AccountKind::AppStore)));
+        };
+        let http_client = accounts.http_client();
+        cx.background_spawn(async move {
+            asc::fetch_version_notes(&http_client, &credentials, &version_id).await
         })
     }
 }
@@ -679,6 +704,23 @@ pub enum StoreWrite {
     },
     SubmitForBetaReview {
         build_id: String,
+    },
+    /// What's New per language: `(localization id, text)`.
+    VersionNotes {
+        notes: Vec<(String, String)>,
+    },
+    SubmitForReview {
+        version_id: String,
+    },
+    StartPhasedRelease {
+        version_id: String,
+    },
+    SetPhasedRelease {
+        phased_release_id: String,
+        state: asc::PhasedReleaseState,
+    },
+    ReleaseVersion {
+        version_id: String,
     },
     Play(google_play::TrackChange),
 }
@@ -703,6 +745,7 @@ async fn send_write(
     http_client: &Arc<dyn HttpClient>,
     accounts: &StoredAccounts,
     package: Option<String>,
+    app_store_app_id: Option<String>,
     write: StoreWrite,
 ) -> Result<()> {
     let app_store = || {
@@ -723,6 +766,30 @@ async fn send_write(
         } => asc::set_what_to_test(http_client, &app_store()?, &build_id, &locale, &text).await,
         StoreWrite::SubmitForBetaReview { build_id } => {
             asc::submit_for_beta_review(http_client, &app_store()?, &build_id).await
+        }
+        StoreWrite::VersionNotes { notes } => {
+            let credentials = app_store()?;
+            for (localization_id, text) in notes {
+                asc::set_whats_new(http_client, &credentials, &localization_id, &text).await?;
+            }
+            Ok(())
+        }
+        StoreWrite::SubmitForReview { version_id } => {
+            let app_id = app_store_app_id.ok_or_else(|| missing_account(AccountKind::AppStore))?;
+            asc::submit_for_review(http_client, &app_store()?, &app_id, &version_id).await
+        }
+        StoreWrite::StartPhasedRelease { version_id } => {
+            asc::create_phased_release(http_client, &app_store()?, &version_id).await
+        }
+        StoreWrite::SetPhasedRelease {
+            phased_release_id,
+            state,
+        } => {
+            asc::set_phased_release_state(http_client, &app_store()?, &phased_release_id, state)
+                .await
+        }
+        StoreWrite::ReleaseVersion { version_id } => {
+            asc::release_version(http_client, &app_store()?, &version_id).await
         }
         StoreWrite::Play(change) => {
             let account = accounts

@@ -651,6 +651,215 @@ pub async fn set_what_to_test(
     Ok(())
 }
 
+pub fn whats_new_body(localization_id: &str, text: &str) -> serde_json::Value {
+    serde_json::json!({
+        "data": {
+            "type": "appStoreVersionLocalizations",
+            "id": localization_id,
+            "attributes": { "whatsNew": text }
+        }
+    })
+}
+
+pub fn review_submission_body(app_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "data": {
+            "type": "reviewSubmissions",
+            "attributes": { "platform": "IOS" },
+            "relationships": { "app": linkage("apps", app_id) }
+        }
+    })
+}
+
+pub fn review_submission_item_body(submission_id: &str, version_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "data": {
+            "type": "reviewSubmissionItems",
+            "relationships": {
+                "reviewSubmission": linkage("reviewSubmissions", submission_id),
+                "appStoreVersion": linkage("appStoreVersions", version_id)
+            }
+        }
+    })
+}
+
+pub fn submit_review_body(submission_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "data": {
+            "type": "reviewSubmissions",
+            "id": submission_id,
+            "attributes": { "submitted": true }
+        }
+    })
+}
+
+pub fn create_phased_release_body(version_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "data": {
+            "type": "appStoreVersionPhasedReleases",
+            "attributes": { "phasedReleaseState": "INACTIVE" },
+            "relationships": { "appStoreVersion": linkage("appStoreVersions", version_id) }
+        }
+    })
+}
+
+pub fn phased_release_state_body(
+    phased_release_id: &str,
+    state: PhasedReleaseState,
+) -> serde_json::Value {
+    serde_json::json!({
+        "data": {
+            "type": "appStoreVersionPhasedReleases",
+            "id": phased_release_id,
+            "attributes": { "phasedReleaseState": state.as_api() }
+        }
+    })
+}
+
+pub fn release_request_body(version_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "data": {
+            "type": "appStoreVersionReleaseRequests",
+            "relationships": { "appStoreVersion": linkage("appStoreVersions", version_id) }
+        }
+    })
+}
+
+fn created_id(body: &str) -> Result<String> {
+    let document = parse_document(body)?;
+    document
+        .data
+        .into_vec()
+        .into_iter()
+        .next()
+        .map(|resource| resource.id)
+        .with_context(|| {
+            t!(
+                "app_releases.api.unexpected_response",
+                service = "App Store Connect"
+            )
+        })
+}
+
+pub async fn fetch_version_notes(
+    client: &Arc<dyn HttpClient>,
+    credentials: &Credentials,
+    version_id: &str,
+) -> Result<Vec<Localization>> {
+    parse_localizations(
+        &get(
+            client,
+            credentials,
+            &format!("/v1/appStoreVersions/{version_id}/appStoreVersionLocalizations"),
+        )
+        .await?,
+    )
+}
+
+pub async fn set_whats_new(
+    client: &Arc<dyn HttpClient>,
+    credentials: &Credentials,
+    localization_id: &str,
+    text: &str,
+) -> Result<()> {
+    send(
+        client,
+        credentials,
+        Method::PATCH,
+        &format!("/v1/appStoreVersionLocalizations/{localization_id}"),
+        Some(whats_new_body(localization_id, text)),
+    )
+    .await?;
+    Ok(())
+}
+
+/// Creates a review submission with the version in it and submits it, as App Store Connect's
+/// "Add for Review" and "Submit to App Review" do.
+pub async fn submit_for_review(
+    client: &Arc<dyn HttpClient>,
+    credentials: &Credentials,
+    app_id: &str,
+    version_id: &str,
+) -> Result<()> {
+    let submission_id = created_id(
+        &send(
+            client,
+            credentials,
+            Method::POST,
+            "/v1/reviewSubmissions",
+            Some(review_submission_body(app_id)),
+        )
+        .await?,
+    )?;
+    send(
+        client,
+        credentials,
+        Method::POST,
+        "/v1/reviewSubmissionItems",
+        Some(review_submission_item_body(&submission_id, version_id)),
+    )
+    .await?;
+    send(
+        client,
+        credentials,
+        Method::PATCH,
+        &format!("/v1/reviewSubmissions/{submission_id}"),
+        Some(submit_review_body(&submission_id)),
+    )
+    .await?;
+    Ok(())
+}
+
+pub async fn create_phased_release(
+    client: &Arc<dyn HttpClient>,
+    credentials: &Credentials,
+    version_id: &str,
+) -> Result<()> {
+    send(
+        client,
+        credentials,
+        Method::POST,
+        "/v1/appStoreVersionPhasedReleases",
+        Some(create_phased_release_body(version_id)),
+    )
+    .await?;
+    Ok(())
+}
+
+pub async fn set_phased_release_state(
+    client: &Arc<dyn HttpClient>,
+    credentials: &Credentials,
+    phased_release_id: &str,
+    state: PhasedReleaseState,
+) -> Result<()> {
+    send(
+        client,
+        credentials,
+        Method::PATCH,
+        &format!("/v1/appStoreVersionPhasedReleases/{phased_release_id}"),
+        Some(phased_release_state_body(phased_release_id, state)),
+    )
+    .await?;
+    Ok(())
+}
+
+/// Releases a version that is approved and waiting for the developer.
+pub async fn release_version(
+    client: &Arc<dyn HttpClient>,
+    credentials: &Credentials,
+    version_id: &str,
+) -> Result<()> {
+    send(
+        client,
+        credentials,
+        Method::POST,
+        "/v1/appStoreVersionReleaseRequests",
+        Some(release_request_body(version_id)),
+    )
+    .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -825,6 +1034,87 @@ WBzmZWoMxkniOGNp+NQdMV2cwYkbGcUP3Gok2UvJkvRrGcD2AZmQt3HLlA==
                 locale: "pt-BR".into(),
                 text: "Testar o Pix".into()
             }]
+        );
+    }
+
+    #[test]
+    fn builds_the_release_write_bodies() {
+        let submission = review_submission_body("1600000000");
+        assert_eq!(submission["data"]["attributes"]["platform"], "IOS");
+        assert_eq!(
+            submission["data"]["relationships"]["app"]["data"]["id"],
+            "1600000000"
+        );
+        let item = review_submission_item_body("rs-1", "v-240");
+        assert_eq!(
+            item["data"]["relationships"]["appStoreVersion"]["data"]["id"],
+            "v-240"
+        );
+        assert_eq!(
+            item["data"]["relationships"]["reviewSubmission"]["data"]["type"],
+            "reviewSubmissions"
+        );
+        assert_eq!(
+            submit_review_body("rs-1")["data"]["attributes"]["submitted"],
+            true
+        );
+        assert_eq!(
+            create_phased_release_body("v-240")["data"]["attributes"]["phasedReleaseState"],
+            "INACTIVE"
+        );
+        assert_eq!(
+            phased_release_state_body("ph-1", PhasedReleaseState::Paused)["data"]["attributes"]["phasedReleaseState"],
+            "PAUSED"
+        );
+        assert_eq!(
+            release_request_body("v-240")["data"]["type"],
+            "appStoreVersionReleaseRequests"
+        );
+        assert_eq!(
+            whats_new_body("loc-9", "Pix agendado")["data"]["attributes"]["whatsNew"],
+            "Pix agendado"
+        );
+    }
+
+    #[gpui::test]
+    async fn submits_for_review_in_three_steps() {
+        let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let client: Arc<dyn HttpClient> = http_client::FakeHttpClient::create({
+            let requests = requests.clone();
+            move |request| {
+                let requests = requests.clone();
+                async move {
+                    requests.lock().unwrap().push(format!(
+                        "{} {}",
+                        request.method(),
+                        request.uri().path()
+                    ));
+                    let body = if request.uri().path() == "/v1/reviewSubmissions" {
+                        r#"{"data":{"type":"reviewSubmissions","id":"rs-1"}}"#
+                    } else {
+                        r#"{"data":{"type":"x","id":"y"}}"#
+                    };
+                    Ok(http_client::Response::builder()
+                        .status(201)
+                        .body(body.into())?)
+                }
+            }
+        });
+        let credentials = Credentials {
+            issuer_id: "issuer".into(),
+            key_id: "KEY".into(),
+            private_key: TEST_P8.into(),
+        };
+        submit_for_review(&client, &credentials, "1600000000", "v-240")
+            .await
+            .unwrap();
+        assert_eq!(
+            *requests.lock().unwrap(),
+            vec![
+                "POST /v1/reviewSubmissions",
+                "POST /v1/reviewSubmissionItems",
+                "PATCH /v1/reviewSubmissions/rs-1",
+            ]
         );
     }
 }
