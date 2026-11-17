@@ -8,6 +8,7 @@ mod app_store_connect;
 mod dock;
 mod eas;
 mod google_play;
+mod insights;
 mod model;
 mod release_item;
 mod store;

@@ -50,19 +50,33 @@ aparece sem commit.
 8. Notificações só em: rejeitado, aprovado, build com falha, rollout parado. Token Expo avisa 14 dias
    antes de expirar.
 
+> Feito em 1aa23d1ecf (não validado no app nem com contas reais; clientes e correlação testados só com fixtures). Desvios:
+> - Board `18 · Lançamentos` não foi consultado (OpenPencil fechado na sessão); a UI segue o texto do plano e o design system.
+> - "Lojas e EAS" é uma aba do editor (`app_releases::OpenAccounts`, engrenagem na dock), não uma página do `settings_ui`.
+> - Ids não secretos (issuer, key id, validade do token Expo) ficam no key-value store do perfil, não no `settings.json`; segredos no keychain. Tudo passa por `accounts::accounts_source`, que é onde entra o escopo de projeto do plano 03.
+> - Vínculo do app: detectado de `app.json`/`app.config.*` (raiz, um nível abaixo e `apps/*`), com correção por pasta salva no key-value store do perfil enquanto `.asylum/settings.json` não existe.
+> - Validade do token Expo é digitada (opcional); a API não expõe.
+> - Linha do tempo é helper local do crate. O chip da status bar só aparece depois que Lançamentos foi aberto no projeto; notificações são toasts.
+
 ## Fase 2 — TestFlight e tracks (escrita com confirmação)
 
 Pôr build em grupo, What to Test, beta review, promover track, mudar rollout. Toda escrita pede
 confirmação (mesmo padrão de "confirmar escritas" do banco).
+
+> Feito em 8a4b953d33 (só fixtures). Toda escrita abre um modal próprio (`ConfirmWrite`) com loja, ação e alvo; nada é enviado antes de confirmar. What to Test grava por locale digitado e não carrega o texto existente. Edição do Play é descartada se qualquer passo falhar.
 
 ## Fase 3 — lançar + agente
 
 Notas por idioma, enviar para review, phased release, liberar versão aprovada; tools do agente
 (`release_status`, `release_promote`… com confirmação).
 
+> Feito em 3cf89a90ff (só fixtures). Notas por idioma (What's New da versão na App Store; release notes da track no Play), enviar para review (reviewSubmissions), lançamento gradual (ativar/pausar/retomar/liberar para todos) e liberar versão aprovada. Tools: `release_status` (lê), `release_promote`, `release_rollout`, `release_submit_review` (sempre confirmam). Enviar para review não escolhe o build da versão: ela precisa existir no App Store Connect com o build certo.
+
 ## Fase 4 — depois do lançamento
 
 Crashes/feedback do TestFlight, vitals do Play, avaliações.
+
+> Feito no commit desta fase (só fixtures). Seção "Depois do lançamento" na aba da versão, carregada sob demanda: avaliações da App Store e do Play, feedback do TestFlight (crash e screenshot) e vitals do Play (crash e ANR por version code na última semana, pela Play Developer Reporting API, que exige o escopo `playdeveloperreporting` e a permissão da conta de serviço no Play Console).
 
 ## Pronto quando (fase 1)
 

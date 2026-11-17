@@ -4,6 +4,7 @@
 use crate::{
     app_store_connect::{self, PhasedReleaseState},
     google_play::{self, LocalizedText, PRODUCTION_TRACK, TrackChange},
+    insights::{AfterLaunch, FeedbackKind, Review, Section},
     model::{Platform, PlatformTimeline, Release, StepKind, StepState},
     state_tone, status_label, step_title,
     store::{ReleasesStore, StoreWrite},
@@ -76,6 +77,8 @@ pub struct ReleaseView {
     ios_notes: NotesEditor,
     android_notes: NotesEditor,
     notes_task: Option<Task<()>>,
+    after_launch: AfterLaunchState,
+    after_launch_task: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -110,6 +113,8 @@ impl ReleaseView {
             ios_notes: NotesEditor::Closed,
             android_notes: NotesEditor::Closed,
             notes_task: None,
+            after_launch: AfterLaunchState::Closed,
+            after_launch_task: None,
             _subscriptions: subscriptions,
         }
     }
@@ -875,6 +880,7 @@ impl Render for ReleaseView {
                                     .map(|timeline| self.render_timeline(timeline, cx)),
                             ),
                     )
+                    .child(self.render_after_launch(&release, cx))
                     .into_any_element()
             }
         };
@@ -1350,6 +1356,259 @@ impl ReleaseView {
                 ))
                 .into_any_element(),
         )
+    }
+}
+
+enum AfterLaunchState {
+    Closed,
+    Loading,
+    Loaded(AfterLaunch),
+}
+
+fn format_rate(rate: Option<f64>) -> String {
+    match rate {
+        Some(rate) => format!("{:.2}%", rate * 100.0),
+        None => "—".to_string(),
+    }
+}
+
+impl ReleaseView {
+    fn load_after_launch(&mut self, cx: &mut Context<Self>) {
+        self.after_launch = AfterLaunchState::Loading;
+        cx.notify();
+        let folder = self.folder.clone();
+        let task = self
+            .store
+            .update(cx, |store, cx| store.fetch_after_launch(&folder, cx));
+        self.after_launch_task = Some(cx.spawn(async move |this, cx| {
+            let after_launch = task.await;
+            this.update(cx, |this, cx| {
+                this.after_launch = AfterLaunchState::Loaded(after_launch);
+                cx.notify();
+            })
+            .log_err();
+        }));
+    }
+
+    fn render_section_body<T>(
+        &self,
+        section: &Section<T>,
+        render: impl Fn(&T) -> AnyElement,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        match section {
+            None => Label::new(t!("app_releases.after.no_account"))
+                .size(LabelSize::XSmall)
+                .color(Color::Placeholder)
+                .into_any_element(),
+            Some(Err(message)) => {
+                error_callout(t!("app_releases.after.failed"), message.clone(), cx)
+                    .into_any_element()
+            }
+            Some(Ok(entries)) if entries.is_empty() => Label::new(t!("app_releases.after.empty"))
+                .size(LabelSize::XSmall)
+                .color(Color::Placeholder)
+                .into_any_element(),
+            Some(Ok(entries)) => v_flex()
+                .gap_1p5()
+                .children(entries.iter().map(&render))
+                .into_any_element(),
+        }
+    }
+
+    fn render_review(review: &Review, cx: &App) -> AnyElement {
+        let stars = "★".repeat(usize::from(review.rating.min(5)));
+        v_flex()
+            .gap_0p5()
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(
+                        Label::new(stars)
+                            .size(LabelSize::XSmall)
+                            .color(Color::Warning),
+                    )
+                    .children(review.title.clone().map(|title| {
+                        Label::new(title)
+                            .size(LabelSize::Small)
+                            .weight(FontWeight::MEDIUM)
+                    }))
+                    .children(review.version_code.clone().map(|code| {
+                        Label::new(code)
+                            .size(LabelSize::XSmall)
+                            .buffer_font(cx)
+                            .color(Color::Muted)
+                    })),
+            )
+            .child(Label::new(review.body.clone()).size(LabelSize::Small))
+            .child(
+                Label::new(
+                    [
+                        review.author.clone(),
+                        review
+                            .created_at
+                            .map(|at| at.with_timezone(&Local).format("%d/%m/%Y").to_string()),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .join(" · "),
+                )
+                .size(LabelSize::XSmall)
+                .color(Color::Placeholder),
+            )
+            .into_any_element()
+    }
+
+    fn render_after_launch(&self, release: &Release, cx: &Context<Self>) -> AnyElement {
+        let header = h_flex()
+            .gap_2()
+            .child(
+                Label::new(t!("app_releases.after.title"))
+                    .size(LabelSize::Default)
+                    .weight(FontWeight::SEMIBOLD),
+            )
+            .child(div().flex_1())
+            .child(
+                secondary_button(
+                    "release-load-after-launch",
+                    Some((IconName::RotateCw, Color::Muted)),
+                    match self.after_launch {
+                        AfterLaunchState::Closed => t!("app_releases.after.load"),
+                        _ => t!("app_releases.dock.refresh"),
+                    },
+                    !matches!(self.after_launch, AfterLaunchState::Loading),
+                    cx,
+                )
+                .on_click(cx.listener(|this, _, _window, cx| this.load_after_launch(cx))),
+            );
+        let body = match &self.after_launch {
+            AfterLaunchState::Closed => Label::new(t!("app_releases.after.description"))
+                .size(LabelSize::Small)
+                .color(Color::Muted)
+                .into_any_element(),
+            AfterLaunchState::Loading => Label::new(t!("app_releases.after.loading"))
+                .size(LabelSize::Small)
+                .color(Color::Muted)
+                .into_any_element(),
+            AfterLaunchState::Loaded(after_launch) => {
+                let version_code = release
+                    .platform(Platform::Android)
+                    .and_then(|timeline| timeline.build.clone());
+                let play_reviews: Section<Review> =
+                    after_launch.play_reviews.clone().map(|result| {
+                        result.map(|reviews| {
+                            reviews
+                                .into_iter()
+                                .filter(|review| {
+                                    version_code.is_none()
+                                        || review.version_code.is_none()
+                                        || review.version_code == version_code
+                                })
+                                .collect()
+                        })
+                    });
+                let current_code = version_code;
+                v_flex()
+                    .gap_3()
+                    .child(section_label(t!("app_releases.after.play_vitals")))
+                    .child(self.render_section_body(
+                        &after_launch.play_vitals,
+                        |vitals| {
+                            let is_current = current_code.as_deref() == Some(&vitals.version_code);
+                            h_flex()
+                                .gap_3()
+                                .child(
+                                    Label::new(vitals.version_code.clone())
+                                        .size(LabelSize::Small)
+                                        .buffer_font(cx)
+                                        .weight(if is_current {
+                                            FontWeight::SEMIBOLD
+                                        } else {
+                                            FontWeight::NORMAL
+                                        }),
+                                )
+                                .child(
+                                    Label::new(t!(
+                                        "app_releases.after.crash_rate",
+                                        rate = format_rate(vitals.crash_rate)
+                                    ))
+                                    .size(LabelSize::Small),
+                                )
+                                .child(
+                                    Label::new(t!(
+                                        "app_releases.after.anr_rate",
+                                        rate = format_rate(vitals.anr_rate)
+                                    ))
+                                    .size(LabelSize::Small),
+                                )
+                                .into_any_element()
+                        },
+                        cx,
+                    ))
+                    .child(section_label(t!("app_releases.after.play_reviews")))
+                    .child(self.render_section_body(
+                        &play_reviews,
+                        |review| Self::render_review(review, cx),
+                        cx,
+                    ))
+                    .child(section_label(t!("app_releases.after.testflight_feedback")))
+                    .child(self.render_section_body(
+                        &after_launch.testflight_feedback,
+                        |feedback| {
+                            let kind = match feedback.kind {
+                                FeedbackKind::Crash => t!("app_releases.after.crash"),
+                                FeedbackKind::Screenshot => t!("app_releases.after.screenshot"),
+                            };
+                            let device = [feedback.device.clone(), feedback.os_version.clone()]
+                                .into_iter()
+                                .flatten()
+                                .collect::<Vec<_>>()
+                                .join(" · ");
+                            v_flex()
+                                .gap_0p5()
+                                .child(
+                                    h_flex()
+                                        .gap_2()
+                                        .child(status_pill(
+                                            kind,
+                                            match feedback.kind {
+                                                FeedbackKind::Crash => StatusTone::Error,
+                                                FeedbackKind::Screenshot => StatusTone::Info,
+                                            },
+                                            cx,
+                                        ))
+                                        .child(
+                                            Label::new(device)
+                                                .size(LabelSize::XSmall)
+                                                .color(Color::Muted),
+                                        ),
+                                )
+                                .children(
+                                    feedback
+                                        .comment
+                                        .clone()
+                                        .map(|comment| Label::new(comment).size(LabelSize::Small)),
+                                )
+                                .into_any_element()
+                        },
+                        cx,
+                    ))
+                    .child(section_label(t!("app_releases.after.app_store_reviews")))
+                    .child(self.render_section_body(
+                        &after_launch.app_store_reviews,
+                        |review| Self::render_review(review, cx),
+                        cx,
+                    ))
+                    .into_any_element()
+            }
+        };
+        card(cx)
+            .p_3()
+            .gap_3()
+            .child(header)
+            .child(body)
+            .into_any_element()
     }
 }
 

@@ -669,6 +669,24 @@ impl ReleasesStore {
 }
 
 impl ReleasesStore {
+    /// Ratings, tester feedback and vitals of an app, read when the release tab asks.
+    pub fn fetch_after_launch(
+        &self,
+        folder: &Path,
+        cx: &mut Context<Self>,
+    ) -> Task<crate::insights::AfterLaunch> {
+        let accounts_store = self.accounts.read(cx);
+        let accounts = accounts_store.accounts().cloned().unwrap_or_default();
+        let http_client = accounts_store.http_client();
+        let app = self.app_for_folder(folder);
+        let app_store_app_id = app.and_then(|app| app.app_store_app_id.clone());
+        let package = app.and_then(|app| app.link.package.clone());
+        cx.background_spawn(async move {
+            crate::insights::fetch_after_launch(&http_client, &accounts, app_store_app_id, package)
+                .await
+        })
+    }
+
     /// What's New of every language of an App Store version, for editing.
     pub fn fetch_version_notes(
         &self,

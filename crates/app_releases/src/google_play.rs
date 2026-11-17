@@ -14,6 +14,8 @@ use util::ResultExt as _;
 
 pub const API_URL: &str = "https://androidpublisher.googleapis.com/androidpublisher/v3";
 const SCOPE: &str = "https://www.googleapis.com/auth/androidpublisher";
+/// Vitals (crash and ANR rates) come from the Play Developer Reporting API, a separate scope.
+pub(crate) const REPORTING_SCOPE: &str = "https://www.googleapis.com/auth/playdeveloperreporting";
 const DEFAULT_TOKEN_URI: &str = "https://oauth2.googleapis.com/token";
 const ASSERTION_LIFETIME_SECONDS: i64 = 60 * 60;
 pub const PRODUCTION_TRACK: &str = "production";
@@ -62,22 +64,22 @@ struct AssertionClaims {
     exp: i64,
 }
 
-fn assertion_claims(account: &ServiceAccount, now: i64) -> AssertionClaims {
+fn assertion_claims(account: &ServiceAccount, scope: &str, now: i64) -> AssertionClaims {
     AssertionClaims {
         iss: account.client_email.clone(),
-        scope: SCOPE.to_string(),
+        scope: scope.to_string(),
         aud: account.token_uri().to_string(),
         iat: now,
         exp: now + ASSERTION_LIFETIME_SECONDS,
     }
 }
 
-fn assertion(account: &ServiceAccount, now: i64) -> Result<String> {
+fn assertion(account: &ServiceAccount, scope: &str, now: i64) -> Result<String> {
     let key = EncodingKey::from_rsa_pem(account.private_key.as_bytes())
         .map_err(|_| anyhow!("{}", t!("app_releases.accounts.invalid_service_account")))?;
     jsonwebtoken::encode(
         &Header::new(Algorithm::RS256),
-        &assertion_claims(account, now),
+        &assertion_claims(account, scope, now),
         &key,
     )
     .map_err(|_| anyhow!("{}", t!("app_releases.accounts.invalid_service_account")))
@@ -88,12 +90,20 @@ struct TokenResponse {
     access_token: String,
 }
 
-/// Exchanges a signed assertion for an access token (OAuth 2 JWT bearer grant).
 pub async fn access_token(
     client: &Arc<dyn HttpClient>,
     account: &ServiceAccount,
 ) -> Result<String> {
-    let assertion = assertion(account, Utc::now().timestamp())?;
+    access_token_for_scope(client, account, SCOPE).await
+}
+
+/// Exchanges a signed assertion for an access token (OAuth 2 JWT bearer grant).
+pub(crate) async fn access_token_for_scope(
+    client: &Arc<dyn HttpClient>,
+    account: &ServiceAccount,
+    scope: &str,
+) -> Result<String> {
+    let assertion = assertion(account, scope, Utc::now().timestamp())?;
     let form = format!(
         "grant_type={}&assertion={}",
         urlencoding::encode("urn:ietf:params:oauth:grant-type:jwt-bearer"),
@@ -642,7 +652,7 @@ pub(crate) mod tests {
             r#"{"client_email":"ci@trix.iam.gserviceaccount.com","private_key":"x","token_uri":"https://oauth2.googleapis.com/token"}"#,
         )
         .unwrap();
-        let claims = assertion_claims(&account, 1_800_000_000);
+        let claims = assertion_claims(&account, SCOPE, 1_800_000_000);
         assert_eq!(claims.iss, "ci@trix.iam.gserviceaccount.com");
         assert_eq!(claims.scope, SCOPE);
         assert_eq!(claims.aud, "https://oauth2.googleapis.com/token");
