@@ -5,13 +5,13 @@ código. A ideia é atacar um de cada vez, na ordem abaixo, e marcar o status aq
 
 | # | Plano | Boards | Tamanho | Depende de | Status |
 |---|---|---|---|---|---|
-| 1 | [Servidores MCP vira atalho](01-mcp-menu-atalho.md) | 19 · Projetos | P | — | fase 1 feita (63060b2c59); fase 2 (linhas da página de MCP) a fazer |
-| 2 | [Contexto da thread](02-contexto-da-thread.md) | 14 · Notas | M | — | fase 1 feita (a4857e2d82, editor abre como modal, não popover ancorado); fases 2–3 a fazer |
-| 3 | [Projetos](03-projetos.md) | 19 · Projetos | G | — | a fazer |
-| 4 | [Lançamentos (ASC + Play + EAS)](04-lancamentos.md) | 18 · Lançamentos | G | 3 (fase 3) para contas por projeto | a fazer |
-| 5 | [Executar e depurar (tasks + debugger)](05-executar-e-depurar.md) | 20 · Executar e depurar | G | — (fase 0 é independente e pequena) | fase 0 feita (2c9f9d0770, 09f23ec86d), menos aspas nos args; fases 1–4 a fazer |
-| 6 | [Imagens nas notas](06-imagens-nas-notas.md) | 14 · Notas | M | — (combina com 02, que também mexe em notas) | @nota com imagens feito (aad1535a6a); colar em .md já existia no editor; resto a fazer |
-| 7 | [Build limpa a partir de uma branch (EAS)](07-build-limpa-por-branch.md) | 18 · Lançamentos | M | 05 (fase 2) e 04 (fase 1) | a fazer |
+| 1 | [Servidores MCP vira atalho](01-mcp-menu-atalho.md) | 19 · Projetos | P | — | fase 1 (63060b2c59) e fase 2 (e3b506854d) feitas; não validado no app |
+| 2 | [Contexto da thread](02-contexto-da-thread.md) | 14 · Notas | M | — | fases 1–3 feitas (a4857e2d82, f1985fa07d, 9df4696992, 5e6745f4aa); não validado no app |
+| 3 | [Projetos](03-projetos.md) | 19 · Projetos | G | — | fase 0 feita; fases 1, 2 e 4 parciais (713e0049dd, cd9c3bccca, 1a0b869649); fase 3 coberta pelo plano 04 (contas no perfil); ver pendências no plano |
+| 4 | [Lançamentos (ASC + Play + EAS)](04-lancamentos.md) | 18 · Lançamentos | G | 3 (fase 3) para contas por projeto | fases 1–4 feitas (37a61a936f…34247ad9cb), só testadas com fixtures; contas no perfil até o 03 fase 3 |
+| 5 | [Executar e depurar (tasks + debugger)](05-executar-e-depurar.md) | 20 · Executar e depurar | G | — (fase 0 é independente e pequena) | fases 0–4 feitas (2c9f9d0770, 09f23ec86d, 2031b17745…a652c7c70e); não validado no app |
+| 6 | [Imagens nas notas](06-imagens-nas-notas.md) | 14 · Notas | M | — (combina com 02, que também mexe em notas) | fases 1–4 feitas em boa parte (aad1535a6a, dd17b31b15, 5e6745f4aa); pendências no plano |
+| 7 | [Build limpa a partir de uma branch (EAS)](07-build-limpa-por-branch.md) | 18 · Lançamentos | M | 05 (fase 2) e 04 (fase 1) | fases 1–2 feitas (7624225b8b); fase 3 a fazer |
 
 **Por que essa ordem:** 1 e 2 são pequenos, independentes e resolvem dores do dia a dia (MCP caindo
 no lugar errado, se perder nas threads). 3 muda onde as configs e as contas moram, então vem antes de

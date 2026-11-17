@@ -49,6 +49,18 @@ dock Lançamentos (plano 04).
 2. Acompanhamento no EAS: linha "limpa" e aviso ao terminar. (Depende do plano 04, fase 1.)
 3. "Enviar para a loja" a partir da build pronta (`eas submit --id`), tool do agente.
 
+**Feito em 7624225b8b (fases 1 e 2):** `app_releases::NewCleanBuild` (botão + na dock Lançamentos e paleta)
+abre o modal: branch (atual pré-preenchida), perfil do `eas.json`, plataforma, nuvem × nesta máquina, limpar
+cache. Confere a branch: fora do origin → "Usar commit local" ou cancelar (nunca faz push); à frente do origin →
+aviso; `production` pede confirmação. Roda como task no terminal (aparece em Execuções) um script com
+worktree destacada do commit em `$TMPDIR/asylum-clean-builds/build-<sha>`, install pelo lockfile
+(`--frozen-lockfile`/`npm ci`), `npx eas-cli build … --json --no-wait --message "asylum clean build <sha>"`,
+e remove a worktree só no sucesso. `EXPO_TOKEN` vai no ambiente da task, vindo da conta Expo de Lançamentos.
+Ao terminar, os ids do `--json` ficam salvos e a linha ganha o pill "limpa"; a dock recarrega.
+Worktrees com mais de 7 dias são apagadas ao iniciar. **Desvios / fica para depois:** etapas como `steps` do
+plano 05 (hoje é um script único na mesma task), `validate:expo`, entradas no menu da branch do Repo e no
+seletor Executar, "Corrigir com agente" na falha, fase 3 inteira (`eas submit --id` e tool `eas_clean_build`).
+
 ## Pronto quando
 
 - Com mudanças locais não commitadas na branch, a build limpa sai igual à do origin (conferir commit no EAS).
