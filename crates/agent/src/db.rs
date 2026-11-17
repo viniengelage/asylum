@@ -1,6 +1,6 @@
 use crate::{AgentMessage, AgentMessageContent, UserMessage, UserMessageContent};
 use acp_thread::ClientUserMessageId;
-use agent_client_protocol::schema::v2 as acp_v2;
+use agent_client_protocol::v2::schema as acp_v2;
 use agent_settings::AgentProfileId;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
@@ -16,7 +16,11 @@ use sqlez::{
     connection::Connection,
     statement::Statement,
 };
-use std::{io::ErrorKind, path::PathBuf, sync::Arc};
+use std::{
+    io::{BufWriter, ErrorKind, Write as _},
+    path::PathBuf,
+    sync::Arc,
+};
 use ui::{App, SharedString};
 use util::{ResultExt, path_list::PathList};
 use zed_env_vars::ASYLUM_STATELESS;
@@ -556,12 +560,20 @@ impl ThreadsDatabase {
                     Some(serialized_folder_paths.order),
                 )
             };
-        let json_data = serde_json::to_string(&SerializedThread {
-            thread,
-            version: DbThread::VERSION,
-        })?;
+        let mut encoder = zstd::stream::Encoder::new(Vec::new(), COMPRESSION_LEVEL)?;
+        {
+            let mut writer = BufWriter::new(&mut encoder);
+            serde_json::to_writer(
+                &mut writer,
+                &SerializedThread {
+                    thread,
+                    version: DbThread::VERSION,
+                },
+            )?;
+            writer.flush()?;
+        }
+        let compressed = encoder.finish()?;
 
-        let compressed = zstd::encode_all(json_data.as_bytes(), COMPRESSION_LEVEL)?;
         let data_type = DataType::Zstd;
         let data = compressed;
 
@@ -835,7 +847,7 @@ impl ThreadsDatabase {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::schema::v1 as acp;
+    use agent_client_protocol::v1::schema as acp;
     use chrono::{DateTime, TimeZone, Utc};
     use collections::HashMap;
     use gpui::TestAppContext;
@@ -989,6 +1001,43 @@ mod tests {
             compacted_output_tokens: 0,
             loaded_context_servers: Vec::new(),
         }
+    }
+
+    #[gpui::test]
+    async fn test_save_thread_stores_versioned_json(cx: &mut TestAppContext) {
+        let database = ThreadsDatabase::new(cx.executor()).unwrap();
+        let thread_id = session_id("versioned-thread");
+        let mut thread = make_thread(
+            "Thread \"雪\"",
+            Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap(),
+        );
+        thread.detailed_summary = Some(
+            "A long summary with \"quotes\", \\ and 雪\n"
+                .repeat(8192)
+                .into(),
+        );
+        let expected = serde_json::to_value(&thread).unwrap();
+
+        database
+            .save_thread(thread_id.clone(), thread, PathList::default())
+            .await
+            .unwrap();
+
+        let (data_type, data) = {
+            let connection = database.connection.lock();
+            let mut select = connection
+                .select_bound::<Arc<str>, (DataType, Vec<u8>)>(
+                    "SELECT data_type, data FROM threads WHERE id = ?",
+                )
+                .unwrap();
+            select(thread_id.0).unwrap().into_iter().next().unwrap()
+        };
+        assert_eq!(data_type, DataType::Zstd);
+        let json = zstd::decode_all(data.as_slice()).unwrap();
+        let saved_json: serde_json::Value = serde_json::from_slice(&json).unwrap();
+        assert_eq!(saved_json["version"], DbThread::VERSION);
+        let restored = DbThread::from_json(&json).unwrap();
+        assert_eq!(serde_json::to_value(restored).unwrap(), expected);
     }
 
     #[gpui::test]
@@ -1313,6 +1362,7 @@ mod tests {
         child_thread.subagent_context = Some(crate::SubagentContext {
             parent_thread_id: parent_id.clone(),
             depth: 1,
+            outcomes: Vec::new(),
         });
 
         let mut grandchild_thread = make_thread(
@@ -1322,6 +1372,7 @@ mod tests {
         grandchild_thread.subagent_context = Some(crate::SubagentContext {
             parent_thread_id: child_id.clone(),
             depth: 2,
+            outcomes: Vec::new(),
         });
 
         let unrelated_thread = make_thread(
@@ -1362,6 +1413,7 @@ mod tests {
         child_thread.subagent_context = Some(crate::SubagentContext {
             parent_thread_id: parent_id.clone(),
             depth: 2,
+            outcomes: Vec::new(),
         });
 
         database

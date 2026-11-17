@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use settings::SettingsStore;
 use ui::{ListItem, ListItemSpacing, prelude::*};
 use util::ResultExt as _;
-use workspace::{ModalView, MultiWorkspace, OpenMode, Workspace};
+use workspace::{ModalView, MultiWorkspace, OpenMode, OpenPathPromptMode, Workspace};
 
 actions!(
     projects,
@@ -310,11 +310,15 @@ fn new_project(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<
             workspace.project().clone(),
             workspace.app_state().fs.clone(),
         ),
+        OpenPathPromptMode::SelectPath,
         window,
         cx,
     );
     cx.spawn_in(window, async move |_, cx| {
-        let Some(root) = chosen.await?.and_then(|paths| paths.into_iter().next()) else {
+        let Some(root) = chosen
+            .await?
+            .and_then(|result| result.paths.into_iter().next())
+        else {
             return anyhow::Ok(());
         };
         let project = cx

@@ -6,7 +6,7 @@ use crate::agent_panel::CreateThreadOptions;
 use crate::{Agent, AgentPanel, AgentThreadSource, ThreadId};
 use acp_thread::{AcpThread, AgentThreadEntry, ToolCallStatus};
 use agent::{AgentTool as _, NativeAgentConnection, SubmitStepTool, SubmitStepToolInput};
-use agent_client_protocol::schema::v2 as acp;
+use agent_client_protocol::v2::schema as acp;
 use anyhow::{Context as _, Result, anyhow};
 use flows::run::{CriterionOutcome, CriterionResult, FlowRun, RunAction, Submission};
 use flows::{StepKind, StepLimits, Verifier};

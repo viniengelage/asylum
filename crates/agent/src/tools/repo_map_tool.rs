@@ -2,7 +2,7 @@ use super::tool_permissions::{
     ResolvedProjectPath, canonicalize_worktree_roots, resolve_project_path,
 };
 use crate::{AgentTool, ToolCallEventStream, ToolInput};
-use agent_client_protocol::schema::v2 as acp;
+use agent_client_protocol::v2::schema as acp;
 use anyhow::{Context as _, Result, anyhow};
 use futures::future;
 use gpui::{App, AsyncApp, Entity, SharedString, Task};

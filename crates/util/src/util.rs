@@ -8,6 +8,8 @@ pub mod asylum_env;
 pub mod command;
 #[cfg(not(target_family = "wasm"))]
 pub mod fs;
+#[cfg(target_os = "linux")]
+pub mod libc_type;
 #[cfg(not(target_family = "wasm"))]
 pub mod process;
 #[cfg(not(target_family = "wasm"))]

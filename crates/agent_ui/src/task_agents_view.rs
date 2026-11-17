@@ -5,7 +5,7 @@ mod new_agent_modal;
 
 use crate::{AgentInitialContent, AgentPanel, AgentThreadSource};
 use agent::AgentTool as _;
-use agent_client_protocol::schema::v2 as acp;
+use agent_client_protocol::v2::schema as acp;
 use agent_settings::AgentProfile;
 use anyhow::Result;
 use editor::Editor;

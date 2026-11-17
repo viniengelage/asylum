@@ -27,7 +27,8 @@ use sha2::{Digest as _, Sha256};
 use util::ResultExt as _;
 use workspace::notifications::NotificationId;
 use workspace::{
-    HideStatusItem, ItemHandle, OpenOptions, StatusItemView, Toast, ToolkitEntry, Workspace,
+    HideStatusItem, ItemHandle, OpenOptions, OpenPathPromptMode, StatusItemView, Toast, ToolkitEntry,
+    Workspace,
 };
 
 pub use agent_toolkit::register_toolkit as register_agent_toolkit;
@@ -78,11 +79,14 @@ fn open(workspace: &mut Workspace, _: &Open, window: &mut Window, cx: &mut Conte
             workspace.project().clone(),
             workspace.app_state().fs.clone(),
         ),
+        OpenPathPromptMode::SelectPath,
         window,
         cx,
     );
     cx.spawn_in(window, async move |workspace, cx| {
-        let Some(path) = paths.await?.and_then(|paths| paths.into_iter().next()) else {
+        let Some(path) = paths
+            .await?
+            .and_then(|result| result.paths.into_iter().next()) else {
             return Ok(());
         };
         if !is_fig(&path) {

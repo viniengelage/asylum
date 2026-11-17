@@ -40,5 +40,11 @@ jobs:
         with:
           shared-key: asylum-ci-windows
 
+      # cef-dll-sys can't read the CEF CDN's index.json any more (it outgrew download-cef's
+      # 10 MiB limit), so the pinned archive is fetched directly.
+      - name: Download CEF
+        shell: bash
+        run: echo "CEF_PATH=$(python script/fetch-cef)" >> "$GITHUB_ENV"
+
       - name: Check the app, CLI and helpers
         run: cargo check --package zed --package cli --package auto_update_helper --package android_sdk --tests

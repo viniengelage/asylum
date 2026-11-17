@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""Download the CEF build that `cef-dll-sys` links against and print a directory to use as
+`CEF_PATH`.
+
+`cef-dll-sys` normally finds the archive through the CDN's `index.json`, but download-cef 2.x
+reads that file with ureq's 10 MiB default limit and the index outgrew it in November 2026, so
+the build script fails before downloading anything. This fetches the pinned archive by name
+instead and lays it out the way the build script expects a `CEF_PATH` to look.
+
+Usage: script/fetch-cef [PLATFORM] [DESTINATION]
+PLATFORM is a CEF platform name (macosarm64, macosx64, windows64, windowsarm64, linux64,
+linuxarm64) and defaults to the host. DESTINATION defaults to target/cef/<platform>.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import platform
+import shutil
+import sys
+import tarfile
+import tempfile
+import urllib.request
+from pathlib import Path
+
+# Must match the `cef` crate in Cargo.lock and `CEF_VERSION` in crates/web_preview/src/cef_paths.rs.
+CEF_VERSION = "150.0.14+g7c1aa68+chromium-150.0.7871.129"
+CDN_URL = "https://cef-builds.spotifycdn.com"
+SHA1 = {
+    "macosarm64": "47baa745213c938861861f0f3f65c6dd03e7254e",
+    "macosx64": "c0591785a04404e2301cb1e216b6508231445dde",
+    "windows64": "63272475eee07ec21cbc8774e2e7e18957115a55",
+    "windowsarm64": "92528472e99b69cc4c3257749e81641c77505043",
+    "linux64": "2e2f9915f134d237ac4fd7b8c6ad893bfc6cc544",
+    "linuxarm64": "a591ca503296be3c420b8f307ac383b44b645612",
+}
+
+
+def host_platform() -> str:
+    system = platform.system()
+    arm = platform.machine().lower() in ("arm64", "aarch64")
+    if system == "Darwin":
+        return "macosarm64" if arm else "macosx64"
+    if system == "Windows":
+        return "windowsarm64" if arm else "windows64"
+    return "linuxarm64" if arm else "linux64"
+
+
+def sha1_of(path: Path) -> str:
+    digest = hashlib.sha1()
+    with path.open("rb") as file:
+        for chunk in iter(lambda: file.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def main() -> None:
+    cef_platform = sys.argv[1] if len(sys.argv) > 1 else host_platform()
+    if cef_platform not in SHA1:
+        sys.exit(f"unknown CEF platform {cef_platform!r}; expected one of {', '.join(SHA1)}")
+    repo_root = Path(__file__).resolve().parent.parent
+    destination = (
+        Path(sys.argv[2]) if len(sys.argv) > 2 else repo_root / "target" / "cef" / cef_platform
+    ).resolve()
+
+    stem = f"cef_binary_{CEF_VERSION}_{cef_platform}_minimal"
+    archive_json = destination / "archive.json"
+    if archive_json.exists() and json.loads(archive_json.read_text()).get("sha1") == SHA1[cef_platform]:
+        print(destination)
+        return
+
+    with tempfile.TemporaryDirectory() as scratch:
+        scratch = Path(scratch)
+        archive = scratch / f"{stem}.tar.bz2"
+        url = f"{CDN_URL}/{urllib.request.quote(archive.name)}"
+        print(f"Downloading {url}", file=sys.stderr)
+        with urllib.request.urlopen(url) as response, archive.open("wb") as file:
+            shutil.copyfileobj(response, file)
+        actual = sha1_of(archive)
+        if actual != SHA1[cef_platform]:
+            sys.exit(f"sha1 mismatch for {archive.name}: expected {SHA1[cef_platform]}, got {actual}")
+
+        with tarfile.open(archive, "r:bz2") as tar:
+            if hasattr(tarfile, "data_filter"):
+                tar.extractall(scratch, filter="data")
+            else:
+                tar.extractall(scratch)
+        extracted = scratch / stem
+
+        # Same layout download_cef::extract_target_archive produces.
+        if destination.exists():
+            shutil.rmtree(destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(extracted / "Release"), destination)
+        if not cef_platform.startswith("macos"):
+            for entry in (extracted / "Resources").iterdir():
+                shutil.move(str(entry), destination / entry.name)
+        for name in ("CMakeLists.txt", "cmake", "include", "libcef_dll", "CREDITS.html"):
+            shutil.move(str(extracted / name), destination / name)
+        archive_json.write_text(
+            json.dumps({"type": "minimal", "name": archive.name, "sha1": actual}, indent=2)
+        )
+
+    print(destination)
+
+
+if __name__ == "__main__":
+    main()

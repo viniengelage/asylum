@@ -177,8 +177,8 @@ impl Sidebar {
         for group in multi_workspace.read(cx).project_groups(cx) {
             let host = group.key.host();
             let entries = store
-                .entries_for_main_worktree_path(group.key.path_list(), host.as_ref())
-                .chain(store.entries_for_path(group.key.path_list(), host.as_ref()));
+                .entries_for_main_worktree_path(group.key.path_list(), host)
+                .chain(store.entries_for_path(group.key.path_list(), host));
             for metadata in entries {
                 if metadata.archived || metadata.is_draft() || !seen.insert(metadata.thread_id) {
                     continue;

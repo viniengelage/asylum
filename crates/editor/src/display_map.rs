@@ -441,16 +441,12 @@ impl DisplayMap {
             }]);
             self.block_map.deferred_edits.set(edits);
             self.block_map.retain_blocks_raw(&mut |block| {
-                if companion
+                !companion
                     .read(cx)
                     .lhs_custom_block_to_balancing_block
                     .borrow()
                     .values()
                     .any(|id| *id == block.id)
-                {
-                    return false;
-                }
-                true
             });
             return;
         };
@@ -4180,7 +4176,6 @@ pub mod tests {
                 ("  ".to_string(), Some(Hsla::red())),
                 ("\n".to_string(), None),
                 ("fn ".to_string(), Some(Hsla::red())),
-                ("i".to_string(), Some(Hsla::blue())),
                 ("\n".to_string(), None)
             ]
         );

@@ -144,6 +144,11 @@ jobs:
           cache-targets: false
           shared-key: asylum-mac
 
+      # cef-dll-sys can't read the CEF CDN's index.json any more (it outgrew download-cef's
+      # 10 MiB limit), so the pinned archive is fetched directly.
+      - name: Download CEF
+        run: echo "CEF_PATH=$(python3 script/fetch-cef)" >> "$GITHUB_ENV"
+
       # Signing with the same certificate on every release is what keeps keychain items and
       # privacy permissions across updates. MACOS_CERTIFICATE is a base64 .p12, self-signed
       # or Developer ID; the notarization secrets only apply to a Developer ID certificate.
@@ -212,7 +217,7 @@ jobs:
         run: |
           export "CC_${TARGET//-/_}"=musl-gcc
           cargo --config .cargo/bundle-config.toml build --release --target "$TARGET" --package remote_server
-          gzip --stdout --best "target/$TARGET/release/remote_server" > "target/asylum-remote-server-linux-$ARCH.gz"
+          gzip --stdout --best "target/$TARGET/release/remote-server" > "target/asylum-remote-server-linux-$ARCH.gz"
 
       - name: Upload the remote server
         uses: actions/upload-artifact@v4
@@ -249,6 +254,12 @@ jobs:
         with:
           cache-targets: false
           shared-key: asylum-windows
+
+      # cef-dll-sys can't read the CEF CDN's index.json any more (it outgrew download-cef's
+      # 10 MiB limit), so the pinned archive is fetched directly.
+      - name: Download CEF
+        shell: bash
+        run: echo "CEF_PATH=$(python script/fetch-cef)" >> "$GITHUB_ENV"
 
       - name: Fetch dependencies
         # bundle-windows.ps1 reads the workspace version with `cargo metadata --offline`.

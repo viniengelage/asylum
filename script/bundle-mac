@@ -472,7 +472,7 @@ function extract_debug_symbols() {
         cat target/dsymutil.log
         exit 1
     fi
-    if ! dsymutil --flat "target/${target_triple}/${target_dir}/remote_server" 2> target/dsymutil.log; then
+    if ! dsymutil --flat "target/${target_triple}/${target_dir}/remote-server" 2> target/dsymutil.log; then
         echo "dsymutil failed"
         cat target/dsymutil.log
         exit 1
@@ -485,12 +485,12 @@ if [[ "$target_dir" == "release" && "$local_install" != true ]]; then
     extract_debug_symbols
     strip -x "target/${target_triple}/${target_dir}/asylum"
     strip -x "target/${target_triple}/${target_dir}/cli"
-    strip -x "target/${target_triple}/${target_dir}/remote_server"
+    strip -x "target/${target_triple}/${target_dir}/remote-server"
 fi
 
 cp target/${target_triple}/${target_dir}/asylum "${app_path}/Contents/MacOS/asylum"
 cp target/${target_triple}/${target_dir}/cli "${app_path}/Contents/MacOS/cli"
 sign_app_binaries
 
-sign_binary "target/$target_triple/release/remote_server"
-gzip -f --stdout --best target/$target_triple/release/remote_server > target/asylum-remote-server-macos-$arch_suffix.gz
+sign_binary "target/$target_triple/release/remote-server"
+gzip -f --stdout --best target/$target_triple/release/remote-server > target/asylum-remote-server-macos-$arch_suffix.gz

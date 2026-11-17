@@ -38,6 +38,7 @@ pub struct TerminalToolHeader {
     sandbox_warning: Option<TerminalSandboxWarning>,
     on_toggle_expand: Option<ClickHandler>,
     on_stop: Option<ClickHandler>,
+    stop_description: SharedString,
     command_slot: Option<AnyElement>,
 }
 
@@ -63,6 +64,7 @@ impl TerminalToolHeader {
             sandbox_warning: None,
             on_toggle_expand: None,
             on_stop: None,
+            stop_description: t!("agent_ui.terminal_card.stop_tooltip_meta"),
             command_slot: None,
         }
     }
@@ -124,6 +126,11 @@ impl TerminalToolHeader {
         self
     }
 
+    pub fn stop_description(mut self, description: impl Into<SharedString>) -> Self {
+        self.stop_description = description.into();
+        self
+    }
+
     pub fn command_slot(mut self, element: impl IntoElement) -> Self {
         self.command_slot = Some(element.into_any_element());
         self
@@ -159,6 +166,7 @@ impl RenderOnce for TerminalToolHeader {
             sandbox_warning,
             on_toggle_expand,
             on_stop,
+            stop_description,
             command_slot,
             ..
         } = self;
@@ -301,7 +309,7 @@ impl RenderOnce for TerminalToolHeader {
                                     Tooltip::with_meta(
                                         t!("agent_ui.terminal_card.stop_tooltip"),
                                         None,
-                                        t!("agent_ui.terminal_card.stop_tooltip_meta"),
+                                        stop_description.clone(),
                                         cx,
                                     )
                                 })

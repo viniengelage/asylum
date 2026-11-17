@@ -7,7 +7,7 @@ use crate::{
     Agent, AgentInitialContent, AgentThreadSource, NewExternalAgentThread, ThreadId,
     thread_metadata_store::ThreadMetadataStore,
 };
-use agent_client_protocol::schema::v2 as acp;
+use agent_client_protocol::v2::schema as acp;
 use gpui::{AnyElement, App, Context, SharedString, Window, actions};
 use i18n::t;
 use task_agents::TaskAgent;

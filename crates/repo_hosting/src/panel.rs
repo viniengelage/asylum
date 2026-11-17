@@ -15,7 +15,10 @@ use editor::Editor;
 use git::repository::PushOptions;
 use git::repository::{FetchOptions, Remote};
 use git_hosting_providers::GitHostingProviderSettings;
-use git_ui::{branch_diff::BranchDiff, commit_view::CommitView};
+use git_ui::{
+    branch_diff::BranchDiff,
+    commit_view::{CommitView, CommitViewOptions},
+};
 use git_ui_core::askpass_modal::AskPassModal;
 use gpui::AsyncApp;
 use gpui::{
@@ -2377,8 +2380,7 @@ impl RepoPanel {
                         hash,
                         repository.downgrade(),
                         workspace,
-                        None,
-                        None,
+                        CommitViewOptions::default(),
                         window,
                         cx,
                     );
@@ -4368,7 +4370,7 @@ impl RepoPanel {
         self.workspace
             .update(cx, |workspace, cx| {
                 BranchDiff::deploy_branch_diff_with_base_ref(
-                    workspace, project, repository, base_ref, None, window, cx,
+                    workspace, project, repository, base_ref, None, None, window, cx,
                 );
             })
             .log_err();
@@ -6137,7 +6139,7 @@ pub(crate) async fn fetch_remote(
             FetchOptions::Remote(Remote {
                 name: remote_name.to_string().into(),
             }),
-            askpass,
+            Some(askpass),
             cx,
         )
     });

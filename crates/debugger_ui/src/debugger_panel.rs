@@ -1646,8 +1646,14 @@ impl Panel for DebugPanel {
         });
     }
 
-    fn default_size(&self, _window: &Window, _: &App) -> Pixels {
-        px(300.)
+    fn default_size(&self, window: &Window, cx: &App) -> Pixels {
+        let settings = DebuggerSettings::get_global(cx);
+        match self.position(window, cx) {
+            DockPosition::Left | DockPosition::Devices | DockPosition::Right => {
+                settings.default_width
+            }
+            DockPosition::Bottom => settings.default_height,
+        }
     }
 
     fn remote_id() -> Option<proto::PanelId> {
