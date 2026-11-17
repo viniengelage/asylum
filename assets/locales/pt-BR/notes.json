@@ -63,5 +63,6 @@
   "images.delete_prompt": "Apagar também as {count} imagens desta nota?",
   "images.delete_images": "Apagar imagens",
   "images.keep_images": "Manter imagens",
-  "images.removed": "{count} imagens sem uso removidas"
+  "images.removed": "{count} imagens sem uso removidas",
+  "images.paste_failed": "Não deu para salvar a imagem na nota: {error}"
 }

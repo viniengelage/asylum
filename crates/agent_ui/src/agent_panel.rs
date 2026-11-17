@@ -207,6 +207,17 @@ async fn write_global_last_used_agent(kvp: KeyValueStore, agent: Agent) {
     }
 }
 
+const COLLAPSED_THREAD_CONTEXTS_KEY: &str = "agent_panel__collapsed_thread_contexts";
+
+fn read_collapsed_thread_contexts(kvp: &KeyValueStore) -> collections::HashSet<ThreadId> {
+    kvp.read_kvp(COLLAPSED_THREAD_CONTEXTS_KEY)
+        .log_err()
+        .flatten()
+        .and_then(|json| serde_json::from_str::<Vec<ThreadId>>(&json).log_err())
+        .map(|ids| ids.into_iter().collect())
+        .unwrap_or_default()
+}
+
 fn read_global_last_created_entry_kind(kvp: &KeyValueStore) -> Option<AgentPanelEntryKind> {
     kvp.read_kvp(LAST_CREATED_ENTRY_KIND_KEY)
         .log_err()
@@ -1789,7 +1800,7 @@ impl AgentPanel {
             last_context_source: None,
             is_active: false,
             _notes_observation,
-            collapsed_thread_contexts: collections::HashSet::default(),
+            collapsed_thread_contexts: read_collapsed_thread_contexts(&KeyValueStore::global(cx)),
             thread_context_markdown: None,
         };
 
@@ -6052,6 +6063,15 @@ impl AgentPanel {
                     if !this.collapsed_thread_contexts.remove(&thread_id) {
                         this.collapsed_thread_contexts.insert(thread_id);
                     }
+                    let ids: Vec<ThreadId> =
+                        this.collapsed_thread_contexts.iter().copied().collect();
+                    let kvp = KeyValueStore::global(cx);
+                    cx.background_spawn(async move {
+                        let json = serde_json::to_string(&ids)?;
+                        kvp.write_kvp(COLLAPSED_THREAD_CONTEXTS_KEY.to_string(), json)
+                            .await
+                    })
+                    .detach_and_log_err(cx);
                     cx.notify();
                 })),
             );

@@ -65,6 +65,8 @@ pub async fn save_note_image(
     }
 }
 
+struct NoteImagePasteError;
+
 pub(crate) fn init(cx: &mut App) {
     let fs = <dyn Fs>::global(cx);
     cx.set_global(MarkdownImagePasteHandler(Arc::new(
@@ -76,8 +78,30 @@ pub(crate) fn init(cx: &mut App) {
             let note_path = path.to_path_buf();
             let bytes = image.bytes.clone();
             let extension = image.format.extension().to_string();
-            Some(cx.background_spawn(async move {
+            let saved = cx.background_spawn(async move {
                 save_note_image(fs, &note_path, &bytes, &extension).await
+            });
+            // The editor only logs a failed paste; say it where the user is looking.
+            Some(cx.spawn(async move |cx| {
+                let result = saved.await;
+                if let Err(error) = &result {
+                    let message = format!("{error:#}");
+                    cx.update(|cx| {
+                        workspace::notifications::show_app_notification(
+                            workspace::notifications::NotificationId::unique::<NoteImagePasteError>(),
+                            cx,
+                            move |cx| {
+                                cx.new(|cx| {
+                                    workspace::notifications::simple_message_notification::MessageNotification::new(
+                                        t!("notes.images.paste_failed", error = message.clone()),
+                                        cx,
+                                    )
+                                })
+                            },
+                        )
+                    });
+                }
+                result
             }))
         },
     )));

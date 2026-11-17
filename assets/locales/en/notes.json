@@ -63,5 +63,6 @@
   "images.delete_prompt": "Also delete the {count} images of this note?",
   "images.delete_images": "Delete images",
   "images.keep_images": "Keep images",
-  "images.removed": "Removed {count} unused images"
+  "images.removed": "Removed {count} unused images",
+  "images.paste_failed": "Couldn't save the image in the note: {error}"
 }
