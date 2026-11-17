@@ -68,8 +68,8 @@ async fn test_invert_axis_on_panel_position_change(
 
     assert_eq!(
         dock_position,
-        DockPosition::Bottom,
-        "Default dock position should be bottom for debug panel"
+        DockPosition::Right,
+        "Default dock position should be right for debug panel"
     );
 
     let pre_serialized_layout = debug_panel
@@ -86,7 +86,7 @@ async fn test_invert_axis_on_panel_position_change(
 
     let post_serialized_layout = debug_panel
         .update_in(cx, |panel, window, cx| {
-            panel.set_position(DockPosition::Right, window, cx);
+            panel.set_position(DockPosition::Bottom, window, cx);
 
             panel
                 .active_session()

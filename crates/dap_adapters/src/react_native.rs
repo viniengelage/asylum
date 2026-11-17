@@ -30,6 +30,7 @@ impl ReactNativeExpoDebugAdapter {
         delegate: &Arc<dyn DapDelegate>,
         metro_address: &str,
         metro_port: u64,
+        device_name: Option<&str>,
         executor: &gpui::BackgroundExecutor,
     ) -> Option<String> {
         let url = format!("http://{}:{}/json/list", metro_address, metro_port);
@@ -64,13 +65,30 @@ impl ReactNativeExpoDebugAdapter {
                 Ok(targets) => targets,
                 Err(_) => continue,
             };
-            if let Some(ws_url) = targets.iter().find_map(|target| {
-                target
-                    .get("webSocketDebuggerUrl")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned)
-            }) {
-                return Some(ws_url);
+            match pick_hermes_target(&targets, device_name) {
+                TargetChoice::Found {
+                    websocket_url,
+                    other_devices,
+                } => {
+                    if !other_devices.is_empty() {
+                        delegate.output_to_console(format!(
+                            "More than one app is connected to Metro ({}); attaching to the first. \
+                             Set \"deviceName\" in the debug scenario to pick another.",
+                            other_devices.join(", ")
+                        ));
+                    }
+                    return Some(websocket_url);
+                }
+                TargetChoice::NoMatch { available } => {
+                    delegate.output_to_console(format!(
+                        "No app on {} is connected to Metro yet; connected: {} (attempt {}/{max})...",
+                        device_name.unwrap_or_default(),
+                        available.join(", "),
+                        attempt + 1
+                    ));
+                    continue;
+                }
+                TargetChoice::Empty => {}
             }
             delegate.output_to_console(format!(
                 "Metro responded but no Hermes targets yet (attempt {}/{max})...",
@@ -117,6 +135,10 @@ impl ReactNativeExpoDebugAdapter {
             .get("port")
             .and_then(Value::as_u64)
             .unwrap_or(8081);
+        let device_name = configuration
+            .remove("deviceName")
+            .and_then(|name| name.as_str().map(str::to_owned))
+            .filter(|name| !name.trim().is_empty());
 
         configuration.insert("type".to_owned(), "pwa-node".into());
         configuration.insert("request".to_owned(), "attach".into());
@@ -140,9 +162,14 @@ impl ReactNativeExpoDebugAdapter {
             .or_insert(delegate.worktree_root_path().to_string_lossy().into());
 
         if !configuration.contains_key("websocketAddress") {
-            if let Some(websocket_url) =
-                Self::discover_hermes_websocket_url(delegate, &metro_address, metro_port, executor)
-                    .await
+            if let Some(websocket_url) = Self::discover_hermes_websocket_url(
+                delegate,
+                &metro_address,
+                metro_port,
+                device_name.as_deref(),
+                executor,
+            )
+            .await
             {
                 delegate
                     .output_to_console(format!("Discovered Hermes inspector at {websocket_url}"));
@@ -214,6 +241,78 @@ impl ReactNativeExpoDebugAdapter {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum TargetChoice {
+    Found {
+        websocket_url: String,
+        /// The devices of the other apps connected, when there is more than one and no device
+        /// was asked for.
+        other_devices: Vec<String>,
+    },
+    /// A device was asked for and no connected app runs on it.
+    NoMatch {
+        available: Vec<String>,
+    },
+    Empty,
+}
+
+fn target_device(target: &Value) -> String {
+    target
+        .get("deviceName")
+        .or_else(|| target.get("title"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// Picks the Hermes target to attach to from Metro's `/json/list`. With iOS and Android apps
+/// connected at once the first entry is a coin toss, so the device of the Devices dock decides
+/// when it is known.
+fn pick_hermes_target(targets: &[Value], device_name: Option<&str>) -> TargetChoice {
+    let debuggable: Vec<(&Value, String)> = targets
+        .iter()
+        .filter_map(|target| {
+            let url = target.get("webSocketDebuggerUrl")?.as_str()?.to_owned();
+            Some((target, url))
+        })
+        .collect();
+    let Some((_, first_url)) = debuggable.first() else {
+        return TargetChoice::Empty;
+    };
+    if let Some(device_name) = device_name {
+        let wanted = device_name.to_lowercase();
+        return match debuggable
+            .iter()
+            .find(|(target, _)| target_device(target).to_lowercase().contains(&wanted))
+        {
+            Some((_, url)) => TargetChoice::Found {
+                websocket_url: url.clone(),
+                other_devices: Vec::new(),
+            },
+            None => TargetChoice::NoMatch {
+                available: debuggable
+                    .iter()
+                    .map(|(target, _)| target_device(target))
+                    .collect(),
+            },
+        };
+    }
+    let mut devices: Vec<String> = debuggable
+        .iter()
+        .map(|(target, _)| target_device(target))
+        .collect();
+    devices.dedup();
+    let other_devices = if devices.len() > 1 {
+        devices.into_iter().skip(1).collect()
+    } else {
+        Vec::new()
+    };
+    TargetChoice::Found {
+        websocket_url: first_url.clone(),
+        other_devices,
+    }
+}
+
 #[async_trait(?Send)]
 impl DebugAdapter for ReactNativeExpoDebugAdapter {
     fn name(&self) -> DebugAdapterName {
@@ -256,6 +355,10 @@ impl DebugAdapter for ReactNativeExpoDebugAdapter {
                     "type": "number",
                     "description": "Metro inspector port",
                     "default": 8081
+                },
+                "deviceName": {
+                    "type": "string",
+                    "description": "Attach to the app running on this device (part of its name, e.g. \"iPhone 16\") when more than one is connected to Metro"
                 },
                 "websocketAddress": {
                     "type": "string",
@@ -385,5 +488,35 @@ mod tests {
         let request_kind = smol::block_on(adapter.request_kind(&json!({ "request": "launch" })));
 
         assert!(request_kind.is_err());
+    }
+
+    #[test]
+    fn picks_the_target_of_the_selected_device() {
+        let targets = vec![
+            json!({ "deviceName": "Pixel 8", "webSocketDebuggerUrl": "ws://android" }),
+            json!({ "deviceName": "iPhone 16 Pro", "webSocketDebuggerUrl": "ws://ios" }),
+            json!({ "deviceName": "iPhone 16 Pro" }),
+        ];
+        assert_eq!(
+            pick_hermes_target(&targets, Some("iphone 16")),
+            TargetChoice::Found {
+                websocket_url: "ws://ios".into(),
+                other_devices: Vec::new(),
+            }
+        );
+        assert_eq!(
+            pick_hermes_target(&targets, None),
+            TargetChoice::Found {
+                websocket_url: "ws://android".into(),
+                other_devices: vec!["iPhone 16 Pro".into()],
+            }
+        );
+        assert_eq!(
+            pick_hermes_target(&targets, Some("Galaxy")),
+            TargetChoice::NoMatch {
+                available: vec!["Pixel 8".into(), "iPhone 16 Pro".into()],
+            }
+        );
+        assert_eq!(pick_hermes_target(&[], None), TargetChoice::Empty);
     }
 }

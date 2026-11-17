@@ -216,6 +216,23 @@ impl StackFrameList {
         self.opened_stack_frame_id
     }
 
+    /// Where execution stopped, as the panel's banner shows it: the open frame, or the first
+    /// frame that isn't collapsed.
+    pub(crate) fn stopped_frame(&self) -> Option<dap::StackFrame> {
+        let frames = self.entries.iter().filter_map(|entry| match entry {
+            StackFrameEntry::Normal(frame) => Some(frame),
+            _ => None,
+        });
+        let mut first = None;
+        for frame in frames {
+            if Some(frame.id) == self.opened_stack_frame_id {
+                return Some(frame.clone());
+            }
+            first.get_or_insert(frame);
+        }
+        first.cloned()
+    }
+
     pub(super) fn schedule_refresh(
         &mut self,
         select_first: bool,
@@ -300,9 +317,18 @@ impl StackFrameList {
                 })
             });
 
+            let is_library_frame = stack_frame
+                .dap
+                .source
+                .as_ref()
+                .and_then(|source| source.path.as_deref())
+                .is_some_and(is_library_path);
             match stack_frame.dap.presentation_hint {
                 Some(dap::StackFramePresentationHint::Deemphasize)
                 | Some(dap::StackFramePresentationHint::Subtle) => {
+                    collapsed_entries.push(stack_frame.dap.clone());
+                }
+                _ if is_library_frame => {
                     collapsed_entries.push(stack_frame.dap.clone());
                 }
                 Some(dap::StackFramePresentationHint::Label) => {
@@ -660,7 +686,9 @@ impl StackFrameList {
                                     }
                                 }))
                                 .tooltip(move |window, cx| {
-                                    Tooltip::text("Restart Stack Frame")(window, cx)
+                                    Tooltip::text(i18n::t!("debugger_ui.stack.restart_frame"))(
+                                        window, cx,
+                                    )
                                 }),
                             ),
                     )
@@ -908,8 +936,8 @@ impl StackFrameList {
 
     pub(crate) fn render_control_strip(&self) -> AnyElement {
         let tooltip_title = match self.list_filter {
-            StackFrameFilter::All => "Show stack frames from your project",
-            StackFrameFilter::OnlyUserFrames => "Show all stack frames",
+            StackFrameFilter::All => i18n::t!("debugger_ui.stack.show_project_frames"),
+            StackFrameFilter::OnlyUserFrames => i18n::t!("debugger_ui.stack.show_all_frames"),
         };
 
         h_flex()
@@ -919,7 +947,7 @@ impl StackFrameList {
                     IconName::Filter,
                 )
                 .tooltip(move |_window, cx| {
-                    Tooltip::for_action(tooltip_title, &ToggleUserFrames, cx)
+                    Tooltip::for_action(tooltip_title.clone(), &ToggleUserFrames, cx)
                 })
                 .toggle_state(self.list_filter == StackFrameFilter::OnlyUserFrames)
                 .icon_size(IconSize::Small)
@@ -929,6 +957,15 @@ impl StackFrameList {
             )
             .into_any_element()
     }
+}
+
+/// Frames in dependencies (node_modules, React Native's own JavaScript) are collapsed like
+/// the ones the adapter deemphasizes, so the stack starts at the project's code.
+fn is_library_path(path: &str) -> bool {
+    let path = path.replace('\\', "/");
+    path.contains("/node_modules/")
+        || path.contains("/Libraries/Renderer/")
+        || path.starts_with("node:")
 }
 
 impl Render for StackFrameList {
@@ -969,3 +1006,18 @@ impl Focusable for StackFrameList {
 }
 
 impl EventEmitter<StackFrameListEvent> for StackFrameList {}
+
+#[cfg(test)]
+mod library_frame_tests {
+    use super::is_library_path;
+
+    #[test]
+    fn collapses_dependency_frames() {
+        assert!(is_library_path(
+            "/trix/node_modules/react-native/Libraries/Core/setUpTimers.js"
+        ));
+        assert!(is_library_path("node:internal/process/task_queues"));
+        assert!(is_library_path("C:\\trix\\node_modules\\react\\index.js"));
+        assert!(!is_library_path("/trix/src/screens/PinScreen.tsx"));
+    }
+}

@@ -613,6 +613,80 @@ impl DebugPanel {
         }
     }
 
+    /// "Stopped at X · file:line · Go" while the program is paused, so where it stopped is one
+    /// click away even with the stack collapsed.
+    fn render_stopped_banner(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let running_state = self
+            .active_session
+            .as_ref()?
+            .read(cx)
+            .running_state()
+            .clone();
+        if running_state.read(cx).thread_status(cx) != Some(ThreadStatus::Stopped) {
+            return None;
+        }
+        let stack_frame_list = running_state.read(cx).stack_frame_list().clone();
+        let frame = stack_frame_list.read(cx).stopped_frame()?;
+        let location = frame
+            .source
+            .as_ref()
+            .and_then(|source| source.path.as_deref().or(source.name.as_deref()))
+            .map(|path| {
+                let file = std::path::Path::new(path)
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.to_string());
+                format!("{file}:{}", frame.line)
+            });
+        let frame_id = frame.id;
+        let warning = Color::Warning.color(cx);
+        Some(
+            h_flex()
+                .w_full()
+                .px_2()
+                .py_1()
+                .gap_2()
+                .bg(warning.opacity(0.08))
+                .border_b_1()
+                .border_color(cx.theme().colors().border_variant)
+                .child(
+                    Icon::new(IconName::DebugBreakpoint)
+                        .size(IconSize::XSmall)
+                        .color(Color::Warning),
+                )
+                .child(
+                    Label::new(i18n::t!(
+                        "debugger_ui.stopped_at",
+                        name = frame.name.as_str()
+                    ))
+                    .size(LabelSize::Small)
+                    .single_line()
+                    .truncate(),
+                )
+                .when_some(location, |this, location| {
+                    this.child(
+                        Label::new(location)
+                            .size(LabelSize::Small)
+                            .color(Color::Muted)
+                            .buffer_font(cx)
+                            .single_line(),
+                    )
+                })
+                .child(div().flex_1())
+                .child(
+                    Button::new("debug-go-to-stopped-frame", i18n::t!("debugger_ui.go"))
+                        .label_size(LabelSize::Small)
+                        .on_click(move |_, window, cx| {
+                            stack_frame_list.update(cx, |list, cx| {
+                                list.go_to_stack_frame(frame_id, window, cx)
+                                    .detach_and_log_err(cx);
+                            });
+                        }),
+                )
+                .into_any_element(),
+        )
+    }
+
     pub(crate) fn top_controls_strip(
         &mut self,
         window: &mut Window,
@@ -633,7 +707,7 @@ impl DebugPanel {
                     let focus_handle = focus_handle.clone();
                     move |_window, cx| {
                         Tooltip::for_action_in(
-                            "Start Debug Session",
+                            i18n::t!("debugger_ui.toolbar.start_session"),
                             &crate::Start,
                             &focus_handle,
                             cx,
@@ -648,7 +722,9 @@ impl DebugPanel {
                 .on_click(|_, window, cx| {
                     window.dispatch_action(zed_actions::OpenProjectDebugTasks.boxed_clone(), cx);
                 })
-                .tooltip(Tooltip::text("Edit debug.json"))
+                .tooltip(Tooltip::text(i18n::t!(
+                    "debugger_ui.toolbar.edit_debug_json"
+                )))
         };
 
         let documentation_button = || {
@@ -659,7 +735,7 @@ impl DebugPanel {
                         "https://github.com/viniengelage/asylum/blob/main/docs/src/debugger.md",
                     )
                 })
-                .tooltip(Tooltip::text("Open Documentation"))
+                .tooltip(Tooltip::text(i18n::t!("debugger_ui.toolbar.open_docs")))
         };
 
         let logs_button = || {
@@ -668,7 +744,7 @@ impl DebugPanel {
                 .on_click(move |_, window, cx| {
                     window.dispatch_action(debugger_tools::OpenDebugAdapterLogs.boxed_clone(), cx)
                 })
-                .tooltip(Tooltip::text("Open Debug Adapter Logs"))
+                .tooltip(Tooltip::text(i18n::t!("debugger_ui.toolbar.open_logs")))
         };
 
         let close_bottom_panel_button = {
@@ -678,7 +754,7 @@ impl DebugPanel {
                     .on_click(move |_, window, cx| {
                         window.dispatch_action(workspace::ToggleBottomDock.boxed_clone(), cx)
                     })
-                    .tooltip(Tooltip::text("Close Panel")),
+                    .tooltip(Tooltip::text(i18n::t!("debugger_ui.toolbar.close_panel"))),
             )
         };
 
@@ -740,7 +816,7 @@ impl DebugPanel {
                                                     let focus_handle = focus_handle.clone();
                                                     move |_window, cx| {
                                                         Tooltip::for_action_in(
-                                                            "Pause Program",
+                                                            i18n::t!("debugger_ui.toolbar.pause"),
                                                             &Pause,
                                                             &focus_handle,
                                                             cx,
@@ -754,6 +830,7 @@ impl DebugPanel {
                                                 IconName::DebugContinue,
                                             )
                                             .icon_size(IconSize::Small)
+                                            .icon_color(Color::Accent)
                                             .disabled(thread_status != ThreadStatus::Stopped)
                                             .on_click(window.listener_for(
                                                 running_state,
@@ -765,7 +842,7 @@ impl DebugPanel {
                                                 let focus_handle = focus_handle.clone();
                                                 move |_window, cx| {
                                                     Tooltip::for_action_in(
-                                                        "Continue Program",
+                                                        i18n::t!("debugger_ui.toolbar.continue"),
                                                         &Continue,
                                                         &focus_handle,
                                                         cx,
@@ -797,7 +874,7 @@ impl DebugPanel {
                                                             let focus_handle = focus_handle.clone();
                                                             move |_window, cx| {
                                                                 Tooltip::for_action_in(
-                                                                    "Continue Thread",
+                                                                    i18n::t!("debugger_ui.toolbar.continue_thread"),
                                                                     &ContinueThread,
                                                                     &focus_handle,
                                                                     cx,
@@ -823,7 +900,7 @@ impl DebugPanel {
                                                 let focus_handle = focus_handle.clone();
                                                 move |_window, cx| {
                                                     Tooltip::for_action_in(
-                                                        "Step Over",
+                                                        i18n::t!("debugger_ui.toolbar.step_over"),
                                                         &StepOver,
                                                         &focus_handle,
                                                         cx,
@@ -845,7 +922,7 @@ impl DebugPanel {
                                                 let focus_handle = focus_handle.clone();
                                                 move |_window, cx| {
                                                     Tooltip::for_action_in(
-                                                        "Step In",
+                                                        i18n::t!("debugger_ui.toolbar.step_in"),
                                                         &StepInto,
                                                         &focus_handle,
                                                         cx,
@@ -867,7 +944,7 @@ impl DebugPanel {
                                                 let focus_handle = focus_handle.clone();
                                                 move |_window, cx| {
                                                     Tooltip::for_action_in(
-                                                        "Step Out",
+                                                        i18n::t!("debugger_ui.toolbar.step_out"),
                                                         &StepOut,
                                                         &focus_handle,
                                                         cx,
@@ -889,7 +966,7 @@ impl DebugPanel {
                                                 let focus_handle = focus_handle.clone();
                                                 move |_window, cx| {
                                                     Tooltip::for_action_in(
-                                                        "Rerun Session",
+                                                        i18n::t!("debugger_ui.toolbar.rerun"),
                                                         &RerunSession,
                                                         &focus_handle,
                                                         cx,
@@ -900,6 +977,7 @@ impl DebugPanel {
                                     .child(
                                         IconButton::new("debug-stop", IconName::Power)
                                             .icon_size(IconSize::Small)
+                                            .icon_color(Color::Error)
                                             .on_click(window.listener_for(
                                                 running_state,
                                                 |this, _, _window, cx| {
@@ -927,13 +1005,13 @@ impl DebugPanel {
                                                     .supports_terminate_threads_request
                                                     .unwrap_or_default()
                                                 {
-                                                    "Terminate Thread"
+                                                    i18n::t!("debugger_ui.toolbar.terminate_thread")
                                                 } else {
-                                                    "Terminate All Threads"
+                                                    i18n::t!("debugger_ui.toolbar.terminate_all")
                                                 };
                                                 move |_window, cx| {
                                                     Tooltip::for_action_in(
-                                                        label,
+                                                        label.clone(),
                                                         &Stop,
                                                         &focus_handle,
                                                         cx,
@@ -962,7 +1040,7 @@ impl DebugPanel {
                                                 let focus_handle = focus_handle.clone();
                                                 move |_window, cx| {
                                                     Tooltip::for_action_in(
-                                                        "Detach",
+                                                        i18n::t!("debugger_ui.toolbar.detach"),
                                                         &Detach,
                                                         &focus_handle,
                                                         cx,
@@ -1346,7 +1424,7 @@ impl DebugPanel {
             .disabled(
                 thread_status == ThreadStatus::Running || thread_status == ThreadStatus::Stepping,
             )
-            .tooltip(Tooltip::text("Step Back in Session History"))
+            .tooltip(Tooltip::text(i18n::t!("debugger_ui.toolbar.step_back")))
             .on_click(window.listener_for(running_state, |this, _, _window, cx| {
                 this.session().update(cx, |session, cx| {
                     let ix = session
@@ -1400,12 +1478,16 @@ impl DebugPanel {
                                 .read(cx)
                                 .historic_snapshots();
 
-                            context_menu = context_menu.entry("Current State", None, {
-                                let running_state = running_state.clone();
-                                move |_window, cx| {
-                                    handler(None, running_state.clone(), cx);
-                                }
-                            });
+                            context_menu = context_menu.entry(
+                                i18n::t!("debugger_ui.toolbar.current_state"),
+                                None,
+                                {
+                                    let running_state = running_state.clone();
+                                    move |_window, cx| {
+                                        handler(None, running_state.clone(), cx);
+                                    }
+                                },
+                            );
 
                             if !history.is_empty() {
                                 context_menu = context_menu.separator();
@@ -1634,6 +1716,7 @@ impl Render for DebugPanel {
             .size_full()
             .key_context("DebugPanel")
             .child(h_flex().children(self.top_controls_strip(window, cx)))
+            .children(self.render_stopped_banner(cx))
             .track_focus(&self.focus_handle(cx))
             .on_action({
                 let this = this.clone();
@@ -1822,7 +1905,7 @@ impl Render for DebugPanel {
                         .justify_center()
                         .gap_2()
                         .child(
-                            Button::new("spawn-new-session-empty-state", "New Session")
+                            Button::new("spawn-new-session-empty-state", i18n::t!("debugger_ui.empty.new_session"))
                                 .start_icon(
                                     Icon::new(IconName::Plus)
                                         .size(IconSize::Small)
@@ -1833,7 +1916,7 @@ impl Render for DebugPanel {
                                 }),
                         )
                         .child(
-                            Button::new("edit-debug-settings", "Edit debug.json")
+                            Button::new("edit-debug-settings", i18n::t!("debugger_ui.toolbar.edit_debug_json"))
                                 .start_icon(
                                     Icon::new(IconName::Code)
                                         .size(IconSize::Small)
@@ -1847,7 +1930,7 @@ impl Render for DebugPanel {
                                 }),
                         )
                         .child(
-                            Button::new("open-debugger-docs", "Debugger Docs")
+                            Button::new("open-debugger-docs", i18n::t!("debugger_ui.empty.docs"))
                                 .start_icon(
                                     Icon::new(IconName::Book)
                                         .size(IconSize::Small)
@@ -1858,7 +1941,7 @@ impl Render for DebugPanel {
                         .child(
                             Button::new(
                                 "spawn-new-session-install-extensions",
-                                "Debugger Extensions",
+                                i18n::t!("debugger_ui.empty.extensions"),
                             )
                             .start_icon(
                                 Icon::new(IconName::Blocks)
@@ -1904,7 +1987,7 @@ impl Render for DebugPanel {
                                 .justify_between()
                                 .border_b_1()
                                 .border_color(cx.theme().colors().border_variant)
-                                .child(Label::new("Breakpoints").size(LabelSize::Small))
+                                .child(Label::new(i18n::t!("debugger_ui.empty.breakpoints")).size(LabelSize::Small))
                                 .child(
                                     h_flex().visible_on_hover("base-breakpoint-list").child(
                                         self.breakpoint_list.read(cx).render_control_strip(),
@@ -1917,7 +2000,7 @@ impl Render for DebugPanel {
                         .when(!has_breakpoints, |this| {
                             this.child(
                                 v_flex().size_full().items_center().justify_center().child(
-                                    Label::new("No Breakpoints Set")
+                                    Label::new(i18n::t!("debugger_ui.empty.no_breakpoints"))
                                         .size(LabelSize::Small)
                                         .color(Color::Muted),
                                 ),
