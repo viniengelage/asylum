@@ -20,6 +20,8 @@ use util::{
 };
 
 pub const RULES_FILE_NAMES: &[&str] = &[
+    // An Asylum project's own agent rules, next to its settings and learnings.
+    ".asylum/rules.md",
     ".rules",
     ".cursorrules",
     ".windsurfrules",
