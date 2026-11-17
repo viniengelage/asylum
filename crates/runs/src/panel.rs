@@ -428,6 +428,20 @@ impl ExecutionsPanel {
                     None => label.color(Color::Muted).into_any_element(),
                 }
             }))
+            .child(
+                h_flex().pt_1().child(
+                    secondary_button(
+                        ("run-fix-with-agent", record_id),
+                        Some((IconName::ZedAgent, Color::Muted)),
+                        i18n::t!("runs.action.fix_with_agent"),
+                        true,
+                        cx,
+                    )
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        crate::fix_with_agent(&this.store, record_id, window, cx);
+                    })),
+                ),
+            )
             .into_any_element()
     }
 

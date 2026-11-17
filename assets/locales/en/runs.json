@@ -87,5 +87,13 @@
   "ready.ended_with_code": "it ended with exit {code} before getting ready",
   "step.ready": "ready",
   "step.skipped": "skipped",
-  "step.waiting": "waiting…"
+  "step.waiting": "waiting…",
+  "agent.toolkit_name": "Runs",
+  "agent.toolkit_description": "Lists, starts and stops the project's runs and reads their output.",
+  "agent.tool_list": "Listed the runs",
+  "agent.tool_start": "Started a run",
+  "agent.tool_output": "Read a run's output",
+  "agent.tool_stop": "Stopped a run",
+  "agent.tool_debug_state": "Checked the debugger",
+  "action.fix_with_agent": "Fix with agent"
 }

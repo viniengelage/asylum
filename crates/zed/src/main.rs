@@ -810,6 +810,7 @@ fn main() {
         outline_panel::init(cx);
         tasks_ui::init(cx);
         runs::init(cx);
+        runs::register_agent_toolkit(cx);
         snippets_ui::init(cx);
         channel::init(&app_state.client.clone(), app_state.user_store.clone(), cx);
         search::init(cx);

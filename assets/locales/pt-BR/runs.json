@@ -87,5 +87,13 @@
   "ready.ended_with_code": "terminou com exit {code} antes de ficar pronta",
   "step.ready": "pronta",
   "step.skipped": "pulada",
-  "step.waiting": "esperando…"
+  "step.waiting": "esperando…",
+  "agent.toolkit_name": "Execuções",
+  "agent.toolkit_description": "Lista, inicia e para as execuções do projeto e lê a saída delas.",
+  "agent.tool_list": "Listou as execuções",
+  "agent.tool_start": "Iniciou uma execução",
+  "agent.tool_output": "Leu a saída de uma execução",
+  "agent.tool_stop": "Parou uma execução",
+  "agent.tool_debug_state": "Consultou o depurador",
+  "action.fix_with_agent": "Corrigir com agente"
 }

@@ -771,5 +771,6 @@
   "thread_context.no_model": "Nenhum modelo configurado para resumir threads",
   "thread_context.delete_note_prompt": "Apagar também a nota de contexto desta thread?",
   "thread_context.delete_note": "Apagar nota",
-  "thread_context.keep_note": "Manter nota"
+  "thread_context.keep_note": "Manter nota",
+  "fix_run.prompt": "A execução “{label}” (`{command}`) falhou: {outcome}. Encontre a causa no projeto e corrija. Estas são as últimas linhas da saída:\n\n```\n{output}\n```"
 }

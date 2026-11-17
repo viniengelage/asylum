@@ -17,9 +17,10 @@ use serde::{Deserialize, Serialize};
 use zed_actions::{
     DecreaseBufferFontSize, IncreaseBufferFontSize, ResetBufferFontSize,
     agent::{
-        AddSelectionToThread, ConflictContent, LogoutAgent, MentionLogs, MentionProjectItem,
-        MentionPullRequest, OpenSettings, ReauthenticateAgent, ResetAgentZoom, ResetOnboarding,
-        ResolveConflictedFilesWithAgent, ResolveConflictsWithAgent, ReviewBranchDiff, SelectAgent,
+        AddSelectionToThread, ConflictContent, FixRunWithAgent, LogoutAgent, MentionLogs,
+        MentionProjectItem, MentionPullRequest, OpenSettings, ReauthenticateAgent, ResetAgentZoom,
+        ResetOnboarding, ResolveConflictedFilesWithAgent, ResolveConflictsWithAgent,
+        ReviewBranchDiff, SelectAgent,
     },
     assistant::{
         FocusAgent, ManageSkills, OpenGlobalAgentsMdRules, OpenProjectAgentsMdRules, Toggle,
@@ -719,6 +720,38 @@ pub fn init(cx: &mut App) {
                             }),
                             true,
                             AgentThreadSource::GitPanel,
+                            window,
+                            cx,
+                        );
+                    });
+                })
+                .register_action(|workspace, action: &FixRunWithAgent, window, cx| {
+                    let Some(panel) = workspace.panel::<AgentPanel>(cx) else {
+                        return;
+                    };
+                    let prompt = i18n::t!(
+                        "agent_ui.fix_run.prompt",
+                        label = action.label.as_str(),
+                        command = action.command.as_str(),
+                        outcome = action.outcome.as_str(),
+                        output = action.output.as_str()
+                    )
+                    .to_string();
+                    let content_blocks =
+                        vec![acp_v2::ContentBlock::Text(acp_v2::TextContent::new(prompt))];
+                    workspace.focus_panel::<AgentPanel>(window, cx);
+                    panel.update(cx, |panel, cx| {
+                        panel.external_thread(
+                            None,
+                            None,
+                            None,
+                            None,
+                            Some(AgentInitialContent::ContentBlock {
+                                blocks: content_blocks,
+                                auto_submit: true,
+                            }),
+                            true,
+                            AgentThreadSource::AgentPanel,
                             window,
                             cx,
                         );

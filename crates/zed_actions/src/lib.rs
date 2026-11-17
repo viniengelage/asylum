@@ -655,6 +655,21 @@ pub mod agent {
         pub submit: bool,
     }
 
+    /// Opens a new agent thread asking it to fix a run that failed, with the run's command and
+    /// the end of its output.
+    #[derive(Clone, PartialEq, Deserialize, JsonSchema, Action)]
+    #[action(namespace = agent)]
+    #[serde(deny_unknown_fields)]
+    pub struct FixRunWithAgent {
+        /// The run's name, e.g. "start" or "Trix no iPhone".
+        pub label: String,
+        pub command: String,
+        /// How it ended, e.g. "exit 1".
+        pub outcome: String,
+        /// The last lines of its output.
+        pub output: String,
+    }
+
     /// Mentions an item of a GitHub project in the agent panel. Without a prompt the mention
     /// goes into the message being written; with one, a new thread starts with it.
     #[derive(Clone, PartialEq, Deserialize, JsonSchema, Action)]

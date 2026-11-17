@@ -771,5 +771,6 @@
   "thread_context.no_model": "No model is set up to summarize threads",
   "thread_context.delete_note_prompt": "Also delete this thread's context note?",
   "thread_context.delete_note": "Delete note",
-  "thread_context.keep_note": "Keep note"
+  "thread_context.keep_note": "Keep note",
+  "fix_run.prompt": "The run “{label}” (`{command}`) failed: {outcome}. Find the cause in the project and fix it. These are the last lines of its output:\n\n```\n{output}\n```"
 }

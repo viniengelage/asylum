@@ -2,6 +2,7 @@
 //! with what runs and what ran, and the sources the picker offers (tasks.json, package.json
 //! scripts, eas.json profiles, debug scenarios).
 
+mod agent_toolkit;
 mod chain;
 mod launch;
 mod panel;
@@ -11,6 +12,7 @@ mod sources;
 mod store;
 mod task_editor;
 
+pub use agent_toolkit::register_toolkit as register_agent_toolkit;
 pub use panel::ExecutionsPanel;
 pub use picker::RunPickerView;
 pub use sources::{RunCandidate, RunKind, RunOrigin};
@@ -201,6 +203,56 @@ pub fn edit_candidate(
     }
 }
 
+const FIX_OUTPUT_LINES: usize = 60;
+
+/// Hands a failed run to the agent: a new thread with its command, how it ended and the end of
+/// its output.
+pub fn fix_with_agent(
+    store: &Entity<RunStore>,
+    record_id: usize,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let Some(record) = store.read(cx).record(record_id).cloned() else {
+        return;
+    };
+    let output = match record.terminal.upgrade() {
+        Some(terminal) => terminal.read(cx).last_n_non_empty_lines(FIX_OUTPUT_LINES),
+        None => {
+            let skip = record.output_tail.len().saturating_sub(FIX_OUTPUT_LINES);
+            record.output_tail.iter().skip(skip).cloned().collect()
+        }
+    };
+    let outcome = match record.state {
+        RunState::Failed {
+            exit_code: Some(code),
+        } => format!("exit {code}"),
+        _ => record_pill_label(record.state).to_string(),
+    };
+    window.dispatch_action(
+        Box::new(zed_actions::agent::FixRunWithAgent {
+            label: record.label.to_string(),
+            command: record.command_label.to_string(),
+            outcome,
+            output: output.join("\n"),
+        }),
+        cx,
+    );
+}
+
+fn record_pill_label(state: RunState) -> SharedString {
+    match state {
+        RunState::Running => i18n::t!("runs.state.running"),
+        RunState::Succeeded => i18n::t!("runs.state.ok"),
+        RunState::Failed {
+            exit_code: Some(code),
+        } => i18n::t!("runs.state.failed_exit", code = code),
+        RunState::Failed { exit_code: None } => i18n::t!("runs.state.failed"),
+        RunState::StoppedByUser => i18n::t!("runs.state.stopped"),
+        RunState::Reused => i18n::t!("runs.state.reused"),
+    }
+}
+
 pub fn format_duration(duration: Duration) -> String {
     let seconds = duration.as_secs();
     if seconds < 60 {
@@ -214,20 +266,14 @@ pub fn format_duration(duration: Duration) -> String {
 
 /// The boards' result pill for a run: ok, failed · exit N, stopped by you, reused.
 pub fn record_pill(record: &RunRecord, cx: &App) -> Div {
-    let (label, tone) = match record.state {
-        RunState::Running => (i18n::t!("runs.state.running"), StatusTone::Info),
-        RunState::Succeeded => (i18n::t!("runs.state.ok"), StatusTone::Success),
-        RunState::Failed {
-            exit_code: Some(code),
-        } => (
-            i18n::t!("runs.state.failed_exit", code = code),
-            StatusTone::Error,
-        ),
-        RunState::Failed { exit_code: None } => (i18n::t!("runs.state.failed"), StatusTone::Error),
-        RunState::StoppedByUser => (i18n::t!("runs.state.stopped"), StatusTone::Neutral),
-        RunState::Reused => (i18n::t!("runs.state.reused"), StatusTone::Warning),
+    let tone = match record.state {
+        RunState::Running => StatusTone::Info,
+        RunState::Succeeded => StatusTone::Success,
+        RunState::Failed { .. } => StatusTone::Error,
+        RunState::StoppedByUser => StatusTone::Neutral,
+        RunState::Reused => StatusTone::Warning,
     };
-    status_pill(label, tone, cx)
+    status_pill(record_pill_label(record.state), tone, cx)
 }
 
 /// The run zone of the status bar: play, the active run and device (opening the picker),
