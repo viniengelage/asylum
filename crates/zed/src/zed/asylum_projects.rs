@@ -518,6 +518,41 @@ impl Render for ProjectPicker {
     }
 }
 
+/// The first empty window of a launch goes to the profile's project when there is one, or offers
+/// the list when there are several. Windows restored with folders are left alone.
+fn offer_projects_on_launch(
+    workspace: &mut Workspace,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    static OFFERED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if workspace.visible_worktrees(cx).next().is_some()
+        || OFFERED.swap(true, std::sync::atomic::Ordering::Relaxed)
+    {
+        return;
+    }
+    let projects: Vec<AsylumProject> = load_projects()
+        .log_err()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|project| {
+            project.profile_id == paths::current_profile_id() && project.root.is_dir()
+        })
+        .collect();
+    match projects.as_slice() {
+        [] => {}
+        [project] => {
+            let project = project.clone();
+            cx.defer_in(window, move |_, window, cx| {
+                open_project(&project, window, cx)
+            });
+        }
+        _ => cx.defer_in(window, |workspace, window, cx| {
+            workspace.toggle_modal(window, cx, ProjectPicker::new);
+        }),
+    }
+}
+
 pub fn init(cx: &mut App) {
     migrate_profile_folders().log_err();
     cx.set_global(ActiveAsylumProject::default());
@@ -532,6 +567,7 @@ pub fn init(cx: &mut App) {
         let Some(window) = window else {
             return;
         };
+        offer_projects_on_launch(workspace, window, cx);
         let project = project_for_workspace(workspace, cx);
         if window.is_window_active() || active_project(cx).is_none() {
             activate(project, cx);
