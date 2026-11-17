@@ -2,6 +2,7 @@
 
 mod adapter_schema;
 mod debug_format;
+mod run_options;
 mod serde_helpers;
 pub mod static_source;
 mod task_template;
@@ -21,6 +22,9 @@ pub use adapter_schema::{AdapterSchema, AdapterSchemas};
 pub use debug_format::{
     AttachRequest, BuildTaskDefinition, DebugRequest, DebugScenario, DebugTaskFile, LaunchRequest,
     Request, TcpArgumentsTemplate, ZedDebugConfig,
+};
+pub use run_options::{
+    DeviceChoice, IfRunning, ReadyOnExit, ReadyWhen, RunOptions, StepAction, TaskStep,
 };
 pub use task_template::{
     DebugArgsRequest, HideStrategy, RevealStrategy, SaveStrategy, TaskHook, TaskTemplate,

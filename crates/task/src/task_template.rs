@@ -9,8 +9,8 @@ use util::serde::default_true;
 use util::{ResultExt, truncate_and_remove_front};
 
 use crate::{
-    ASYLUM_VARIABLE_NAME_PREFIX, AttachRequest, ResolvedTask, RevealTarget, Shell, SpawnInTerminal,
-    TaskContext, TaskId, VariableName, ZED_VARIABLE_NAME_PREFIX,
+    ASYLUM_VARIABLE_NAME_PREFIX, AttachRequest, ResolvedTask, RevealTarget, RunOptions, Shell,
+    SpawnInTerminal, TaskContext, TaskId, VariableName, ZED_VARIABLE_NAME_PREFIX,
     serde_helpers::non_empty_string_vec,
 };
 
@@ -79,6 +79,9 @@ pub struct TaskTemplate {
     /// Hooks that this task runs when emitted.
     #[serde(default)]
     pub hooks: HashSet<TaskHook>,
+    /// Asylum's run options (`steps`, `ready_when`, `if_running`, `device`, `favorite`).
+    #[serde(flatten)]
+    pub run: RunOptions,
 }
 
 #[derive(Deserialize, Eq, PartialEq, Clone, Debug)]

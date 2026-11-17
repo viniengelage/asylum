@@ -8,13 +8,16 @@ use gpui::{
 use ui::{
     StatusTone, destructive_button, prelude::*, primary_button, secondary_button, status_pill,
 };
+use util::ResultExt as _;
 use workspace::{
     OpenOptions, OpenVisible, Workspace,
     dock::{DockPosition, Panel, PanelEvent},
 };
 
 use crate::{
-    OpenPicker, ToggleFocus, format_duration, record_pill,
+    OpenPicker, ToggleFocus,
+    chain::{ChainRecord, StepState},
+    format_duration, record_pill,
     store::{ExcerptLine, OutputLocation, RunRecord, RunStore},
 };
 
@@ -51,7 +54,9 @@ impl ExecutionsPanel {
 
     /// Redraws every second while something runs, so the elapsed times move.
     fn update_ticker(&mut self, cx: &mut Context<Self>) {
-        let any_running = self.store.read(cx).running().next().is_some();
+        let store = self.store.read(cx);
+        let any_running = store.running().next().is_some()
+            || store.chains().iter().any(|chain| chain.is_running());
         if !any_running {
             self._ticker = None;
             return;
@@ -113,6 +118,131 @@ impl ExecutionsPanel {
                 anyhow::Ok(())
             })
             .detach_and_log_err(cx);
+    }
+
+    fn render_chain(&self, chain: &ChainRecord, cx: &mut Context<Self>) -> AnyElement {
+        let chain_id = chain.id;
+        let colors = cx.theme().colors();
+        let (pill_label, tone) = if chain.is_running() {
+            (i18n::t!("runs.state.running"), StatusTone::Info)
+        } else if chain.failed_step().is_some() {
+            (i18n::t!("runs.state.failed"), StatusTone::Error)
+        } else {
+            (i18n::t!("runs.state.ok"), StatusTone::Success)
+        };
+        let elapsed = chain
+            .finished_at
+            .unwrap_or_else(std::time::Instant::now)
+            .saturating_duration_since(chain.started_at);
+        v_flex()
+            .w_full()
+            .p_3()
+            .gap_1p5()
+            .rounded(Radius::Lg.rems())
+            .border_1()
+            .border_color(colors.border_variant)
+            .bg(colors.element_background)
+            .child(
+                h_flex()
+                    .w_full()
+                    .gap_2()
+                    .child(status_pill(pill_label, tone, cx))
+                    .child(
+                        Label::new(chain.label.clone())
+                            .size(LabelSize::Small)
+                            .weight(gpui::FontWeight::SEMIBOLD)
+                            .single_line()
+                            .truncate(),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        Label::new(format_duration(elapsed))
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
+                    ),
+            )
+            .children(chain.steps.iter().enumerate().map(|(index, step)| {
+                let (icon, color, detail) = match &step.state {
+                    StepState::Pending => (IconName::Circle, Color::Muted, None),
+                    StepState::Starting | StepState::Waiting => (
+                        IconName::LoadCircle,
+                        Color::Info,
+                        Some(i18n::t!("runs.step.waiting")),
+                    ),
+                    StepState::Ready => (
+                        IconName::Check,
+                        Color::Success,
+                        Some(i18n::t!("runs.step.ready")),
+                    ),
+                    StepState::Reused => (
+                        IconName::Check,
+                        Color::Success,
+                        Some(i18n::t!("runs.state.reused")),
+                    ),
+                    StepState::Done => (IconName::Check, Color::Success, None),
+                    StepState::Failed(reason) => {
+                        (IconName::XCircle, Color::Error, Some(reason.clone()))
+                    }
+                    StepState::Skipped => (
+                        IconName::Dash,
+                        Color::Muted,
+                        Some(i18n::t!("runs.step.skipped")),
+                    ),
+                };
+                let terminal = step.terminal.clone();
+                h_flex()
+                    .id(("chain-step", chain_id * 100 + index))
+                    .w_full()
+                    .gap_1p5()
+                    .child(Icon::new(icon).size(IconSize::XSmall).color(color))
+                    .child(
+                        Label::new(step.label.clone())
+                            .size(LabelSize::XSmall)
+                            .single_line()
+                            .truncate(),
+                    )
+                    .when_some(detail, |this, detail| {
+                        this.child(
+                            Label::new(detail)
+                                .size(LabelSize::XSmall)
+                                .color(color)
+                                .single_line()
+                                .truncate(),
+                        )
+                    })
+                    .when_some(terminal, |this, terminal| {
+                        this.cursor_pointer()
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                let Some(terminal) = terminal.upgrade() else {
+                                    return;
+                                };
+                                this.workspace
+                                    .update(cx, |workspace, cx| {
+                                        crate::store::reveal_terminal(
+                                            workspace, &terminal, window, cx,
+                                        )
+                                    })
+                                    .log_err();
+                            }))
+                    })
+            }))
+            .when(chain.is_running(), |this| {
+                this.child(
+                    h_flex().pt_1().child(
+                        destructive_button(
+                            ("chain-stop", chain_id),
+                            i18n::t!("runs.action.stop"),
+                            true,
+                            cx,
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.store
+                                .update(cx, |store, cx| store.stop_chain(chain_id, cx));
+                        })),
+                    ),
+                )
+            })
+            .into_any_element()
     }
 
     fn render_running(&self, record: &RunRecord, cx: &mut Context<Self>) -> AnyElement {
@@ -304,19 +434,18 @@ impl ExecutionsPanel {
     fn render_favorites(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let store = self.store.read(cx);
         let favorites: Vec<(usize, SharedString, SharedString)> = store
-            .favorites()
-            .iter()
-            .enumerate()
-            .map(|(index, key)| {
+            .favorite_slots()
+            .into_iter()
+            .map(|(slot, key)| {
                 let label = store
-                    .candidate(key)
+                    .candidate(&key)
                     .map(|candidate| candidate.label.clone())
                     .unwrap_or_else(|| {
                         key.split_once(':')
                             .map(|(_, label)| SharedString::from(label.to_string()))
                             .unwrap_or_else(|| key.clone())
                     });
-                (index + 1, key.clone(), label)
+                (slot, key, label)
             })
             .collect();
         if favorites.is_empty() {
@@ -387,20 +516,26 @@ impl Render for ExecutionsPanel {
         let store = self.store.read(cx);
         let running: Vec<usize> = store.running().map(|record| record.id).collect();
         let recent: Vec<usize> = store.recent().map(|record| record.id).collect();
-        let running_elements: Vec<AnyElement> = running
+        let chains: Vec<ChainRecord> = store.chains().iter().rev().cloned().collect();
+        let mut running_elements: Vec<AnyElement> = chains
             .iter()
-            .filter_map(|record_id| {
-                let record = self.store.read(cx).record(*record_id)?.clone();
-                Some(self.render_running(&record, cx))
-            })
+            .filter(|chain| chain.is_running())
+            .map(|chain| self.render_chain(chain, cx))
             .collect();
-        let recent_elements: Vec<AnyElement> = recent
+        let mut recent_elements: Vec<AnyElement> = chains
             .iter()
-            .filter_map(|record_id| {
-                let record = self.store.read(cx).record(*record_id)?.clone();
-                Some(self.render_recent(&record, cx))
-            })
+            .filter(|chain| !chain.is_running())
+            .take(5)
+            .map(|chain| self.render_chain(chain, cx))
             .collect();
+        running_elements.extend(running.iter().filter_map(|record_id| {
+            let record = self.store.read(cx).record(*record_id)?.clone();
+            Some(self.render_running(&record, cx))
+        }));
+        recent_elements.extend(recent.iter().filter_map(|record_id| {
+            let record = self.store.read(cx).record(*record_id)?.clone();
+            Some(self.render_recent(&record, cx))
+        }));
         let favorites = self.render_favorites(cx);
         let is_empty = running_elements.is_empty() && recent_elements.is_empty();
         v_flex()

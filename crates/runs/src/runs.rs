@@ -2,21 +2,26 @@
 //! with what runs and what ran, and the sources the picker offers (tasks.json, package.json
 //! scripts, eas.json profiles, debug scenarios).
 
+mod chain;
 mod launch;
 mod panel;
 mod picker;
+pub mod ready;
 mod sources;
 mod store;
+mod task_editor;
 
 pub use panel::ExecutionsPanel;
 pub use picker::RunPickerView;
 pub use sources::{RunCandidate, RunKind, RunOrigin};
 pub use store::{RunRecord, RunState, RunStore};
+pub use task_editor::TaskEditor;
 
 use std::time::Duration;
 
 use gpui::{
-    Action, App, AppContext as _, Context, Entity, Subscription, WeakEntity, Window, actions,
+    Action, App, AppContext as _, Context, Entity, Subscription, TaskExt as _, WeakEntity, Window,
+    actions,
 };
 use project::debugger::session::ThreadStatus;
 use schemars::JsonSchema;
@@ -87,11 +92,7 @@ pub fn init(cx: &mut App) {
             let Some(store) = store_of(workspace, cx) else {
                 return;
             };
-            let key = store
-                .read(cx)
-                .favorites()
-                .get(action.slot.saturating_sub(1))
-                .cloned();
+            let key = store.read(cx).favorite_at(action.slot);
             match key {
                 Some(key) => store.update(cx, |store, cx| store.run_key(key, false, window, cx)),
                 None => show_toast(
@@ -166,6 +167,37 @@ fn stop_active(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<
     let stopped = store.update(cx, |store, cx| store.stop_all(cx));
     if stopped == 0 && !debugging {
         show_toast(workspace, i18n::t!("runs.nothing_running").to_string(), cx);
+    }
+}
+
+/// Opens a candidate's definition: tasks.json tasks in the task editor, everything else (a
+/// package.json script, an eas.json profile, a .vscode task) as its file.
+pub fn edit_candidate(
+    workspace: &mut Workspace,
+    candidate: &RunCandidate,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    let Some(file) = candidate.file.clone() else {
+        return;
+    };
+    match (candidate.origin, candidate.template()) {
+        (RunOrigin::ProjectTasks | RunOrigin::GlobalTasks, Some(template)) => {
+            task_editor::open(workspace, file, template.clone(), window, cx);
+        }
+        _ => {
+            workspace
+                .open_abs_path(
+                    file,
+                    workspace::OpenOptions {
+                        visible: Some(workspace::OpenVisible::None),
+                        ..workspace::OpenOptions::default()
+                    },
+                    window,
+                    cx,
+                )
+                .detach_and_log_err(cx);
+        }
     }
 }
 

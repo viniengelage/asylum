@@ -4,7 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use collections::HashSet;
+use collections::{HashMap, HashSet};
 use db::kvp::KeyValueStore;
 use gpui::{
     App, AppContext as _, Context, Entity, EntityId, Global, SharedString, Task, TaskExt as _,
@@ -17,7 +17,10 @@ use terminal_view::{TerminalView, terminal_panel::TerminalPanel};
 use util::ResultExt as _;
 use workspace::{Pane, Toast, Workspace, notifications::NotificationId};
 
-use crate::sources::{RunCandidate, load_candidates, project_key};
+use crate::{
+    chain::{ChainRecord, ChainStepRecord, StepState},
+    sources::{RunCandidate, load_candidates, project_key},
+};
 
 const SCAN_INTERVAL: Duration = Duration::from_millis(800);
 const RECENT_LIMIT: usize = 30;
@@ -101,6 +104,8 @@ pub struct RunStore {
     active: Option<SharedString>,
     candidates: Vec<RunCandidate>,
     project_key: Option<String>,
+    chains: Vec<ChainRecord>,
+    chain_tasks: HashMap<usize, Task<()>>,
     _scan: Task<()>,
 }
 
@@ -152,6 +157,8 @@ impl RunStore {
             active: None,
             candidates: Vec::new(),
             project_key: None,
+            chains: Vec::new(),
+            chain_tasks: HashMap::default(),
             _scan: scan,
         };
         this.load_project_state(cx);
@@ -187,6 +194,10 @@ impl RunStore {
             .map(SharedString::from);
     }
 
+    pub fn workspace(&self) -> WeakEntity<Workspace> {
+        self.workspace.clone()
+    }
+
     pub fn records(&self) -> &[RunRecord] {
         &self.records
     }
@@ -216,15 +227,183 @@ impl RunStore {
             .find(|record| record.label.as_ref() == label)
     }
 
-    pub fn favorites(&self) -> &[SharedString] {
-        &self.favorites
+    /// The favorites by slot (1–9): tasks that name a `favorite` slot in tasks.json take it,
+    /// the ones favorited in the picker fill the free slots in the order they were added.
+    pub fn favorite_slots(&self) -> Vec<(usize, SharedString)> {
+        favorite_slots(&self.candidates, &self.favorites)
+    }
+
+    pub fn favorite_at(&self, slot: usize) -> Option<SharedString> {
+        self.favorite_slots()
+            .into_iter()
+            .find(|(favorite_slot, _)| *favorite_slot == slot)
+            .map(|(_, key)| key)
     }
 
     pub fn favorite_slot(&self, key: &str) -> Option<usize> {
-        self.favorites
+        self.favorite_slots()
+            .into_iter()
+            .find(|(_, favorite)| favorite.as_ref() == key)
+            .map(|(slot, _)| slot)
+    }
+
+    pub fn chains(&self) -> &[ChainRecord] {
+        &self.chains
+    }
+
+    pub fn running_chain(&self, label: &str) -> Option<&ChainRecord> {
+        self.chains
             .iter()
-            .position(|favorite| favorite.as_ref() == key)
-            .map(|index| index + 1)
+            .rev()
+            .find(|chain| chain.is_running() && chain.label.as_ref() == label)
+    }
+
+    pub fn start_chain(
+        &mut self,
+        label: SharedString,
+        step_labels: Vec<SharedString>,
+        cx: &mut Context<Self>,
+    ) -> usize {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.chains.push(ChainRecord {
+            id,
+            label,
+            steps: step_labels
+                .into_iter()
+                .map(|label| ChainStepRecord {
+                    label,
+                    state: StepState::Pending,
+                    terminal: None,
+                })
+                .collect(),
+            started_at: Instant::now(),
+            finished_at: None,
+        });
+        let finished = self
+            .chains
+            .iter()
+            .filter(|chain| !chain.is_running())
+            .count();
+        if finished > RECENT_LIMIT {
+            if let Some(index) = self.chains.iter().position(|chain| !chain.is_running()) {
+                self.chains.remove(index);
+            }
+        }
+        cx.notify();
+        id
+    }
+
+    pub fn set_chain_task(&mut self, chain_id: usize, task: Task<()>) {
+        self.chain_tasks.insert(chain_id, task);
+    }
+
+    pub fn set_step_state(
+        &mut self,
+        chain_id: usize,
+        index: usize,
+        state: StepState,
+        terminal: Option<WeakEntity<Terminal>>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(step) = self
+            .chains
+            .iter_mut()
+            .find(|chain| chain.id == chain_id)
+            .and_then(|chain| chain.steps.get_mut(index))
+        else {
+            return;
+        };
+        step.state = state;
+        if terminal.is_some() {
+            step.terminal = terminal;
+        }
+        cx.notify();
+    }
+
+    pub fn fail_chain(
+        &mut self,
+        chain_id: usize,
+        index: usize,
+        reason: SharedString,
+        cx: &mut Context<Self>,
+    ) {
+        let label = self
+            .chains
+            .iter_mut()
+            .find(|chain| chain.id == chain_id)
+            .map(|chain| {
+                for (step_index, step) in chain.steps.iter_mut().enumerate() {
+                    if step_index == index {
+                        step.state = StepState::Failed(reason.clone());
+                    } else if step_index > index {
+                        step.state = StepState::Skipped;
+                    }
+                }
+                chain.finished_at = Some(Instant::now());
+                chain.label.clone()
+            });
+        self.chain_tasks.remove(&chain_id);
+        if let Some(label) = label {
+            self.show_toast(
+                i18n::t!(
+                    "runs.chain.failed",
+                    label = label.as_ref(),
+                    reason = reason.as_ref()
+                )
+                .to_string(),
+                cx,
+            );
+        }
+        cx.notify();
+    }
+
+    pub fn finish_chain(&mut self, chain_id: usize, cx: &mut Context<Self>) {
+        if let Some(chain) = self.chains.iter_mut().find(|chain| chain.id == chain_id) {
+            chain.finished_at = Some(Instant::now());
+        }
+        self.chain_tasks.remove(&chain_id);
+        cx.notify();
+    }
+
+    /// Stops a chain: the step waiting stops being waited on and the terminals it started stop.
+    pub fn stop_chain(&mut self, chain_id: usize, cx: &mut Context<Self>) {
+        self.chain_tasks.remove(&chain_id);
+        let terminals: Vec<WeakEntity<Terminal>> = self
+            .chains
+            .iter_mut()
+            .find(|chain| chain.id == chain_id)
+            .map(|chain| {
+                chain.finished_at.get_or_insert_with(Instant::now);
+                for step in &mut chain.steps {
+                    if matches!(step.state, StepState::Pending) || step.state.is_active() {
+                        step.state = StepState::Skipped;
+                    }
+                }
+                chain
+                    .steps
+                    .iter()
+                    .filter_map(|step| step.terminal.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        for terminal in terminals {
+            let record_id = self
+                .records
+                .iter()
+                .rev()
+                .find(|record| record.state.is_running() && record.terminal == terminal)
+                .map(|record| record.id);
+            match record_id {
+                Some(record_id) => self.stop(record_id, cx),
+                None => {
+                    if let Some(terminal) = terminal.upgrade() {
+                        terminal.update(cx, |terminal, _| terminal.kill_active_task());
+                    }
+                }
+            }
+        }
+        cx.notify();
     }
 
     pub fn candidates(&self) -> &[RunCandidate] {
@@ -459,6 +638,15 @@ impl RunStore {
     }
 
     pub fn stop_all(&mut self, cx: &mut Context<Self>) -> usize {
+        let chains: Vec<usize> = self
+            .chains
+            .iter()
+            .filter(|chain| chain.is_running())
+            .map(|chain| chain.id)
+            .collect();
+        for chain_id in chains {
+            self.stop_chain(chain_id, cx);
+        }
         let running: Vec<usize> = self.running().map(|record| record.id).collect();
         for record_id in &running {
             self.stop(*record_id, cx);
@@ -734,6 +922,40 @@ pub fn reveal_terminal(
             return;
         }
     }
+}
+
+pub fn favorite_slots(
+    candidates: &[RunCandidate],
+    picked: &[SharedString],
+) -> Vec<(usize, SharedString)> {
+    let mut slots: Vec<Option<SharedString>> = vec![None; FAVORITE_SLOTS];
+    for candidate in candidates {
+        let Some(slot) = candidate
+            .template()
+            .and_then(|template| template.run.favorite)
+            .map(usize::from)
+        else {
+            continue;
+        };
+        if let Some(entry) = slot.checked_sub(1).and_then(|index| slots.get_mut(index))
+            && entry.is_none()
+        {
+            *entry = Some(candidate.key.clone());
+        }
+    }
+    for key in picked {
+        if slots.iter().any(|slot| slot.as_ref() == Some(key)) {
+            continue;
+        }
+        if let Some(entry) = slots.iter_mut().find(|slot| slot.is_none()) {
+            *entry = Some(key.clone());
+        }
+    }
+    slots
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, key)| Some((index + 1, key?)))
+        .collect()
 }
 
 fn favorites_key(project_key: &str) -> String {

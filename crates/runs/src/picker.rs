@@ -143,7 +143,7 @@ impl PickerDelegate for RunPickerDelegate {
     ) -> Task<()> {
         let store = self.store.read(cx);
         let candidates: Vec<RunCandidate> = store.candidates().to_vec();
-        let favorites: Vec<SharedString> = store.favorites().to_vec();
+        let favorites = store.favorite_slots();
         let match_candidates: Vec<StringMatchCandidate> = candidates
             .iter()
             .enumerate()
@@ -300,6 +300,10 @@ impl PickerDelegate for RunPickerDelegate {
                         .color(Color::Muted),
                 )
         };
+        let edit = self
+            .selected_key()
+            .and_then(|key| self.store.read(cx).candidate(&key).cloned())
+            .filter(|candidate| candidate.file.is_some());
         Some(
             h_flex()
                 .w_full()
@@ -311,6 +315,22 @@ impl PickerDelegate for RunPickerDelegate {
                 .child(hint("↵", i18n::t!("runs.picker.hint_run")))
                 .child(hint("⌘↵", i18n::t!("runs.picker.hint_debug")))
                 .child(hint("⌘S", i18n::t!("runs.picker.hint_favorite")))
+                .child(div().flex_1())
+                .when_some(edit, |this, candidate| {
+                    this.child(
+                        Button::new("run-picker-edit", i18n::t!("runs.picker.edit"))
+                            .label_size(LabelSize::XSmall)
+                            .on_click(cx.listener(move |picker, _, window, cx| {
+                                let workspace = picker.delegate.store.read(cx).workspace();
+                                workspace
+                                    .update(cx, |workspace, cx| {
+                                        crate::edit_candidate(workspace, &candidate, window, cx);
+                                    })
+                                    .log_err();
+                                cx.emit(DismissEvent);
+                            })),
+                    )
+                })
                 .into_any_element(),
         )
     }
@@ -334,7 +354,7 @@ fn origin_chip(origin: RunOrigin, cx: &App) -> Div {
 
 fn group_entries(
     candidates: &[RunCandidate],
-    favorites: &[SharedString],
+    favorites: &[(usize, SharedString)],
     matches: Vec<StringMatch>,
 ) -> Vec<Entry> {
     let mut favorite_entries: Vec<(usize, Entry)> = Vec::new();
@@ -348,8 +368,8 @@ fn group_entries(
             key: candidate.key.clone(),
             positions: string_match.positions,
         };
-        if let Some(slot) = favorites.iter().position(|key| *key == candidate.key) {
-            favorite_entries.push((slot, entry));
+        if let Some((slot, _)) = favorites.iter().find(|(_, key)| *key == candidate.key) {
+            favorite_entries.push((*slot, entry));
         } else if candidate.is_debug() {
             debug_entries.push(entry);
         } else {

@@ -1264,13 +1264,24 @@ impl RunningState {
                     this.refresh_terminal_toolbars(window, cx);
                 })?;
 
-                let exit_status = terminal
-                    .read_with(cx, |terminal, cx| terminal.wait_for_completed_task(cx))
-                    .await
-                    .context("Failed to wait for completed task")?;
+                // A build with `ready_when` (Metro, a dev server) never ends; the session starts
+                // once it is ready instead.
+                match task_template.run.ready_when.clone().filter(|ready_when| !ready_when.waits_for_exit()) {
+                    Some(ready_when) => {
+                        runs::ready::wait_until_ready(&ready_when, &terminal, cx)
+                            .await
+                            .context("Build task did not get ready")?;
+                    }
+                    None => {
+                        let exit_status = terminal
+                            .read_with(cx, |terminal, cx| terminal.wait_for_completed_task(cx))
+                            .await
+                            .context("Failed to wait for completed task")?;
 
-                if !exit_status.success() {
-                    anyhow::bail!("Build failed");
+                        if !exit_status.success() {
+                            anyhow::bail!("Build failed");
+                        }
+                    }
                 }
                 Some((task.resolved.clone(), locator_name, extra_config))
             } else {
