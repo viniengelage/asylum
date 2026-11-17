@@ -852,6 +852,7 @@ fn main() {
         toolbox::init(cx);
         notes::init(cx);
         clickup::init(cx);
+        app_releases::init(cx);
         repo_hosting::init(cx);
         github_projects::init(cx);
         api_client::init(cx);

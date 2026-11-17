@@ -24,6 +24,7 @@ pub mod toolkit_ids {
     pub const DOCKER: &str = "docker";
     pub const ELASTIC: &str = "elastic";
     pub const GITHUB_PROJECTS: &str = "github_projects";
+    pub const RELEASES: &str = "releases";
     pub const REPO: &str = "repo";
 }
 

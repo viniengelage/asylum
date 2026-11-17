@@ -136,6 +136,12 @@ pub const TOOLKITS: &[ToolkitInfo] = &[
         label: || "Repo".into(),
     },
     ToolkitInfo {
+        id: task_agents::toolkit_ids::RELEASES,
+        domain: ToolkitDomain::Infra,
+        icon: IconName::Smartphone,
+        label: || i18n::t!("app_releases.dock.title"),
+    },
+    ToolkitInfo {
         id: task_agents::toolkit_ids::CLICKUP,
         domain: ToolkitDomain::Work,
         icon: IconName::ListTodo,

@@ -631,6 +631,8 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
             cx.new(|_| line_ending_selector::LineEndingIndicator::default());
         let toolbox_button = cx.new(|cx| toolbox::ToolboxButton::new(workspace, cx));
         let clickup_button = cx.new(|cx| clickup::ClickUpToolkitButton::new(workspace, cx));
+        let releases_button = cx.new(|cx| app_releases::ReleasesToolkitButton::new(workspace, cx));
+        let releases_chip = cx.new(|cx| app_releases::ReleasesStatusChip::new(workspace, cx));
         let repo_button = cx.new(|cx| repo_hosting::RepoToolkitButton::new(workspace, cx));
         let projects_button =
             cx.new(|cx| github_projects::ProjectsToolkitButton::new(workspace, cx));
@@ -664,6 +666,7 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
             status_bar.add_navigation_item(search_button, window, cx);
             status_bar.add_left_item(active_file_name, window, cx);
             status_bar.add_left_item(flow_run_chip, window, cx);
+            status_bar.add_left_item(releases_chip, window, cx);
             status_bar.add_toolkit_item(toolbox_button, window, cx);
             status_bar.add_toolkit_item(design_button, window, cx);
             status_bar.add_toolkit_item(clickup_button, window, cx);
@@ -673,6 +676,7 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
             status_bar.add_toolkit_item(database_button, window, cx);
             status_bar.add_toolkit_item(elastic_button, window, cx);
             status_bar.add_toolkit_item(docker_button, window, cx);
+            status_bar.add_toolkit_item(releases_button, window, cx);
             status_bar.add_toolkit_item(task_agents_button, window, cx);
             status_bar.add_toolkit_item(flows_button, window, cx);
             // Editor info renders right items in reverse, so this sits at its right end,
@@ -6453,6 +6457,7 @@ mod tests {
                 "agents_sidebar",
                 "api_client",
                 "app_menu",
+                "app_releases",
                 "assistant",
                 "assistant2",
                 "auto_update",

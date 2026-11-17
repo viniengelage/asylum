@@ -892,6 +892,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "app_releases"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "collections",
+ "credentials_provider",
+ "db",
+ "fs",
+ "futures 0.3.34",
+ "gpui",
+ "http_client",
+ "i18n",
+ "jsonwebtoken",
+ "log",
+ "project",
+ "schemars 1.0.4",
+ "serde",
+ "serde_json",
+ "task_agents",
+ "ui",
+ "ui_input",
+ "urlencoding",
+ "util",
+ "workspace",
+ "zed_credentials_provider",
+]
+
+[[package]]
 name = "approx"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -23329,6 +23358,7 @@ dependencies = [
  "android_sdk",
  "anyhow",
  "api_client",
+ "app_releases",
  "ashpd",
  "askpass",
  "assets",

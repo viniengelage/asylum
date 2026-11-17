@@ -92,6 +92,7 @@ clickup.workspace = true
 i18n.workspace = true
 repo_hosting.workspace = true
 api_client.workspace = true
+app_releases.workspace = true
 client.workspace = true
 clock = { workspace = true, optional = true }
 codestral.workspace = true
