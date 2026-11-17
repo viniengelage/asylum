@@ -18,6 +18,7 @@ pub mod toolkit_ids {
     pub const API: &str = "api";
     pub const BROWSER: &str = "browser";
     pub const CLICKUP: &str = "clickup";
+    pub const CLOUDWATCH: &str = "cloudwatch";
     pub const DATABASE: &str = "database";
     pub const DESIGN: &str = "design";
     pub const DEVICES: &str = "devices";

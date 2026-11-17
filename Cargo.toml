@@ -39,6 +39,7 @@ members = [
     "crates/cloud_api_types",
     "crates/cloud_llm_client",
     "crates/codestral",
+    "crates/cloudwatch",
     "crates/collab",
     "crates/collab_ui",
     "crates/collections",
@@ -340,6 +341,7 @@ cloud_api_client = { path = "crates/cloud_api_client" }
 cloud_api_types = { path = "crates/cloud_api_types" }
 cloud_llm_client = { path = "crates/cloud_llm_client" }
 codestral = { path = "crates/codestral" }
+cloudwatch = { path = "crates/cloudwatch" }
 collab = { path = "crates/collab" }
 collab_ui = { path = "crates/collab_ui" }
 collections = { path = "crates/collections", version = "0.1.0" }
@@ -607,6 +609,7 @@ async-tungstenite = "0.33"
 async_zip = { version = "0.0.18", features = ["deflate", "deflate64"] }
 aws-config = { version = "1.8.10", default-features = false, features = [
     "behavior-version-latest",
+    "credentials-login",
     "credentials-process",
     "rt-tokio",
     "sso",
@@ -618,11 +621,22 @@ aws-sdk-bedrockruntime = { version = "1.112.0", default-features = false, featur
     "behavior-version-latest",
     "rt-tokio",
 ] }
+# Pinned to the release train of the aws-smithy-* crates already in Cargo.lock;
+# newer releases require a newer smithy runtime.
+aws-sdk-cloudwatchlogs = { version = "=1.117.0", default-features = false, features = [
+    "behavior-version-latest",
+    "rt-tokio",
+] }
 aws-sdk-kinesis = { version = "1.51", default-features = false }
+aws-sdk-sts = { version = "1.98", default-features = false, features = [
+    "behavior-version-latest",
+    "rt-tokio",
+] }
 aws-sdk-s3 = { version = "1.15", default-features = false }
 aws-sigv4 = { version = "1.4.0", features = ["http1"] }
 aws-smithy-runtime-api = { version = "1.9.2", features = ["http-1x", "client"] }
 aws-smithy-types = { version = "1.3.4", features = ["http-body-1-x"] }
+aws-types = "1.3.12"
 backtrace = "0.3"
 base64 = "0.22"
 betlang = "0.1.1"
