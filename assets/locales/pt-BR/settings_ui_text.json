@@ -1358,5 +1358,12 @@
   "when enabled, zed will prefer already-open buffers.": "quando ativado, o Asylum prefere buffers já abertos.",
   "writes it to the shared file and removes it here": "grava na base comum e remove daqui",
   "{name} overrides it": "O {name} sobrescreve",
-  "{name} overrides it: {value}": "O {name} sobrescreve: {value}"
+  "{name} overrides it: {value}": "O {name} sobrescreve: {value}",
+  "running": "rodando",
+  "starting": "iniciando",
+  "signing in": "entrando",
+  "on demand": "sob demanda",
+  "needs sign-in": "precisa entrar",
+  "error": "erro",
+  "Restart": "Reiniciar"
 }

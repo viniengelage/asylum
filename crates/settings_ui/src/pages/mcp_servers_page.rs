@@ -12,7 +12,7 @@ use project::project_settings::ContextServerSettings;
 use settings::{ContextServerCommand, ContextServerSettingsContent, OAuthClientSettings};
 use ui::{
     AiSettingItem, AiSettingItemSource, AiSettingItemStatus, ContextMenu, Divider, PopoverMenu,
-    Switch, ToggleState, Tooltip, prelude::*,
+    StatusTone, Switch, ToggleState, Tooltip, prelude::*,
 };
 use util::ResultExt as _;
 
@@ -243,12 +243,50 @@ fn render_context_server(
         None => render_status_details(&server_status, context_server_id, store, should_show_logout),
     };
 
+    let pill = server_status_pill(&server_status, is_enabled);
+    let subtitle = server_settings.as_ref().and_then(server_invocation);
+
     AiSettingItem::new(item_id, display_name, status, source)
+        .when_some(pill, |this, (label, tone)| this.status_pill(label, tone))
+        .when_some(subtitle, |this, subtitle| this.subtitle(subtitle))
         .when_some(configure_button, |this, button| this.action(button))
         .action(uninstall_button)
         .action(toggle_switch)
         .when_some(tool_label, |this, label| this.detail_label(label))
         .when_some(details, |this, details| this.details(details))
+}
+
+/// Disabled servers show no pill: the toggle already says they are off.
+fn server_status_pill(
+    status: &ContextServerStatus,
+    is_enabled: bool,
+) -> Option<(SharedString, StatusTone)> {
+    if !is_enabled {
+        return None;
+    }
+    let (text, tone) = match status {
+        ContextServerStatus::Running => ("running", StatusTone::Success),
+        ContextServerStatus::Starting => ("starting", StatusTone::Info),
+        ContextServerStatus::Authenticating => ("signing in", StatusTone::Info),
+        ContextServerStatus::Stopped => ("on demand", StatusTone::Neutral),
+        ContextServerStatus::AuthRequired | ContextServerStatus::ClientSecretRequired { .. } => {
+            ("needs sign-in", StatusTone::Warning)
+        }
+        ContextServerStatus::Error(_) => ("error", StatusTone::Error),
+    };
+    Some((i18n::translate_text("settings_ui_text", text), tone))
+}
+
+fn server_invocation(settings: &ContextServerSettings) -> Option<SharedString> {
+    match settings {
+        ContextServerSettings::Stdio { command, .. } => {
+            let mut parts = vec![command.path.to_string_lossy().into_owned()];
+            parts.extend(command.args.iter().cloned());
+            Some(parts.join(" ").into())
+        }
+        ContextServerSettings::Http { url, .. } => Some(url.to_string().into()),
+        ContextServerSettings::Extension { .. } => None,
+    }
 }
 
 fn map_server_status(status: &ContextServerStatus) -> AiSettingItemStatus {
@@ -425,6 +463,25 @@ fn render_status_details(
                                         .size(LabelSize::Small),
                                 ),
                             ),
+                    )
+                    .child(
+                        Button::new(
+                            "error-restart",
+                            i18n::translate_text("settings_ui_text", "Restart"),
+                        )
+                        .style(ButtonStyle::Outlined)
+                        .label_size(LabelSize::Small)
+                        .on_click({
+                            let store = store.clone();
+                            let context_server_id = context_server_id.clone();
+                            move |_event, _window, cx| {
+                                store.update(cx, |store, cx| {
+                                    if let Some(server) = store.get_server(&context_server_id) {
+                                        store.start_server(server, cx);
+                                    }
+                                });
+                            }
+                        }),
                     )
                     .when(should_show_logout, |this| {
                         this.child(

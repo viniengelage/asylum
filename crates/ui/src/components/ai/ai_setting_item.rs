@@ -1,4 +1,4 @@
-use crate::{IconDecoration, IconDecorationKind, Tooltip, prelude::*};
+use crate::{IconDecoration, IconDecorationKind, StatusTone, Tooltip, prelude::*, status_pill};
 use gpui::{Animation, AnimationExt, SharedString, pulsating_between};
 use std::time::Duration;
 
@@ -76,6 +76,8 @@ pub struct AiSettingItem {
     icon: Option<AnyElement>,
     label: SharedString,
     detail_label: Option<SharedString>,
+    subtitle: Option<SharedString>,
+    pill: Option<(SharedString, StatusTone)>,
     actions: Vec<AnyElement>,
     details: Option<AnyElement>,
 }
@@ -94,6 +96,8 @@ impl AiSettingItem {
             icon: None,
             label: label.into(),
             detail_label: None,
+            subtitle: None,
+            pill: None,
             actions: Vec::new(),
             details: None,
         }
@@ -106,6 +110,17 @@ impl AiSettingItem {
 
     pub fn detail_label(mut self, detail: impl Into<SharedString>) -> Self {
         self.detail_label = Some(detail.into());
+        self
+    }
+
+    /// A monospace line under the label, such as the command or URL a server runs.
+    pub fn subtitle(mut self, subtitle: impl Into<SharedString>) -> Self {
+        self.subtitle = Some(subtitle.into());
+        self
+    }
+
+    pub fn status_pill(mut self, label: impl Into<SharedString>, tone: StatusTone) -> Self {
+        self.pill = Some((label.into(), tone));
         self
     }
 
@@ -129,6 +144,8 @@ impl RenderOnce for AiSettingItem {
             icon,
             label,
             detail_label,
+            subtitle,
+            pill,
             actions,
             details,
         } = self;
@@ -232,10 +249,24 @@ impl RenderOnce for AiSettingItem {
                                 )
                             }),
                     )
+                    .when_some(pill, |this, (label, tone)| {
+                        this.child(status_pill(label, tone, cx))
+                    })
                     .when(!actions.is_empty(), |this| {
                         this.child(h_flex().gap_0p5().flex_none().children(actions))
                     }),
             )
+            .when_some(subtitle, |this, subtitle| {
+                this.child(
+                    div().pl(px(26.)).min_w_0().child(
+                        Label::new(subtitle)
+                            .size(LabelSize::XSmall)
+                            .color(Color::Placeholder)
+                            .buffer_font(cx)
+                            .truncate(),
+                    ),
+                )
+            })
             .children(details)
     }
 }

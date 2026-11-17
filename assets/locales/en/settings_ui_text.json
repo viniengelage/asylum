@@ -1358,5 +1358,12 @@
   "when enabled, zed will prefer already-open buffers.": "when enabled, zed will prefer already-open buffers.",
   "writes it to the shared file and removes it here": "writes it to the shared file and removes it here",
   "{name} overrides it": "{name} overrides it",
-  "{name} overrides it: {value}": "{name} overrides it: {value}"
+  "{name} overrides it: {value}": "{name} overrides it: {value}",
+  "running": "running",
+  "starting": "starting",
+  "signing in": "signing in",
+  "on demand": "on demand",
+  "needs sign-in": "needs sign-in",
+  "error": "error",
+  "Restart": "Restart"
 }
