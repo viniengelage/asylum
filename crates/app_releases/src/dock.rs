@@ -122,6 +122,17 @@ impl ReleasesPanel {
             )
             .start_children(app_picker)
             .end_child(
+                IconButton::new("releases-clean-build", IconName::Plus)
+                    .icon_size(IconSize::Small)
+                    .tooltip(Tooltip::for_action_title(
+                        t!("app_releases.clean_build.title"),
+                        &crate::NewCleanBuild,
+                    ))
+                    .on_click(|_, window, cx| {
+                        window.dispatch_action(Box::new(crate::NewCleanBuild), cx)
+                    }),
+            )
+            .end_child(
                 IconButton::new("releases-refresh", IconName::RotateCw)
                     .icon_size(IconSize::Small)
                     .disabled(refreshing)

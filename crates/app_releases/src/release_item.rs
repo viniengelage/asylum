@@ -691,6 +691,9 @@ impl ReleaseView {
             _ => None,
         };
 
+        let is_clean_build = timeline.ids.eas_build_id.as_ref().is_some_and(|id| {
+            crate::clean_build::clean_build_ids(&db::kvp::KeyValueStore::global(cx)).contains(id)
+        });
         card(cx)
             .flex_1()
             .min_w(px(280.))
@@ -704,7 +707,14 @@ impl ReleaseView {
                             .size(LabelSize::Default)
                             .weight(FontWeight::SEMIBOLD),
                     )
-                    .child(status_pill(label, tone, cx)),
+                    .child(status_pill(label, tone, cx))
+                    .when(is_clean_build, |this| {
+                        this.child(status_pill(
+                            t!("app_releases.clean_build.clean_chip"),
+                            ui::StatusTone::Info,
+                            cx,
+                        ))
+                    }),
             )
             .children(
                 build_line.map(|line| Label::new(line).size(LabelSize::XSmall).color(Color::Muted)),

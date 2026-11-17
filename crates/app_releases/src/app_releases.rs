@@ -5,6 +5,7 @@ mod accounts;
 mod accounts_view;
 mod agent_toolkit;
 mod app_store_connect;
+mod clean_build;
 mod dock;
 mod eas;
 mod google_play;
@@ -38,6 +39,8 @@ actions!(
         OpenAccounts,
         /// Reads EAS, App Store Connect and Google Play again.
         Refresh,
+        /// Builds on EAS what a branch has on origin, from a throwaway worktree.
+        NewCleanBuild,
     ]
 );
 
@@ -77,6 +80,7 @@ pub fn is_unauthorized(error: &anyhow::Error) -> bool {
 }
 
 pub fn init(cx: &mut App) {
+    clean_build::remove_stale_worktrees(cx);
     workspace::register_panel_item::<ReleasesPanel>(cx);
     workspace::register_lazy_panel::<ReleasesPanel>(
         |workspace, window, cx| {
@@ -94,6 +98,11 @@ pub fn init(cx: &mut App) {
         workspace.register_action(|workspace, _: &OpenAccounts, window, cx| {
             if toolkit_allowed(workspace, cx) {
                 accounts_view::open(workspace, window, cx);
+            }
+        });
+        workspace.register_action(|workspace, _: &NewCleanBuild, window, cx| {
+            if toolkit_allowed(workspace, cx) {
+                clean_build::open(workspace, window, cx);
             }
         });
         workspace.register_action(|workspace, _: &Refresh, _window, cx| {
