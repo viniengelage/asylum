@@ -1,3 +1,4 @@
+mod note_images;
 mod palette;
 mod panel;
 mod quick_note;
@@ -8,12 +9,14 @@ use std::path::PathBuf;
 use std::time::SystemTime;
 
 use editor::Editor;
-use gpui::{Action, App, Entity, SharedString, Window, actions};
+use gpui::{Action, App, Entity, SharedString, TaskExt as _, Window, actions};
+use i18n::t;
 use project::Project;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use workspace::Workspace;
 
+pub use note_images::{is_note_path, save_note_image, split_draft_images};
 pub use palette::NotesPalette;
 pub use panel::NotesPanel;
 pub use quick_note::QuickNote;
@@ -22,7 +25,7 @@ pub use store::{
     title_from_text,
 };
 pub use thread_context::ThreadContextEditor;
-pub use zed_actions::notes::InsertText;
+pub use zed_actions::notes::{InsertImages, InsertText};
 
 actions!(
     notes,
@@ -45,6 +48,8 @@ actions!(
         CreateNote,
         /// Saves the quick note.
         SaveQuickNote,
+        /// Deletes the images in the notes' `assets/` folders that no note links to.
+        RemoveUnusedImages,
     ]
 );
 
@@ -69,6 +74,25 @@ pub fn init(cx: &mut App) {
         workspace.register_action(|workspace, _: &ToggleFocus, window, cx| {
             panel::toggle_focus(workspace, window, cx);
         });
+        workspace.register_action(|_workspace, _: &RemoveUnusedImages, window, cx| {
+            let removed = note_images::remove_unused_images(cx);
+            let workspace = cx.entity().downgrade();
+            cx.spawn_in(window, async move |_, cx| {
+                let removed = removed.await?;
+                workspace.update(cx, |workspace, cx| {
+                    workspace.show_toast(
+                        workspace::Toast::new(
+                            workspace::notifications::NotificationId::unique::<RemoveUnusedImages>(
+                            ),
+                            t!("notes.images.removed", count = removed).to_string(),
+                        )
+                        .autohide(),
+                        cx,
+                    );
+                })
+            })
+            .detach_and_log_err(cx);
+        });
         workspace.register_action(|workspace, action: &PastePinned, window, cx| {
             let roots = worktree_roots(workspace, cx);
             let note = NotesStore::global(cx).read(cx).pinned(action.slot, &roots);
@@ -79,9 +103,14 @@ pub fn init(cx: &mut App) {
     })
     .detach();
 
+    note_images::init(cx);
+
     cx.observe_new(|editor: &mut Editor, window, cx| {
-        if window.is_none() {
+        let Some(window) = window else {
             return;
+        };
+        if editor.mode().is_full() {
+            note_images::attach_to_editor(editor, window, cx);
         }
         let handle = cx.weak_entity();
         editor

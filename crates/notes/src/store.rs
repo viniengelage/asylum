@@ -10,7 +10,7 @@ use gpui::{App, AppContext as _, Context, Entity, Global, SharedString, Task};
 use serde::{Deserialize, Serialize};
 use util::ResultExt as _;
 
-const NOTES_FOLDER_NAME: &str = "notes";
+pub(crate) const NOTES_FOLDER_NAME: &str = "notes";
 pub const PIN_SLOTS: u8 = 9;
 
 pub fn global_notes_dir() -> PathBuf {
@@ -328,6 +328,14 @@ impl NotesStore {
             this.update(cx, |this, cx| this.set_notes(scope, notes, cx))
                 .log_err();
         })
+    }
+
+    pub(crate) fn notes_by_scope(&self) -> impl Iterator<Item = (&NoteScope, &Vec<Note>)> {
+        self.notes.iter()
+    }
+
+    pub(crate) fn notes_dir(scope: &NoteScope) -> PathBuf {
+        Self::dir(scope)
     }
 
     pub fn visible_notes(&self, worktree_roots: &[PathBuf]) -> Vec<Note> {

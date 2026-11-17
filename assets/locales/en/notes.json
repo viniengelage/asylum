@@ -57,5 +57,11 @@
   "thread_context.summarize": "Summarize conversation",
   "thread_context.summarizing": "Summarizing…",
   "panel.thread_chip": "thread",
-  "panel.open_thread": "Open the thread"
+  "panel.open_thread": "Open the thread",
+  "images.too_large": "The image is larger than {limit} MB",
+  "images.missing": "Image not found: {name}",
+  "images.delete_prompt": "Also delete the {count} images of this note?",
+  "images.delete_images": "Delete images",
+  "images.keep_images": "Keep images",
+  "images.removed": "Removed {count} unused images"
 }

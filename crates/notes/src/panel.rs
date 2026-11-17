@@ -1,9 +1,9 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use editor::{Editor, EditorEvent};
 use gpui::{
-    Action as _, ClipboardItem, Entity, EventEmitter, FocusHandle, Focusable, Subscription,
-    WeakEntity,
+    Action as _, ClipboardItem, Entity, EventEmitter, FocusHandle, Focusable, ObjectFit,
+    Subscription, WeakEntity, img,
 };
 use i18n::t;
 use ui::EmptyState;
@@ -133,7 +133,12 @@ impl NotesPanel {
     }
 
     fn resume(&self, note: &Note, window: &mut Window, cx: &mut App) {
-        let text = note.body.clone();
+        let note_directory = note
+            .path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_default();
+        let (text, images) = crate::split_draft_images(&note.body, &note_directory);
         self.store
             .update(cx, |store, cx| store.delete(note, cx))
             .detach_and_log_err(cx);
@@ -141,6 +146,9 @@ impl NotesPanel {
         // The composer takes the focus while FocusAgent runs; the text has to go there after.
         window.defer(cx, move |window, cx| {
             window.dispatch_action(Box::new(InsertText { text }), cx);
+            if !images.is_empty() {
+                window.dispatch_action(Box::new(crate::InsertImages { paths: images }), cx);
+            }
         });
     }
 
@@ -187,6 +195,18 @@ impl NotesPanel {
             .unwrap_or_default()
             .trim()
             .to_string();
+
+        let images: Vec<PathBuf> = note
+            .path
+            .parent()
+            .map(|directory| {
+                crate::note_images::linked_images(&note.body, directory)
+                    .into_iter()
+                    .map(|image| image.path)
+                    .filter(|path| path.is_file())
+                    .collect()
+            })
+            .unwrap_or_default();
 
         let leading: AnyElement = match note.pin {
             Some(slot) => h_flex()
@@ -315,6 +335,19 @@ impl NotesPanel {
                         )
                     }),
             )
+            .when(!selected, |this| {
+                this.when_some(images.first().cloned(), |this, path| {
+                    this.child(
+                        div()
+                            .flex_none()
+                            .size(px(28.))
+                            .rounded(px(4.))
+                            .overflow_hidden()
+                            .bg(colors.editor_background)
+                            .child(img(path).size_full().object_fit(ObjectFit::Cover)),
+                    )
+                })
+            })
             .child(trailing);
 
         let body_lines: Vec<String> = note.body.lines().take(6).map(str::to_string).collect();
@@ -339,6 +372,39 @@ impl NotesPanel {
                                 .truncate()
                         })),
                 )
+                .when(!images.is_empty(), |this| {
+                    let hidden = images.len().saturating_sub(2);
+                    this.child(
+                        h_flex()
+                            .w_full()
+                            .gap_1()
+                            .children(images.iter().take(2).cloned().map(|path| {
+                                div()
+                                    .flex_1()
+                                    .h(px(72.))
+                                    .rounded(px(6.))
+                                    .overflow_hidden()
+                                    .bg(colors.editor_background)
+                                    .child(img(path).size_full().object_fit(ObjectFit::Cover))
+                            }))
+                            .when(hidden > 0, |this| {
+                                this.child(
+                                    h_flex()
+                                        .flex_none()
+                                        .w(px(40.))
+                                        .h(px(72.))
+                                        .justify_center()
+                                        .rounded(px(6.))
+                                        .bg(colors.editor_background)
+                                        .child(
+                                            Label::new(format!("+{hidden}"))
+                                                .size(LabelSize::Small)
+                                                .color(Color::Muted),
+                                        ),
+                                )
+                            }),
+                    )
+                })
                 .child(
                     h_flex()
                         .w_full()
@@ -413,10 +479,13 @@ impl NotesPanel {
                             IconButton::new("notes-delete", IconName::Trash)
                                 .icon_size(IconSize::Small)
                                 .tooltip(Tooltip::text(t!("notes.palette.delete")))
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.store
-                                        .update(cx, |store, cx| store.delete(&note, cx))
-                                        .detach_and_log_err(cx);
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    crate::note_images::delete_note(
+                                        this.store.clone(),
+                                        note.clone(),
+                                        window,
+                                        cx,
+                                    );
                                 })),
                         ),
                 )

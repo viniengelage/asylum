@@ -548,6 +548,51 @@ impl MessageEditor {
         editor.update(cx, |editor, _cx| {
             editor.set_completion_provider(Some(completion_provider.clone()))
         });
+        {
+            let weak_editor = editor.downgrade();
+            let mention_set = mention_set.clone();
+            let workspace = workspace.clone();
+            editor.update(cx, |editor, _cx| {
+                editor
+                    .register_action(
+                        move |action: &zed_actions::notes::InsertImages, window, cx| {
+                            let Some(editor) = weak_editor.upgrade() else {
+                                return;
+                            };
+                            let paths = action.paths.clone();
+                            let mention_set = mention_set.clone();
+                            let workspace = workspace.clone();
+                            window
+                                .spawn(cx, async move |cx| {
+                                    let default_name: SharedString = "Image".into();
+                                    let images = cx
+                                        .background_spawn(async move {
+                                            paths
+                                            .iter()
+                                            .filter_map(|path| {
+                                                crate::mention_set::load_external_image_from_path(
+                                                    path,
+                                                    &default_name,
+                                                )
+                                            })
+                                            .collect::<Vec<_>>()
+                                        })
+                                        .await;
+                                    crate::mention_set::insert_images_as_context(
+                                        images,
+                                        editor,
+                                        mention_set,
+                                        workspace,
+                                        cx,
+                                    )
+                                    .await;
+                                })
+                                .detach();
+                        },
+                    )
+                    .detach();
+            });
+        }
 
         cx.on_focus_in(&editor.focus_handle(cx), window, |_, _, cx| {
             cx.emit(MessageEditorEvent::Focus)
@@ -974,27 +1019,68 @@ impl MessageEditor {
             return;
         };
         let text = self.text(cx);
-        if text.trim().is_empty() {
+        let has_images = self
+            .mention_set
+            .read(cx)
+            .mentions()
+            .iter()
+            .any(|uri| matches!(uri, MentionUri::PastedImage { .. }));
+        if text.trim().is_empty() && !has_images {
             notes::open_quick_note(&workspace, String::new(), None, window, cx);
             return;
         }
+        let contents = self
+            .mention_set
+            .update(cx, |mention_set, cx| mention_set.contents(false, cx));
         let store = notes::NotesStore::global(cx);
-        let create = store.update(cx, |store, cx| {
-            store.create(
-                notes::NewNote {
-                    title: notes::title_from_text(&text),
-                    body: text.clone(),
-                    kind: notes::NoteKind::Draft,
-                    scope: notes::NoteScope::Global,
-                    pin: None,
-                    thread: None,
-                },
-                cx,
-            )
-        });
+        let fs = <dyn fs::Fs>::global(cx);
         self.clear(window, cx);
         let message_editor = cx.weak_entity();
         cx.spawn_in(window, async move |_, cx| {
+            let mut body = text.clone();
+            let mut links = Vec::new();
+            // Images that fail to load are left out rather than losing the whole draft.
+            for (uri, mention) in contents.await.log_err().unwrap_or_default().into_values() {
+                let Mention::Image(image) = mention else {
+                    continue;
+                };
+                body = body.replace(&uri.as_link().to_string(), "");
+                let Some(bytes) = base64::Engine::decode(
+                    &base64::engine::general_purpose::STANDARD,
+                    image.data.as_bytes(),
+                )
+                .log_err() else {
+                    continue;
+                };
+                let draft_path = notes::global_notes_dir().join("draft.md");
+                if let Some(link) = notes::save_note_image(
+                    fs.clone(),
+                    &draft_path,
+                    &bytes,
+                    image.format.extension(),
+                )
+                .await
+                .log_err()
+                {
+                    links.push(format!("![]({link})"));
+                }
+            }
+            if !links.is_empty() {
+                body = format!("{}\n\n{}", body.trim_end(), links.join("\n"));
+            }
+            let create = store.update(cx, |store, cx| {
+                store.create(
+                    notes::NewNote {
+                        title: notes::title_from_text(&body),
+                        body: body.trim().to_string(),
+                        kind: notes::NoteKind::Draft,
+                        scope: notes::NoteScope::Global,
+                        pin: None,
+                        thread: None,
+                    },
+                    cx,
+                )
+            });
             let path = create.await?;
             workspace.update(cx, |workspace, cx| {
                 let toast = workspace::Toast::new(

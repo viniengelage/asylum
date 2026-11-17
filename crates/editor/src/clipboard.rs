@@ -1,6 +1,15 @@
 use super::*;
 use util::rel_path::RelPath;
 
+/// Lets another crate take over pasting an image into a markdown file, e.g. to save it next to
+/// a note in its `assets/` folder. The handler gets the file's absolute path and returns the
+/// link to insert, or `None` to fall back to saving the image beside the file.
+pub struct MarkdownImagePasteHandler(
+    pub Arc<dyn Fn(&Path, &gpui::Image, &mut App) -> Option<Task<Result<String>>>>,
+);
+
+impl gpui::Global for MarkdownImagePasteHandler {}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ClipboardSelection {
     /// The number of bytes in this selection.
@@ -282,6 +291,23 @@ impl Editor {
             };
 
             if is_markdown {
+                let delegated = maybe!({
+                    let handler = cx.try_global::<MarkdownImagePasteHandler>()?.0.clone();
+                    let buffer = self.buffer().read(cx).as_singleton()?;
+                    let abs_path = buffer.read(cx).file()?.as_local()?.abs_path(cx);
+                    handler(&abs_path, image, cx)
+                });
+                if let Some(saved) = delegated {
+                    cx.spawn_in(window, async move |editor, cx| {
+                        let link = saved.await?;
+                        editor.update_in(cx, |editor, window, cx| {
+                            editor.insert_image_snippet(&link, window, cx)
+                        })
+                    })
+                    .detach_and_log_err(cx);
+                    return;
+                }
+
                 let handled = maybe!({
                     let buffer = self.buffer().read(cx).as_singleton()?;
                     let file = buffer.read(cx).file()?;

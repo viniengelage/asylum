@@ -77,7 +77,7 @@ mod rewrap;
 mod selection;
 
 pub(crate) use actions::*;
-pub use clipboard::ClipboardSelection;
+pub use clipboard::{ClipboardSelection, MarkdownImagePasteHandler};
 pub use code_actions::CodeActionProvider;
 use collections::TypeIdHashMap;
 pub use completions::CompletionProvider;

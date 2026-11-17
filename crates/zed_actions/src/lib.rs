@@ -1152,4 +1152,12 @@ pub mod notes {
     pub struct InsertText {
         pub text: String,
     }
+
+    /// Attaches image files to the agent's composer, as if they were pasted.
+    #[derive(Clone, PartialEq, Deserialize, JsonSchema, Action)]
+    #[action(namespace = notes)]
+    #[serde(deny_unknown_fields)]
+    pub struct InsertImages {
+        pub paths: Vec<std::path::PathBuf>,
+    }
 }
