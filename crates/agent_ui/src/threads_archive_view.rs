@@ -1,3 +1,4 @@
+use i18n::t;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -729,12 +730,13 @@ impl ThreadsArchiveView {
                                 let agent = thread.agent_id.clone();
                                 let thread_id = thread.thread_id;
                                 let session_id = thread.session_id.clone();
-                                cx.listener(move |this, _, _, cx| {
+                                cx.listener(move |this, _, window, cx| {
                                     this.preserve_selection_on_next_update = true;
                                     this.delete_thread(
                                         thread_id,
                                         session_id.clone(),
                                         agent.clone(),
+                                        window,
                                         cx,
                                     );
                                     cx.stop_propagation();
@@ -792,7 +794,7 @@ impl ThreadsArchiveView {
     fn remove_selected_thread(
         &mut self,
         _: &RemoveSelectedThread,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let Some(ix) = self.selection else { return };
@@ -805,6 +807,7 @@ impl ThreadsArchiveView {
             thread.thread_id,
             thread.session_id.clone(),
             thread.agent_id.clone(),
+            window,
             cx,
         );
     }
@@ -814,9 +817,11 @@ impl ThreadsArchiveView {
         thread_id: ThreadId,
         session_id: Option<acp::SessionId>,
         agent: AgentId,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         ThreadMetadataStore::global(cx).update(cx, |store, cx| store.delete(thread_id, cx));
+        Self::offer_to_delete_context_note(thread_id, window, cx);
 
         let agent = Agent::from(agent);
 
@@ -851,6 +856,38 @@ impl ThreadsArchiveView {
                 }
             });
             task.await
+        })
+        .detach_and_log_err(cx);
+    }
+
+    /// Deleting a thread leaves its context note alone unless the user says otherwise: the note
+    /// may still be worth keeping in the Notes dock.
+    fn offer_to_delete_context_note(thread_id: ThreadId, window: &mut Window, cx: &mut App) {
+        let store = notes::NotesStore::global(cx);
+        let Some(note) = store
+            .read(cx)
+            .note_for_thread(&thread_id.to_key_string())
+            .cloned()
+        else {
+            return;
+        };
+        let answer = window.prompt(
+            gpui::PromptLevel::Info,
+            &t!("agent_ui.thread_context.delete_note_prompt"),
+            Some(&note.title),
+            &[
+                t!("agent_ui.thread_context.delete_note").as_ref(),
+                t!("agent_ui.thread_context.keep_note").as_ref(),
+            ],
+            cx,
+        );
+        cx.spawn(async move |cx| {
+            if answer.await? == 0 {
+                store
+                    .update(cx, |store, cx| store.delete(&note, cx))
+                    .await?;
+            }
+            anyhow::Ok(())
         })
         .detach_and_log_err(cx);
     }

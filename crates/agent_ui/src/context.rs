@@ -56,11 +56,11 @@ pub fn load_context(mention_set: &Entity<MentionSet>, cx: &mut App) -> Task<Opti
                 }),
                 Mention::Note { content, images } => {
                     loaded_context.text.push_str(&content);
-                    loaded_context
-                        .images
-                        .extend(images.into_iter().map(|image| LanguageModelImage {
-                            source: image.data,
-                        }));
+                    loaded_context.images.extend(
+                        images
+                            .into_iter()
+                            .map(|image| LanguageModelImage { source: image.data }),
+                    );
                 }
                 Mention::Link => {}
             }

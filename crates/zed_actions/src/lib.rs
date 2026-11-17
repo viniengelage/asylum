@@ -574,6 +574,14 @@ pub mod agent {
     use schemars::JsonSchema;
     use serde::Deserialize;
 
+    /// Opens the agent thread a note is tied to.
+    #[derive(Clone, PartialEq, Deserialize, JsonSchema, Action)]
+    #[action(namespace = agent)]
+    #[serde(deny_unknown_fields)]
+    pub struct OpenThreadByKey {
+        pub thread_key: String,
+    }
+
     actions!(
         agent,
         [

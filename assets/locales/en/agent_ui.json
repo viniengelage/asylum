@@ -758,5 +758,18 @@
   "options_menu.mcp_summary.enabled": "on: {count}",
   "options_menu.mcp_attention.error": "{name}: error",
   "options_menu.mcp_attention.needs_auth": "{name}: needs sign-in",
-  "options_menu.thread_context": "Thread context"
+  "options_menu.thread_context": "Thread context",
+  "thread_context.add": "Add context",
+  "thread_context.title": "Context",
+  "thread_context.edit": "Edit",
+  "thread_context.edited": "edited {ago}",
+  "thread_context.more_lines": "+{count} lines",
+  "thread_context.just_now": "just now",
+  "thread_context.minutes_ago": "{count} min ago",
+  "thread_context.hours_ago": "{count} h ago",
+  "thread_context.days_ago": "{count} d ago",
+  "thread_context.no_model": "No model is set up to summarize threads",
+  "thread_context.delete_note_prompt": "Also delete this thread's context note?",
+  "thread_context.delete_note": "Delete note",
+  "thread_context.keep_note": "Keep note"
 }

@@ -265,6 +265,41 @@ impl NotesPanel {
                                         .size(LabelSize::XSmall)
                                         .color(Color::Accent),
                                 )
+                            })
+                            .when_some(note.thread.clone(), |this, thread_key| {
+                                this.child(
+                                    h_flex()
+                                        .id(SharedString::from(format!(
+                                            "notes-thread-{}",
+                                            note.path.display()
+                                        )))
+                                        .flex_none()
+                                        .gap_0p5()
+                                        .px_1()
+                                        .rounded(px(4.))
+                                        .cursor_pointer()
+                                        .hover(|style| style.bg(cx.theme().colors().element_hover))
+                                        .tooltip(Tooltip::text(t!("notes.panel.open_thread")))
+                                        .child(
+                                            Icon::new(IconName::Chat)
+                                                .size(IconSize::XSmall)
+                                                .color(Color::Accent),
+                                        )
+                                        .child(
+                                            Label::new(t!("notes.panel.thread_chip"))
+                                                .size(LabelSize::XSmall)
+                                                .color(Color::Accent),
+                                        )
+                                        .on_click(move |_, window, cx| {
+                                            cx.stop_propagation();
+                                            window.dispatch_action(
+                                                Box::new(zed_actions::agent::OpenThreadByKey {
+                                                    thread_key: thread_key.clone(),
+                                                }),
+                                                cx,
+                                            );
+                                        }),
+                                )
                             }),
                     )
                     .when(!selected, |this| {

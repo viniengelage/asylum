@@ -14,6 +14,7 @@ use crate::store::{NoteScope, NotesStore};
 const SAVE_DELAY: Duration = Duration::from_millis(500);
 
 type RenameThread = Rc<dyn Fn(SharedString, &mut Window, &mut App)>;
+type SummarizeThread = Rc<dyn Fn(&mut App) -> Task<anyhow::Result<String>>>;
 
 /// "Edit thread": the thread's title and a markdown context the user writes for themselves.
 /// The context is a note tied to the thread, so it also shows up in the Notes dock and in `@note`.
@@ -25,6 +26,9 @@ pub struct ThreadContextEditor {
     body: Entity<Editor>,
     initial_title: String,
     rename_thread: RenameThread,
+    summarize_thread: Option<SummarizeThread>,
+    summarizing: Option<Task<()>>,
+    summarize_error: Option<SharedString>,
     saved: bool,
     save_task: Option<Task<()>>,
     focus_handle: FocusHandle,
@@ -71,11 +75,61 @@ impl ThreadContextEditor {
             body,
             initial_title: title.to_string(),
             rename_thread: Rc::new(rename_thread),
+            summarize_thread: None,
+            summarizing: None,
+            summarize_error: None,
             saved: false,
             save_task: None,
             focus_handle: cx.focus_handle(),
             _subscriptions: subscriptions,
         }
+    }
+
+    /// Offers "Summarize conversation". The summary lands in the context field for the user to
+    /// edit; it is appended when the field already has text.
+    pub fn summarize_with(
+        mut self,
+        summarize: impl Fn(&mut App) -> Task<anyhow::Result<String>> + 'static,
+    ) -> Self {
+        self.summarize_thread = Some(Rc::new(summarize));
+        self
+    }
+
+    fn summarize(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(summarize) = self.summarize_thread.clone() else {
+            return;
+        };
+        if self.summarizing.is_some() {
+            return;
+        }
+        self.summarize_error = None;
+        let summary = summarize(cx);
+        self.summarizing = Some(cx.spawn_in(window, async move |this, cx| {
+            let summary = summary.await;
+            this.update_in(cx, |this, window, cx| {
+                this.summarizing = None;
+                match summary {
+                    Ok(summary) => {
+                        let existing = this.body.read(cx).text(cx);
+                        let text = if existing.trim().is_empty() {
+                            summary.trim().to_string()
+                        } else {
+                            format!("{}\n\n{}", existing.trim_end(), summary.trim())
+                        };
+                        this.body.update(cx, |editor, cx| {
+                            editor.set_text(text, window, cx);
+                            editor.move_to_end(&editor::actions::MoveToEnd, window, cx);
+                        });
+                    }
+                    Err(error) => {
+                        this.summarize_error = Some(format!("{error:#}").into());
+                    }
+                }
+                cx.notify();
+            })
+            .log_err();
+        }));
+        cx.notify();
     }
 
     fn schedule_save(&mut self, cx: &mut Context<Self>) {
@@ -92,13 +146,7 @@ impl ThreadContextEditor {
         let body = self.body.read(cx).text(cx);
         let title = self.title.read(cx).text(cx);
         let save = NotesStore::global(cx).update(cx, |store, cx| {
-            store.save_thread_context(
-                self.thread_key.clone(),
-                title,
-                body,
-                self.scope.clone(),
-                cx,
-            )
+            store.save_thread_context(self.thread_key.clone(), title, body, self.scope.clone(), cx)
         });
         cx.spawn(async move |this, cx| {
             let saved = save.await.log_err().is_some();
@@ -237,20 +285,52 @@ impl Render for ThreadContextEditor {
                     ),
             )
             .child(
-                modal_footer(cx).child(div().flex_1()).child(
-                    primary_button(
-                        "thread-context-done",
-                        None,
-                        t!("notes.thread_context.done"),
-                        Some(KeyBinding::for_action_in(
-                            &SaveQuickNote,
-                            &self.focus_handle,
+                modal_footer(cx)
+                    .when(self.summarize_thread.is_some(), |this| {
+                        let summarizing = self.summarizing.is_some();
+                        this.child(
+                            Button::new(
+                                "thread-context-summarize",
+                                if summarizing {
+                                    t!("notes.thread_context.summarizing")
+                                } else {
+                                    t!("notes.thread_context.summarize")
+                                },
+                            )
+                            .start_icon(Icon::new(IconName::Sparkle).size(IconSize::XSmall))
+                            .style(ButtonStyle::Subtle)
+                            .label_size(LabelSize::Small)
+                            .disabled(summarizing)
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.summarize(window, cx)),
+                            ),
+                        )
+                    })
+                    .when_some(self.summarize_error.clone(), |this, error| {
+                        this.child(
+                            div().min_w_0().flex_shrink(1.).child(
+                                Label::new(error)
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Error)
+                                    .truncate(),
+                            ),
+                        )
+                    })
+                    .child(div().flex_1())
+                    .child(
+                        primary_button(
+                            "thread-context-done",
+                            None,
+                            t!("notes.thread_context.done"),
+                            Some(KeyBinding::for_action_in(
+                                &SaveQuickNote,
+                                &self.focus_handle,
+                                cx,
+                            )),
                             cx,
-                        )),
-                        cx,
-                    )
-                    .on_click(cx.listener(|this, _, window, cx| this.finish(window, cx))),
-                ),
+                        )
+                        .on_click(cx.listener(|this, _, window, cx| this.finish(window, cx))),
+                    ),
             )
             .on_mouse_down_out(cx.listener(|this, _, window, cx| this.finish(window, cx)))
     }

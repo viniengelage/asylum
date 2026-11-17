@@ -758,5 +758,18 @@
   "options_menu.mcp_summary.enabled": "ligados: {count}",
   "options_menu.mcp_attention.error": "{name}: erro",
   "options_menu.mcp_attention.needs_auth": "{name}: precisa entrar",
-  "options_menu.thread_context": "Contexto da thread"
+  "options_menu.thread_context": "Contexto da thread",
+  "thread_context.add": "Adicionar contexto",
+  "thread_context.title": "Contexto",
+  "thread_context.edit": "Editar",
+  "thread_context.edited": "editado {ago}",
+  "thread_context.more_lines": "+{count} linhas",
+  "thread_context.just_now": "agora",
+  "thread_context.minutes_ago": "há {count} min",
+  "thread_context.hours_ago": "há {count} h",
+  "thread_context.days_ago": "há {count} d",
+  "thread_context.no_model": "Nenhum modelo configurado para resumir threads",
+  "thread_context.delete_note_prompt": "Apagar também a nota de contexto desta thread?",
+  "thread_context.delete_note": "Apagar nota",
+  "thread_context.keep_note": "Manter nota"
 }

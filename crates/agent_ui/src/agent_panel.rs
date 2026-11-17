@@ -278,7 +278,8 @@ fn mcp_summary(store: &Entity<ContextServerStore>, cx: &App) -> McpSummary {
                 summary.failing.push(SharedString::from(id.0.clone()))
             }
             Some(
-                ContextServerStatus::AuthRequired | ContextServerStatus::ClientSecretRequired { .. },
+                ContextServerStatus::AuthRequired
+                | ContextServerStatus::ClientSecretRequired { .. },
             ) => summary.needs_auth.push(SharedString::from(id.0.clone())),
             _ => {}
         }
@@ -324,7 +325,11 @@ fn render_mcp_menu_entry(summary: &McpSummary, cx: &App) -> AnyElement {
                 .size(IconSize::Small)
                 .color(Color::Muted),
         )
-        .child(div().flex_1().child(Label::new(t!("agent_ui.options_menu.mcp_servers"))))
+        .child(
+            div()
+                .flex_1()
+                .child(Label::new(t!("agent_ui.options_menu.mcp_servers"))),
+        )
         .child(trailing)
         .child(
             Icon::new(IconName::ArrowUpRight)
@@ -531,6 +536,37 @@ pub fn init(cx: &mut App) {
                         panel.update(cx, |panel, cx| panel.manage_skills(action, window, cx));
                     }
                 })
+                .register_action(
+                    |workspace, action: &zed_actions::agent::OpenThreadByKey, window, cx| {
+                        let Some(thread_id) =
+                            ThreadId::from_key_string(&action.thread_key).log_err()
+                        else {
+                            return;
+                        };
+                        let Some(metadata) = ThreadMetadataStore::global(cx)
+                            .read(cx)
+                            .entry(thread_id)
+                            .cloned()
+                        else {
+                            return;
+                        };
+                        if let Some(panel) = workspace.panel::<AgentPanel>(cx) {
+                            workspace.focus_panel::<AgentPanel>(window, cx);
+                            panel.update(cx, |panel, cx| {
+                                panel.load_agent_thread(
+                                    Agent::from(metadata.agent_id.clone()),
+                                    metadata.thread_id,
+                                    Some(metadata.folder_paths().clone()),
+                                    metadata.title.clone(),
+                                    true,
+                                    AgentThreadSource::AgentPanel,
+                                    window,
+                                    cx,
+                                )
+                            });
+                        }
+                    },
+                )
                 .register_action(|workspace, _: &crate::EditThreadContext, window, cx| {
                     if let Some(panel) = workspace.panel::<AgentPanel>(cx) {
                         panel.update(cx, |panel, cx| panel.edit_thread_context(window, cx));
@@ -1000,6 +1036,68 @@ fn build_conflicted_files_resolution_prompt(
     content
 }
 
+const THREAD_CONTEXT_PROMPT: &str = "Summarize the conversation above as a short context note \
+the user will read later to remember what this thread is about. Use markdown with three short \
+sections: the goal, the decisions made, and what is still left to do. Write in the language the \
+user wrote in. Reply with the note only.";
+
+/// The transcript is truncated from the start: the latest turns say best where the thread stopped.
+const THREAD_CONTEXT_TRANSCRIPT_LIMIT: usize = 60_000;
+
+fn summarize_thread_for_context(transcript: String, cx: &mut App) -> Task<Result<String>> {
+    let Some(model) = LanguageModelRegistry::read_global(cx).thread_summary_model(cx) else {
+        return Task::ready(Err(anyhow::anyhow!(t!("agent_ui.thread_context.no_model"))));
+    };
+    let provider = match LanguageModelRegistry::read_global(cx).provider_for_model(&model) {
+        Ok(provider) => provider,
+        Err(error) => return Task::ready(Err(error.into())),
+    };
+    let transcript = match transcript
+        .len()
+        .checked_sub(THREAD_CONTEXT_TRANSCRIPT_LIMIT)
+    {
+        Some(excess) => {
+            let start = transcript.ceil_char_boundary(excess);
+            transcript[start..].to_string()
+        }
+        None => transcript,
+    };
+    let request = language_model::LanguageModelRequest {
+        intent: Some(language_model::CompletionIntent::ThreadSummarization),
+        messages: vec![language_model::LanguageModelRequestMessage {
+            role: language_model::Role::User,
+            content: vec![format!("{transcript}\n\n---\n\n{THREAD_CONTEXT_PROMPT}").into()],
+            cache: false,
+            reasoning_details: None,
+        }],
+        ..Default::default()
+    };
+    cx.spawn(async move |cx| {
+        let mut response = provider.stream_completion_text(&model, request, cx).await?;
+        let mut text = String::new();
+        while let Some(chunk) = futures::StreamExt::next(&mut response.stream).await {
+            text.push_str(&chunk?);
+        }
+        Ok(text)
+    })
+}
+
+fn format_elapsed(elapsed: std::time::Duration) -> SharedString {
+    let minutes = elapsed.as_secs() / 60;
+    if minutes < 1 {
+        t!("agent_ui.thread_context.just_now")
+    } else if minutes < 60 {
+        t!("agent_ui.thread_context.minutes_ago", count = minutes)
+    } else if minutes < 60 * 24 {
+        t!("agent_ui.thread_context.hours_ago", count = minutes / 60)
+    } else {
+        t!(
+            "agent_ui.thread_context.days_ago",
+            count = minutes / (60 * 24)
+        )
+    }
+}
+
 fn format_timestamp_human(dt: &DateTime<Utc>) -> String {
     let now = Utc::now();
     let duration = now.signed_duration_since(*dt);
@@ -1270,6 +1368,9 @@ pub struct AgentPanel {
     last_context_source: Option<AgentContextSource>,
 
     is_active: bool,
+    _notes_observation: Subscription,
+    collapsed_thread_contexts: collections::HashSet<ThreadId>,
+    thread_context_markdown: Option<(String, Entity<markdown::Markdown>)>,
 }
 
 impl AgentPanel {
@@ -1637,6 +1738,8 @@ impl AgentPanel {
         let _settings_subscription = cx.observe_global::<SettingsStore>(|this, cx| {
             this.cleanup_retained_threads(cx);
         });
+        let notes_store = notes::NotesStore::global(cx);
+        let _notes_observation = cx.observe(&notes_store, |_, _, cx| cx.notify());
 
         cx.on_release(|this, cx| {
             this.dismiss_all_terminal_notifications(cx);
@@ -1685,6 +1788,9 @@ impl AgentPanel {
             retained_thread_subscriptions: HashMap::default(),
             last_context_source: None,
             is_active: false,
+            _notes_observation,
+            collapsed_thread_contexts: collections::HashSet::default(),
+            thread_context_markdown: None,
         };
 
         panel.ensure_native_agent_connection(cx);
@@ -5749,7 +5855,10 @@ impl AgentPanel {
         let Some(workspace) = self.workspace.upgrade() else {
             return;
         };
-        let metadata = ThreadMetadataStore::global(cx).read(cx).entry(thread_id).cloned();
+        let metadata = ThreadMetadataStore::global(cx)
+            .read(cx)
+            .entry(thread_id)
+            .cloned();
         let title = metadata
             .as_ref()
             .map(|metadata| metadata.display_title())
@@ -5768,9 +5877,14 @@ impl AgentPanel {
             .unwrap_or_default()
             .into();
         let panel = cx.entity().downgrade();
+        let transcript = self
+            .conversation_view_for_id(&thread_id, cx)
+            .and_then(|view| view.read(cx).root_thread(cx))
+            .map(|thread| thread.read(cx).to_markdown(cx))
+            .filter(|transcript| !transcript.trim().is_empty());
         workspace.update(cx, |workspace, cx| {
             workspace.toggle_modal(window, cx, move |window, cx| {
-                notes::ThreadContextEditor::new(
+                let editor = notes::ThreadContextEditor::new(
                     thread_id.to_key_string(),
                     scope,
                     title,
@@ -5790,9 +5904,185 @@ impl AgentPanel {
                     },
                     window,
                     cx,
-                )
+                );
+                match transcript {
+                    Some(transcript) => editor.summarize_with(move |cx| {
+                        summarize_thread_for_context(transcript.clone(), cx)
+                    }),
+                    None => editor,
+                }
             });
         });
+    }
+
+    fn render_thread_context_card(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let thread_id = self.active_thread_id(cx)?;
+        let metadata = ThreadMetadataStore::global(cx)
+            .read(cx)
+            .entry(thread_id)
+            .cloned()?;
+        let store = notes::NotesStore::global(cx);
+        if let Some(root) = metadata.main_worktree_paths().paths().first().cloned() {
+            store.update(cx, |store, cx| store.watch_project(root, cx));
+        }
+        let note = store
+            .read(cx)
+            .note_for_thread(&thread_id.to_key_string())
+            .cloned();
+        let hover_background = cx.theme().colors().element_hover;
+
+        let Some(note) = note.filter(|note| !note.body.trim().is_empty()) else {
+            self.thread_context_markdown = None;
+            return Some(
+                h_flex()
+                    .id("thread-context-add")
+                    .flex_none()
+                    .mx_2()
+                    .mt_1()
+                    .px_2()
+                    .py_1()
+                    .gap_1p5()
+                    .rounded_md()
+                    .cursor_pointer()
+                    .hover(move |style| style.bg(hover_background))
+                    .child(
+                        Icon::new(IconName::Plus)
+                            .size(IconSize::XSmall)
+                            .color(Color::Muted),
+                    )
+                    .child(
+                        Label::new(t!("agent_ui.thread_context.add"))
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
+                    )
+                    .child(KeyBinding::for_action_in(
+                        &crate::EditThreadContext,
+                        &self.focus_handle,
+                        cx,
+                    ))
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.edit_thread_context(window, cx)),
+                    )
+                    .into_any_element(),
+            );
+        };
+
+        let body = note.body.trim().to_string();
+        let collapsed = self.collapsed_thread_contexts.contains(&thread_id);
+        let markdown = match &self.thread_context_markdown {
+            Some((text, markdown)) if *text == body => markdown.clone(),
+            _ => {
+                let markdown =
+                    cx.new(|cx| markdown::Markdown::new(body.clone().into(), None, None, cx));
+                self.thread_context_markdown = Some((body.clone(), markdown.clone()));
+                markdown
+            }
+        };
+        let edited = note
+            .modified
+            .elapsed()
+            .ok()
+            .map(|elapsed| format_elapsed(elapsed));
+
+        let header = h_flex()
+            .gap_1p5()
+            .child(
+                Icon::new(IconName::Notepad)
+                    .size(IconSize::XSmall)
+                    .color(Color::Muted),
+            )
+            .child(
+                Label::new(t!("agent_ui.thread_context.title"))
+                    .size(LabelSize::Small)
+                    .weight(FontWeight::MEDIUM),
+            )
+            .when(!collapsed, |this| {
+                this.when_some(edited.clone(), |this, edited| {
+                    this.child(
+                        Label::new(t!("agent_ui.thread_context.edited", ago = edited))
+                            .size(LabelSize::XSmall)
+                            .color(Color::Placeholder),
+                    )
+                })
+            })
+            .when(collapsed, |this| {
+                let mut lines = body.lines().filter(|line| !line.trim().is_empty());
+                let first = notes::context_line(lines.next().unwrap_or_default());
+                let remaining = lines.count();
+                this.child(
+                    div().min_w_0().flex_1().child(
+                        Label::new(first)
+                            .size(LabelSize::Small)
+                            .color(Color::Muted)
+                            .truncate(),
+                    ),
+                )
+                .when(remaining > 0, |this| {
+                    this.child(
+                        Label::new(t!("agent_ui.thread_context.more_lines", count = remaining))
+                            .size(LabelSize::XSmall)
+                            .color(Color::Placeholder),
+                    )
+                })
+            })
+            .child(div().flex_1())
+            .child(
+                Button::new("thread-context-edit", t!("agent_ui.thread_context.edit"))
+                    .style(ButtonStyle::Subtle)
+                    .label_size(LabelSize::Small)
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.edit_thread_context(window, cx)),
+                    ),
+            )
+            .child(
+                IconButton::new(
+                    "thread-context-toggle",
+                    if collapsed {
+                        IconName::ChevronDown
+                    } else {
+                        IconName::ChevronUp
+                    },
+                )
+                .icon_size(IconSize::XSmall)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if !this.collapsed_thread_contexts.remove(&thread_id) {
+                        this.collapsed_thread_contexts.insert(thread_id);
+                    }
+                    cx.notify();
+                })),
+            );
+
+        let style = markdown::MarkdownStyle::themed(markdown::MarkdownFont::Agent, window, cx);
+        Some(
+            v_flex()
+                .id("thread-context-card")
+                .flex_none()
+                .mx_2()
+                .mt_1()
+                .px_2()
+                .py_1()
+                .gap_1()
+                .rounded_md()
+                .border_1()
+                .border_color(cx.theme().colors().border_variant)
+                .bg(cx.theme().colors().elevated_surface_background)
+                .child(header)
+                .when(!collapsed, |this| {
+                    this.child(
+                        div()
+                            .id("thread-context-body")
+                            .max_h(px(160.))
+                            .overflow_y_scroll()
+                            .text_sm()
+                            .child(markdown::MarkdownElement::new(markdown, style)),
+                    )
+                })
+                .into_any_element(),
+        )
     }
 
     fn handle_regenerate_thread_title(
@@ -5923,13 +6213,15 @@ impl AgentPanel {
                                             t!("agent_ui.options_menu.regenerate_title"),
                                             IconName::RotateCcw,
                                         )
-                                        .handler(move |_, cx| {
-                                            Self::handle_regenerate_thread_title(
-                                                conversation_view.clone(),
-                                                workspace.clone(),
-                                                cx,
-                                            );
-                                        }),
+                                        .handler(
+                                            move |_, cx| {
+                                                Self::handle_regenerate_thread_title(
+                                                    conversation_view.clone(),
+                                                    workspace.clone(),
+                                                    cx,
+                                                );
+                                            },
+                                        ),
                                     );
                                 }
 
@@ -5952,45 +6244,39 @@ impl AgentPanel {
                         }
 
                         if !showing_terminal {
-                            menu = menu.header(t!("agent_ui.options_menu.context")).item(
-                                action_item(
-                                    t!("agent_ui.options_menu.skills"),
-                                    IconName::Sparkle,
-                                    Box::new(ManageSkills),
-                                ),
-                            );
+                            menu =
+                                menu.header(t!("agent_ui.options_menu.context"))
+                                    .item(action_item(
+                                        t!("agent_ui.options_menu.skills"),
+                                        IconName::Sparkle,
+                                        Box::new(ManageSkills),
+                                    ));
 
                             if project_agents_md_path.is_some() {
                                 let workspace = workspace.clone();
                                 menu = menu.item(
-                                    item(
-                                        t!("agent_ui.options_menu.project_rules"),
-                                        IconName::Book,
-                                    )
-                                    .handler(move |window, cx| {
-                                        workspace
-                                            .update(cx, |workspace, cx| {
-                                                open_project_rules(workspace, window, cx);
-                                            })
-                                            .log_err();
-                                    }),
+                                    item(t!("agent_ui.options_menu.project_rules"), IconName::Book)
+                                        .handler(move |window, cx| {
+                                            workspace
+                                                .update(cx, |workspace, cx| {
+                                                    open_project_rules(workspace, window, cx);
+                                                })
+                                                .log_err();
+                                        }),
                                 );
                             }
 
                             if global_agents_md_loaded {
                                 let workspace = workspace.clone();
                                 menu = menu.item(
-                                    item(
-                                        t!("agent_ui.options_menu.global_rules"),
-                                        IconName::Book,
-                                    )
-                                    .handler(move |window, cx| {
-                                        workspace
-                                            .update(cx, |workspace, cx| {
-                                                open_global_rules(workspace, window, cx);
-                                            })
-                                            .log_err();
-                                    }),
+                                    item(t!("agent_ui.options_menu.global_rules"), IconName::Book)
+                                        .handler(move |window, cx| {
+                                            workspace
+                                                .update(cx, |workspace, cx| {
+                                                    open_global_rules(workspace, window, cx);
+                                                })
+                                                .log_err();
+                                        }),
                                 );
                             }
 
@@ -6000,10 +6286,8 @@ impl AgentPanel {
                                 .custom_entry_with_docs(
                                     move |_window, cx| render_mcp_menu_entry(&summary, cx),
                                     |window, cx| {
-                                        window.dispatch_action(
-                                            Box::new(crate::ManageMcpServers),
-                                            cx,
-                                        )
+                                        window
+                                            .dispatch_action(Box::new(crate::ManageMcpServers), cx)
                                     },
                                     aside,
                                 )
@@ -6797,6 +7081,10 @@ impl Render for AgentPanel {
         // - Font size works as expected and can be changed with cmd-+/cmd-
         // - Scrolling in all views works as expected
         // - Files can be dropped into the panel
+        let thread_context_card = match self.visible_surface() {
+            VisibleSurface::AgentThread(_) => self.render_thread_context_card(window, cx),
+            _ => None,
+        };
         let content = v_flex()
             .key_context(self.key_context(cx))
             .relative()
@@ -6847,6 +7135,7 @@ impl Render for AgentPanel {
             }))
             .children(self.render_agent_tabs(window, cx))
             .child(self.render_toolbar(window, cx))
+            .children(thread_context_card)
             .map(|parent| match self.visible_surface() {
                 VisibleSurface::Uninitialized if !self.has_open_project(cx) => {
                     parent.child(self.render_no_project_state(cx))

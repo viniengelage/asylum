@@ -53,5 +53,9 @@
   "thread_context.saved": "Markdown · saved",
   "thread_context.placeholder": "What is this thread for? What was decided, what is missing?",
   "thread_context.hint": "The first line shows in the thread list. Saved as a note tied to this thread.",
-  "thread_context.done": "Done"
+  "thread_context.done": "Done",
+  "thread_context.summarize": "Summarize conversation",
+  "thread_context.summarizing": "Summarizing…",
+  "panel.thread_chip": "thread",
+  "panel.open_thread": "Open the thread"
 }
