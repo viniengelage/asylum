@@ -577,11 +577,10 @@ impl ReleasesStore {
             .collect();
         self.refreshing = true;
         cx.notify();
-        self.refresh_task =
-            Some(cx.spawn(async move |this, cx| {
-                let mut results = Vec::new();
-                for (folder, link, app_store_app_id) in requests {
-                    let result = cx
+        self.refresh_task = Some(cx.spawn(async move |this, cx| {
+            let mut results = Vec::new();
+            for (folder, link, app_store_app_id) in requests {
+                let result = cx
                         .background_spawn({
                             let http_client = http_client.clone();
                             let accounts = accounts.clone();
@@ -590,11 +589,11 @@ impl ReleasesStore {
                             }
                         })
                         .await;
-                    results.push((folder, result));
-                }
-                this.update(cx, |this, cx| this.finish_refresh(results, cx))
-                    .log_err();
-            }));
+                results.push((folder, result));
+            }
+            this.update(cx, |this, cx| this.finish_refresh(results, cx))
+                .log_err();
+        }));
     }
 
     fn finish_refresh(&mut self, results: Vec<(Arc<Path>, Fetched)>, cx: &mut Context<Self>) {
@@ -640,6 +639,100 @@ impl ReleasesStore {
     /// Releases of every app of the project, for the status bar chip.
     pub fn all_releases(&self) -> impl Iterator<Item = (&AppReleases, &[Release])> {
         self.apps.iter().map(|app| (app, app.releases.as_slice()))
+    }
+
+    /// Sends a write the person already confirmed, then reads the stores again.
+    pub fn run_write(
+        &mut self,
+        folder: &Path,
+        write: StoreWrite,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<()>> {
+        let Some(accounts) = self.accounts.read(cx).accounts().cloned() else {
+            return Task::ready(Err(anyhow::anyhow!("{}", t!("app_releases.dock.loading"))));
+        };
+        let package = self
+            .app_for_folder(folder)
+            .and_then(|app| app.link.package.clone());
+        let http_client = self.accounts.read(cx).http_client();
+        cx.spawn(async move |this, cx| {
+            cx.background_spawn(async move {
+                send_write(&http_client, &accounts, package, write).await
+            })
+            .await?;
+            this.update(cx, |this, cx| this.refresh(cx))
+        })
+    }
+}
+
+/// A change to a store. Every variant is only ever sent after an explicit confirmation.
+#[derive(Clone, Debug, PartialEq)]
+pub enum StoreWrite {
+    AddBuildToGroup {
+        build_id: String,
+        group_id: String,
+    },
+    WhatToTest {
+        build_id: String,
+        locale: String,
+        text: String,
+    },
+    SubmitForBetaReview {
+        build_id: String,
+    },
+    Play(google_play::TrackChange),
+}
+
+impl StoreWrite {
+    pub fn service(&self) -> AccountKind {
+        match self {
+            Self::Play(_) => AccountKind::GooglePlay,
+            _ => AccountKind::AppStore,
+        }
+    }
+}
+
+fn missing_account(kind: AccountKind) -> anyhow::Error {
+    anyhow::anyhow!(
+        "{}",
+        t!("app_releases.write.no_account", service = kind.label())
+    )
+}
+
+async fn send_write(
+    http_client: &Arc<dyn HttpClient>,
+    accounts: &StoredAccounts,
+    package: Option<String>,
+    write: StoreWrite,
+) -> Result<()> {
+    let app_store = || {
+        accounts
+            .app_store
+            .as_ref()
+            .map(|account| account.credentials())
+            .ok_or_else(|| missing_account(AccountKind::AppStore))
+    };
+    match write {
+        StoreWrite::AddBuildToGroup { build_id, group_id } => {
+            asc::add_build_to_group(http_client, &app_store()?, &group_id, &build_id).await
+        }
+        StoreWrite::WhatToTest {
+            build_id,
+            locale,
+            text,
+        } => asc::set_what_to_test(http_client, &app_store()?, &build_id, &locale, &text).await,
+        StoreWrite::SubmitForBetaReview { build_id } => {
+            asc::submit_for_beta_review(http_client, &app_store()?, &build_id).await
+        }
+        StoreWrite::Play(change) => {
+            let account = accounts
+                .google_play
+                .as_ref()
+                .ok_or_else(|| missing_account(AccountKind::GooglePlay))?;
+            let package = package.ok_or_else(|| missing_account(AccountKind::GooglePlay))?;
+            google_play::update_track(http_client, &account.service_account, &package, &change)
+                .await
+        }
     }
 }
 

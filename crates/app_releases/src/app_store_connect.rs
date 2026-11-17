@@ -501,6 +501,156 @@ pub async fn fetch_beta_groups(
     parse_beta_groups(&get(client, credentials, &path).await?)
 }
 
+fn linkage(kind: &str, id: &str) -> serde_json::Value {
+    serde_json::json!({ "data": { "type": kind, "id": id } })
+}
+
+pub fn add_build_to_group_body(build_id: &str) -> serde_json::Value {
+    serde_json::json!({ "data": [{ "type": "builds", "id": build_id }] })
+}
+
+pub fn beta_review_body(build_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "data": {
+            "type": "betaAppReviewSubmissions",
+            "relationships": { "build": linkage("builds", build_id) }
+        }
+    })
+}
+
+pub fn what_to_test_body(
+    existing_localization_id: Option<&str>,
+    build_id: &str,
+    locale: &str,
+    text: &str,
+) -> serde_json::Value {
+    match existing_localization_id {
+        Some(id) => serde_json::json!({
+            "data": {
+                "type": "betaBuildLocalizations",
+                "id": id,
+                "attributes": { "whatsNew": text }
+            }
+        }),
+        None => serde_json::json!({
+            "data": {
+                "type": "betaBuildLocalizations",
+                "attributes": { "locale": locale, "whatsNew": text },
+                "relationships": { "build": linkage("builds", build_id) }
+            }
+        }),
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Localization {
+    pub id: String,
+    pub locale: String,
+    pub text: String,
+}
+
+/// `betaBuildLocalizations` (What to Test) and `appStoreVersionLocalizations` (What's New)
+/// both keep the text in `whatsNew`.
+pub fn parse_localizations(body: &str) -> Result<Vec<Localization>> {
+    let document = parse_document(body)?;
+    Ok(document
+        .data
+        .into_vec()
+        .into_iter()
+        .map(|resource| Localization {
+            locale: resource.text("locale").unwrap_or_default(),
+            text: resource.text("whatsNew").unwrap_or_default(),
+            id: resource.id,
+        })
+        .collect())
+}
+
+pub async fn add_build_to_group(
+    client: &Arc<dyn HttpClient>,
+    credentials: &Credentials,
+    group_id: &str,
+    build_id: &str,
+) -> Result<()> {
+    send(
+        client,
+        credentials,
+        Method::POST,
+        &format!("/v1/betaGroups/{group_id}/relationships/builds"),
+        Some(add_build_to_group_body(build_id)),
+    )
+    .await?;
+    Ok(())
+}
+
+pub async fn submit_for_beta_review(
+    client: &Arc<dyn HttpClient>,
+    credentials: &Credentials,
+    build_id: &str,
+) -> Result<()> {
+    send(
+        client,
+        credentials,
+        Method::POST,
+        "/v1/betaAppReviewSubmissions",
+        Some(beta_review_body(build_id)),
+    )
+    .await?;
+    Ok(())
+}
+
+pub async fn fetch_what_to_test(
+    client: &Arc<dyn HttpClient>,
+    credentials: &Credentials,
+    build_id: &str,
+) -> Result<Vec<Localization>> {
+    parse_localizations(
+        &get(
+            client,
+            credentials,
+            &format!("/v1/builds/{build_id}/betaBuildLocalizations"),
+        )
+        .await?,
+    )
+}
+
+pub async fn set_what_to_test(
+    client: &Arc<dyn HttpClient>,
+    credentials: &Credentials,
+    build_id: &str,
+    locale: &str,
+    text: &str,
+) -> Result<()> {
+    let existing = fetch_what_to_test(client, credentials, build_id).await?;
+    let existing_id = existing
+        .iter()
+        .find(|localization| localization.locale == locale)
+        .map(|localization| localization.id.clone());
+    let body = what_to_test_body(existing_id.as_deref(), build_id, locale, text);
+    match existing_id {
+        Some(id) => {
+            send(
+                client,
+                credentials,
+                Method::PATCH,
+                &format!("/v1/betaBuildLocalizations/{id}"),
+                Some(body),
+            )
+            .await?
+        }
+        None => {
+            send(
+                client,
+                credentials,
+                Method::POST,
+                "/v1/betaBuildLocalizations",
+                Some(body),
+            )
+            .await?
+        }
+    };
+    Ok(())
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -640,6 +790,41 @@ WBzmZWoMxkniOGNp+NQdMV2cwYkbGcUP3Gok2UvJkvRrGcD2AZmQt3HLlA==
         assert_eq!(
             first_error_detail(body).as_deref(),
             Some("The build is not in a valid state")
+        );
+    }
+
+    #[test]
+    fn builds_the_testflight_write_bodies() {
+        assert_eq!(
+            add_build_to_group_body("asc-128"),
+            serde_json::json!({"data": [{"type": "builds", "id": "asc-128"}]})
+        );
+        assert_eq!(
+            beta_review_body("asc-128")["data"]["relationships"]["build"]["data"]["id"],
+            "asc-128"
+        );
+        let update = what_to_test_body(Some("loc-1"), "asc-128", "pt-BR", "Testar o Pix");
+        assert_eq!(update["data"]["id"], "loc-1");
+        assert!(update["data"].get("relationships").is_none());
+        let create = what_to_test_body(None, "asc-128", "pt-BR", "Testar o Pix");
+        assert_eq!(create["data"]["attributes"]["locale"], "pt-BR");
+        assert_eq!(
+            create["data"]["relationships"]["build"]["data"]["type"],
+            "builds"
+        );
+    }
+
+    #[test]
+    fn parses_localizations() {
+        let body = r#"{"data":[{"type":"betaBuildLocalizations","id":"loc-1","attributes":{"locale":"pt-BR","whatsNew":"Testar o Pix"}}]}"#;
+        let localizations = parse_localizations(body).unwrap();
+        assert_eq!(
+            localizations,
+            vec![Localization {
+                id: "loc-1".into(),
+                locale: "pt-BR".into(),
+                text: "Testar o Pix".into()
+            }]
         );
     }
 }
