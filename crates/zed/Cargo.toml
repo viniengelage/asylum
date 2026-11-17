@@ -94,6 +94,7 @@ repo_hosting.workspace = true
 api_client.workspace = true
 app_releases.workspace = true
 client.workspace = true
+cloudwatch.workspace = true
 clock = { workspace = true, optional = true }
 codestral.workspace = true
 collab_ui.workspace = true

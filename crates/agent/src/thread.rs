@@ -372,7 +372,7 @@ impl UserMessage {
         const OPEN_PULL_REQUESTS_TAG: &str = "<pull_requests>\nThe user pointed at these pull requests of the project's repository. Read more with the repo_* tools, never through an MCP server:\n";
         const OPEN_NOTES_TAG: &str =
             "<notes>\nThe user attached these notes from their notes panel:\n";
-        const OPEN_LOGS_TAG: &str = "<logs>\nThe user pointed at these logs from the Elastic dock (personal data masked). Read more with the elastic_* tools:\n";
+        const OPEN_LOGS_TAG: &str = "<logs>\nThe user pointed at these logs from the Elastic or CloudWatch dock (personal data masked). Read more with the elastic_* or cloudwatch_* tools, matching where each one came from:\n";
         const OPEN_PROJECT_ITEMS_TAG: &str = "<project_items>\nThe user pointed at these items of the GitHub project in the Tarefas dock. Read and change them with the project_* tools:\n";
         const OPEN_SKILLS_TAG: &str =
             "<skills>\nThe user has attached the following agent skills:\n";

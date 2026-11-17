@@ -1,0 +1,17 @@
+{
+  "error.connect_timeout": "CloudWatch is still connecting. Ask the user to check the CloudWatch dock.",
+  "error.empty_query": "The query is empty.",
+  "error.mention_forgotten": "This context is no longer in the CloudWatch dock's memory.",
+  "error.no_groups": "No log groups: pass `log_groups`, or ask the user to mark the project's groups in the CloudWatch dock (cloudwatch_list_log_groups lists them).",
+  "error.no_workspace": "There is no workspace open for this project.",
+  "error.not_connected": "CloudWatch is not connected: {message}",
+  "error.query_unreadable": "Could not read the query {path}.",
+  "error.session_expired": "The AWS session of profile {profile} expired. Ask the user to run `aws login` from the CloudWatch dock.",
+  "error.window_needs_wide": "A {window} min window is over the {max} min this tool reads without asking. Use cloudwatch_wide_insights_query, which asks the user first.",
+  "error.window_too_wide": "A {window} min window is over the {max} min limit.",
+  "toolkit.description": "Read-only Logs Insights queries and recent events of CloudWatch Logs.",
+  "toolkit.tool_insights_query": "Query CloudWatch",
+  "toolkit.tool_list_log_groups": "List CloudWatch log groups",
+  "toolkit.tool_recent_events": "Read recent CloudWatch events",
+  "toolkit.tool_wide_insights_query": "Query CloudWatch over more than 1 h"
+}

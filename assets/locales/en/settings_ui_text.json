@@ -1366,5 +1366,7 @@
   "needs sign-in": "needs sign-in",
   "error": "error",
   "Restart": "Restart",
-  "profile": "profile"
+  "profile": "profile",
+  "CloudWatch": "CloudWatch",
+  "Logs Insights queries and recent events of CloudWatch Logs, read only.": "Logs Insights queries and recent events of CloudWatch Logs, read only."
 }

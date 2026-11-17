@@ -1886,6 +1886,78 @@
     },
   },
   {
+    // CloudWatch (crates/cloudwatch), declared here for the same reason as the database client's.
+    "context": "Workspace",
+    "use_key_equivalents": true,
+    "bindings": {
+      "ctrl-shift-l": "cloudwatch::OpenLiveTail",
+    },
+  },
+  {
+    "context": "CloudWatchPanel",
+    "use_key_equivalents": true,
+    "bindings": {
+      "ctrl-f": "cloudwatch::FocusFilter",
+      "ctrl-shift-l": "cloudwatch::OpenLiveTail",
+    },
+  },
+  {
+    "context": "CloudWatchQueryView",
+    "use_key_equivalents": true,
+    "bindings": {
+      "ctrl-enter": "cloudwatch::RunQuery",
+      "ctrl-k": "cloudwatch::AskAgent",
+      "ctrl-.": "cloudwatch::CancelQuery",
+    },
+  },
+  {
+    "context": "CloudWatchQueryView > Editor",
+    "use_key_equivalents": true,
+    "bindings": {
+      "ctrl-enter": "cloudwatch::RunQuery",
+      "ctrl-k": "cloudwatch::AskAgent",
+    },
+  },
+  {
+    "context": "CloudWatchQueryView && suggestion",
+    "use_key_equivalents": true,
+    "bindings": {
+      "alt-enter": "cloudwatch::AcceptSuggestion",
+      "ctrl-enter": "cloudwatch::AcceptSuggestionAndRun",
+      "escape": "cloudwatch::DiscardSuggestion",
+    },
+  },
+  {
+    "context": "CloudWatchAskPrompt > Editor",
+    "use_key_equivalents": true,
+    "bindings": {
+      "alt-enter": "cloudwatch::AcceptSuggestion",
+      "escape": "cloudwatch::DiscardSuggestion",
+    },
+  },
+  {
+    "context": "CloudWatchLiveTail",
+    "use_key_equivalents": true,
+    "bindings": {
+      "ctrl-.": "cloudwatch::TogglePause",
+    },
+  },
+  {
+    "context": "CloudWatchTailFilter > Editor",
+    "use_key_equivalents": true,
+    "bindings": {
+      "enter": "cloudwatch_tail::ApplyFilter",
+    },
+  },
+  {
+    "context": "CloudWatchTailSearch > Editor",
+    "use_key_equivalents": true,
+    "bindings": {
+      "enter": "cloudwatch_tail::NextMatch",
+      "shift-enter": "cloudwatch_tail::PreviousMatch",
+    },
+  },
+  {
     // Docker (crates/docker), declared here for the same reason as the database client's.
     "context": "DockerPanel",
     "use_key_equivalents": true,

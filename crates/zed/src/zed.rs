@@ -640,6 +640,8 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
         let database_button =
             cx.new(|cx| database_client::DatabaseToolkitButton::new(workspace, cx));
         let elastic_button = cx.new(|cx| elastic::ElasticToolkitButton::new(workspace, cx));
+        let cloudwatch_button =
+            cx.new(|cx| cloudwatch::CloudWatchToolkitButton::new(workspace, cx));
         let docker_button = cx.new(|cx| docker::DockerToolkitButton::new(workspace, cx));
         let design_button = cx.new(|cx| design_viewer::DesignToolkitButton::new(workspace, cx));
         let task_agents_button =
@@ -675,6 +677,7 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
             status_bar.add_toolkit_item(api_button, window, cx);
             status_bar.add_toolkit_item(database_button, window, cx);
             status_bar.add_toolkit_item(elastic_button, window, cx);
+            status_bar.add_toolkit_item(cloudwatch_button, window, cx);
             status_bar.add_toolkit_item(docker_button, window, cx);
             status_bar.add_toolkit_item(releases_button, window, cx);
             status_bar.add_toolkit_item(task_agents_button, window, cx);
@@ -6522,6 +6525,7 @@ mod tests {
                 "cli",
                 "clickup",
                 "client",
+                "cloudwatch",
                 "collab",
                 "collab_panel",
                 "command_palette",

@@ -462,13 +462,21 @@ pub fn register_log_source(source: LogSource, cx: &mut App) {
     cx.set_global(source);
 }
 
+/// The Elastic dock's mentions followed by the CloudWatch dock's, each only while its toolkit is
+/// on.
 pub fn log_mentions(project: &Entity<Project>, cx: &App) -> Vec<LogMention> {
-    if !toolkit_enabled(toolkit_ids::ELASTIC, project, cx) {
-        return Vec::new();
+    let mut mentions = Vec::new();
+    if toolkit_enabled(toolkit_ids::ELASTIC, project, cx)
+        && let Some(source) = cx.try_global::<LogSource>()
+    {
+        mentions.extend((source.list)(project, cx));
     }
-    cx.try_global::<LogSource>()
-        .map(|source| (source.list)(project, cx))
-        .unwrap_or_default()
+    if toolkit_enabled(toolkit_ids::CLOUDWATCH, project, cx)
+        && let Some(source) = cx.try_global::<CloudWatchSource>()
+    {
+        mentions.extend((source.list)(project, cx));
+    }
+    mentions
 }
 
 pub fn describe_log_mention(
@@ -481,6 +489,9 @@ pub fn describe_log_mention(
     }
     if id.starts_with(DESIGN_MENTION_PREFIX) {
         return describe_design_mention(project, id, cx);
+    }
+    if id.starts_with(CLOUDWATCH_MENTION_PREFIX) {
+        return describe_cloudwatch_mention(project, id, cx);
     }
     if !toolkit_enabled(toolkit_ids::ELASTIC, project, cx) {
         return Task::ready(Err(toolkit_disabled_error(toolkit_ids::ELASTIC, cx)));
@@ -512,6 +523,13 @@ pub fn open_log_mention(
             .try_global::<DesignSource>()
             .map(|source| source.open.clone())
             .ok_or_else(|| missing_dock_error("Design"))?;
+        return open(project, id, window, cx);
+    }
+    if id.starts_with(CLOUDWATCH_MENTION_PREFIX) {
+        let open = cx
+            .try_global::<CloudWatchSource>()
+            .map(|source| source.open.clone())
+            .ok_or_else(|| missing_dock_error("CloudWatch"))?;
         return open(project, id, window, cx);
     }
     let open = cx
@@ -665,6 +683,44 @@ fn describe_design_mention(
     }
 }
 
+/// CloudWatch log groups, saved Logs Insights queries and what the CloudWatch views hand to the
+/// agent travel as log mentions whose id starts with this, like containers.
+pub const CLOUDWATCH_MENTION_PREFIX: &str = "cloudwatch:";
+
+/// Installed by the CloudWatch dock, so the agent can offer and read its log groups, queries and
+/// events without depending on it.
+#[derive(Clone)]
+pub struct CloudWatchSource {
+    /// The project's log groups and saved queries.
+    pub list: ListLogMentions,
+    /// What the agent receives when the mention is sent, with personal data masked.
+    pub describe: DescribeLogMention,
+    pub open: OpenLogMention,
+}
+
+impl Global for CloudWatchSource {}
+
+pub fn register_cloudwatch_source(source: CloudWatchSource, cx: &mut App) {
+    cx.set_global(source);
+}
+
+fn describe_cloudwatch_mention(
+    project: &Entity<Project>,
+    id: &str,
+    cx: &mut App,
+) -> Task<Result<String>> {
+    if !toolkit_enabled(toolkit_ids::CLOUDWATCH, project, cx) {
+        return Task::ready(Err(toolkit_disabled_error(toolkit_ids::CLOUDWATCH, cx)));
+    }
+    match cx.try_global::<CloudWatchSource>() {
+        Some(source) => {
+            let describe = source.describe.clone();
+            describe(project, id, cx)
+        }
+        None => Task::ready(Err(missing_dock_error("CloudWatch"))),
+    }
+}
+
 pub const DATABASE_QUERY_TOOL: &str = "database_query";
 pub const DATABASE_WRITE_QUERY_TOOL: &str = "database_write_query";
 
@@ -811,6 +867,53 @@ pub struct ElasticTraceResult {
     pub total_spans: usize,
     pub errors: Vec<String>,
     pub log_count: usize,
+}
+
+pub const CLOUDWATCH_LIST_LOG_GROUPS_TOOL: &str = "cloudwatch_list_log_groups";
+pub const CLOUDWATCH_INSIGHTS_QUERY_TOOL: &str = "cloudwatch_insights_query";
+pub const CLOUDWATCH_WIDE_INSIGHTS_QUERY_TOOL: &str = "cloudwatch_wide_insights_query";
+pub const CLOUDWATCH_RECENT_EVENTS_TOOL: &str = "cloudwatch_recent_events";
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CloudWatchReadKind {
+    /// A Logs Insights query.
+    #[default]
+    Insights,
+    /// `FilterLogEvents` on one group.
+    Events,
+    /// The account's log groups.
+    LogGroups,
+}
+
+/// The most frequent value of a `stats count(*) by <field>` result, for the card's one-line
+/// finding.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CloudWatchFinding {
+    pub value: String,
+    pub count: u64,
+    pub total: u64,
+}
+
+/// What the CloudWatch tools keep for the thread's "Consultou o CloudWatch" card. The model got a
+/// masked copy of the rows; the card only needs the numbers.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct CloudWatchReadResult {
+    pub kind: CloudWatchReadKind,
+    pub log_groups: Vec<String>,
+    /// Unix milliseconds.
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub query: String,
+    /// The query's filters and stats, e.g. `level = "error" · count(*) by msg`.
+    pub summary: String,
+    /// The field a stats query grouped by, when it grouped by one.
+    pub grouped_by: Option<String>,
+    /// What came back: rows, events or log groups.
+    pub rows: usize,
+    pub records_matched: u64,
+    pub bytes_scanned: u64,
+    pub finding: Option<CloudWatchFinding>,
 }
 
 pub const REPO_PULL_REQUEST_TOOL: &str = "repo_pull_request";

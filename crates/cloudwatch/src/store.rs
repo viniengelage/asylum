@@ -498,7 +498,7 @@ async fn list_queries(fs: &dyn Fs, dir: &Path) -> Vec<SavedQuery> {
             modified,
         });
     }
-    queries.sort_by(|a, b| b.modified.cmp(&a.modified));
+    queries.sort_by_key(|query| std::cmp::Reverse(query.modified));
     queries
 }
 

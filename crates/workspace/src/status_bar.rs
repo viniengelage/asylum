@@ -124,6 +124,12 @@ pub const TOOLKITS: &[ToolkitInfo] = &[
         label: || "Elastic".into(),
     },
     ToolkitInfo {
+        id: task_agents::toolkit_ids::CLOUDWATCH,
+        domain: ToolkitDomain::Backend,
+        icon: IconName::CloudPulse,
+        label: || "CloudWatch".into(),
+    },
+    ToolkitInfo {
         id: task_agents::toolkit_ids::DOCKER,
         domain: ToolkitDomain::Infra,
         icon: IconName::Docker,

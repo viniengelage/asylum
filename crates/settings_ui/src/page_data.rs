@@ -202,6 +202,11 @@ fn integrations_page() -> SettingsPage {
                 "elastic"
             ),
             toolkit_field!(
+                "CloudWatch",
+                "Logs Insights queries and recent events of CloudWatch Logs, read only.",
+                "cloudwatch"
+            ),
+            toolkit_field!(
                 "Docker",
                 "Containers, logs and the terminal of Docker.",
                 "docker"

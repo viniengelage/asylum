@@ -44,6 +44,17 @@ fn summarize_input(input: &serde_json::Value) -> Option<String> {
                 Some(format!("{key}: {text}"))
             }
             serde_json::Value::Number(number) => Some(format!("{key}: {number}")),
+            // Lists such as CloudWatch's `log_groups` belong in the permission prompt too.
+            serde_json::Value::Array(values) => {
+                let values = values
+                    .iter()
+                    .filter_map(|value| value.as_str())
+                    .collect::<Vec<_>>();
+                (!values.is_empty()).then(|| {
+                    let text: String = values.join(", ").chars().take(120).collect();
+                    format!("{key}: {text}")
+                })
+            }
             _ => None,
         })
         .collect::<Vec<_>>();

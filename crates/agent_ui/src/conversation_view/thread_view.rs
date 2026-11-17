@@ -62,6 +62,7 @@ use super::subagent_card::{
 };
 use super::*;
 
+mod cloudwatch_card;
 mod database_card;
 mod docker_card;
 mod elastic_card;
@@ -11767,7 +11768,14 @@ impl ThreadView {
                 .buffer_font(cx)
         };
 
-        let tool_output_display = if is_open {
+        let cloudwatch_card = if is_open {
+            cloudwatch_card::cloudwatch_card(tool_call)
+        } else {
+            None
+        };
+        let tool_output_display = if let Some(card) = cloudwatch_card {
+            Some(self.render_cloudwatch_card(card, cx))
+        } else if is_open {
             match tool_call.status() {
                 ToolCallStatus::WaitingForConfirmation => {
                     let confirmation_content = v_flex()
@@ -13445,6 +13453,11 @@ impl ThreadView {
             div().child(file_icon).into_any_element()
         } else if is_subagent_tool_call {
             Icon::new(self.agent_icon)
+                .size(IconSize::Small)
+                .color(Color::Muted)
+                .into_any_element()
+        } else if cloudwatch_card::is_cloudwatch_tool(tool_call) {
+            Icon::new(IconName::CloudPulse)
                 .size(IconSize::Small)
                 .color(Color::Muted)
                 .into_any_element()
@@ -18358,6 +18371,7 @@ enum ToolVerb {
     Copy,
     CreateDirectory,
     Diagnostics,
+    CloudWatch,
 }
 
 impl ToolVerb {
@@ -18385,6 +18399,8 @@ impl ToolVerb {
             (Self::CreateDirectory, true) => t!("agent_ui.tool_verb.create_directory.done"),
             (Self::Diagnostics, false) => t!("agent_ui.tool_verb.diagnostics.running"),
             (Self::Diagnostics, true) => t!("agent_ui.tool_verb.diagnostics.done"),
+            (Self::CloudWatch, false) => t!("agent_ui.tool_verb.cloudwatch.running"),
+            (Self::CloudWatch, true) => t!("agent_ui.tool_verb.cloudwatch.done"),
         }
     }
 }
@@ -18394,6 +18410,12 @@ impl ToolVerb {
 /// fixed when the call starts, so they can't do this themselves. Other tools
 /// (MCP, external agents) keep their title.
 fn tool_call_verb_label(tool_call: &ToolCall) -> Option<(ToolVerb, Option<SharedString>)> {
+    if cloudwatch_card::is_cloudwatch_tool(tool_call) {
+        return Some((
+            ToolVerb::CloudWatch,
+            cloudwatch_card::header_target(tool_call),
+        ));
+    }
     let input = tool_call.raw_input.as_ref()?;
     let field = |name: &str| {
         input

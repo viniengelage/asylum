@@ -61,7 +61,6 @@ actions!(
 pub fn init(cx: &mut App) {
     panel::init(cx);
     query_view::init(cx);
-    live_tail_view::init(cx);
 }
 
 #[cfg(test)]
