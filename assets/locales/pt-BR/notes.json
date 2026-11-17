@@ -64,5 +64,8 @@
   "images.delete_images": "Apagar imagens",
   "images.keep_images": "Manter imagens",
   "images.removed": "{count} imagens sem uso removidas",
-  "images.paste_failed": "Não deu para salvar a imagem na nota: {error}"
+  "images.paste_failed": "Não deu para salvar a imagem na nota: {error}",
+  "images.screenshot_title": "Screenshot {time}",
+  "images.saved_to_note": "Guardado em nota",
+  "images.save_to_note": "Guardar em nota"
 }

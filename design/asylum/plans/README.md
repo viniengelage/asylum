@@ -11,7 +11,7 @@ código. A ideia é atacar um de cada vez, na ordem abaixo, e marcar o status aq
 | 4 | [Lançamentos (ASC + Play + EAS)](04-lancamentos.md) | 18 · Lançamentos | G | 3 (fase 3) para contas por projeto | fases 1–4 feitas (37a61a936f…34247ad9cb), só testadas com fixtures; contas no perfil até o 03 fase 3 |
 | 5 | [Executar e depurar (tasks + debugger)](05-executar-e-depurar.md) | 20 · Executar e depurar | G | — (fase 0 é independente e pequena) | fases 0–4 feitas (2c9f9d0770, 09f23ec86d, 2031b17745…a652c7c70e); não validado no app |
 | 6 | [Imagens nas notas](06-imagens-nas-notas.md) | 14 · Notas | M | — (combina com 02, que também mexe em notas) | fases 1–4 feitas em boa parte (aad1535a6a, dd17b31b15, 5e6745f4aa); pendências no plano |
-| 7 | [Build limpa a partir de uma branch (EAS)](07-build-limpa-por-branch.md) | 18 · Lançamentos | M | 05 (fase 2) e 04 (fase 1) | fases 1–2 feitas (7624225b8b); fase 3 a fazer |
+| 7 | [Build limpa a partir de uma branch (EAS)](07-build-limpa-por-branch.md) | 18 · Lançamentos | M | 05 (fase 2) e 04 (fase 1) | fases 1–3 feitas (7624225b8b e seguinte); falta a tool do agente |
 
 **Por que essa ordem:** 1 e 2 são pequenos, independentes e resolvem dores do dia a dia (MCP caindo
 no lugar errado, se perder nas threads). 3 muda onde as configs e as contas moram, então vem antes de

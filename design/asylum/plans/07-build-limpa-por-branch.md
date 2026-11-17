@@ -59,7 +59,7 @@ e remove a worktree só no sucesso. `EXPO_TOKEN` vai no ambiente da task, vindo 
 Ao terminar, os ids do `--json` ficam salvos e a linha ganha o pill "limpa"; a dock recarrega.
 Worktrees com mais de 7 dias são apagadas ao iniciar. **Desvios / fica para depois:** etapas como `steps` do
 plano 05 (hoje é um script único na mesma task), `validate:expo`, entradas no menu da branch do Repo e no
-seletor Executar, "Corrigir com agente" na falha, fase 3 inteira (`eas submit --id` e tool `eas_clean_build`).
+seletor Executar, "Corrigir com agente" na falha, tool `eas_clean_build` do agente. **Fase 3 em 2d (mesmo dia):** "Enviar para a loja" no card da build limpa roda `npx eas-cli submit --platform … --id <build> --non-interactive` como task, depois de confirmar.
 
 ## Pronto quando
 

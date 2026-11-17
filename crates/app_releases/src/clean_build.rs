@@ -691,6 +691,103 @@ impl Render for CleanBuildModal {
     }
 }
 
+/// The EAS command that sends a finished build to its store.
+pub fn submit_command(build_id: &str, platform: crate::model::Platform) -> Vec<String> {
+    let platform = match platform {
+        crate::model::Platform::Ios => "ios",
+        crate::model::Platform::Android => "android",
+    };
+    [
+        "--yes",
+        "eas-cli",
+        "submit",
+        "--platform",
+        platform,
+        "--id",
+        build_id,
+        "--non-interactive",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
+}
+
+/// Sends a clean build to its store with `eas submit --id`, after the user confirms.
+pub fn submit_build(
+    workspace: WeakEntity<Workspace>,
+    store: Entity<ReleasesStore>,
+    build_id: String,
+    platform: crate::model::Platform,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let token = store
+        .read(cx)
+        .accounts()
+        .read(cx)
+        .accounts()
+        .and_then(|accounts| accounts.expo.as_ref().map(|expo| expo.token.clone()));
+    let Some(token) = token else {
+        window.dispatch_action(Box::new(crate::OpenAccounts), cx);
+        return;
+    };
+    let folder = store
+        .read(cx)
+        .selected_app()
+        .map(|app| app.folder.to_path_buf());
+    let answer = window.prompt(
+        PromptLevel::Warning,
+        &t!(
+            "app_releases.clean_build.submit_prompt",
+            platform = platform.label()
+        ),
+        Some(&t!("app_releases.clean_build.submit_detail")),
+        &[
+            t!("app_releases.clean_build.submit").as_ref(),
+            t!("app_releases.clean_build.cancel").as_ref(),
+        ],
+        cx,
+    );
+    window
+        .spawn(cx, async move |cx| {
+            if answer.await.ok() != Some(0) {
+                return;
+            }
+            let mut template = TaskTemplate {
+                label: t!(
+                    "app_releases.clean_build.submit_label",
+                    build = build_id.clone()
+                )
+                .to_string(),
+                command: "npx".to_string(),
+                args: submit_command(&build_id, platform),
+                cwd: folder.map(|folder| folder.to_string_lossy().into_owned()),
+                ..TaskTemplate::default()
+            };
+            template
+                .env
+                .insert("EXPO_TOKEN".to_string(), token.to_string());
+            let Some(resolved) =
+                template.resolve_task("asylum-clean-build-submit", &TaskContext::default())
+            else {
+                return;
+            };
+            workspace
+                .update_in(cx, |workspace, window, cx| {
+                    workspace.schedule_resolved_task_with_completion(
+                        TaskSourceKind::UserInput,
+                        resolved,
+                        false,
+                        move |_, cx| store.update(cx, |store, cx| store.refresh(cx)),
+                        window,
+                        cx,
+                    );
+                })
+                .log_err();
+        })
+        .detach();
+}
+
 /// Opens "Nova build limpa" for the dock's selected app.
 pub fn open(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
     let store = ReleasesStore::for_project(workspace.project(), cx);
@@ -781,6 +878,14 @@ mod tests {
         assert!(!script.contains("git fetch"));
         assert!(script.contains("--local"));
         assert!(!script.contains("--message"));
+    }
+
+    #[test]
+    fn submit_uses_the_build_id_without_prompts() {
+        assert_eq!(
+            submit_command("b1", crate::model::Platform::Android).join(" "),
+            "--yes eas-cli submit --platform android --id b1 --non-interactive"
+        );
     }
 
     #[test]

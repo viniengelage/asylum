@@ -70,7 +70,7 @@ retomar devolve texto + imagens (`notes::InsertImages`). `PastePinned` continua 
 2. Screenshot do simulador/emulador: ação "Guardar em nota" (nova nota ou anexar à nota aberta).
 
 **Feito em dd17b31b15:** miniatura na linha da nota e galeria (2 + "+N") na selecionada. **Fica para depois:**
-filtro "Com imagem", contador nas ações, "Guardar em nota" no screenshot da dock Devices.
+filtro "Com imagem", contador nas ações. "Guardar em nota" no toast do screenshot da dock Devices (iOS e Android) foi feito depois: cria uma nota do projeto com a imagem em `assets/`.
 
 ## Fase 4 — limpeza
 

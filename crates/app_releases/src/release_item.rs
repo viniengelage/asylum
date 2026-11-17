@@ -734,6 +734,33 @@ impl ReleaseView {
                     .children(steps),
             )
             .child(self.render_platform_details(timeline, cx))
+            .when_some(
+                timeline.ids.eas_build_id.clone().filter(|_| is_clean_build),
+                |this, build_id| {
+                    let platform = timeline.platform;
+                    this.child(
+                        ui::secondary_button(
+                            SharedString::from(format!("clean-build-submit-{build_id}")),
+                            Some((IconName::ArrowUpRight, Color::Muted)),
+                            t!("app_releases.clean_build.submit"),
+                            true,
+                            cx,
+                        )
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                crate::clean_build::submit_build(
+                                    this.workspace.clone(),
+                                    this.store.clone(),
+                                    build_id.clone(),
+                                    platform,
+                                    window,
+                                    cx,
+                                );
+                            },
+                        )),
+                    )
+                },
+            )
             .children(match timeline.platform {
                 Platform::Ios => self.render_ios_actions(timeline, cx),
                 Platform::Android => self.render_android_actions(timeline, cx),

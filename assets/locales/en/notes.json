@@ -64,5 +64,8 @@
   "images.delete_images": "Delete images",
   "images.keep_images": "Keep images",
   "images.removed": "Removed {count} unused images",
-  "images.paste_failed": "Couldn't save the image in the note: {error}"
+  "images.paste_failed": "Couldn't save the image in the note: {error}",
+  "images.screenshot_title": "Screenshot {time}",
+  "images.saved_to_note": "Saved to a note",
+  "images.save_to_note": "Save to note"
 }

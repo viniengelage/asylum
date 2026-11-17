@@ -12239,15 +12239,7 @@ impl Sidebar {
                     Ok(()) => {
                         this.ios_simulator_error = None;
                         workspace.update(cx, |workspace, cx| {
-                            struct ScreenshotIosSuccessToast;
-                            workspace.show_toast(
-                                Toast::new(
-                                    NotificationId::unique::<ScreenshotIosSuccessToast>(),
-                                    t!("sidebar.devices.screenshot_copied").to_string(),
-                                )
-                                .autohide(),
-                                cx,
-                            );
+                            show_screenshot_toast(workspace, tmp_path.clone(), cx);
                         });
                         cx.notify();
                     }
@@ -12274,14 +12266,13 @@ impl Sidebar {
         cx.spawn(async move |_this, cx| {
             let result = async {
                 let path = screenshot.await?;
-                copy_png_to_clipboard(&path).await
+                copy_png_to_clipboard(&path).await?;
+                anyhow::Ok(path)
             }
             .await;
             workspace
                 .update(cx, |workspace, cx| match result {
-                    Ok(()) => {
-                        show_device_toast(workspace, t!("sidebar.devices.screenshot_copied"), cx)
-                    }
+                    Ok(path) => show_screenshot_toast(workspace, path, cx),
                     Err(error) => show_device_toast(
                         workspace,
                         t!(
@@ -12641,6 +12632,48 @@ fn device_toolbar_button(
 
 /// Reports the outcome of a device action. Every such message shares one notification id, so
 /// a second action replaces the first message instead of stacking toasts.
+/// "Copied", with a button that also keeps the screenshot as a note.
+fn show_screenshot_toast(
+    workspace: &mut Workspace,
+    image_path: PathBuf,
+    cx: &mut Context<Workspace>,
+) {
+    struct ScreenshotToast;
+    let weak_workspace = workspace.weak_handle();
+    workspace.show_toast(
+        Toast::new(
+            NotificationId::unique::<ScreenshotToast>(),
+            t!("sidebar.devices.screenshot_copied").to_string(),
+        )
+        .on_click(
+            t!("notes.images.save_to_note").to_string(),
+            move |_window, cx| {
+                let Some(workspace) = weak_workspace.upgrade() else {
+                    return;
+                };
+                let roots =
+                    workspace.update(cx, |workspace, cx| notes::worktree_roots(workspace, cx));
+                let saved = notes::save_screenshot_as_note(image_path.clone(), roots, cx);
+                let weak_workspace = workspace.downgrade();
+                cx.spawn(async move |cx| {
+                    let message = match saved.await {
+                        Ok(_) => t!("notes.images.saved_to_note"),
+                        Err(error) => t!(
+                            "sidebar.devices.screenshot_failed",
+                            error = format!("{error:#}")
+                        ),
+                    };
+                    weak_workspace.update(cx, |workspace, cx| {
+                        show_device_toast(workspace, message, cx)
+                    })
+                })
+                .detach_and_log_err(cx);
+            },
+        ),
+        cx,
+    );
+}
+
 fn show_device_toast(
     workspace: &mut Workspace,
     message: impl Into<SharedString>,

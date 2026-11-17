@@ -270,5 +270,9 @@
   "clean_build.production_detail": "This build can go to the stores. Check the version before going on.",
   "clean_build.build_production": "Build production",
   "clean_build.task_label": "Clean build · {branch} · {profile}",
-  "clean_build.clean_chip": "clean"
+  "clean_build.clean_chip": "clean",
+  "clean_build.submit": "Send to the store",
+  "clean_build.submit_prompt": "Send this clean build to {platform}?",
+  "clean_build.submit_detail": "eas submit uploads it to App Store Connect or Google Play with the submit profile in eas.json.",
+  "clean_build.submit_label": "Send build {build} to the store"
 }

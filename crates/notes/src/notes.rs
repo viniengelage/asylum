@@ -22,7 +22,7 @@ pub use panel::NotesPanel;
 pub use quick_note::QuickNote;
 pub use store::{
     NewNote, Note, NoteKind, NoteScope, NotesStore, PIN_SLOTS, context_line, global_notes_dir,
-    title_from_text,
+    project_notes_dir, title_from_text,
 };
 pub use thread_context::ThreadContextEditor;
 pub use zed_actions::notes::{InsertImages, InsertText};
@@ -158,6 +158,44 @@ pub fn init(cx: &mut App) {
             .detach();
     })
     .detach();
+}
+
+/// Saves a screenshot as a new note of the first of `roots` (or the user's notes),
+/// with the image in the notes' `assets/` folder.
+pub fn save_screenshot_as_note(
+    image_path: PathBuf,
+    roots: Vec<PathBuf>,
+    cx: &mut App,
+) -> gpui::Task<anyhow::Result<PathBuf>> {
+    let (scope, directory) = match roots.first() {
+        Some(root) => (NoteScope::Project(root.clone()), project_notes_dir(root)),
+        None => (NoteScope::Global, global_notes_dir()),
+    };
+    let fs = <dyn fs::Fs>::global(cx);
+    let store = NotesStore::global(cx);
+    let title = t!(
+        "notes.images.screenshot_title",
+        time = chrono::Local::now().format("%d/%m %H:%M").to_string()
+    )
+    .to_string();
+    cx.spawn(async move |cx| {
+        let bytes = fs.load_bytes(&image_path).await?;
+        let link = save_note_image(fs, &directory.join("screenshot.md"), &bytes, "png").await?;
+        let create = store.update(cx, |store, cx| {
+            store.create(
+                NewNote {
+                    title,
+                    body: format!("![]({link})"),
+                    kind: NoteKind::Note,
+                    scope,
+                    pin: None,
+                    thread: None,
+                },
+                cx,
+            )
+        });
+        create.await
+    })
 }
 
 /// The roots of the workspace's visible worktrees, whose `.zed/notes` start being read.
