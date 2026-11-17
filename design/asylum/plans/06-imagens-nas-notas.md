@@ -46,6 +46,11 @@ em `assets/`). Falta o bloco inline e a nota rápida.
    Começar só em notas; depois decidir se vale para qualquer `.md` (setting).
 5. Nota rápida (⌥⌘N): aceitar paste de imagem (miniatura no popover; salva junto com a nota).
 
+**Feito em dd17b31b15:** colar imagem num `.md` de nota (global ou de projeto) salva em `assets/<nota>-<n>.<ext>`
+(gancho `editor::MarkdownImagePasteHandler`, limite 10 MB) e insere o link; bloco inline com a imagem
+(até 12 linhas) ou "Imagem não encontrada". **Fica para depois:** toast com Desfazer, arrastar arquivo,
+ações/recolher no bloco, nota rápida com imagem.
+
 ## Fase 2 — agente
 
 1. `confirm_mention_for_note`: devolver texto + imagens. Mudar `Mention` para suportar composto
@@ -55,16 +60,25 @@ em `assets/`). Falta o bloco inline e a nota rápida.
 3. Retomar rascunho, "Colar no agente" e `notes::PastePinned` (⌥⌘1–9): reinserir texto **e** imagens
    (usar `insert_images_as_context`).
 
+**Feito em dd17b31b15:** estacionar salva as imagens do compositor em `assets/` e põe os links no rascunho;
+retomar devolve texto + imagens (`notes::InsertImages`). `PastePinned` continua colando só o texto.
+
 ## Fase 3 — dock e Devices
 
 1. `panel.rs`: miniatura à direita quando a nota tem 1 imagem; galeria (até 2 + "+N") na nota
    selecionada; filtro "Com imagem"; contador "texto + N imagens" nas ações.
 2. Screenshot do simulador/emulador: ação "Guardar em nota" (nova nota ou anexar à nota aberta).
 
+**Feito em dd17b31b15:** miniatura na linha da nota e galeria (2 + "+N") na selecionada. **Fica para depois:**
+filtro "Com imagem", contador nas ações, "Guardar em nota" no screenshot da dock Devices.
+
 ## Fase 4 — limpeza
 
 - Apagar nota pergunta se apaga as imagens dela.
 - Comando "notes: remove unused images" (imagens em `assets/` sem referência).
+
+**Feito em dd17b31b15:** apagar no dock pergunta se apaga as imagens que nenhuma outra nota usa;
+`notes: remove unused images` com toast do total.
 
 ## Pronto quando
 

@@ -49,6 +49,14 @@ Todos os perfis  ~/.config/asylum/settings.json            aparência, fontes, t
 5. Workspace sabe qual é o projeto ativo (global `ActiveProject` por janela; um projeto por instância
    de perfil por vez, como hoje com as pastas).
 
+**Feito em 713e0049dd:** `SettingsScope::Project`; `paths::asylum_project_settings_file` / `asylum_projects_file`;
+camada `set_asylum_project_settings` no `SettingsStore` entre perfil e servidor/`.zed`, com
+`{"enabled": false}` só desligando o MCP herdado (`take_project_disabled_servers`, testes);
+`update_settings_file_in_scope(Project)` grava no `.asylum/settings.json`. Registro `projects.json`
+(`crates/zed/src/zed/asylum_projects.rs`), projeto ativo = projeto da janela focada (registro ou pasta com
+`.asylum/settings.json`). Testes do `zed` não rodados (binário de teste pesado demais para o disco); os do
+`settings` passam.
+
 ## Fase 1 — abrir e trocar
 
 1. Abertura do app (`app_profiles::init` / `launch_folders`):
@@ -69,6 +77,13 @@ Todos os perfis  ~/.config/asylum/settings.json            aparência, fontes, t
    - `~/.config/zed/settings.json` com `context_servers` que não existem no perfil → aviso
      "importar para o perfil X?" (uma vez).
 
+**Feito em 713e0049dd (parcial):** `projects::OpenProject` (⌘⌥O, picker com busca, projeto de outro perfil
+vai para a instância dele) e `projects::NewProject` (escolhe a pasta, cria `.asylum/settings.json`, registra no
+perfil atual). Migração: na primeira vez, as pastas de cada perfil viram projetos no registro (sem escrever
+nada nas pastas). **Fica para depois:** janela "Escolher projeto" na abertura do app, modal completo
+(nome, perfil, "Achamos na pasta", herdar × vazio), seletor na barra lateral, sugestão de pasta pai e aviso
+do `~/.config/zed/settings.json`.
+
 ## Fase 2 — Ferramentas e MCP
 
 1. Página "Ferramentas e MCP" no grupo "PROJETO · <nome>" das Configurações:
@@ -80,6 +95,11 @@ Todos os perfis  ~/.config/asylum/settings.json            aparência, fontes, t
 2. Menu de ações de um MCP: mover entre perfil e projeto sem recriar.
 3. Scope Chip: `Type=Projeto` passa a significar o projeto Asylum; `.zed` ganha variante "Pasta"
    (`ui::form_controls::scope_chip`, ~linha 379) — atualizar o componente no `.fig` também.
+
+**Feito em 713e0049dd (parcial):** na página de MCP, com projeto aberto, o toggle vale só para o projeto
+(desligar grava `{"enabled": false}`, religar remove) e cada linha mostra o chip de origem (perfil/projeto).
+**Fica para depois:** seletor de nível no topo das Configurações, "Só deste projeto" com Adicionar,
+mover entre perfil e projeto, card "Onde cada coisa fica".
 
 ## Fase 3 — Contas e Lançamentos
 

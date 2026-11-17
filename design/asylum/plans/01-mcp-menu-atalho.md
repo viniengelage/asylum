@@ -46,6 +46,10 @@ servidores…" (extensões). Não tem um lugar claro para gerenciar, e o usuári
 - O agrupamento "MCP do perfil" / "Só deste projeto" e o seletor de nível vêm com o plano 03
   (Projetos, fase 2). Até lá a página continua mostrando o nível atual (perfil).
 
+**Feito em e3b506854d:** pill por estado (rodando · iniciando · entrando · sob demanda · precisa entrar · erro;
+desligado sem pill) via `server_status_pill`, comando/URL em mono embaixo do nome (`AiSettingItem::subtitle`),
+**Reiniciar** no erro. O "Ver erro com log" virou o texto do erro já mostrado na linha + Reiniciar.
+
 ## Pronto quando
 
 - Menu do Agent abre direto a página certa; o pill aparece só com problema.

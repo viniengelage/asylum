@@ -58,11 +58,19 @@ mover o mouse para ele. A chave da nota é o `ThreadId` (`to_key_string`), não 
 2. Ação `agent: edit thread context` com ⌥⌘E (conferir conflito no keymap padrão e nos do fork
    antes; atalho vai no keymap JSON, não por código) e item "Contexto da thread" no menu (…).
 
+**Feito em f1985fa07d + 9df4696992:** card embaixo da barra (`render_thread_context_card`), markdown renderizado,
+"editado há X", recolhido com primeira linha + "+N linhas", "+ Adicionar contexto ⌥⌘E" sem contexto.
+Desvio: aberto/recolhido fica só em memória (por thread, até fechar o app), não no KV store.
+
 ## Fase 3 — resumir + Notas
 
 1. "Resumir conversa": usa o modelo de títulos; prompt pede objetivo, decisões, o que falta.
    Resultado entra no campo para editar; com texto existente, adiciona ao fim. Nunca grava sozinho.
 2. Dock Notas: chip "thread" nas notas ligadas; clicar abre a thread.
+
+**Feito em 9df4696992:** "Resumir conversa" no editor (modelo de resumo de threads, transcrição cortada nos
+últimos 60 mil caracteres, adiciona ao fim). Chip "thread" no dock Notas → `agent::OpenThreadByKey`.
+Apagar uma thread arquivada pergunta se apaga a nota de contexto.
 
 ## Pronto quando
 
