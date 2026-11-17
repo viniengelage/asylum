@@ -3,6 +3,12 @@
 set -euo pipefail
 source script/lib/blob-store.sh
 
+# cef-dll-sys can no longer find the archive through the CDN's index.json; see script/fetch-cef.
+if [[ -z "${CEF_PATH:-}" ]]; then
+    CEF_PATH="$(script/fetch-cef)"
+    export CEF_PATH
+fi
+
 build_flag="--release"
 zed_features=""
 remote_server_features=""
