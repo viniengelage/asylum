@@ -243,6 +243,26 @@ fn is_glob(entry: &str) -> bool {
     entry.contains(['*', '?', '[', '{'])
 }
 
+/// Each profile's plain folders (globs left out), for turning them into projects once.
+pub fn profile_folders() -> Vec<(String, Vec<PathBuf>)> {
+    load_profiles()
+        .log_err()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|profile| {
+            let folders = profile
+                .folders
+                .iter()
+                .chain(profile.open_on_launch.iter())
+                .filter(|entry| !is_glob(entry))
+                .map(|entry| expand_home(entry.trim()))
+                .filter(|path| path.is_dir())
+                .collect();
+            (profile.id, folders)
+        })
+        .collect()
+}
+
 pub fn launch_folders() -> Vec<PathBuf> {
     let Some(profiles) = load_profiles().log_err() else {
         return Vec::new();

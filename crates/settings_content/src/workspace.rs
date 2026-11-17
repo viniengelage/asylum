@@ -621,16 +621,7 @@ pub struct ToolkitSettingsContent {
 }
 
 #[derive(
-    Copy,
-    Clone,
-    Debug,
-    Eq,
-    PartialEq,
-    Default,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    MergeFrom,
+    Copy, Clone, Debug, Eq, PartialEq, Default, Serialize, Deserialize, JsonSchema, MergeFrom,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum ToolkitDisplay {

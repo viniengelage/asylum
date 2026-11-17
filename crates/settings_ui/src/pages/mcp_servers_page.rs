@@ -4,7 +4,9 @@ use collections::HashMap;
 use context_server::ContextServerId;
 use editor::Editor;
 use extension_host::ExtensionStore;
-use gpui::{Action as _, Entity, Focusable as _, ScrollHandle, WeakEntity, prelude::*};
+use gpui::{
+    Action as _, Entity, Focusable as _, ReadGlobal as _, ScrollHandle, WeakEntity, prelude::*,
+};
 use project::context_server_store::{
     ContextServerConfiguration, ContextServerStatus, ContextServerStore,
 };
@@ -246,7 +248,10 @@ fn render_context_server(
     let pill = server_status_pill(&server_status, is_enabled);
     let subtitle = server_settings.as_ref().and_then(server_invocation);
 
+    let origin_chip = render_origin_chip(context_server_id, cx);
+
     AiSettingItem::new(item_id, display_name, status, source)
+        .when_some(origin_chip, |this, chip| this.action(chip))
         .when_some(pill, |this, (label, tone)| this.status_pill(label, tone))
         .when_some(subtitle, |this, subtitle| this.subtitle(subtitle))
         .when_some(configure_button, |this, button| this.action(button))
@@ -413,6 +418,26 @@ fn render_toggle_switch(
             };
 
             let fs = <dyn fs::Fs>::global(cx);
+            if settings::SettingsStore::global(cx)
+                .asylum_project_settings_path()
+                .is_some()
+            {
+                let written = settings::SettingsStore::global(cx).update_settings_file_in_scope(
+                    fs,
+                    settings::SettingsScope::Project,
+                    {
+                        let name = context_server_id.0.clone();
+                        move |settings, _| set_enabled_in_project(settings, name, is_enabled)
+                    },
+                );
+                cx.background_spawn(async move {
+                    if let Ok(Err(error)) = written.await {
+                        log::error!("Failed to write the project settings: {error:#}");
+                    }
+                })
+                .detach();
+                return;
+            }
             settings::update_settings_file(fs, cx, {
                 let context_server_id = context_server_id.clone();
                 move |settings, _| {
@@ -430,6 +455,65 @@ fn render_toggle_switch(
             });
         }
     })
+}
+
+/// In an Asylum project the toggle only changes the project: turning a profile server off writes
+/// `{"enabled": false}` there, and turning it back on removes that entry.
+fn set_enabled_in_project(
+    settings: &mut settings::SettingsContent,
+    name: Arc<str>,
+    is_enabled: bool,
+) {
+    let servers = &mut settings.project.context_servers;
+    let only_turns_off = matches!(
+        servers.get(&name),
+        Some(ContextServerSettingsContent::Extension { enabled: false, remote: false, settings })
+            if settings.is_null() || settings.as_object().is_some_and(|object| object.is_empty())
+    );
+    if is_enabled && only_turns_off {
+        servers.remove(&name);
+        return;
+    }
+    servers
+        .entry(name)
+        .or_insert_with(|| ContextServerSettingsContent::Extension {
+            enabled: is_enabled,
+            remote: false,
+            settings: serde_json::json!({}),
+        })
+        .set_enabled(is_enabled);
+}
+
+/// Where the server is defined, shown when an Asylum project is open.
+fn render_origin_chip(context_server_id: &ContextServerId, cx: &App) -> Option<AnyElement> {
+    let store = settings::SettingsStore::global(cx);
+    store.asylum_project_settings_path()?;
+    let in_project = store.asylum_project_settings().is_some_and(|project| {
+        project
+            .project
+            .context_servers
+            .contains_key(&context_server_id.0)
+    });
+    let (kind, label) = if in_project {
+        (
+            ui::ScopeChipKind::Project,
+            i18n::translate_text("settings_ui_text", "project"),
+        )
+    } else {
+        (
+            ui::ScopeChipKind::Profile(cx.theme().colors().text_accent),
+            i18n::translate_text("settings_ui_text", "profile"),
+        )
+    };
+    Some(
+        ui::scope_chip(
+            SharedString::from(format!("mcp-origin-{}", context_server_id.0)),
+            kind,
+            label,
+            cx,
+        )
+        .into_any_element(),
+    )
 }
 
 fn render_status_details(

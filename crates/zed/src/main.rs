@@ -580,6 +580,7 @@ fn main() {
         OpenListener::set_global(cx, open_listener.clone());
         #[cfg(target_os = "macos")]
         zed::app_profiles::init(cx);
+        zed::asylum_projects::init(cx);
 
         extension::init(cx);
         let extension_host_proxy = ExtensionHostProxy::global(cx);

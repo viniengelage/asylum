@@ -156,6 +156,11 @@ pub struct SettingsStore {
 
     extension_settings: Option<Box<SettingsContent>>,
     server_settings: Option<Box<SettingsContent>>,
+    /// The open Asylum project's `.asylum/settings.json`, above the profile.
+    asylum_project_settings: Option<Box<SettingsContent>>,
+    /// MCP servers of the profile the project turns off.
+    asylum_project_disabled_servers: Vec<String>,
+    asylum_project_settings_path: Option<PathBuf>,
 
     language_semantic_token_rules: HashMap<SharedString, SemanticTokenRules>,
 
@@ -326,6 +331,9 @@ impl SettingsStore {
             global_settings: None,
             shared_settings: None,
             server_settings: None,
+            asylum_project_settings: None,
+            asylum_project_disabled_servers: Vec::new(),
+            asylum_project_settings_path: None,
             user_settings: None,
             extension_settings: None,
             language_semantic_token_rules: HashMap::default(),
@@ -792,6 +800,15 @@ impl SettingsStore {
         scope: crate::SettingsScope,
         update: impl 'static + Send + FnOnce(&mut SettingsContent, &App),
     ) -> oneshot::Receiver<Result<()>> {
+        if scope == crate::SettingsScope::Project {
+            let Some(path) = self.asylum_project_settings_path.clone() else {
+                let (tx, rx) = oneshot::channel();
+                tx.send(Err(anyhow::anyhow!("No Asylum project is open")))
+                    .ok();
+                return rx;
+            };
+            return self.update_settings_file_at_with_app(fs, path, update);
+        }
         let shared =
             scope == crate::SettingsScope::Shared && paths::shared_settings_file().is_some();
         let mut update = Some(update);
@@ -815,6 +832,41 @@ impl SettingsStore {
                 })
             }),
         )
+    }
+
+    fn update_settings_file_at_with_app(
+        &self,
+        fs: Arc<dyn Fs>,
+        path: PathBuf,
+        update: impl 'static + Send + FnOnce(&mut SettingsContent, &App),
+    ) -> oneshot::Receiver<Result<()>> {
+        let (tx, rx) = oneshot::channel::<Result<()>>();
+        self.setting_file_updates_tx
+            .unbounded_send(Box::new(move |cx: AsyncApp| {
+                async move {
+                    let result = async {
+                        let old_text = Self::load_settings_at(&fs, &path).await?;
+                        let new_text = cx.read_global(|store: &SettingsStore, cx| {
+                            store.new_text_for_update(old_text, |content| update(content, cx))
+                        })?;
+                        if let Some(parent) = path.parent() {
+                            fs.create_dir(parent).await?;
+                        }
+                        Self::write_settings_text(&fs, &path, new_text).await
+                    }
+                    .await;
+                    tx.send(match &result {
+                        Ok(_) => anyhow::Ok(()),
+                        Err(error) => Err(anyhow::anyhow!("{error:?}")),
+                    })
+                    .ok();
+                    result
+                }
+                .boxed_local()
+            }))
+            .map_err(|err| anyhow::format_err!("Failed to update settings file: {}", err))
+            .log_with_level(log::Level::Warn);
+        rx
     }
 
     /// Updates a settings file this process doesn't load, such as another profile's. That
@@ -1254,6 +1306,51 @@ impl SettingsStore {
         parse_result
     }
 
+    /// Sets the open Asylum project's settings (`None` when no project is open). MCP servers the
+    /// project sets to `{"enabled": false}` stay defined by the profile and are only turned off.
+    pub fn set_asylum_project_settings(
+        &mut self,
+        project_settings_content: Option<&str>,
+        cx: &mut App,
+    ) -> Result<()> {
+        if project_settings_content.is_none() {
+            self.asylum_project_settings_path = None;
+        }
+        let (settings, disabled) = match project_settings_content {
+            Some(text) if !text.trim().is_empty() => {
+                let mut value: serde_json::Value = crate::parse_json_with_comments(text)?;
+                let disabled = crate::settings_scope::take_project_disabled_servers(&mut value);
+                let settings: SettingsContent = serde_json::from_value(value)?;
+                (Some(Box::new(settings)), disabled)
+            }
+            _ => (None, Vec::new()),
+        };
+        self.asylum_project_settings = settings;
+        self.asylum_project_disabled_servers = disabled;
+        self.recompute_values(None, cx);
+        Ok(())
+    }
+
+    /// The file `SettingsScope::Project` writes to: the open Asylum project's settings.
+    pub fn set_asylum_project_settings_path(&mut self, path: Option<PathBuf>) {
+        self.asylum_project_settings_path = path;
+    }
+
+    pub fn asylum_project_settings_path(&self) -> Option<&Path> {
+        self.asylum_project_settings_path.as_deref()
+    }
+
+    /// What the open Asylum project's own file sets, without the servers it only turns off.
+    pub fn asylum_project_settings(&self) -> Option<&SettingsContent> {
+        self.asylum_project_settings.as_deref()
+    }
+
+    pub fn is_turned_off_in_asylum_project(&self, server: &str) -> bool {
+        self.asylum_project_disabled_servers
+            .iter()
+            .any(|name| name == server)
+    }
+
     pub fn set_server_settings(
         &mut self,
         server_settings_content: &str,
@@ -1632,6 +1729,12 @@ impl SettingsStore {
                     merged.merge_from(&profile.settings);
                 }
             }
+            merged.merge_from_option(self.asylum_project_settings.as_deref());
+            for name in &self.asylum_project_disabled_servers {
+                if let Some(server) = merged.project.context_servers.get_mut(name.as_str()) {
+                    server.set_enabled(false);
+                }
+            }
             merged.merge_from_option(self.server_settings.as_deref());
 
             // Merge `disable_ai` from all project/local settings into the global value.
@@ -1932,7 +2035,8 @@ mod tests {
 
     use crate::{
         ClosePosition, ItemSettingsContent, VsCodeSettingsSource, default_settings,
-        settings_content::LanguageSettingsContent, test_settings,
+        settings_content::{ContextServerSettingsContent, LanguageSettingsContent},
+        test_settings,
     };
 
     use super::*;
@@ -2109,6 +2213,66 @@ mod tests {
             &AutoUpdateSetting { auto_update: false },
             "dev override from default settings should apply",
         );
+    }
+
+    #[gpui::test]
+    fn test_asylum_project_settings_inherit_disable_and_add(cx: &mut App) {
+        let mut store = SettingsStore::new(cx, &default_settings());
+        store
+            .set_user_settings(
+                r#"{
+                    "context_servers": {
+                        "github": { "command": "github-mcp", "args": [] },
+                        "linear": { "url": "https://mcp.linear.app" }
+                    },
+                    "agent_toolkits": { "docker": true }
+                }"#,
+                cx,
+            )
+            .result()
+            .unwrap();
+
+        store.set_asylum_project_settings(None, cx).unwrap();
+        let servers = &store.merged_settings().project.context_servers;
+        assert_eq!(servers.len(), 2);
+
+        store
+            .set_asylum_project_settings(
+                Some(
+                    r#"{
+                        // Off here, still on in the profile.
+                        "context_servers": {
+                            "linear": { "enabled": false },
+                            "expo": { "url": "https://mcp.expo.dev" }
+                        },
+                        "agent_toolkits": { "docker": false }
+                    }"#,
+                ),
+                cx,
+            )
+            .unwrap();
+        let merged = store.merged_settings();
+        let servers = &merged.project.context_servers;
+        assert_eq!(servers.len(), 3);
+        assert!(matches!(
+            servers.get("linear"),
+            Some(ContextServerSettingsContent::Http { enabled: false, url, .. })
+                if url == "https://mcp.linear.app"
+        ));
+        assert!(matches!(
+            servers.get("github"),
+            Some(ContextServerSettingsContent::Stdio { enabled: true, .. })
+        ));
+        assert!(servers.contains_key("expo"));
+        assert_eq!(merged.project.agent_toolkits.get("docker"), Some(&false));
+
+        store.set_asylum_project_settings(Some(""), cx).unwrap();
+        let servers = &store.merged_settings().project.context_servers;
+        assert_eq!(servers.len(), 2);
+        assert!(matches!(
+            servers.get("linear"),
+            Some(ContextServerSettingsContent::Http { enabled: true, .. })
+        ));
     }
 
     #[gpui::test]

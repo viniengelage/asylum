@@ -148,5 +148,10 @@
   "toolkits.project_override": "{state} por .zed/settings.json deste projeto · perfil: {profile_state}",
   "toolkits.scope": "Vale para todo projeto aberto neste perfil",
   "toolkits.scope_detail": "Um projeto pode sobrescrever em .zed/settings.json",
-  "toolkits.title": "TOOLKIT DO AGENTE"
+  "toolkits.title": "TOOLKIT DO AGENTE",
+  "projects.choose_folder": "Escolha a pasta do projeto",
+  "projects.search": "Buscar projetos…",
+  "projects.none": "Nenhum projeto ainda",
+  "projects.active": "aberto",
+  "projects.new": "Novo projeto"
 }

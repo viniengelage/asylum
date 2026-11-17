@@ -1,6 +1,7 @@
 mod app_menus;
 #[cfg(target_os = "macos")]
 pub(crate) mod app_profiles;
+pub(crate) mod asylum_projects;
 pub mod edit_prediction_registry;
 #[cfg(target_os = "macos")]
 pub(crate) mod mac_only_instance;

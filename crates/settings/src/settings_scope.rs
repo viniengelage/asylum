@@ -28,11 +28,49 @@ pub const PROFILE_SCOPED_SETTINGS: &[&str] = &[
     "agent.on_demand_context_servers",
 ];
 
-/// Where a setting is written: the file every profile shares or the current profile's own.
+/// Where a setting is written: the file every profile shares, the current profile's own, or the
+/// open Asylum project's `.asylum/settings.json`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SettingsScope {
     Shared,
     Profile,
+    Project,
+}
+
+/// Takes out of a project's settings the MCP servers it only turns off (`{"enabled": false}`),
+/// returning their names. Those entries switch off a server the profile defines; parsed as
+/// settings they would replace its whole definition.
+/// `{"enabled": false}`, also as the settings editor writes it back (`"settings": {}`,
+/// `"remote": false`).
+fn is_only_turned_off(server: &Value) -> bool {
+    let Some(object) = server.as_object() else {
+        return false;
+    };
+    object.get("enabled") == Some(&Value::Bool(false))
+        && object.iter().all(|(key, value)| match key.as_str() {
+            "enabled" => true,
+            "remote" => value == &Value::Bool(false),
+            "settings" => value.as_object().is_some_and(Map::is_empty) || value.is_null(),
+            _ => false,
+        })
+}
+
+pub fn take_project_disabled_servers(project: &mut Value) -> Vec<String> {
+    let Some(servers) = project
+        .get_mut("context_servers")
+        .and_then(Value::as_object_mut)
+    else {
+        return Vec::new();
+    };
+    let disabled: Vec<String> = servers
+        .iter()
+        .filter(|(_, server)| is_only_turned_off(server))
+        .map(|(name, _)| name.clone())
+        .collect();
+    for name in &disabled {
+        servers.remove(name);
+    }
+    disabled
 }
 
 /// Whether the setting at `path` (keys from the root) belongs to each profile.
@@ -107,6 +145,29 @@ fn diff_into(old: &Value, new: &Value, path: &mut Vec<String>, changes: &mut Vec
             value: Some(new.clone()),
         }),
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod project_scope_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn only_turned_off_servers_are_taken() {
+        let mut project = json!({
+            "context_servers": {
+                "linear": { "enabled": false },
+                "github": { "enabled": false, "settings": {}, "remote": false },
+                "expo": { "enabled": false, "url": "https://mcp.expo.dev" },
+                "docker": { "command": "docker-mcp" }
+            }
+        });
+        let mut taken = take_project_disabled_servers(&mut project);
+        taken.sort();
+        assert_eq!(taken, vec!["github".to_string(), "linear".to_string()]);
+        let remaining = project["context_servers"].as_object().map(Map::len);
+        assert_eq!(remaining, Some(2));
     }
 }
 

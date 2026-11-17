@@ -800,6 +800,22 @@ pub fn local_settings_folder_name() -> &'static str {
     ".zed"
 }
 
+/// The folder an Asylum project keeps its own settings and agent files in, at the project root.
+pub fn asylum_folder_name() -> &'static str {
+    ".asylum"
+}
+
+/// The settings of the Asylum project rooted at `root`, between the profile's and the `.zed`
+/// folders'.
+pub fn asylum_project_settings_file(root: &Path) -> PathBuf {
+    root.join(asylum_folder_name()).join("settings.json")
+}
+
+/// Every Asylum project, of every profile, next to the profiles registry.
+pub fn asylum_projects_file() -> PathBuf {
+    profiles_dir().join("projects.json")
+}
+
 /// Returns the relative path to a `.vscode` folder within a project.
 pub fn local_vscode_folder_name() -> &'static str {
     ".vscode"

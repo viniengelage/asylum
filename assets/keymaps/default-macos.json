@@ -2143,6 +2143,7 @@
   {
     "context": "Workspace",
     "bindings": {
+      "cmd-alt-o": "projects::OpenProject",
       "cmd-alt-v": "notes::OpenPalette",
       "cmd-alt-n": "notes::Save",
       "cmd-alt-shift-v": "notes::ToggleFocus",
