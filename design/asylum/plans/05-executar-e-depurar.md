@@ -100,6 +100,16 @@ Debugger:
    - `shift-f5` → parar execução ou sessão (hoje `debugger::Stop` só no contexto de sessão; ampliar).
    - O "Run ⌘R" da dock Devices no board 08 está errado: `cmd-r` é `workspace::ToggleRightDock`. Usar F5.
 
+**Feito em 5fc48a70ff** (crate novo `runs`): zona Executar na status bar (`StatusItemZone::Run`), seletor em
+popover com FAVORITAS / DO PROJETO / DEPURAR, chip de origem e último resultado; dock Execuções no dock direito;
+fonte eas.json; atalhos no keymap JSON. Desvios: o seletor tem delegate próprio (não reaproveita o do
+`tasks_ui`); os scripts do package.json são lidos direto (a tag `package-script` do typescript.rs só aparece
+com buffer TS aberto e é ignorada); o eas usa `npx eas-cli build` (funciona sem o `eas` global); favoritas do ⌘S
+ficam no KV por projeto; ⌃⌥1–9 só no macOS (no Linux/Windows ⌃⌥N já é `notes::PastePinned`), e lá o depurar é
+`ctrl-f5`; o device vem de um `DeviceSource` novo em `task_agents` que o dock Devices registra. A lista de
+execuções lê os terminais de task do workspace (qualquer origem) por polling de 800 ms; o código de saída vem de
+`Terminal::exit_status` (acessor novo) porque o canal de conclusão do terminal tem um consumidor só.
+
 ## Fase 2 — etapas e editor de task
 
 1. `steps`, `ready_when`, `if_running`, `device` no `TaskTemplate` (crate `task`) + resolução + JSON schema.
@@ -108,6 +118,14 @@ Debugger:
 3. `build` do debug.json aceita task com `ready_when` (não espera terminar).
 4. Editor visual (aba no editor): etapas, pronto quando, se já rodando, device, pasta, ambiente, saída,
    favorita, avisar; "Editar JSON" abre o arquivo; salva sozinho.
+
+**Feito em 41f861a66c**: `RunOptions` achatado no `TaskTemplate` (`task/src/run_options.rs`), executor de
+cadeia (`runs/src/chain.rs`), prontidão (`runs/src/ready.rs`, usada também pelo `build` do debug.json em
+`running.rs`), editor de task como aba (`runs/src/task_editor.rs`, botão Editar no seletor). Desvios: etapa do
+Asylum é `{ "action": "open_app" }` (xcrun simctl launch / adb monkey com o id do app.json); etapa `{ "task":
+"<label>" }` roda outra task; uma etapa com `ready_when` de porta já aberta é reaproveitada. `device: "ask"` só
+exige um device selecionado no dock Devices (não abre seletor próprio). O editor reescreve o tasks.json como
+JSON puro (comentários somem) e não tem os campos "saída" e "avisar" (reveal/hide) — ficam no Editar JSON.
 
 ## Fase 3 — dock Depurar
 
@@ -122,10 +140,23 @@ Debugger:
    conexão caiu (reconectar após reload mantendo breakpoints).
 3. i18n do `debugger_ui` (hoje sem `t!`).
 
+**Feito em 11da1f0d39**: debugger no dock direito por padrão, banner "Parou em X · arquivo:linha · Ir",
+frames de node_modules/React Native recolhidos, Continuar em destaque e Parar vermelho, i18n da toolbar/estado
+vazio/pilha; o adaptador RN filtra o `/json/list` por `deviceName` (o device do dock Devices quando se depura
+uma execução). Adiado: estados A–E do board como telas próprias (conectando com passos e tempo, "Subir Metro e
+conectar", escolha entre dois apps, "Esperar mais / Forçar parar / Log", reconectar após reload — hoje valem o
+progresso/timeout/toast da fase 0 e o `restart: true` do js-debug), layout novo de PILHA/VARIÁVEIS/OBSERVAR em
+seções, i18n do resto do `debugger_ui` (modal de nova sessão, breakpoints, variáveis, console) e o nome da aba
+("Debug": o título vem de `icon_tooltip`, que é `&'static str`).
+
 ## Fase 4 — agente
 
 Tools `run_task`, `task_output`, `stop_task`, `debug_state` (com confirmação onde escreve);
 "Corrigir com agente" no card de falha manda a saída do erro para uma thread.
+
+**Feito em c40bd883b2**: toolkit `runs` com `runs_list`, `runs_start`, `runs_output`, `runs_stop`
+(confirmação pela permissão de tool) e `debug_state` (só o estado da sessão, sem pilha/variáveis); "Corrigir com
+agente" no card de falha do dock Execuções abre thread nova via `agent::FixRunWithAgent`.
 
 ## Pronto quando
 
