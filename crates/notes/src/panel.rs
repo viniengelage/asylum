@@ -827,6 +827,6 @@ impl Panel for NotesPanel {
     }
 
     fn activation_priority(&self) -> u32 {
-        9
+        18
     }
 }

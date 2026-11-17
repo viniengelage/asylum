@@ -49,7 +49,11 @@ pub struct RunPickerView {
 
 impl RunPickerView {
     pub fn new(workspace: &Entity<Workspace>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let store = RunStore::for_workspace(workspace, cx);
+        let store = RunStore::for_workspace(
+            workspace.downgrade(),
+            workspace.read(cx).project().clone(),
+            cx,
+        );
         let delegate = RunPickerDelegate {
             store: store.clone(),
             entries: Vec::new(),

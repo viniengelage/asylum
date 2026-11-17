@@ -76,7 +76,7 @@ fn store_for(
 )> {
     let (window, workspace) =
         workspace_for(project, cx).context("This project has no open window.")?;
-    let store = RunStore::for_workspace(&workspace, cx);
+    let store = RunStore::for_workspace(workspace.downgrade(), project.clone(), cx);
     Ok((window, workspace, store))
 }
 

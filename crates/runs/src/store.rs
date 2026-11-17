@@ -14,6 +14,7 @@ use regex::Regex;
 use task::{SharedTaskContext, SpawnInTerminal, TaskContext, TaskId};
 use terminal::{TaskStatus, Terminal};
 use terminal_view::{TerminalView, terminal_panel::TerminalPanel};
+use project::Project;
 use util::ResultExt as _;
 use workspace::{Pane, Toast, Workspace, notifications::NotificationId};
 
@@ -98,6 +99,7 @@ impl gpui::EventEmitter<RunStoreEvent> for RunStore {}
 /// favorites and the run F5 starts.
 pub struct RunStore {
     workspace: WeakEntity<Workspace>,
+    project: Entity<Project>,
     records: Vec<RunRecord>,
     next_id: usize,
     favorites: Vec<SharedString>,
@@ -115,8 +117,11 @@ struct RunStores(Vec<(WeakEntity<Workspace>, Entity<RunStore>)>);
 impl Global for RunStores {}
 
 impl RunStore {
-    pub fn for_workspace(workspace: &Entity<Workspace>, cx: &mut App) -> Entity<Self> {
-        let handle = workspace.downgrade();
+    pub fn for_workspace(
+        handle: WeakEntity<Workspace>,
+        project: Entity<Project>,
+        cx: &mut App,
+    ) -> Entity<Self> {
         let stores = cx.default_global::<RunStores>();
         stores
             .0
@@ -124,7 +129,7 @@ impl RunStore {
         if let Some((_, store)) = stores.0.iter().find(|(existing, _)| *existing == handle) {
             return store.clone();
         }
-        let store = cx.new(|cx| Self::new(handle.clone(), cx));
+        let store = cx.new(|cx| Self::new(handle.clone(), project, cx));
         cx.default_global::<RunStores>()
             .0
             .push((handle, store.clone()));
@@ -140,7 +145,11 @@ impl RunStore {
             .map(|(_, store)| store.clone())
     }
 
-    fn new(workspace: WeakEntity<Workspace>, cx: &mut Context<Self>) -> Self {
+    fn new(
+        workspace: WeakEntity<Workspace>,
+        project: Entity<Project>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let scan = cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(SCAN_INTERVAL).await;
@@ -151,6 +160,7 @@ impl RunStore {
         });
         let mut this = Self {
             workspace,
+            project,
             records: Vec::new(),
             next_id: 0,
             favorites: Vec::new(),
@@ -166,10 +176,7 @@ impl RunStore {
     }
 
     fn load_project_state(&mut self, cx: &mut Context<Self>) {
-        let Some(workspace) = self.workspace.upgrade() else {
-            return;
-        };
-        let key = project_key(workspace.read(cx), cx);
+        let key = project_key(self.project.read(cx), cx);
         if key == self.project_key {
             return;
         }
@@ -765,7 +772,11 @@ pub fn refresh_candidates(
     window: &mut Window,
     cx: &mut App,
 ) -> Task<()> {
-    let store = RunStore::for_workspace(workspace, cx);
+    let store = RunStore::for_workspace(
+        workspace.downgrade(),
+        workspace.read(cx).project().clone(),
+        cx,
+    );
     let task_contexts = workspace.update(cx, |workspace, cx| {
         tasks_ui::task_contexts(workspace, window, cx)
     });

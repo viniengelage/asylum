@@ -680,6 +680,6 @@ impl Panel for ExecutionsPanel {
     }
 
     fn activation_priority(&self) -> u32 {
-        15
+        17
     }
 }

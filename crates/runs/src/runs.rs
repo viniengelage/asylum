@@ -109,8 +109,11 @@ pub fn init(cx: &mut App) {
 }
 
 fn store_of(workspace: &Workspace, cx: &mut App) -> Option<Entity<RunStore>> {
-    let workspace = workspace.weak_handle().upgrade()?;
-    Some(RunStore::for_workspace(&workspace, cx))
+    Some(RunStore::for_workspace(
+        workspace.weak_handle(),
+        workspace.project().clone(),
+        cx,
+    ))
 }
 
 fn add_panel(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {

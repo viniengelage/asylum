@@ -7,7 +7,7 @@ use std::{
 use collections::HashSet;
 use fs::Fs;
 use gpui::{App, AppContext as _, AsyncWindowContext, SharedString, Task, WeakEntity};
-use project::{TaskContexts, TaskSourceKind, WorktreeId};
+use project::{Project, TaskContexts, TaskSourceKind, WorktreeId};
 use serde::Deserialize;
 use task::{DebugScenario, TaskTemplate};
 use workspace::Workspace;
@@ -358,10 +358,8 @@ pub fn load_candidates(
 
 /// The first visible worktree's root, which per-project state (favorites, the active run) is
 /// keyed by.
-pub fn project_key(workspace: &Workspace, cx: &App) -> Option<String> {
-    workspace
-        .project()
-        .read(cx)
+pub fn project_key(project: &Project, cx: &App) -> Option<String> {
+    project
         .visible_worktrees(cx)
         .next()
         .map(|worktree| worktree.read(cx).abs_path().to_string_lossy().into_owned())

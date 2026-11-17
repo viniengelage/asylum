@@ -1705,6 +1705,6 @@ impl Panel for TasksPanel {
     }
 
     fn activation_priority(&self) -> u32 {
-        10
+        16
     }
 }
