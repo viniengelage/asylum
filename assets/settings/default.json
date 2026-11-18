@@ -8,7 +8,7 @@
   // - "dark": Use the theme indicated by the "dark" field
   "theme": {
     "mode": "dark",
-    "light": "Ayu Light",
+    "light": "Polar Light",
     "dark": "Polar Dark",
   },
   "icon_theme": "Asylum (Default)",

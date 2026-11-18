@@ -461,3 +461,60 @@ pub fn increase_buffer_font_size(cx: &mut App) {
 pub fn decrease_buffer_font_size(cx: &mut App) {
     adjust_buffer_font_size(cx, |size| size - px(1.0));
 }
+
+#[cfg(test)]
+mod polar_tests {
+    use super::*;
+
+    fn relative_luminance(color: gpui::Hsla) -> f32 {
+        let rgba = color.to_rgb();
+        let channel = |value: f32| {
+            if value <= 0.03928 {
+                value / 12.92
+            } else {
+                ((value + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * channel(rgba.r) + 0.7152 * channel(rgba.g) + 0.0722 * channel(rgba.b)
+    }
+
+    fn contrast(a: gpui::Hsla, b: gpui::Hsla) -> f32 {
+        let (a, b) = (relative_luminance(a), relative_luminance(b));
+        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+
+    #[test]
+    fn polar_ships_a_light_variant_with_readable_text() {
+        let family = deserialize_user_theme(include_bytes!(
+            "../../../assets/themes/polar/polar.json"
+        ))
+        .expect("polar.json parses");
+        let family = refine_theme_family(family);
+        let names = family
+            .themes
+            .iter()
+            .map(|theme| theme.name.to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec!["Polar Dark", "Polar Light"]);
+
+        let light = family
+            .themes
+            .iter()
+            .find(|theme| theme.name.as_ref() == "Polar Light")
+            .expect("light variant");
+        assert_eq!(light.appearance, theme::Appearance::Light);
+        let colors = light.colors();
+        let surface = colors.editor_background;
+        for (role, color) in [
+            ("text", colors.text),
+            ("text.muted", colors.text_muted),
+            ("text.accent", colors.text_accent),
+            ("editor.foreground", colors.editor_foreground),
+        ] {
+            assert!(
+                contrast(color, surface) >= 4.5,
+                "{role} is not readable on the light editor background"
+            );
+        }
+    }
+}

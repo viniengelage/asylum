@@ -22,8 +22,7 @@ use crate::{
     theme_preview::{ThemePreviewStyle, ThemePreviewTile},
 };
 
-// Polar has no light variant, so it fills both slots of its family.
-const LIGHT_THEMES: [&str; 3] = ["Polar Dark", "Ayu Light", "Gruvbox Light"];
+const LIGHT_THEMES: [&str; 3] = ["Polar Light", "Ayu Light", "Gruvbox Light"];
 const DARK_THEMES: [&str; 3] = ["Polar Dark", "Ayu Dark", "Gruvbox Dark"];
 const FAMILY_NAMES: [SharedString; 3] = [
     SharedString::new_static("Polar"),

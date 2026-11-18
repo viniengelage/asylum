@@ -384,7 +384,7 @@ const LEGACY_DEFAULT_ICON_THEME_NAME: &str = "Zed (Default)";
 fn legacy_theme_replacement(name: &str) -> Option<&'static str> {
     match name {
         "One Dark" => Some("Polar Dark"),
-        "One Light" => Some("Ayu Light"),
+        "One Light" => Some("Polar Light"),
         _ => None,
     }
 }

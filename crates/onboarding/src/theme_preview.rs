@@ -323,7 +323,7 @@ impl Component for ThemePreviewTile {
         let theme_registry = ThemeRegistry::global(cx);
 
         let one_dark = theme_registry.get("Polar Dark");
-        let one_light = theme_registry.get("Ayu Light");
+        let one_light = theme_registry.get("Polar Light");
         let gruvbox_dark = theme_registry.get("Gruvbox Dark");
         let gruvbox_light = theme_registry.get("Gruvbox Light");
 
