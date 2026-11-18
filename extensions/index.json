@@ -5648,17 +5648,17 @@
    "authors": [
     "Gentrit Halili"
    ],
-   "description": "gh44 theme for Zed",
+   "description": "Warm neutrals with clay accents. gh44 Dark and gh44 Light, a matched pair for the editor and terminal.",
    "download_count": 0,
    "id": "gh44-theme",
    "name": "gh44",
    "provides": [
     "themes"
    ],
-   "published_at": "2026-11-06T11:59:38Z",
+   "published_at": "2026-11-18T12:58:36Z",
    "repository": "https://github.com/gentrithalili1/gh44-theme",
    "schema_version": 1,
-   "version": "1.0.0",
+   "version": "1.1.0",
    "wasm_api_version": null
   },
   {
@@ -11679,10 +11679,10 @@
    "provides": [
     "themes"
    ],
-   "published_at": "2026-11-04T12:14:08Z",
+   "published_at": "2026-11-18T12:58:38Z",
    "repository": "https://github.com/biaqat/panda-theme-zed",
    "schema_version": 1,
-   "version": "0.9.0",
+   "version": "0.9.1",
    "wasm_api_version": null
   },
   {
