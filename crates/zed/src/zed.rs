@@ -859,16 +859,6 @@ fn initialize_panels(window: &mut Window, cx: &mut Context<Workspace>) -> Task<a
             workspace.finish_dock_restoration(cx);
         })?;
 
-        // Only seed a layout from the dock positions when the restored pane tree has
-        // no panel tabs of its own, so a saved layout is never overwritten.
-        workspace_handle
-            .update_in(cx, |workspace, window, cx| {
-                if Workspace::unified_panes(cx) && !workspace.has_panel_panes(cx) {
-                    workspace.build_unified_layout(window, cx);
-                }
-            })
-            .log_err();
-
         anyhow::Ok(())
     })
 }

@@ -506,6 +506,21 @@ impl TerminalPanel {
                 cx.notify();
             }
             pane::Event::AddItem { item } => {
+                // Nothing renders this panel's panes while the window shows a scene, so a
+                // terminal that lands here anyway (restore, a caller that adds to the
+                // panel directly) moves to the scene's terminal slot.
+                if let Some(workspace) = self.workspace.upgrade()
+                    && workspace.read(cx).in_scene()
+                {
+                    let item = item.boxed_clone();
+                    let pane = pane.clone();
+                    window.defer(cx, move |window, cx| {
+                        workspace.update(cx, |workspace, cx| {
+                            workspace.adopt_into_scene(&pane, item, window, cx);
+                        });
+                    });
+                    return;
+                }
                 if let Some(workspace) = self.workspace.upgrade() {
                     workspace.update(cx, |workspace, cx| {
                         item.added_to_pane(workspace, pane.clone(), window, cx);
@@ -1015,9 +1030,7 @@ impl TerminalPanel {
                     RevealStrategy::Never => {}
                 }
 
-                pane.update(cx, |pane, cx| {
-                    pane.add_item(terminal_view, true, take_focus, None, window, cx);
-                });
+                place_terminal(workspace, &pane, terminal_view, take_focus, window, cx);
 
                 terminal.downgrade()
             })
@@ -1075,9 +1088,7 @@ impl TerminalPanel {
                         RevealStrategy::Never => {}
                     }
 
-                    pane.update(cx, |pane, cx| {
-                        pane.add_item(terminal_view, true, take_focus, None, window, cx);
-                    });
+                    place_terminal(workspace, &pane, terminal_view, take_focus, window, cx);
 
                     terminal.downgrade()
                 }),
@@ -1405,6 +1416,32 @@ pub fn prepare_task_for_spawn(
         args,
         ..task.clone()
     }
+}
+
+/// Adds a terminal to the scene's terminal slot when the window shows a scene, and to
+/// the panel's own pane otherwise; in a scene nothing renders the panel's panes.
+fn place_terminal(
+    workspace: &mut Workspace,
+    panel_pane: &Entity<Pane>,
+    terminal_view: Box<dyn workspace::ItemHandle>,
+    take_focus: bool,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    if workspace.in_scene()
+        && workspace.add_item_to_kind_slot(
+            &workspace::ContentKind::terminal(),
+            terminal_view.boxed_clone(),
+            take_focus,
+            window,
+            cx,
+        )
+    {
+        return;
+    }
+    panel_pane.update(cx, |pane, cx| {
+        pane.add_item(terminal_view, true, take_focus, None, window, cx);
+    });
 }
 
 fn is_enabled_in_workspace(workspace: &Workspace, cx: &App) -> bool {
@@ -1919,6 +1956,40 @@ impl Panel for TerminalPanel {
 
     fn hosted_content_kind(&self) -> Option<workspace::ContentKind> {
         Some(workspace::ContentKind::terminal())
+    }
+
+    fn take_hosted_items(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<Box<dyn workspace::ItemHandle>> {
+        let mut items = Vec::new();
+        for pane in self.center.panes() {
+            let pane_items = pane
+                .read(cx)
+                .items()
+                .map(|item| item.boxed_clone())
+                .collect::<Vec<_>>();
+            pane.update(cx, |pane, cx| {
+                for item in &pane_items {
+                    pane.remove_item(item.item_id(), false, false, window, cx);
+                }
+            });
+            items.extend(pane_items);
+        }
+        items
+    }
+
+    fn adopt_hosted_item(
+        &mut self,
+        item: Box<dyn workspace::ItemHandle>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Box<dyn workspace::ItemHandle>> {
+        self.active_pane.update(cx, |pane, cx| {
+            pane.add_item(item, true, false, None, window, cx);
+        });
+        None
     }
 
     fn activation_priority(&self) -> u32 {

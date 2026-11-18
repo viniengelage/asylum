@@ -947,12 +947,38 @@ impl Pane {
         self.collapsed_flex.is_some()
     }
 
+    pub(crate) fn collapsed_flex(&self) -> Option<f32> {
+        self.collapsed_flex
+    }
+
     pub(crate) fn take_collapsed_flex(&mut self) -> Option<f32> {
         self.collapsed_flex.take()
     }
 
     pub(crate) fn set_collapsed_flex(&mut self, flex: Option<f32>) {
         self.collapsed_flex = flex;
+    }
+
+    /// Tells the active item whether its slot is on screen, keeping the record of what
+    /// was activated in step so a later `activate_item` neither repeats nor skips it.
+    pub(crate) fn set_active_item_visible(
+        &mut self,
+        visible: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(item) = self.active_item() else {
+            self.activated_item_id = None;
+            return;
+        };
+        if visible {
+            if self.activated_item_id != Some(item.item_id()) {
+                self.activated_item_id = Some(item.item_id());
+                item.activated(window, cx);
+            }
+        } else if self.activated_item_id.take().is_some() {
+            item.deactivated(window, cx);
+        }
     }
 
     pub fn accepts_kinds(&self) -> &[ContentKind] {
@@ -1635,8 +1661,12 @@ impl Pane {
             }
             // Tracked by id rather than by index, so that the first item added to a
             // pane still counts as newly activated even though the index never moved.
+            // A hidden scene slot activates nothing: `activated` shows native views
+            // (the iOS simulator's window), which would then float over the scene.
             let new_item_id = self.items.get(index).map(|item| item.item_id());
-            if self.activated_item_id != new_item_id {
+            if self.is_collapsed() {
+                self.activated_item_id = None;
+            } else if self.activated_item_id != new_item_id {
                 self.activated_item_id = new_item_id;
                 if let Some(new_item) = self.items.get(index).cloned() {
                     new_item.activated(window, cx);
@@ -2344,6 +2374,10 @@ impl Pane {
         }
 
         let item = self.items.remove(item_index);
+        // Otherwise moving the item away and back would never activate it again.
+        if self.activated_item_id == Some(item.item_id()) {
+            self.activated_item_id = None;
+        }
 
         cx.emit(Event::RemovedItem { item: item.clone() });
         if self.items.is_empty() {

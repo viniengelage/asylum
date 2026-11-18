@@ -101,6 +101,25 @@ pub trait Panel: Focusable + EventEmitter<PanelEvent> + Render + Sized {
     fn hosted_content_kind(&self) -> Option<crate::pane::ContentKind> {
         None
     }
+    /// Hands over the items a container panel keeps in panes of its own. Nothing renders
+    /// those panes while the window shows a scene, so the items join its pane tree.
+    fn take_hosted_items(
+        &mut self,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Vec<Box<dyn crate::item::ItemHandle>> {
+        Vec::new()
+    }
+    /// Takes an item back when the window leaves its scene. Returns the item when the
+    /// panel cannot host it, so the caller can place it elsewhere.
+    fn adopt_hosted_item(
+        &mut self,
+        item: Box<dyn crate::item::ItemHandle>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<Box<dyn crate::item::ItemHandle>> {
+        Some(item)
+    }
     /// Set by panels that lay themselves out as several cards side by side, so the dock
     /// must not frame them in a single card of its own.
     fn draws_own_cards(&self, _cx: &App) -> bool {
@@ -148,6 +167,17 @@ pub trait PanelHandle: Send + Sync {
     fn remote_id(&self) -> Option<proto::PanelId>;
     fn pane(&self, cx: &App) -> Option<Entity<Pane>>;
     fn hosted_content_kind(&self, cx: &App) -> Option<crate::pane::ContentKind>;
+    fn take_hosted_items(
+        &self,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Vec<Box<dyn crate::item::ItemHandle>>;
+    fn adopt_hosted_item(
+        &self,
+        item: Box<dyn crate::item::ItemHandle>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<Box<dyn crate::item::ItemHandle>>;
     fn draws_own_cards(&self, cx: &App) -> bool;
     fn dock_header_actions(&self, window: &mut Window, cx: &mut App) -> Option<Vec<AnyElement>>;
     fn default_size(&self, window: &Window, cx: &App) -> Pixels;
@@ -185,16 +215,21 @@ pub trait PanelHandle: Send + Sync {
 
     fn move_to_next_position(&self, window: &mut Window, cx: &mut App) {
         let current_position = self.position(window, cx);
-        let next_position = [
-            DockPosition::Left,
-            DockPosition::Bottom,
-            DockPosition::Devices,
-            DockPosition::Right,
-        ]
-        .into_iter()
-        .filter(|position| self.position_is_valid(*position, cx))
-        .skip_while(|valid_position| *valid_position != current_position)
-        .nth(1)
+        // The devices dock is reserved for the device panel, so cycling skips it; a panel
+        // sitting there moves on to the first general position.
+        let valid_positions = [DockPosition::Left, DockPosition::Bottom, DockPosition::Right]
+            .into_iter()
+            .filter(|position| self.position_is_valid(*position, cx))
+            .collect::<Vec<_>>();
+        // Wraps around, so the last position (right) moves the panel back to the first.
+        let next_position = match valid_positions
+            .iter()
+            .position(|position| *position == current_position)
+        {
+            Some(index) => valid_positions.get((index + 1) % valid_positions.len()),
+            None => valid_positions.first(),
+        }
+        .copied()
         .unwrap_or(current_position);
 
         self.set_position(next_position, window, cx);
@@ -251,6 +286,23 @@ where
 
     fn hosted_content_kind(&self, cx: &App) -> Option<crate::pane::ContentKind> {
         self.read(cx).hosted_content_kind()
+    }
+
+    fn take_hosted_items(
+        &self,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Vec<Box<dyn crate::item::ItemHandle>> {
+        self.update(cx, |this, cx| this.take_hosted_items(window, cx))
+    }
+
+    fn adopt_hosted_item(
+        &self,
+        item: Box<dyn crate::item::ItemHandle>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<Box<dyn crate::item::ItemHandle>> {
+        self.update(cx, |this, cx| this.adopt_hosted_item(item, window, cx))
     }
 
     fn draws_own_cards(&self, cx: &App) -> bool {
@@ -364,6 +416,10 @@ pub struct Dock {
     restoration: DockRestoreState,
     zoom_layer_open: bool,
     modal_layer: Entity<ModalLayer>,
+    /// Set while the window shows a scene. The panels are tabs in the pane tree then,
+    /// and a dock that opened anyway would activate a panel nobody can see (the iOS
+    /// simulator's native window would appear over the scene).
+    suppressed: bool,
     _subscriptions: [Subscription; 2],
 }
 
@@ -555,6 +611,7 @@ impl Dock {
                 restoration: DockRestoreState::Restoring { pending: None },
                 zoom_layer_open: false,
                 modal_layer,
+                suppressed: false,
             }
         });
 
@@ -704,7 +761,22 @@ impl Dock {
         self.set_open_internal(open, window, cx);
     }
 
+    pub(crate) fn set_suppressed(
+        &mut self,
+        suppressed: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.suppressed = suppressed;
+        if suppressed {
+            self.set_open_internal(false, window, cx);
+        }
+    }
+
     fn set_open_internal(&mut self, open: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if open && self.suppressed {
+            return;
+        }
         if open != self.is_open {
             self.is_open = open;
             if let Some(active_panel) = self.active_panel_entry() {
@@ -868,6 +940,20 @@ impl Dock {
                 &panel,
                 window,
                 move |this, panel, event, window, cx| match event {
+                    // In a scene the panel's tab handles zoom, and activation has to reveal
+                    // that tab instead of opening a dock nothing renders.
+                    PanelEvent::ZoomIn | PanelEvent::ZoomOut if this.suppressed => {}
+                    PanelEvent::Activate if this.suppressed => {
+                        let panel_id = Entity::entity_id(panel);
+                        let workspace = workspace.clone();
+                        window.defer(cx, move |window, cx| {
+                            workspace
+                                .update(cx, |workspace, cx| {
+                                    workspace.reveal_panel_by_id(panel_id, window, cx);
+                                })
+                                .ok();
+                        });
+                    }
                     PanelEvent::ZoomIn => {
                         this.set_panel_zoomed(&panel.to_any(), true, window, cx);
                         if !PanelHandle::panel_focus_handle(panel, cx).contains_focused(window, cx)
@@ -1887,10 +1973,12 @@ impl RenderOnce for StatusBarButton {
         };
         let icon = Icon::new(self.icon).size(IconSize::Small).color(icon_color);
         let accent_soft = cx.theme().colors().text_accent.opacity(0.2);
+        let icon_name = self.icon;
 
         // `ButtonStyle` has no accent-tinted selection, so the fill sits behind a subtle
         // button, and the clip rounds the button's own hover to the same corners.
         div()
+            .debug_selector(|| format!("ICON-{:?}", icon_name))
             .flex_none()
             .size(size)
             .rounded_md()
@@ -1922,10 +2010,16 @@ impl DockToggleButtons {
             workspace.bottom_dock().clone(),
             workspace.right_dock().clone(),
         ];
-        let subscriptions = docks
+        let mut subscriptions = docks
             .iter()
             .map(|dock| cx.observe(dock, |_, _, cx| cx.notify()))
-            .collect();
+            .collect::<Vec<_>>();
+        // The scene control follows the pane tree (to show a scene as changed) and the
+        // `scenes` setting.
+        if let Some(workspace) = workspace.weak_handle().upgrade() {
+            subscriptions.push(cx.observe(&workspace, |_, _, cx| cx.notify()));
+        }
+        subscriptions.push(cx.observe_global::<SettingsStore>(|_, cx| cx.notify()));
         Self {
             workspace: workspace.weak_handle(),
             docks,
@@ -1936,7 +2030,16 @@ impl DockToggleButtons {
 
 impl Render for DockToggleButtons {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let buttons = self.docks.iter().filter_map(|dock| {
+        let workspace_entity = self.workspace.upgrade();
+        let in_scene = workspace_entity
+            .as_ref()
+            .is_some_and(|workspace| workspace.read(cx).in_scene());
+        let scene_menu = workspace_entity.as_ref().map(|workspace| {
+            crate::scene::render_scene_menu(workspace.read(cx), self.workspace.clone(), cx)
+        });
+        // In a scene the slots replace the docks, and hiding a slot goes through the
+        // dock toggles' actions anyway; the buttons would only show docks that are off.
+        let buttons = self.docks.iter().filter(|_| !in_scene).filter_map(|dock| {
             let dock = dock.read(cx);
             // A dock without panels has nothing to show, so toggling it would do nothing.
             if dock.panels_len() == 0 {
@@ -1978,6 +2081,7 @@ impl Render for DockToggleButtons {
 
         h_flex()
             .gap(DynamicSpacing::Base04.rems(cx))
+            .children(scene_menu)
             .children(buttons)
     }
 }

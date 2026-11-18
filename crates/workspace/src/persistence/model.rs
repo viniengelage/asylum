@@ -490,7 +490,7 @@ impl SerializedPane {
                                 workspace.record_pending_panel_tab(kind, pane);
                             }
                         })
-                        .ok();
+                        .log_err();
                 }
             }
         }

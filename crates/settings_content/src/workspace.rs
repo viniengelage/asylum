@@ -147,11 +147,11 @@ pub struct WorkspaceSettingsContent {
     ///
     /// Default: 8.0
     pub card_gap: Option<f32>,
-    /// Present panels as tabs in a single pane tree instead of in fixed docks, so
-    /// rows and columns can be arranged freely.
+    /// Named layouts a window can switch to. Each one says which panels and content
+    /// appear on screen, in which slot and at which proportion.
     ///
-    /// Default: false
-    pub unified_panes: Option<bool>,
+    /// Default: Code, Mobile and PR review
+    pub scenes: Option<Vec<SceneContent>>,
     pub zoomed_padding: Option<bool>,
     /// Whether invoking a panel's `ToggleFocus` action while the panel is
     /// already focused closes the panel, instead of just moving focus back
@@ -189,6 +189,52 @@ pub struct WorkspaceSettingsContent {
     /// List of panel names to hide from the right dock tab bar.
     /// Example: `["CollabPanel", "OutlinePanel"]`
     pub hidden_right_dock_panels: Option<Vec<String>>,
+}
+
+/// A named layout: a tree of slots, each declaring the content it hosts.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SceneContent {
+    /// Stable identifier. The window remembers its scene by this, so renaming keeps it.
+    pub id: String,
+    /// Shown in the scene picker and the status bar. The built-in scenes leave it out
+    /// and are named in the interface language.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Index of the `ctrl-cmd-N` shortcut that activates the scene, from 1 to 9.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shortcut: Option<u8>,
+    /// The root of the slot tree.
+    pub layout: SceneNodeContent,
+}
+
+/// A node of a scene's slot tree.
+///
+/// A node with `children` splits its space along `axis`; a node without them is a slot.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SceneNodeContent {
+    /// Share of the parent's space, relative to the siblings. Ignored on the root.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flex: Option<f32>,
+    /// Direction the children are laid out in: `horizontal` makes columns, `vertical` rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub axis: Option<SceneAxis>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<SceneNodeContent>,
+    /// Content routed to this slot: `Editor`, `Terminal`, `Browser`, or a panel's
+    /// persistent name such as `AgentPanel` or `DevicesPanel`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub kinds: Vec<String>,
+    /// The slot that receives anything the scene has no slot for. One per scene.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub principal: bool,
+}
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SceneAxis {
+    #[default]
+    Horizontal,
+    Vertical,
 }
 
 #[with_fallible_options]

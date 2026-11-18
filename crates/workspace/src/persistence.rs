@@ -1139,6 +1139,10 @@ impl Domain for WorkspaceDb {
             DROP TABLE trusted_worktrees;
             ALTER TABLE trusted_worktrees_2 RENAME TO trusted_worktrees;
         ),
+        // The scene a window shows, by scene id. NULL means the docks ("Free").
+        sql!(
+            ALTER TABLE workspaces ADD COLUMN active_scene TEXT;
+        ),
     ];
 
     // Allow recovering from bad migration that was initially shipped to nightly
@@ -2583,6 +2587,22 @@ impl WorkspaceDb {
             SELECT display, native_window_state
             FROM workspaces
             WHERE workspace_id = ?
+        }
+    }
+
+    query! {
+        pub(crate) fn active_scene(workspace_id: WorkspaceId) -> Result<Option<Option<String>>> {
+            SELECT active_scene
+            FROM workspaces
+            WHERE workspace_id = ?
+        }
+    }
+
+    query! {
+        pub(crate) async fn set_active_scene(workspace_id: WorkspaceId, active_scene: Option<String>) -> Result<()> {
+            UPDATE workspaces
+            SET active_scene = ?2
+            WHERE workspace_id = ?1
         }
     }
 

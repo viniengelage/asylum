@@ -63,6 +63,7 @@ pub struct PastePinned {
 
 pub fn init(cx: &mut App) {
     workspace::register_lazy_panel::<NotesPanel>(panel::restore_panel, cx);
+    workspace::register_panel_item::<NotesPanel>(cx);
 
     cx.observe_new(|workspace: &mut Workspace, _window, _cx| {
         workspace.register_action(|workspace, _: &OpenPalette, window, cx| {

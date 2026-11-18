@@ -229,8 +229,19 @@ impl<T: Panel> SerializableItem for PanelItem<T> {
         window: &mut Window,
         cx: &mut App,
     ) -> Task<Result<Entity<Self>>> {
-        let panel = workspace.update(cx, |workspace, cx| workspace.panel::<T>(cx));
-        Task::ready(match panel {
+        let panel = workspace.update(cx, |workspace, cx| {
+            // Outside a scene the docks present panels; a restored tab would render the
+            // panel a second time.
+            if workspace.in_scene() {
+                Ok(workspace.panel::<T>(cx))
+            } else {
+                Err(anyhow!(
+                    "not restoring the {} tab: the window shows the docks",
+                    T::persistent_name()
+                ))
+            }
+        });
+        Task::ready(match panel.and_then(|panel| panel) {
             Ok(Some(panel)) => Ok(cx.new(|cx| Self::new(panel, window, cx))),
             Ok(None) => Err(anyhow!(
                 "cannot restore {}, panel is not registered in the workspace",

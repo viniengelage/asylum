@@ -13417,6 +13417,11 @@ fn all_thread_infos_for_workspace(
     Some(threads).into_iter().flatten()
 }
 
+/// Lets a scene show the devices panel as a tab of a slot.
+pub fn register_panel_item(cx: &mut App) {
+    workspace::register_panel_item::<Sidebar>(cx);
+}
+
 /// Registers the agent toolkits this crate owns: the devices of the Devices dock.
 pub fn register_agent_toolkits(cx: &mut App) {
     device_toolkit::register_toolkit(cx);

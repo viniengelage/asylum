@@ -318,20 +318,22 @@ impl PaneGroup {
             _ => bounding_box.center(),
         };
 
-        let distance_to_next = crate::HANDLE_HITBOX_SIZE;
+        // Panes are cards separated by the card gap; a point just past the edge would land
+        // in that gap and find no neighbour.
+        let distance_to_next = px(crate::HANDLE_HITBOX_SIZE) + workspace_card_gap(cx);
 
         let target = match direction {
             SplitDirection::Left => {
-                Point::new(bounding_box.left() - distance_to_next.into(), center.y)
+                Point::new(bounding_box.left() - distance_to_next, center.y)
             }
             SplitDirection::Right => {
-                Point::new(bounding_box.right() + distance_to_next.into(), center.y)
+                Point::new(bounding_box.right() + distance_to_next, center.y)
             }
             SplitDirection::Up => {
-                Point::new(center.x, bounding_box.top() - distance_to_next.into())
+                Point::new(center.x, bounding_box.top() - distance_to_next)
             }
             SplitDirection::Down => {
-                Point::new(center.x, bounding_box.bottom() + distance_to_next.into())
+                Point::new(center.x, bounding_box.bottom() + distance_to_next)
             }
         };
         self.pane_at_pixel_position(target)
@@ -356,6 +358,7 @@ impl Member {
                 for member in pane_axis.members.iter_mut() {
                     member.mark_positions(in_center_group, cx);
                 }
+                pane_axis.keep_collapsed_members_empty(cx);
             }
             Member::Pane(entity) => entity.update(cx, |pane, _| {
                 pane.in_center_group = in_center_group;
@@ -787,7 +790,13 @@ impl PaneAxis {
             } else {
                 let restored = pane
                     .update(cx, |pane, _| pane.take_collapsed_flex())
-                    .unwrap_or(1.);
+                    .unwrap_or(1.)
+                    .max(0.05);
+                // A reset may already have handed the member its share back; taking
+                // more from the siblings would break the sum.
+                if flexes[index] > 0. {
+                    return true;
+                }
                 // Cannot reclaim more than the siblings currently hold, or the sum breaks.
                 let available: f32 = flexes
                     .iter()
@@ -806,6 +815,80 @@ impl PaneAxis {
             Member::Axis(axis) => axis.set_pane_collapsed(pane, collapsed, cx),
             Member::Pane(_) => false,
         })
+    }
+
+    /// Inserting, removing or resetting members sets every flex back to 1, which would
+    /// hand a hidden slot a share of space it then renders blank. Every tree change ends
+    /// in `mark_positions`, which calls this to give that share back to the siblings.
+    fn keep_collapsed_members_empty(&mut self, cx: &mut App) {
+        let collapsed = self
+            .members
+            .iter()
+            .map(|member| match member {
+                Member::Pane(pane) => pane.read(cx).is_collapsed(),
+                Member::Axis(_) => false,
+            })
+            .collect::<Vec<_>>();
+        // An axis of nothing but hidden slots has nowhere to give space to.
+        if collapsed.iter().all(|collapsed| *collapsed) {
+            for member in &self.members {
+                if let Member::Pane(pane) = member {
+                    pane.update(cx, |pane, _| pane.set_collapsed_flex(None));
+                }
+            }
+            *self.flexes.lock() = vec![1.; self.members.len()];
+            return;
+        }
+        let mut flexes = self.flexes.lock();
+        if flexes.len() != collapsed.len() {
+            return;
+        }
+        for (index, is_collapsed) in collapsed.iter().enumerate() {
+            let Some(flex) = flexes.get(index).copied() else {
+                continue;
+            };
+            if *is_collapsed && flex > 0. {
+                flexes[index] = 0.;
+                distribute(&mut flexes, index, flex);
+            }
+        }
+    }
+
+    /// The flexes to persist. Hiding a slot is not persisted, so a hidden slot is saved
+    /// at the size it will come back at; saved at zero it could never be shown again.
+    pub fn flexes_with_collapsed_shown(members: &[Member], flexes: &[f32], cx: &App) -> Vec<f32> {
+        let mut flexes = flexes.to_vec();
+        if flexes.len() != members.len() {
+            return flexes;
+        }
+        let count = flexes.len() as f32;
+        for (index, member) in members.iter().enumerate() {
+            let Member::Pane(pane) = member else {
+                continue;
+            };
+            let Some(restored) = pane.read(cx).collapsed_flex() else {
+                continue;
+            };
+            let restored = restored.clamp(0.05, count - 0.05);
+            let others: f32 = flexes
+                .iter()
+                .enumerate()
+                .filter(|(other, _)| *other != index)
+                .map(|(_, flex)| *flex)
+                .sum();
+            if others <= 0. {
+                continue;
+            }
+            let scale = (count - restored) / others;
+            for (other, flex) in flexes.iter_mut().enumerate() {
+                if other == index {
+                    *flex = restored;
+                } else {
+                    *flex *= scale;
+                }
+            }
+        }
+        flexes
     }
 
     fn insert_pane(&mut self, idx: usize, new_pane: &Entity<Pane>) {

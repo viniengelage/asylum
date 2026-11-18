@@ -349,6 +349,74 @@
   // List of panel names to hide from the right dock tab bar.
   // Example: ["CollabPanel", "OutlinePanel"]
   "hidden_right_dock_panels": [],
+  // Named layouts a window can switch to (ctrl-cmd-1…9 on macOS, ctrl-cmd-0 goes back to
+  // the docks). A node with "children" splits along "axis" ("horizontal" = columns,
+  // "vertical" = rows); a node without children is a slot hosting the listed "kinds":
+  // "Editor", "Terminal", "Browser" or a panel name such as "AgentPanel", "DevicesPanel",
+  // "Project Panel" or "GitPanel". The "principal" slot receives anything without a slot.
+  "scenes": [
+    {
+      "id": "code",
+      "shortcut": 1,
+      "layout": {
+        "axis": "horizontal",
+        "children": [
+          { "flex": 0.18, "kinds": ["Project Panel"] },
+          {
+            "flex": 0.56,
+            "axis": "vertical",
+            "children": [
+              { "flex": 0.7, "kinds": ["Editor"], "principal": true },
+              { "flex": 0.3, "kinds": ["Terminal"] },
+            ],
+          },
+          { "flex": 0.26, "kinds": ["AgentPanel"] },
+        ],
+      },
+    },
+    {
+      "id": "mobile",
+      "shortcut": 2,
+      "layout": {
+        "axis": "horizontal",
+        "children": [
+          { "flex": 0.25, "kinds": ["DevicesPanel"] },
+          { "flex": 0.49, "kinds": ["Terminal"], "principal": true },
+          { "flex": 0.26, "kinds": ["AgentPanel"] },
+        ],
+      },
+    },
+    {
+      "id": "mobile_stacked",
+      "shortcut": 3,
+      "layout": {
+        "axis": "horizontal",
+        "children": [
+          { "flex": 0.25, "kinds": ["DevicesPanel"] },
+          {
+            "flex": 0.75,
+            "axis": "vertical",
+            "children": [
+              { "flex": 0.62, "kinds": ["AgentPanel"] },
+              { "flex": 0.38, "kinds": ["Terminal"], "principal": true },
+            ],
+          },
+        ],
+      },
+    },
+    {
+      "id": "review",
+      "shortcut": 4,
+      "layout": {
+        "axis": "horizontal",
+        "children": [
+          { "flex": 0.22, "kinds": ["GitPanel"] },
+          { "flex": 0.5, "kinds": ["Editor"], "principal": true },
+          { "flex": 0.28, "kinds": ["AgentPanel"] },
+        ],
+      },
+    },
+  ],
   // Determines how snippets are sorted relative to other completion items.
   //
   // 1. Place snippets at the top of the completion list:
