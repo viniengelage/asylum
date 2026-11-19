@@ -2374,7 +2374,10 @@ impl ContextMenu {
                     .group_name("label_container")
                     .inset(true)
                     .spacing(self.spacing)
-                    .when(self.sectioned, |item| item.height(px(32.)))
+                    .when(self.sectioned, |item| {
+                        // The description is a second line under the label.
+                        item.height(px(if description.is_some() { 44. } else { 32. }))
+                    })
                     .disabled(*disabled)
                     .aria_role(if toggle.is_some() {
                         Role::MenuItemCheckBox
