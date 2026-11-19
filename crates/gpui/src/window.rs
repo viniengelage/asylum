@@ -991,6 +991,11 @@ fn painted_bounds(scene: &Scene, range: Range<usize>, scale_factor: f32) -> Opti
         let crate::scene::PaintOperation::Primitive(primitive) = operation else {
             continue;
         };
+        // A shadow's bounds include its blur (64px for elevated menus); cutting the hole that
+        // large exposes a dark band of the window behind the hosted view around the overlay.
+        if matches!(primitive, crate::scene::Primitive::Shadow(_)) {
+            continue;
+        }
         let bounds = primitive
             .bounds()
             .intersect(&primitive.content_mask().bounds);
