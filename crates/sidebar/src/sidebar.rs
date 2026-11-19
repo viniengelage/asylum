@@ -9514,11 +9514,18 @@ impl Sidebar {
             return;
         }
 
+        // Only the transition to closed hides it: the dock re-notifies on every notify of this
+        // panel, and in a scene the dock stays closed while the panel is shown in a pane, so
+        // hiding on "is closed" fought the pane's render and froze the app re-adding the child
+        // window and restarting the pasteboard sync on every frame.
+        let mut was_open = dock.read(cx).is_open();
         self.devices_dock_subscription =
-            Some(cx.observe_in(&dock, window, |this, dock, window, cx| {
-                if !dock.read(cx).is_open() {
+            Some(cx.observe_in(&dock, window, move |this, dock, window, cx| {
+                let is_open = dock.read(cx).is_open();
+                if was_open && !is_open {
                     this.hide_ios_simulator_view(window);
                 }
+                was_open = is_open;
             }));
         self.observed_devices_dock = Some(dock.entity_id());
     }
