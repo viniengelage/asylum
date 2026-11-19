@@ -4754,7 +4754,12 @@ impl Render for Pane {
             return div().track_focus(&self.focus_handle(cx));
         };
         // WSL remotes accept dropped host files too, since their paths can be translated with `wslpath`; see `Pane::handle_external_paths_drop`.
-        let accepts_external_paths = {
+        // A hosted panel (e.g. the agent in a scene) takes dropped files itself, as it does in a
+        // dock; the pane's drop target would cover it and open or split the files instead.
+        let hosts_panel = self.active_item().is_some_and(|item| {
+            crate::panel_item::PanelItemRegistry::is_panel_item(&item.to_any_view(), cx)
+        });
+        let accepts_external_paths = !hosts_panel && {
             let project = project.read(cx);
             project.is_local() || project.is_via_wsl(cx)
         };
