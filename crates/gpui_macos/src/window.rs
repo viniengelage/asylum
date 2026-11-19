@@ -1463,6 +1463,12 @@ impl MacWindow {
             // The mask that cuts overlays out of the hosted view lives on the container's layer,
             // so it has to be layer-backed whether or not the hosted view asks for layers.
             let _: () = msg_send![container, setWantsLayer: Bool::YES];
+            // Autoresizing only carries later size deltas over, so a view created at a
+            // placeholder size (the web view starts at 800x600) would stay that much off.
+            let _: () = msg_send![
+                subview,
+                setFrame: NSRect::new(NSPoint::new(0., 0.), screen_rect.size)
+            ];
             let _: () = msg_send![container, addSubview: subview];
             // Cursor rects lose to a subview that sets the cursor itself, so also ask for
             // `cursorUpdate:` over the whole container. Enter and move are tracked as well
