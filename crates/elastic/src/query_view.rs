@@ -703,7 +703,7 @@ impl EsqlQueryView {
             .py_1p5()
             .gap_2()
             .child(
-                Icon::new(IconName::CloudPulse)
+                Icon::new(IconName::LogSearch)
                     .size(IconSize::Small)
                     .color(Color::Muted),
             )
@@ -1761,7 +1761,7 @@ impl Item for EsqlQueryView {
     }
 
     fn tab_icon(&self, _window: &gpui::Window, _cx: &App) -> Option<Icon> {
-        Some(Icon::new(IconName::CloudPulse).color(Color::Muted))
+        Some(Icon::new(IconName::LogSearch).color(Color::Muted))
     }
 
     fn telemetry_event_text(&self) -> Option<&'static str> {

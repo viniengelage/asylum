@@ -120,7 +120,7 @@ pub const TOOLKITS: &[ToolkitInfo] = &[
     ToolkitInfo {
         id: task_agents::toolkit_ids::ELASTIC,
         domain: ToolkitDomain::Backend,
-        icon: IconName::CloudPulse,
+        icon: IconName::LogSearch,
         label: || "Elastic".into(),
     },
     ToolkitInfo {

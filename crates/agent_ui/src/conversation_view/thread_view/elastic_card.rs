@@ -396,7 +396,7 @@ impl ThreadView {
             ),
             Presentation::Number => (IconName::Hash, Color::Accent, source),
             _ => (
-                IconName::CloudPulse,
+                IconName::LogSearch,
                 Color::Accent,
                 format!("{source} · {}", rows_label(result.total_rows, logs)),
             ),
@@ -1142,7 +1142,7 @@ impl ThreadView {
                     )
                     .label_size(LabelSize::Small)
                     .start_icon(
-                        Icon::new(IconName::CloudPulse)
+                        Icon::new(IconName::LogSearch)
                             .size(IconSize::XSmall)
                             .color(Color::Accent),
                     )

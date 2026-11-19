@@ -670,7 +670,7 @@ impl Render for ConnectView {
                                     .rounded_md()
                                     .bg(Color::Accent.color(cx).opacity(0.12))
                                     .child(
-                                        Icon::new(IconName::CloudPulse)
+                                        Icon::new(IconName::LogSearch)
                                             .size(IconSize::XSmall)
                                             .color(Color::Accent),
                                     )
@@ -850,7 +850,7 @@ impl Item for ConnectView {
     }
 
     fn tab_icon(&self, _window: &Window, _cx: &App) -> Option<Icon> {
-        Some(Icon::new(IconName::CloudPulse).color(Color::Muted))
+        Some(Icon::new(IconName::LogSearch).color(Color::Muted))
     }
 
     fn telemetry_event_text(&self) -> Option<&'static str> {

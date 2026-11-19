@@ -1085,7 +1085,7 @@ impl ElasticPanel {
                                         Color::Accent.color(cx).opacity(0.12)
                                     })
                                     .child(
-                                        Icon::new(IconName::CloudPulse)
+                                        Icon::new(IconName::LogSearch)
                                             .size(IconSize::Small)
                                             .color(if failed {
                                                 Color::Error
@@ -1558,7 +1558,7 @@ impl ElasticPanel {
                             .rounded_lg()
                             .bg(Color::Accent.color(cx).opacity(0.12))
                             .child(
-                                Icon::new(IconName::CloudPulse)
+                                Icon::new(IconName::LogSearch)
                                     .size(IconSize::Medium)
                                     .color(Color::Accent),
                             ),
@@ -1617,7 +1617,7 @@ impl ElasticPanel {
                         .cursor_pointer()
                         .hover(|style| style.bg(cx.theme().colors().element_hover))
                         .child(
-                            Icon::new(IconName::CloudPulse)
+                            Icon::new(IconName::LogSearch)
                                 .size(IconSize::Small)
                                 .color(Color::Muted),
                         )
@@ -1974,7 +1974,7 @@ impl Panel for ElasticPanel {
     }
 
     fn tab_icon(&self, _window: &Window, _cx: &App) -> Option<IconName> {
-        Some(IconName::CloudPulse)
+        Some(IconName::LogSearch)
     }
 
     fn icon_tooltip(&self, _window: &Window, _cx: &App) -> Option<&'static str> {

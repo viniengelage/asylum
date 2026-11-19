@@ -196,6 +196,7 @@ pub enum IconName {
     ListX,
     LoadCircle,
     LocationEdit,
+    LogSearch,
     Lock,
     LockOff,
     MagnifyingGlass,

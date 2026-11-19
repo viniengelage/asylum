@@ -762,7 +762,7 @@ impl Render for FollowView {
                     .py_1p5()
                     .gap_2()
                     .child(
-                        Icon::new(IconName::CloudPulse)
+                        Icon::new(IconName::LogSearch)
                             .size(IconSize::Small)
                             .color(Color::Muted),
                     )
