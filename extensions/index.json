@@ -4343,10 +4343,10 @@
    "provides": [
     "language-servers"
    ],
-   "published_at": "2026-11-01T11:15:29Z",
+   "published_at": "2026-11-23T14:16:19Z",
    "repository": "https://github.com/ahockersten/emoji-completions-zed",
    "schema_version": 1,
-   "version": "1.4.0",
+   "version": "1.5.1",
    "wasm_api_version": "0.7.0"
   },
   {
@@ -5194,6 +5194,24 @@
    "repository": "https://github.com/takeshiyu/formosa-zed-theme",
    "schema_version": 1,
    "version": "1.0.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Joop Kiefte <joop@kiefte.net>"
+   ],
+   "description": "Fountain screenplay support: highlighting, outline of sections and scenes",
+   "download_count": 0,
+   "id": "fountain",
+   "name": "Fountain",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-23T14:16:26Z",
+   "repository": "https://github.com/LaPingvino/zed-fountain",
+   "schema_version": 1,
+   "version": "0.3.0",
    "wasm_api_version": null
   },
   {

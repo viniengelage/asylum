@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Joop Kiefte <joop@kiefte.net>"
+   ],
+   "description": "Fountain screenplay support: highlighting, outline of sections and scenes",
+   "download_count": 0,
+   "id": "fountain",
+   "name": "Fountain",
+   "provides": [
+    "languages",
+    "grammars"
+   ],
+   "published_at": "2026-11-23T14:16:26Z",
+   "repository": "https://github.com/LaPingvino/zed-fountain",
+   "schema_version": 1,
+   "version": "0.3.0",
+   "wasm_api_version": null
+  }
+ ]
+}
