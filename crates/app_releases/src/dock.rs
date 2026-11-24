@@ -133,6 +133,17 @@ impl ReleasesPanel {
                     }),
             )
             .end_child(
+                IconButton::new("releases-release-agent", IconName::Sparkle)
+                    .icon_size(IconSize::Small)
+                    .tooltip(Tooltip::for_action_title(
+                        t!("app_releases.agent.create"),
+                        &crate::CreateReleaseAgent,
+                    ))
+                    .on_click(|_, window, cx| {
+                        window.dispatch_action(Box::new(crate::CreateReleaseAgent), cx)
+                    }),
+            )
+            .end_child(
                 IconButton::new("releases-refresh", IconName::RotateCw)
                     .icon_size(IconSize::Small)
                     .disabled(refreshing)

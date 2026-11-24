@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use collections::HashSet;
 use db::kvp::KeyValueStore;
 use editor::Editor;
@@ -17,7 +17,9 @@ use ui::{
 use util::ResultExt as _;
 use workspace::{ModalView, Workspace, tasks::ScheduledTaskResult};
 
-use crate::store::ReleasesStore;
+use crate::{model::Platform, store::ReleasesStore};
+use futures::channel::oneshot;
+use std::sync::Arc;
 
 const CLEAN_BUILD_IDS_KEY: &str = "app_releases__clean_build_ids";
 const CLEAN_BUILD_MESSAGE: &str = "asylum clean build";
@@ -183,7 +185,7 @@ async fn confirmed(answer: Result<futures::channel::oneshot::Receiver<usize>>) -
     }
 }
 
-async fn git(folder: &Path, args: &[&str]) -> Option<String> {
+pub(crate) async fn git(folder: &Path, args: &[&str]) -> Option<String> {
     let output = util::command::new_command("git")
         .args(args)
         .current_dir(folder)
@@ -197,13 +199,13 @@ async fn git(folder: &Path, args: &[&str]) -> Option<String> {
 }
 
 #[derive(Clone, Debug)]
-struct BranchState {
-    repository_root: PathBuf,
-    on_origin: bool,
-    ahead: usize,
+pub(crate) struct BranchState {
+    pub repository_root: PathBuf,
+    pub on_origin: bool,
+    pub ahead: usize,
 }
 
-async fn branch_state(app_folder: &Path, branch: &str) -> Option<BranchState> {
+pub(crate) async fn branch_state(app_folder: &Path, branch: &str) -> Option<BranchState> {
     let repository_root = PathBuf::from(git(app_folder, &["rev-parse", "--show-toplevel"]).await?);
     // Offline is fine: origin is then judged by what was fetched last.
     git(&repository_root, &["fetch", "origin", branch]).await;
@@ -227,6 +229,110 @@ async fn branch_state(app_folder: &Path, branch: &str) -> Option<BranchState> {
         on_origin,
         ahead,
     })
+}
+
+/// What to build, as chosen in the modal or asked by an agent.
+#[derive(Clone, Debug)]
+pub struct BuildRequest {
+    pub app_folder: PathBuf,
+    pub branch: String,
+    pub profile: String,
+    pub platform: BuildPlatform,
+    pub local: bool,
+    pub clear_cache: bool,
+}
+
+pub(crate) fn plan_for(
+    state: &BranchState,
+    request: &BuildRequest,
+    commit_ref: String,
+    fetch: bool,
+) -> CleanBuildPlan {
+    let app_subfolder = request
+        .app_folder
+        .strip_prefix(&state.repository_root)
+        .map(Path::to_path_buf)
+        .unwrap_or_default();
+    let result_file = paths::temp_dir().join(format!(
+        "asylum-clean-build-{}.json",
+        chrono::Utc::now().timestamp_millis()
+    ));
+    CleanBuildPlan {
+        repository_root: state.repository_root.clone(),
+        app_subfolder,
+        commit_ref,
+        branch: request.branch.clone(),
+        fetch,
+        profile: request.profile.clone(),
+        platform: request.platform,
+        local: request.local,
+        clear_cache: request.clear_cache,
+        install_command: install_command(&request.app_folder),
+        result_file,
+        worktrees_dir: paths::temp_dir().join("asylum-clean-builds"),
+    }
+}
+
+/// Runs the clean build as a task (so it shows in Execuções). The receiver gets the EAS build
+/// ids, or `None` when a step failed or the task was stopped.
+pub(crate) fn schedule_clean_build(
+    workspace: &mut Workspace,
+    store: Entity<ReleasesStore>,
+    plan: CleanBuildPlan,
+    token: Arc<str>,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) -> oneshot::Receiver<Option<Vec<String>>> {
+    let (sender, receiver) = oneshot::channel();
+    let mut template = TaskTemplate {
+        label: t!(
+            "app_releases.clean_build.task_label",
+            branch = plan.branch.clone(),
+            profile = plan.profile.clone()
+        )
+        .to_string(),
+        command: "bash".to_string(),
+        args: vec!["-c".to_string(), clean_build_script(&plan)],
+        cwd: Some(plan.repository_root.to_string_lossy().into_owned()),
+        ..TaskTemplate::default()
+    };
+    template
+        .env
+        .insert("EXPO_TOKEN".to_string(), token.to_string());
+    let Some(resolved) = template.resolve_task("asylum-clean-build", &TaskContext::default())
+    else {
+        sender.send(None).ok();
+        return receiver;
+    };
+    let kvp = KeyValueStore::global(cx);
+    let result_file = plan.result_file;
+    workspace.schedule_resolved_task_with_completion(
+        TaskSourceKind::UserInput,
+        resolved,
+        false,
+        move |result, cx| {
+            if result != ScheduledTaskResult::Success {
+                sender.send(None).ok();
+                return;
+            }
+            let ids = std::fs::read_to_string(&result_file)
+                .map(|json| parse_build_ids(&json))
+                .unwrap_or_default();
+            std::fs::remove_file(&result_file).log_err();
+            cx.background_spawn({
+                let ids = ids.clone();
+                async move {
+                    remember_clean_builds(kvp, ids).await.log_err();
+                }
+            })
+            .detach();
+            store.update(cx, |store, cx| store.refresh(cx));
+            sender.send(Some(ids)).ok();
+        },
+        window,
+        cx,
+    );
+    receiver
 }
 
 /// "Nova build limpa": builds on EAS what a branch has on origin, from a throwaway worktree.
@@ -420,74 +526,18 @@ impl CleanBuildModal {
                 }
             }
 
-            let app_subfolder = app_folder
-                .strip_prefix(&state.repository_root)
-                .map(Path::to_path_buf)
-                .unwrap_or_default();
-            let result_file = paths::temp_dir().join(format!(
-                "asylum-clean-build-{}.json",
-                chrono::Utc::now().timestamp()
-            ));
-            let plan = CleanBuildPlan {
-                repository_root: state.repository_root.clone(),
-                app_subfolder,
-                commit_ref,
+            let request = BuildRequest {
+                app_folder: app_folder.clone(),
                 branch: branch.clone(),
-                fetch,
                 profile: profile.clone(),
                 platform,
                 local,
                 clear_cache,
-                install_command: install_command(&app_folder),
-                result_file: result_file.clone(),
-                worktrees_dir: paths::temp_dir().join("asylum-clean-builds"),
             };
-            let mut template = TaskTemplate {
-                label: t!(
-                    "app_releases.clean_build.task_label",
-                    branch = branch.clone(),
-                    profile = profile.clone()
-                )
-                .to_string(),
-                command: "bash".to_string(),
-                args: vec!["-c".to_string(), clean_build_script(&plan)],
-                cwd: Some(state.repository_root.to_string_lossy().into_owned()),
-                ..TaskTemplate::default()
-            };
-            template
-                .env
-                .insert("EXPO_TOKEN".to_string(), token.to_string());
-            let Some(resolved) =
-                template.resolve_task("asylum-clean-build", &TaskContext::default())
-            else {
-                return;
-            };
-            let kvp = cx.update(|_, cx| KeyValueStore::global(cx)).ok();
+            let plan = plan_for(&state, &request, commit_ref, fetch);
             workspace
                 .update_in(cx, |workspace, window, cx| {
-                    workspace.schedule_resolved_task_with_completion(
-                        TaskSourceKind::UserInput,
-                        resolved,
-                        false,
-                        move |result, cx| {
-                            if result != ScheduledTaskResult::Success {
-                                return;
-                            }
-                            let ids = std::fs::read_to_string(&result_file)
-                                .map(|json| parse_build_ids(&json))
-                                .unwrap_or_default();
-                            std::fs::remove_file(&result_file).log_err();
-                            if let Some(kvp) = kvp {
-                                cx.background_spawn(async move {
-                                    remember_clean_builds(kvp, ids).await.log_err();
-                                })
-                                .detach();
-                            }
-                            store.update(cx, |store, cx| store.refresh(cx));
-                        },
-                        window,
-                        cx,
-                    );
+                    schedule_clean_build(workspace, store, plan, token, window, cx)
                 })
                 .log_err();
             this.update(cx, |_, cx| cx.emit(DismissEvent)).log_err();
@@ -691,57 +741,321 @@ impl Render for CleanBuildModal {
     }
 }
 
-/// The EAS command that sends a finished build to its store.
-pub fn submit_command(build_id: &str, platform: crate::model::Platform) -> Vec<String> {
-    let platform = match platform {
-        crate::model::Platform::Ios => "ios",
-        crate::model::Platform::Android => "android",
-    };
+/// The EAS command that sends a finished build to its store. It doesn't wait: the dock follows
+/// the submission on EAS like any other.
+pub fn submit_command(build_id: &str, platform: Platform) -> Vec<String> {
     [
         "--yes",
         "eas-cli",
         "submit",
         "--platform",
-        platform,
+        platform_flag(platform),
         "--id",
         build_id,
         "--non-interactive",
+        "--no-wait",
     ]
     .into_iter()
     .map(str::to_string)
     .collect()
 }
 
-/// Sends a clean build to its store with `eas submit --id`, after the user confirms.
+fn platform_flag(platform: Platform) -> &'static str {
+    match platform {
+        Platform::Ios => "ios",
+        Platform::Android => "android",
+    }
+}
+
+/// eas-cli reads submit credentials only from the submit profile of `eas.json` (which expands
+/// `$VARS`) or from what EAS has saved. A profile that points at these variables gets the keys
+/// of Lançamentos for the length of one submit.
+pub const ASC_KEY_PATH_VAR: &str = "EXPO_ASC_API_KEY_PATH";
+pub const ASC_KEY_ID_VAR: &str = "EXPO_ASC_KEY_ID";
+pub const ASC_ISSUER_ID_VAR: &str = "EXPO_ASC_ISSUER_ID";
+pub const PLAY_KEY_PATH_VAR: &str = "ASYLUM_GOOGLE_SERVICE_ACCOUNT_KEY_PATH";
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SubmitCheck {
+    /// iOS: without `ascAppId` eas-cli refuses to submit when it can't ask.
+    pub missing_asc_app_id: bool,
+    /// The profile reads the variables above, so Asylum's keys are used instead of EAS's.
+    pub uses_asylum_credentials: bool,
+}
+
+/// The submit profile eas-cli picks (`production`, as it does by default), with `extends`
+/// followed, for one platform.
+fn submit_profile(eas_json: &serde_json::Value, platform: Platform) -> serde_json::Map<String, serde_json::Value> {
+    let profiles = eas_json.get("submit").and_then(serde_json::Value::as_object);
+    let mut merged = serde_json::Map::new();
+    let mut name = Some("production".to_string());
+    let mut chain = Vec::new();
+    while let Some(current) = name.take() {
+        if chain.contains(&current) {
+            break;
+        }
+        let Some(profile) = profiles.and_then(|profiles| profiles.get(&current)) else {
+            break;
+        };
+        name = profile
+            .get("extends")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+        chain.push(current);
+        if let Some(fields) = profile
+            .get(platform_flag(platform))
+            .and_then(serde_json::Value::as_object)
+        {
+            for (key, value) in fields {
+                merged.entry(key.clone()).or_insert_with(|| value.clone());
+            }
+        }
+    }
+    merged
+}
+
+pub fn check_submit_profile(eas_json: &str, platform: Platform) -> SubmitCheck {
+    let value = serde_json_lenient::from_str::<serde_json::Value>(eas_json).unwrap_or_default();
+    let profile = submit_profile(&value, platform);
+    let field = |key: &str| profile.get(key).and_then(serde_json::Value::as_str);
+    match platform {
+        Platform::Ios => SubmitCheck {
+            missing_asc_app_id: field("ascAppId").is_none_or(str::is_empty),
+            uses_asylum_credentials: field("ascApiKeyPath")
+                .is_some_and(|path| path.contains(ASC_KEY_PATH_VAR)),
+        },
+        Platform::Android => SubmitCheck {
+            missing_asc_app_id: false,
+            uses_asylum_credentials: field("serviceAccountKeyPath")
+                .is_some_and(|path| path.contains(PLAY_KEY_PATH_VAR)),
+        },
+    }
+}
+
+/// What to add under `submit.production` in `eas.json` so a submit uses Lançamentos' keys.
+pub fn submit_profile_snippet(platform: Platform, asc_app_id: Option<&str>) -> String {
+    let fields = match platform {
+        Platform::Ios => serde_json::json!({
+            "ios": {
+                "ascAppId": asc_app_id.unwrap_or("<App Store Connect app id>"),
+                "ascApiKeyPath": format!("${ASC_KEY_PATH_VAR}"),
+                "ascApiKeyId": format!("${ASC_KEY_ID_VAR}"),
+                "ascApiKeyIssuerId": format!("${ASC_ISSUER_ID_VAR}"),
+            }
+        }),
+        Platform::Android => serde_json::json!({
+            "android": { "serviceAccountKeyPath": format!("${PLAY_KEY_PATH_VAR}") }
+        }),
+    };
+    serde_json::to_string_pretty(&serde_json::json!({ "submit": { "production": fields } }))
+        .unwrap_or_default()
+}
+
+/// Key files written for one submit. They are deleted when this is dropped, so a submit that
+/// never starts (cancelled, no window) doesn't leave keys behind.
+#[derive(Default)]
+struct SecretFiles(Vec<PathBuf>);
+
+impl Drop for SecretFiles {
+    fn drop(&mut self) {
+        for file in &self.0 {
+            std::fs::remove_file(file).log_err();
+        }
+    }
+}
+
+/// Everything one `eas submit` needs. The key files only live until the task ends.
+pub(crate) struct SubmitPlan {
+    build_id: String,
+    platform: Platform,
+    folder: PathBuf,
+    env: Vec<(String, String)>,
+    secret_files: SecretFiles,
+    pub uses_asylum_credentials: bool,
+}
+
+fn write_secret_file(name: &str, contents: &str) -> Result<PathBuf> {
+    let directory = paths::temp_dir().join("asylum-submit");
+    std::fs::create_dir_all(&directory)?;
+    let path = directory.join(format!(
+        "{}-{name}",
+        chrono::Utc::now().timestamp_millis()
+    ));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    let mut file = options.open(&path)?;
+    std::io::Write::write_all(&mut file, contents.as_bytes())?;
+    Ok(path)
+}
+
+/// Checks `eas.json` and the accounts, and writes the keys the profile asks for.
+pub(crate) fn prepare_submit(
+    store: &ReleasesStore,
+    build_id: String,
+    platform: Platform,
+    cx: &App,
+) -> Result<SubmitPlan> {
+    let accounts = store
+        .accounts()
+        .read(cx)
+        .accounts()
+        .cloned()
+        .unwrap_or_default();
+    let token = accounts
+        .expo
+        .as_ref()
+        .map(|expo| expo.token.clone())
+        .with_context(|| t!("app_releases.clean_build.no_expo"))?;
+    let app = store
+        .selected_app()
+        .with_context(|| t!("app_releases.submit.no_app"))?;
+    let folder = app.folder.to_path_buf();
+    let eas_json = std::fs::read_to_string(folder.join("eas.json")).unwrap_or_default();
+    let check = check_submit_profile(&eas_json, platform);
+    if check.missing_asc_app_id {
+        anyhow::bail!(
+            "{}",
+            t!(
+                "app_releases.submit.missing_asc_app_id",
+                snippet = submit_profile_snippet(platform, app.app_store_app_id.as_deref())
+            )
+        );
+    }
+    let mut env = vec![("EXPO_TOKEN".to_string(), token.to_string())];
+    let mut secret_files = SecretFiles::default();
+    if check.uses_asylum_credentials {
+        match platform {
+            Platform::Ios => {
+                let account = accounts
+                    .app_store
+                    .as_ref()
+                    .with_context(|| t!("app_releases.write.no_account", service = "App Store Connect"))?;
+                let path = write_secret_file("AuthKey.p8", &account.private_key)?;
+                env.push((ASC_KEY_PATH_VAR.into(), path.to_string_lossy().into_owned()));
+                env.push((ASC_KEY_ID_VAR.into(), account.key_id.trim().to_string()));
+                env.push((ASC_ISSUER_ID_VAR.into(), account.issuer_id.trim().to_string()));
+                secret_files.0.push(path);
+            }
+            Platform::Android => {
+                let account = accounts
+                    .google_play
+                    .as_ref()
+                    .with_context(|| t!("app_releases.write.no_account", service = "Google Play"))?;
+                let path = write_secret_file("service-account.json", &account.json)?;
+                env.push((PLAY_KEY_PATH_VAR.into(), path.to_string_lossy().into_owned()));
+                secret_files.0.push(path);
+            }
+        }
+    }
+    Ok(SubmitPlan {
+        build_id,
+        platform,
+        folder,
+        env,
+        secret_files,
+        uses_asylum_credentials: check.uses_asylum_credentials,
+    })
+}
+
+/// Runs `eas submit` as a task; the receiver says whether it worked.
+pub(crate) fn schedule_submit(
+    workspace: &mut Workspace,
+    store: Entity<ReleasesStore>,
+    plan: SubmitPlan,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) -> oneshot::Receiver<bool> {
+    let (sender, receiver) = oneshot::channel();
+    let mut template = TaskTemplate {
+        label: t!(
+            "app_releases.clean_build.submit_label",
+            build = plan.build_id.clone()
+        )
+        .to_string(),
+        command: "npx".to_string(),
+        args: submit_command(&plan.build_id, plan.platform),
+        cwd: Some(plan.folder.to_string_lossy().into_owned()),
+        ..TaskTemplate::default()
+    };
+    template.env.extend(plan.env);
+    let Some(resolved) =
+        template.resolve_task("asylum-clean-build-submit", &TaskContext::default())
+    else {
+        sender.send(false).ok();
+        return receiver;
+    };
+    let secret_files = plan.secret_files;
+    workspace.schedule_resolved_task_with_completion(
+        TaskSourceKind::UserInput,
+        resolved,
+        false,
+        move |result, cx| {
+            drop(secret_files);
+            store.update(cx, |store, cx| store.refresh(cx));
+            sender.send(result == ScheduledTaskResult::Success).ok();
+        },
+        window,
+        cx,
+    );
+    receiver
+}
+
+/// Sends a build to its store with `eas submit --id`, after the user confirms.
 pub fn submit_build(
     workspace: WeakEntity<Workspace>,
     store: Entity<ReleasesStore>,
     build_id: String,
-    platform: crate::model::Platform,
+    platform: Platform,
     window: &mut Window,
     cx: &mut App,
 ) {
-    let token = store
+    let has_expo = store
         .read(cx)
         .accounts()
         .read(cx)
         .accounts()
-        .and_then(|accounts| accounts.expo.as_ref().map(|expo| expo.token.clone()));
-    let Some(token) = token else {
+        .is_some_and(|accounts| accounts.expo.is_some());
+    if !has_expo {
         window.dispatch_action(Box::new(crate::OpenAccounts), cx);
         return;
+    }
+    let plan = match prepare_submit(store.read(cx), build_id, platform, cx) {
+        Ok(plan) => plan,
+        Err(error) => {
+            let answer = window.prompt(
+                PromptLevel::Critical,
+                &t!("app_releases.submit.cannot", platform = platform.label()),
+                Some(&format!("{error:#}")),
+                &[t!("app_releases.submit.ok").as_ref()],
+                cx,
+            );
+            cx.background_spawn(async move {
+                answer.await.ok();
+            })
+            .detach();
+            return;
+        }
     };
-    let folder = store
-        .read(cx)
-        .selected_app()
-        .map(|app| app.folder.to_path_buf());
+    let detail = if plan.uses_asylum_credentials {
+        t!("app_releases.submit.with_asylum_keys")
+    } else {
+        t!("app_releases.submit.with_eas_keys")
+    };
     let answer = window.prompt(
         PromptLevel::Warning,
         &t!(
             "app_releases.clean_build.submit_prompt",
             platform = platform.label()
         ),
-        Some(&t!("app_releases.clean_build.submit_detail")),
+        Some(&format!(
+            "{}\n\n{detail}",
+            t!("app_releases.clean_build.submit_detail")
+        )),
         &[
             t!("app_releases.clean_build.submit").as_ref(),
             t!("app_releases.clean_build.cancel").as_ref(),
@@ -753,35 +1067,9 @@ pub fn submit_build(
             if answer.await.ok() != Some(0) {
                 return;
             }
-            let mut template = TaskTemplate {
-                label: t!(
-                    "app_releases.clean_build.submit_label",
-                    build = build_id.clone()
-                )
-                .to_string(),
-                command: "npx".to_string(),
-                args: submit_command(&build_id, platform),
-                cwd: folder.map(|folder| folder.to_string_lossy().into_owned()),
-                ..TaskTemplate::default()
-            };
-            template
-                .env
-                .insert("EXPO_TOKEN".to_string(), token.to_string());
-            let Some(resolved) =
-                template.resolve_task("asylum-clean-build-submit", &TaskContext::default())
-            else {
-                return;
-            };
             workspace
                 .update_in(cx, |workspace, window, cx| {
-                    workspace.schedule_resolved_task_with_completion(
-                        TaskSourceKind::UserInput,
-                        resolved,
-                        false,
-                        move |_, cx| store.update(cx, |store, cx| store.refresh(cx)),
-                        window,
-                        cx,
-                    );
+                    schedule_submit(workspace, store, plan, window, cx)
                 })
                 .log_err();
         })
@@ -884,7 +1172,7 @@ mod tests {
     fn submit_uses_the_build_id_without_prompts() {
         assert_eq!(
             submit_command("b1", crate::model::Platform::Android).join(" "),
-            "--yes eas-cli submit --platform android --id b1 --non-interactive"
+            "--yes eas-cli submit --platform android --id b1 --non-interactive --no-wait"
         );
     }
 
@@ -904,5 +1192,58 @@ mod tests {
         let output = r#"[{"id": "b1", "platform": "IOS"}, {"id": "b2"}]"#;
         assert_eq!(parse_build_ids(output), vec!["b1", "b2"]);
         assert_eq!(parse_build_ids(r#"{"id": "b3"}"#), vec!["b3"]);
+    }
+
+    #[test]
+    fn checks_the_submit_profile_eas_will_use() {
+        let eas_json = r#"{
+          // comments are fine in eas.json
+          "submit": {
+            "base": {"ios": {"ascAppId": "1600000000"}},
+            "production": {
+              "extends": "base",
+              "ios": {"ascApiKeyPath": "$EXPO_ASC_API_KEY_PATH", "ascApiKeyId": "$EXPO_ASC_KEY_ID"},
+              "android": {"serviceAccountKeyPath": "./keys/play.json"}
+            }
+          }
+        }"#;
+        assert_eq!(
+            check_submit_profile(eas_json, Platform::Ios),
+            SubmitCheck {
+                missing_asc_app_id: false,
+                uses_asylum_credentials: true,
+            }
+        );
+        assert_eq!(
+            check_submit_profile(eas_json, Platform::Android),
+            SubmitCheck {
+                missing_asc_app_id: false,
+                uses_asylum_credentials: false,
+            }
+        );
+        assert!(check_submit_profile("{}", Platform::Ios).missing_asc_app_id);
+    }
+
+    #[test]
+    fn the_snippet_is_a_profile_eas_accepts() {
+        let snippet = submit_profile_snippet(Platform::Ios, Some("1600000000"));
+        let check = check_submit_profile(&snippet, Platform::Ios);
+        assert!(!check.missing_asc_app_id);
+        assert!(check.uses_asylum_credentials);
+        let snippet = submit_profile_snippet(Platform::Android, None);
+        assert!(check_submit_profile(&snippet, Platform::Android).uses_asylum_credentials);
+    }
+
+    #[test]
+    fn key_files_are_private_and_go_away() {
+        let path = write_secret_file("sample.p8", "secret").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        drop(SecretFiles(vec![path.clone()]));
+        assert!(!path.exists());
     }
 }

@@ -2,10 +2,13 @@
 //! TestFlight groups, Play tracks and release notes.
 
 use crate::{
-    app_store_connect::{self, PhasedReleaseState},
+    app_store_connect::{self, Localization, PhasedReleaseState, ReleaseType, VersionPreparation},
     google_play::{self, LocalizedText, PRODUCTION_TRACK, TrackChange},
     insights::{AfterLaunch, FeedbackKind, Review, Section},
-    model::{Platform, PlatformTimeline, Release, StepKind, StepState},
+    model::{
+        self, CheckItem, CheckKind, CheckState, Platform, PlatformTimeline, Release, StepKind,
+        StepState, VersionOptions,
+    },
     state_tone, status_label, step_title,
     store::{ReleasesStore, StoreWrite},
 };
@@ -18,8 +21,9 @@ use i18n::t;
 use std::{path::Path, sync::Arc};
 use ui::{
     CommonAnimationExt, ContextMenu, EmptyState, HeaderBar, PopoverMenu, PopoverTriggerArea,
-    StatusTone, card, error_callout, modal_footer, modal_surface, prelude::*, primary_button,
-    secondary_button, section_label, status_pill,
+    StatusTone, card, choice_chip, error_callout, modal_footer, modal_surface, prelude::*,
+    primary_button, secondary_button, section_label, segment_option, segmented_control,
+    status_pill,
 };
 use ui_input::InputField;
 use util::ResultExt as _;
@@ -54,7 +58,20 @@ pub fn open(
     }
     let weak_workspace = workspace.weak_handle();
     let view = cx.new(|cx| ReleaseView::new(store, weak_workspace, folder, version, window, cx));
+    view.update(cx, |view, cx| view.ensure_review_notes(cx));
     workspace.add_item_to_active_pane(Box::new(view), None, true, window, cx);
+}
+
+/// What's New of the version being prepared, read so the checklist can say which languages
+/// still lack it.
+enum ReviewNotes {
+    NotLoaded,
+    Loading(String),
+    Loaded {
+        version_id: String,
+        localizations: Vec<Localization>,
+    },
+    Failed(String),
 }
 
 enum WriteState {
@@ -79,6 +96,11 @@ pub struct ReleaseView {
     notes_task: Option<Task<()>>,
     after_launch: AfterLaunchState,
     after_launch_task: Option<Task<()>>,
+    prepare_build: Option<String>,
+    prepare_release_type: Option<ReleaseType>,
+    prepare_encryption: bool,
+    review_notes: ReviewNotes,
+    review_notes_task: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -91,7 +113,10 @@ impl ReleaseView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let subscriptions = vec![cx.observe(&store, |_, _, cx| cx.notify())];
+        let subscriptions = vec![cx.observe(&store, |this, _, cx| {
+            this.ensure_review_notes(cx);
+            cx.notify()
+        })];
         let what_to_test = cx.new(|cx| {
             InputField::new(
                 window,
@@ -115,8 +140,86 @@ impl ReleaseView {
             notes_task: None,
             after_launch: AfterLaunchState::Closed,
             after_launch_task: None,
+            prepare_build: None,
+            prepare_release_type: None,
+            prepare_encryption: false,
+            review_notes: ReviewNotes::NotLoaded,
+            review_notes_task: None,
             _subscriptions: subscriptions,
         }
+    }
+
+    fn version_options(&self, cx: &App) -> Option<VersionOptions> {
+        self.store
+            .read(cx)
+            .app_for_folder(&self.folder)?
+            .version_options(&self.version)
+    }
+
+    /// Loads What's New of the version once it exists, for the checklist.
+    fn ensure_review_notes(&mut self, cx: &mut Context<Self>) {
+        let Some(options) = self.version_options(cx) else {
+            return;
+        };
+        let Some(version) = options.version.filter(|_| !options.first_release) else {
+            return;
+        };
+        let current = match &self.review_notes {
+            ReviewNotes::NotLoaded => None,
+            ReviewNotes::Loading(version_id) | ReviewNotes::Failed(version_id) => {
+                Some(version_id)
+            }
+            ReviewNotes::Loaded { version_id, .. } => Some(version_id),
+        };
+        if current == Some(&version.id) {
+            return;
+        }
+        let version_id = version.id;
+        self.review_notes = ReviewNotes::Loading(version_id.clone());
+        let task = self.store.update(cx, |store, cx| {
+            store.fetch_version_notes(version_id.clone(), cx)
+        });
+        self.review_notes_task = Some(cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                this.review_notes = match result {
+                    Ok(localizations) => ReviewNotes::Loaded {
+                        version_id,
+                        localizations,
+                    },
+                    Err(error) => {
+                        log::warn!("Lançamentos: What's New da versão: {error:#}");
+                        ReviewNotes::Failed(version_id)
+                    }
+                };
+                cx.notify();
+            })
+            .log_err();
+        }));
+    }
+
+    fn review_localizations(&self, version_id: &str) -> Option<&[Localization]> {
+        match &self.review_notes {
+            ReviewNotes::Loaded {
+                version_id: loaded,
+                localizations,
+            } if loaded == version_id => Some(localizations),
+            _ => None,
+        }
+    }
+
+    fn checklist(&self, options: &VersionOptions, cx: &App) -> Option<Vec<CheckItem>> {
+        let data = self
+            .store
+            .read(cx)
+            .app_for_folder(&self.folder)?
+            .app_store
+            .as_ref()?;
+        let localizations = options
+            .version
+            .as_ref()
+            .and_then(|version| self.review_localizations(&version.id));
+        Some(model::review_checklist(data, options, localizations))
     }
 
     /// Every store write goes through here: nothing is sent until the modal is confirmed.
@@ -161,6 +264,8 @@ impl ReleaseView {
         self.write_task = Some(cx.spawn(async move |this, cx| {
             let result = task.await;
             this.update(cx, |this, cx| {
+                // The write may have changed the version or its notes; read them again.
+                this.review_notes = ReviewNotes::NotLoaded;
                 this.write_state = match result {
                     Ok(()) => WriteState::Done(t!("app_releases.write.done")),
                     Err(error) => WriteState::Failed(format!("{error:#}").into()),
@@ -766,6 +871,10 @@ impl ReleaseView {
                 Platform::Android => self.render_android_actions(timeline, cx),
             })
             .children(match timeline.platform {
+                Platform::Ios => self.render_prepare_version(cx),
+                Platform::Android => None,
+            })
+            .children(match timeline.platform {
                 Platform::Ios => self.render_app_store_launch(timeline, cx),
                 Platform::Android => self.render_play_notes(timeline, cx),
             })
@@ -975,6 +1084,86 @@ const SUBMITTABLE_STATES: [&str; 4] = [
     "METADATA_REJECTED",
 ];
 
+fn check_title(kind: CheckKind) -> SharedString {
+    match kind {
+        CheckKind::Version => t!("app_releases.checklist.version"),
+        CheckKind::Build => t!("app_releases.checklist.build"),
+        CheckKind::Encryption => t!("app_releases.checklist.encryption"),
+        CheckKind::WhatsNew => t!("app_releases.checklist.whats_new"),
+    }
+}
+
+fn render_checklist(checklist: &[CheckItem], cx: &App) -> AnyElement {
+    v_flex()
+        .gap_1()
+        .pt_1()
+        .child(section_label(t!("app_releases.checklist.title")))
+        .children(checklist.iter().map(|item| {
+            let (label, tone) = match item.state {
+                CheckState::Passed => (t!("app_releases.checklist.passed"), StatusTone::Success),
+                CheckState::Missing => (t!("app_releases.checklist.missing"), StatusTone::Warning),
+                CheckState::Unknown => (t!("app_releases.checklist.unknown"), StatusTone::Neutral),
+            };
+            h_flex()
+                .gap_2()
+                .child(status_pill(label, tone, cx))
+                .child(Label::new(check_title(item.kind)).size(LabelSize::Small))
+                .children(item.detail.clone().filter(|detail| !detail.is_empty()).map(
+                    |detail| {
+                        Label::new(detail)
+                            .size(LabelSize::XSmall)
+                            .buffer_font(cx)
+                            .color(Color::Muted)
+                    },
+                ))
+        }))
+        .into_any_element()
+}
+
+/// The confirmation text: what App Store Connect will get, in the order it is sent.
+pub(crate) fn prepare_detail(
+    options: &VersionOptions,
+    preparation: &VersionPreparation,
+) -> SharedString {
+    let mut lines = Vec::new();
+    match (&options.version, &options.editable_version) {
+        (Some(_), _) => {}
+        (None, Some(editable)) => lines.push(
+            t!(
+                "app_releases.prepare.detail_rename",
+                from = editable.version.clone(),
+                to = preparation.version_string.clone()
+            )
+            .to_string(),
+        ),
+        (None, None) => lines.push(
+            t!(
+                "app_releases.prepare.detail_create",
+                version = preparation.version_string.clone()
+            )
+            .to_string(),
+        ),
+    }
+    if let Some(uses) = preparation.uses_non_exempt_encryption {
+        lines.push(
+            if uses {
+                t!("app_releases.prepare.detail_encryption_yes")
+            } else {
+                t!("app_releases.prepare.detail_encryption_exempt")
+            }
+            .to_string(),
+        );
+    }
+    lines.push(
+        match preparation.release_type {
+            ReleaseType::Manual => t!("app_releases.prepare.detail_manual"),
+            ReleaseType::AfterApproval => t!("app_releases.prepare.detail_after_approval"),
+        }
+        .to_string(),
+    );
+    lines.join("\n").into()
+}
+
 fn note_rows(
     notes: Vec<(String, String, String)>,
     window: &mut Window,
@@ -1174,6 +1363,220 @@ impl ReleaseView {
         }
     }
 
+    fn render_prepare_version(&self, cx: &Context<Self>) -> Option<AnyElement> {
+        self.app_store_app_id(cx)?;
+        let options = self.version_options(cx)?;
+        // A version Apple never heard of (an Android-only or abandoned one) has nothing to prepare.
+        let nothing_uploaded = options.version.is_none()
+            && options.ready_builds.is_empty()
+            && options.processing_builds == 0;
+        if !options.can_prepare() || nothing_uploaded {
+            return None;
+        }
+        let version = self.version.clone();
+        let selected_build = self
+            .prepare_build
+            .as_ref()
+            .and_then(|build_id| options.ready_builds.iter().find(|build| &build.id == build_id))
+            .or_else(|| options.suggested_build())
+            .cloned();
+        let release_type = self
+            .prepare_release_type
+            .or_else(|| options.version.as_ref().and_then(|version| version.release_type))
+            .unwrap_or_default();
+
+        let version_status = match (&options.version, &options.editable_version) {
+            (Some(_), _) => status_pill(t!("app_releases.prepare.open"), StatusTone::Info, cx),
+            (None, Some(editable)) => status_pill(
+                t!("app_releases.prepare.renames", version = editable.version.clone()),
+                StatusTone::Warning,
+                cx,
+            ),
+            (None, None) => {
+                status_pill(t!("app_releases.prepare.creates"), StatusTone::Neutral, cx)
+            }
+        };
+
+        let builds: Vec<AnyElement> = options
+            .ready_builds
+            .iter()
+            .map(|build| {
+                let build_id = build.id.clone();
+                let selected = selected_build
+                    .as_ref()
+                    .is_some_and(|selected| selected.id == build.id);
+                choice_chip(
+                    SharedString::from(format!("prepare-build-{}", build.id)),
+                    None,
+                    build.build_number.clone(),
+                    selected,
+                    true,
+                    cx,
+                )
+                .on_click(cx.listener(move |this, _, _window, cx| {
+                    this.prepare_build = Some(build_id.clone());
+                    cx.notify();
+                }))
+                .into_any_element()
+            })
+            .collect();
+        let no_builds = builds.is_empty().then(|| {
+            let text = if options.processing_builds > 0 {
+                t!(
+                    "app_releases.prepare.builds_processing",
+                    count = options.processing_builds
+                )
+            } else {
+                t!("app_releases.prepare.no_builds", version = version.clone())
+            };
+            Label::new(text)
+                .size(LabelSize::XSmall)
+                .color(Color::Placeholder)
+        });
+
+        let release_types = segmented_control(cx).children(
+            [
+                (ReleaseType::Manual, t!("app_releases.prepare.release_manual")),
+                (
+                    ReleaseType::AfterApproval,
+                    t!("app_releases.prepare.release_after_approval"),
+                ),
+            ]
+            .into_iter()
+            .map(|(option, label)| {
+                segment_option(
+                    SharedString::from(format!("prepare-release-type-{option:?}")),
+                    label,
+                    option == release_type,
+                    true,
+                    cx,
+                )
+                .on_click(cx.listener(move |this, _, _window, cx| {
+                    this.prepare_release_type = Some(option);
+                    cx.notify();
+                }))
+            }),
+        );
+
+        let needs_encryption_answer = selected_build
+            .as_ref()
+            .is_some_and(|build| build.uses_non_exempt_encryption.is_none());
+        let encryption = needs_encryption_answer.then(|| {
+            v_flex()
+                .gap_1()
+                .child(
+                    Label::new(t!("app_releases.prepare.encryption"))
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted),
+                )
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .flex_wrap()
+                        .children([false, true].into_iter().map(|uses| {
+                            choice_chip(
+                                SharedString::from(format!("prepare-encryption-{uses}")),
+                                None,
+                                if uses {
+                                    t!("app_releases.prepare.encryption_yes")
+                                } else {
+                                    t!("app_releases.prepare.encryption_exempt")
+                                },
+                                self.prepare_encryption == uses,
+                                true,
+                                cx,
+                            )
+                            .on_click(cx.listener(move |this, _, _window, cx| {
+                                this.prepare_encryption = uses;
+                                cx.notify();
+                            }))
+                        })),
+                )
+        });
+
+        let already_prepared = options.version.as_ref().is_some_and(|current| {
+            current.build_id.as_ref() == selected_build.as_ref().map(|build| &build.id)
+                && current.release_type == Some(release_type)
+        }) && !needs_encryption_answer;
+        let prepare_button = selected_build
+            .filter(|_| !already_prepared)
+            .map(|build| {
+                let preparation = VersionPreparation {
+                    editable_version_id: options
+                        .version
+                        .as_ref()
+                        .or(options.editable_version.as_ref())
+                        .map(|version| version.id.clone()),
+                    version_string: version.clone(),
+                    build_id: build.id.clone(),
+                    release_type,
+                    uses_non_exempt_encryption: needs_encryption_answer
+                        .then_some(self.prepare_encryption),
+                };
+                let title = t!(
+                    "app_releases.prepare.title",
+                    version = version.clone(),
+                    build = build.build_number
+                );
+                let detail = prepare_detail(&options, &preparation);
+                primary_button(
+                    "release-prepare-version",
+                    Some(IconName::Check),
+                    t!("app_releases.prepare.save"),
+                    None,
+                    cx,
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.confirm_write(
+                        title.clone(),
+                        detail.clone(),
+                        StoreWrite::PrepareVersion(preparation.clone()),
+                        window,
+                        cx,
+                    )
+                }))
+            });
+
+        let checklist = self.checklist(&options, cx).filter(|_| options.version.is_some());
+
+        Some(
+            v_flex()
+                .gap_2()
+                .pt_2()
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .child(section_label(t!("app_releases.prepare.section")))
+                        .child(version_status),
+                )
+                .child(
+                    v_flex()
+                        .gap_1()
+                        .child(
+                            Label::new(t!("app_releases.prepare.build"))
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted),
+                        )
+                        .child(h_flex().gap_2().flex_wrap().children(builds))
+                        .children(no_builds),
+                )
+                .child(
+                    v_flex()
+                        .gap_1()
+                        .child(
+                            Label::new(t!("app_releases.prepare.release_type"))
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted),
+                        )
+                        .child(h_flex().child(release_types)),
+                )
+                .children(encryption)
+                .children(prepare_button.map(|button| h_flex().child(button)))
+                .children(checklist.map(|checklist| render_checklist(&checklist, cx)))
+                .into_any_element(),
+        )
+    }
+
     fn render_app_store_launch(
         &self,
         timeline: &PlatformTimeline,
@@ -1185,7 +1588,11 @@ impl ReleaseView {
         let has_app_id = self.app_store_app_id(cx).is_some();
         let mut buttons: Vec<AnyElement> = Vec::new();
 
-        if has_app_id && SUBMITTABLE_STATES.contains(&state.as_str()) {
+        let checklist_passed = self
+            .version_options(cx)
+            .and_then(|options| self.checklist(&options, cx))
+            .is_none_or(|checklist| model::checklist_passed(&checklist));
+        if has_app_id && checklist_passed && SUBMITTABLE_STATES.contains(&state.as_str()) {
             let version_id = version_id.clone();
             let title = t!("app_releases.launch.submit_title", version = version);
             buttons.push(

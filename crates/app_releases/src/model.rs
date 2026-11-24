@@ -897,6 +897,180 @@ pub fn notable_changes(previous: &[Release], current: &[Release]) -> Vec<Notice>
     notices
 }
 
+/// What App Store Connect has for an iOS version that is not in review yet: the version (if
+/// it exists), the one open for changes, and the builds that could go with it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct VersionOptions {
+    pub version: Option<asc::Version>,
+    /// Apple keeps one version open per platform. When it exists under another number, it is
+    /// renamed rather than a second one created.
+    pub editable_version: Option<asc::Version>,
+    /// Processed, unexpired builds of this marketing version, newest first.
+    pub ready_builds: Vec<asc::Build>,
+    pub processing_builds: usize,
+    /// No earlier version exists, so What's New isn't asked for.
+    pub first_release: bool,
+}
+
+impl VersionOptions {
+    /// The build the version would get: the one it has, or the newest ready one.
+    pub fn suggested_build(&self) -> Option<&asc::Build> {
+        let current = self
+            .version
+            .as_ref()
+            .and_then(|version| version.build_id.as_ref());
+        current
+            .and_then(|build_id| self.ready_builds.iter().find(|build| &build.id == build_id))
+            .or_else(|| self.ready_builds.first())
+    }
+
+    /// The build with this build number, among the ready ones.
+    pub fn ready_build(&self, build_number: &str) -> Option<&asc::Build> {
+        self.ready_builds
+            .iter()
+            .find(|build| build.build_number == build_number)
+    }
+
+    /// Whether the version can still be changed from here (it doesn't exist yet, or it is open).
+    pub fn can_prepare(&self) -> bool {
+        self.version
+            .as_ref()
+            .is_none_or(|version| version.is_editable())
+    }
+}
+
+pub fn version_options(data: &AppStoreData, version_string: &str) -> VersionOptions {
+    let version = data
+        .versions
+        .iter()
+        .find(|version| version.version == version_string)
+        .cloned();
+    let editable_version = data
+        .versions
+        .iter()
+        .find(|version| version.is_editable())
+        .cloned();
+    let of_version = |build: &&asc::Build| build.version.as_deref() == Some(version_string);
+    let mut ready_builds: Vec<asc::Build> = data
+        .builds
+        .iter()
+        .filter(of_version)
+        .filter(|build| build.processing_state == ProcessingState::Valid && !build.expired)
+        .cloned()
+        .collect();
+    ready_builds.sort_by(|left, right| compare_build_numbers(&right.build_number, &left.build_number));
+    let processing_builds = data
+        .builds
+        .iter()
+        .filter(of_version)
+        .filter(|build| build.processing_state == ProcessingState::Processing)
+        .count();
+    let first_release = data
+        .versions
+        .iter()
+        .all(|other| other.version == version_string || other.is_editable());
+    VersionOptions {
+        version,
+        editable_version,
+        ready_builds,
+        processing_builds,
+        first_release,
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub enum CheckKind {
+    Version,
+    Build,
+    Encryption,
+    WhatsNew,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub enum CheckState {
+    Passed,
+    Missing,
+    /// Not read yet (What's New is loaded on demand).
+    Unknown,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct CheckItem {
+    pub kind: CheckKind,
+    pub state: CheckState,
+    /// What is missing, e.g. the languages without What's New.
+    pub detail: Option<String>,
+}
+
+/// What App Review will refuse a submission for, checked before sending it.
+pub fn review_checklist(
+    data: &AppStoreData,
+    options: &VersionOptions,
+    localizations: Option<&[asc::Localization]>,
+) -> Vec<CheckItem> {
+    let item = |kind, passed: bool, detail: Option<String>| CheckItem {
+        kind,
+        state: if passed {
+            CheckState::Passed
+        } else {
+            CheckState::Missing
+        },
+        detail: if passed { None } else { detail },
+    };
+    let version = options.version.as_ref();
+    let build = version
+        .and_then(|version| version.build_id.as_ref())
+        .and_then(|build_id| data.builds.iter().find(|build| &build.id == build_id));
+    let build_ready = build.is_some_and(|build| {
+        build.processing_state == ProcessingState::Valid && !build.expired
+    });
+    let whats_new = if options.first_release {
+        item(CheckKind::WhatsNew, true, None)
+    } else {
+        match localizations {
+            None => CheckItem {
+                kind: CheckKind::WhatsNew,
+                state: CheckState::Unknown,
+                detail: None,
+            },
+            Some(localizations) => {
+                let missing: Vec<&str> = localizations
+                    .iter()
+                    .filter(|localization| localization.text.trim().is_empty())
+                    .map(|localization| localization.locale.as_str())
+                    .collect();
+                item(
+                    CheckKind::WhatsNew,
+                    missing.is_empty() && !localizations.is_empty(),
+                    Some(missing.join(", ")),
+                )
+            }
+        }
+    };
+    vec![
+        item(
+            CheckKind::Version,
+            version.is_some_and(|version| version.is_editable()),
+            version.map(|version| version.state.clone()),
+        ),
+        item(
+            CheckKind::Build,
+            build_ready,
+            build.map(|build| build.build_number.clone()),
+        ),
+        item(
+            CheckKind::Encryption,
+            build.is_some_and(|build| build.uses_non_exempt_encryption.is_some()),
+            None,
+        ),
+        whats_new,
+    ]
+}
+
+pub fn checklist_passed(checklist: &[CheckItem]) -> bool {
+    checklist.iter().all(|item| item.state == CheckState::Passed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1096,5 +1270,90 @@ mod tests {
         assert!(releases[0].is_live_everywhere());
         assert!(most_urgent(&releases).is_none());
         assert!(!anything_moving(&releases));
+    }
+
+    fn prepare_data() -> AppStoreData {
+        let mut data = snapshot().app_store.unwrap();
+        // 2.4.0 is still being prepared and its newest build has no compliance answer.
+        data.versions[0].state = "PREPARE_FOR_SUBMISSION".into();
+        data.versions[0].build_id = None;
+        data
+    }
+
+    #[test]
+    fn offers_the_ready_builds_of_a_version() {
+        let data = prepare_data();
+        let options = version_options(&data, "2.4.0");
+        assert!(options.can_prepare());
+        assert_eq!(
+            options.editable_version.as_ref().map(|version| version.id.as_str()),
+            Some("v-240")
+        );
+        let builds: Vec<&str> = options
+            .ready_builds
+            .iter()
+            .map(|build| build.build_number.as_str())
+            .collect();
+        assert_eq!(builds, ["128"]);
+        assert_eq!(
+            options.suggested_build().map(|build| build.id.as_str()),
+            Some("asc-128")
+        );
+        assert!(!options.first_release, "2.3.9 is on sale already");
+
+        let next = version_options(&data, "2.5.0");
+        assert!(next.version.is_none());
+        assert!(next.ready_builds.is_empty());
+        assert!(next.can_prepare());
+    }
+
+    #[test]
+    fn a_version_in_review_cannot_be_prepared() {
+        let data = snapshot().app_store.unwrap();
+        assert!(!version_options(&data, "2.4.0").can_prepare());
+    }
+
+    #[test]
+    fn checks_what_review_would_refuse() {
+        let mut data = prepare_data();
+        let options = version_options(&data, "2.4.0");
+        let checklist = review_checklist(&data, &options, None);
+        let states: Vec<(CheckKind, CheckState)> = checklist
+            .iter()
+            .map(|item| (item.kind, item.state.clone()))
+            .collect();
+        assert_eq!(
+            states,
+            [
+                (CheckKind::Version, CheckState::Passed),
+                (CheckKind::Build, CheckState::Missing),
+                (CheckKind::Encryption, CheckState::Missing),
+                (CheckKind::WhatsNew, CheckState::Unknown),
+            ]
+        );
+        assert!(!checklist_passed(&checklist));
+
+        data.versions[0].build_id = Some("asc-128".into());
+        let options = version_options(&data, "2.4.0");
+        let localizations = [
+            asc::Localization {
+                id: "l1".into(),
+                locale: "pt-BR".into(),
+                text: "Pix agendado".into(),
+            },
+            asc::Localization {
+                id: "l2".into(),
+                locale: "en-US".into(),
+                text: " ".into(),
+            },
+        ];
+        let checklist = review_checklist(&data, &options, Some(&localizations));
+        assert_eq!(checklist[1].state, CheckState::Passed);
+        assert_eq!(checklist[2].state, CheckState::Passed);
+        assert_eq!(checklist[3].state, CheckState::Missing);
+        assert_eq!(checklist[3].detail.as_deref(), Some("en-US"));
+
+        let checklist = review_checklist(&data, &options, Some(&localizations[..1]));
+        assert!(checklist_passed(&checklist));
     }
 }

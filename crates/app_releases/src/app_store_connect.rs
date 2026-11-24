@@ -114,6 +114,8 @@ pub struct Build {
     pub external_state: Option<String>,
     pub internal_state: Option<String>,
     pub groups: Vec<BetaGroup>,
+    /// `None` until someone answers the export compliance question for this build.
+    pub uses_non_exempt_encryption: Option<bool>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -162,6 +164,52 @@ pub struct Version {
     pub build_id: Option<String>,
     pub created_at: Option<DateTime<Utc>>,
     pub phased_release: Option<PhasedRelease>,
+    pub release_type: Option<ReleaseType>,
+}
+
+/// Apple keeps one version per platform open for changes; these are the states it can be in.
+const EDITABLE_VERSION_STATES: [&str; 6] = [
+    "PREPARE_FOR_SUBMISSION",
+    "DEVELOPER_REJECTED",
+    "REJECTED",
+    "METADATA_REJECTED",
+    "INVALID_BINARY",
+    "DEVELOPER_ACTION_NEEDED",
+];
+
+impl Version {
+    pub fn is_editable(&self) -> bool {
+        EDITABLE_VERSION_STATES.contains(&self.state.as_str())
+    }
+}
+
+/// When an approved version goes on sale. Scheduled releases need a date and stay in App
+/// Store Connect.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ReleaseType {
+    /// The developer releases it by hand after approval.
+    #[default]
+    Manual,
+    /// Apple releases it as soon as it is approved.
+    AfterApproval,
+}
+
+impl ReleaseType {
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "MANUAL" => Some(Self::Manual),
+            "AFTER_APPROVAL" => Some(Self::AfterApproval),
+            _ => None,
+        }
+    }
+
+    pub fn as_api(self) -> &'static str {
+        match self {
+            Self::Manual => "MANUAL",
+            Self::AfterApproval => "AFTER_APPROVAL",
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -329,6 +377,10 @@ pub fn parse_builds(body: &str) -> Result<Vec<Build>> {
                 external_state: beta_detail.and_then(|detail| detail.text("externalBuildState")),
                 internal_state: beta_detail.and_then(|detail| detail.text("internalBuildState")),
                 groups,
+                uses_non_exempt_encryption: resource
+                    .attributes
+                    .get("usesNonExemptEncryption")
+                    .and_then(|value| value.as_bool()),
             }
         })
         .collect())
@@ -374,6 +426,9 @@ pub fn parse_versions(body: &str) -> Result<Vec<Version>> {
                     .and_then(|date| DateTime::parse_from_rfc3339(&date).ok())
                     .map(|date| date.with_timezone(&Utc)),
                 phased_release,
+                release_type: resource
+                    .text("releaseType")
+                    .and_then(|value| ReleaseType::parse(&value)),
             }
         })
         .collect())
@@ -860,6 +915,131 @@ pub async fn release_version(
     Ok(())
 }
 
+pub fn create_version_body(
+    app_id: &str,
+    version_string: &str,
+    release_type: ReleaseType,
+) -> serde_json::Value {
+    serde_json::json!({
+        "data": {
+            "type": "appStoreVersions",
+            "attributes": {
+                "platform": "IOS",
+                "versionString": version_string,
+                "releaseType": release_type.as_api()
+            },
+            "relationships": { "app": linkage("apps", app_id) }
+        }
+    })
+}
+
+pub fn update_version_body(
+    version_id: &str,
+    version_string: &str,
+    release_type: ReleaseType,
+) -> serde_json::Value {
+    serde_json::json!({
+        "data": {
+            "type": "appStoreVersions",
+            "id": version_id,
+            "attributes": {
+                "versionString": version_string,
+                "releaseType": release_type.as_api()
+            }
+        }
+    })
+}
+
+pub fn select_build_body(build_id: &str) -> serde_json::Value {
+    linkage("builds", build_id)
+}
+
+pub fn encryption_body(build_id: &str, uses_non_exempt_encryption: bool) -> serde_json::Value {
+    serde_json::json!({
+        "data": {
+            "type": "builds",
+            "id": build_id,
+            "attributes": { "usesNonExemptEncryption": uses_non_exempt_encryption }
+        }
+    })
+}
+
+/// What the version should look like before it goes to review.
+#[derive(Clone, Debug, PartialEq)]
+pub struct VersionPreparation {
+    /// The version that is open for changes, if any: Apple allows one, so it is reused (and
+    /// renamed) instead of creating another.
+    pub editable_version_id: Option<String>,
+    pub version_string: String,
+    pub build_id: String,
+    pub release_type: ReleaseType,
+    /// Answers export compliance for the build when it has no answer yet.
+    pub uses_non_exempt_encryption: Option<bool>,
+}
+
+/// Creates or reuses the open version, gives it the build and, when asked, answers export
+/// compliance. Returns the version id.
+pub async fn prepare_version(
+    client: &Arc<dyn HttpClient>,
+    credentials: &Credentials,
+    app_id: &str,
+    preparation: &VersionPreparation,
+) -> Result<String> {
+    if let Some(uses_non_exempt_encryption) = preparation.uses_non_exempt_encryption {
+        send(
+            client,
+            credentials,
+            Method::PATCH,
+            &format!("/v1/builds/{}", preparation.build_id),
+            Some(encryption_body(
+                &preparation.build_id,
+                uses_non_exempt_encryption,
+            )),
+        )
+        .await?;
+    }
+    let version_id = match &preparation.editable_version_id {
+        Some(version_id) => {
+            send(
+                client,
+                credentials,
+                Method::PATCH,
+                &format!("/v1/appStoreVersions/{version_id}"),
+                Some(update_version_body(
+                    version_id,
+                    &preparation.version_string,
+                    preparation.release_type,
+                )),
+            )
+            .await?;
+            version_id.clone()
+        }
+        None => created_id(
+            &send(
+                client,
+                credentials,
+                Method::POST,
+                "/v1/appStoreVersions",
+                Some(create_version_body(
+                    app_id,
+                    &preparation.version_string,
+                    preparation.release_type,
+                )),
+            )
+            .await?,
+        )?,
+    };
+    send(
+        client,
+        credentials,
+        Method::PATCH,
+        &format!("/v1/appStoreVersions/{version_id}/relationships/build"),
+        Some(select_build_body(&preparation.build_id)),
+    )
+    .await?;
+    Ok(version_id)
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -879,7 +1059,7 @@ WBzmZWoMxkniOGNp+NQdMV2cwYkbGcUP3Gok2UvJkvRrGcD2AZmQt3HLlA==
       "data": [
         {
           "type": "builds", "id": "asc-128",
-          "attributes": {"version": "128", "processingState": "VALID", "uploadedDate": "2026-11-14T12:30:00-08:00", "expired": false},
+          "attributes": {"version": "128", "processingState": "VALID", "uploadedDate": "2026-11-14T12:30:00-08:00", "expired": false, "usesNonExemptEncryption": false},
           "relationships": {
             "preReleaseVersion": {"data": {"type": "preReleaseVersions", "id": "pre-240"}},
             "buildBetaDetail": {"data": {"type": "buildBetaDetails", "id": "detail-128"}},
@@ -910,7 +1090,7 @@ WBzmZWoMxkniOGNp+NQdMV2cwYkbGcUP3Gok2UvJkvRrGcD2AZmQt3HLlA==
       "data": [
         {
           "type": "appStoreVersions", "id": "v-240",
-          "attributes": {"versionString": "2.4.0", "appStoreState": "WAITING_FOR_REVIEW", "createdDate": "2026-11-14T13:00:00Z"},
+          "attributes": {"versionString": "2.4.0", "appStoreState": "WAITING_FOR_REVIEW", "createdDate": "2026-11-14T13:00:00Z", "releaseType": "AFTER_APPROVAL"},
           "relationships": {
             "build": {"data": {"type": "builds", "id": "asc-128"}},
             "appStoreVersionPhasedRelease": {"data": null}
@@ -980,6 +1160,8 @@ WBzmZWoMxkniOGNp+NQdMV2cwYkbGcUP3Gok2UvJkvRrGcD2AZmQt3HLlA==
         assert_eq!(names, ["Time Trix", "QA externo"]);
         assert!(build.groups[0].is_internal);
         assert!(builds[1].expired);
+        assert_eq!(build.uses_non_exempt_encryption, Some(false));
+        assert_eq!(builds[1].uses_non_exempt_encryption, None);
     }
 
     #[test]
@@ -991,6 +1173,9 @@ WBzmZWoMxkniOGNp+NQdMV2cwYkbGcUP3Gok2UvJkvRrGcD2AZmQt3HLlA==
         let phased = versions[1].phased_release.as_ref().unwrap();
         assert_eq!(phased.state, PhasedReleaseState::Active);
         assert_eq!(phased.current_day, Some(3));
+        assert_eq!(versions[0].release_type, Some(ReleaseType::AfterApproval));
+        assert_eq!(versions[1].release_type, None);
+        assert!(!versions[0].is_editable());
     }
 
     #[test]
@@ -1116,5 +1301,100 @@ WBzmZWoMxkniOGNp+NQdMV2cwYkbGcUP3Gok2UvJkvRrGcD2AZmQt3HLlA==
                 "PATCH /v1/reviewSubmissions/rs-1",
             ]
         );
+    }
+
+    fn recording_client(
+        requests: Arc<std::sync::Mutex<Vec<String>>>,
+    ) -> Arc<dyn HttpClient> {
+        http_client::FakeHttpClient::create(move |request| {
+            let requests = requests.clone();
+            async move {
+                let mut body = String::new();
+                let mut request = request;
+                request.body_mut().read_to_string(&mut body).await?;
+                requests.lock().unwrap().push(format!(
+                    "{} {} {}",
+                    request.method(),
+                    request.uri().path(),
+                    body
+                ));
+                Ok(http_client::Response::builder()
+                    .status(201)
+                    .body(r#"{"data":{"type":"appStoreVersions","id":"v-new"}}"#.into())?)
+            }
+        })
+    }
+
+    fn test_credentials() -> Credentials {
+        Credentials {
+            issuer_id: "issuer".into(),
+            key_id: "KEY".into(),
+            private_key: TEST_P8.into(),
+        }
+    }
+
+    #[gpui::test]
+    async fn prepares_a_new_version_with_its_build() {
+        let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let client = recording_client(requests.clone());
+        let version_id = prepare_version(
+            &client,
+            &test_credentials(),
+            "1600000000",
+            &VersionPreparation {
+                editable_version_id: None,
+                version_string: "2.4.0".into(),
+                build_id: "asc-128".into(),
+                release_type: ReleaseType::Manual,
+                uses_non_exempt_encryption: Some(false),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(version_id, "v-new");
+        let requests = requests.lock().unwrap();
+        let paths: Vec<&str> = requests
+            .iter()
+            .map(|request| request.splitn(3, ' ').take(2).last().unwrap_or_default())
+            .collect();
+        assert_eq!(
+            paths,
+            [
+                "/v1/builds/asc-128",
+                "/v1/appStoreVersions",
+                "/v1/appStoreVersions/v-new/relationships/build",
+            ]
+        );
+        assert!(requests[0].contains(r#""usesNonExemptEncryption":false"#));
+        assert!(requests[1].starts_with("POST"));
+        assert!(requests[1].contains(r#""versionString":"2.4.0""#));
+        assert!(requests[1].contains(r#""releaseType":"MANUAL""#));
+        assert!(requests[2].contains(r#""id":"asc-128""#));
+    }
+
+    #[gpui::test]
+    async fn renames_the_open_version_instead_of_creating_one() {
+        let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let client = recording_client(requests.clone());
+        let version_id = prepare_version(
+            &client,
+            &test_credentials(),
+            "1600000000",
+            &VersionPreparation {
+                editable_version_id: Some("v-231".into()),
+                version_string: "2.4.0".into(),
+                build_id: "asc-128".into(),
+                release_type: ReleaseType::AfterApproval,
+                uses_non_exempt_encryption: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(version_id, "v-231");
+        let requests = requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[0].starts_with("PATCH /v1/appStoreVersions/v-231 "));
+        assert!(requests[0].contains(r#""releaseType":"AFTER_APPROVAL""#));
+        assert!(requests[1].starts_with("PATCH /v1/appStoreVersions/v-231/relationships/build"));
     }
 }

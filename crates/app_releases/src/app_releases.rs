@@ -41,6 +41,9 @@ actions!(
         Refresh,
         /// Builds on EAS what a branch has on origin, from a throwaway worktree.
         NewCleanBuild,
+        /// Adds the ready-made "Lançar versão" agent, which takes a version from a branch to the
+        /// stores with the Lançamentos tools.
+        CreateReleaseAgent,
     ]
 );
 
@@ -103,6 +106,11 @@ pub fn init(cx: &mut App) {
         workspace.register_action(|workspace, _: &NewCleanBuild, window, cx| {
             if toolkit_allowed(workspace, cx) {
                 clean_build::open(workspace, window, cx);
+            }
+        });
+        workspace.register_action(|workspace, _: &CreateReleaseAgent, window, cx| {
+            if toolkit_allowed(workspace, cx) {
+                agent_toolkit::create_release_agent(workspace, window, cx);
             }
         });
         workspace.register_action(|workspace, _: &Refresh, _window, cx| {

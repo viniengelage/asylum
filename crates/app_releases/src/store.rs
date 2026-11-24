@@ -295,6 +295,17 @@ pub struct AppReleases {
     pub app_store_app_id: Option<String>,
     pub beta_groups: Vec<asc::BetaGroup>,
     pub google_play_tracks: Vec<google_play::Track>,
+    /// Builds and versions as App Store Connect listed them, for preparing a version.
+    pub app_store: Option<AppStoreData>,
+}
+
+impl AppReleases {
+    /// The version and builds App Store Connect has for `version`, once it was read.
+    pub fn version_options(&self, version: &str) -> Option<model::VersionOptions> {
+        self.app_store
+            .as_ref()
+            .map(|data| model::version_options(data, version))
+    }
 }
 
 impl AppReleases {
@@ -507,6 +518,7 @@ impl ReleasesStore {
                         app_store_app_id: None,
                         beta_groups: Vec::new(),
                         google_play_tracks: Vec::new(),
+                        app_store: None,
                     }
                 })
                 .collect::<Vec<_>>();
@@ -619,6 +631,7 @@ impl ReleasesStore {
                 app.beta_groups = fetched.beta_groups;
             }
             app.google_play_tracks = snapshot.google_play.unwrap_or_default();
+            app.app_store = snapshot.app_store;
         }
         for notice in notices {
             cx.emit(ReleasesEvent::Notice(notice));
@@ -727,6 +740,8 @@ pub enum StoreWrite {
     VersionNotes {
         notes: Vec<(String, String)>,
     },
+    /// Creates or renames the open iOS version and gives it a build.
+    PrepareVersion(asc::VersionPreparation),
     SubmitForReview {
         version_id: String,
     },
@@ -791,6 +806,12 @@ async fn send_write(
                 asc::set_whats_new(http_client, &credentials, &localization_id, &text).await?;
             }
             Ok(())
+        }
+        StoreWrite::PrepareVersion(preparation) => {
+            let app_id = app_store_app_id.ok_or_else(|| missing_account(AccountKind::AppStore))?;
+            asc::prepare_version(http_client, &app_store()?, &app_id, &preparation)
+                .await
+                .map(|_| ())
         }
         StoreWrite::SubmitForReview { version_id } => {
             let app_id = app_store_app_id.ok_or_else(|| missing_account(AccountKind::AppStore))?;
