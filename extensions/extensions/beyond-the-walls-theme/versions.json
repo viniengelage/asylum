@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Definitely Not A Titan"
+   ],
+   "description": "Nine Titan-inspired color themes for Zed: seven dark palettes and two light palettes.",
+   "download_count": 0,
+   "id": "beyond-the-walls-theme",
+   "name": "Beyond the Walls: Titan Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:50:56Z",
+   "repository": "https://github.com/ihssmaheel-dev/zed-titan-themes",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

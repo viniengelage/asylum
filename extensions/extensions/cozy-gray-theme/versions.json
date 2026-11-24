@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Marsolab"
+   ],
+   "description": "Warm gray light and dark themes with amber, coral, and rose syntax accents.",
+   "download_count": 0,
+   "id": "cozy-gray-theme",
+   "name": "Cozy Gray",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:51:06Z",
+   "repository": "https://github.com/marsolab/cozygray",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

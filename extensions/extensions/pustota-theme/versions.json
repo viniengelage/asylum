@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Vania Livadnyi"
+   ],
+   "description": "Minimalistic theme inspired by old-fashioned hobbies, by Nikita Sobolev",
+   "download_count": 0,
+   "id": "pustota-theme",
+   "name": "pustota",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:51:56Z",
+   "repository": "https://github.com/skatromb/pustota-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

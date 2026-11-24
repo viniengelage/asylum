@@ -2,6 +2,24 @@
  "data": [
   {
    "authors": [
+    "Josef Bisits <jbisits@gmail.com>",
+    "Neal Mckee <mail@nealmckee.com>"
+   ],
+   "description": "Penumbra light and dark colour themes",
+   "download_count": 0,
+   "id": "penumbra",
+   "name": "Penumbra",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:51:54Z",
+   "repository": "https://github.com/jbisits/penumbra-zed",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
     "Josef Bisits <jbisits@gmail.com>"
    ],
    "description": "Penumbra light and dark colour themes",

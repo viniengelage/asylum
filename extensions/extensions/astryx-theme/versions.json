@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Astryx"
+   ],
+   "description": "Dark theme for all the people who love to code in deep dark spaces.",
+   "download_count": 0,
+   "id": "astryx-theme",
+   "name": "Astryx",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:50:55Z",
+   "repository": "https://github.com/BrankoSlavkov/astryx",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

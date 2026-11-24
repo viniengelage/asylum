@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "kerneldroid <212222389+kerneldroid@users.noreply.github.com>"
+   ],
+   "description": "A theme inspired by the space Easter egg from Android 17, with six light and dark variants.",
+   "download_count": 0,
+   "id": "landroid-theme",
+   "name": "Landroid",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:51:50Z",
+   "repository": "https://github.com/kerneldroid/Landroid",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

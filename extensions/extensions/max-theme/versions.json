@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ricardo Ara\u00fajo <nricardoba@gmail.com>"
+   ],
+   "description": "A dark theme with syntax inspired by One Dark.",
+   "download_count": 0,
+   "id": "max-theme",
+   "name": "Max Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:51:51Z",
+   "repository": "https://github.com/nricardoba/zed-max-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  }
+ ]
+}

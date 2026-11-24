@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Anton Zavalniuk <zavalniuk.pro@gmail.com>"
+   ],
+   "description": "A warm charcoal dark theme with copper accents",
+   "download_count": 0,
+   "id": "copper-charcoal-theme",
+   "name": "Copper Charcoal",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:51:04Z",
+   "repository": "https://github.com/AntonZavalniuk/copper-charcoal-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

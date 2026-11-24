@@ -1,0 +1,23 @@
+{
+ "data": [
+  {
+   "authors": [
+    "rayL-K"
+   ],
+   "description": "Zamak language support: syntax highlighting, diagnostics as you type, completion, hover, go to definition, and formatting.",
+   "download_count": 0,
+   "id": "zamak",
+   "name": "Zamak",
+   "provides": [
+    "languages",
+    "grammars",
+    "language-servers"
+   ],
+   "published_at": "2026-11-24T14:52:27Z",
+   "repository": "https://github.com/VeyraLux/Zamak",
+   "schema_version": 1,
+   "version": "0.2.1",
+   "wasm_api_version": "0.7.0"
+  }
+ ]
+}

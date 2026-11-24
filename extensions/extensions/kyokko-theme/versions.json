@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "dekunocode"
+   ],
+   "description": "A calm navy dark theme lit by aurora cyan and green.",
+   "download_count": 0,
+   "id": "kyokko-theme",
+   "name": "Kyokko",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:51:49Z",
+   "repository": "https://github.com/dekunocode/kyokko-theme",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

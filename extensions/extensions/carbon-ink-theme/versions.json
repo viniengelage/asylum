@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "small-frappuccino"
+   ],
+   "description": "A true-black theme with lavender control flow, blue function calls, seafoam types, and quiet punctuation.",
+   "download_count": 0,
+   "id": "carbon-ink-theme",
+   "name": "Carbon Ink",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:50:57Z",
+   "repository": "https://github.com/small-frappuccino/carbon-ink",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

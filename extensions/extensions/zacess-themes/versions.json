@@ -4,6 +4,23 @@
    "authors": [
     "Zacess <contact@zacess.com>"
    ],
+   "description": "Accessible themes matching the Zacess reader: Light, Dark, Yellow on Black, Cream, High Contrast Dark, High Contrast Light, Deep Contrast Dark and Deep Contrast Light at 7:1 or more, plus the gentler Warm Dark and Warm Light at 4.5:1 or more for every text and syntax colour on the background.",
+   "download_count": 0,
+   "id": "zacess-themes",
+   "name": "Zacess Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:52:08Z",
+   "repository": "https://github.com/zacesshq/themes",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Zacess <contact@zacess.com>"
+   ],
    "description": "High contrast themes matching the Zacess reader: Light, Dark, Yellow on Black, Cream, High Contrast Dark and High Contrast Light, every text and syntax colour at 7:1 or more.",
    "download_count": 0,
    "id": "zacess-themes",

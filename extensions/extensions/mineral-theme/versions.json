@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "HarryC919"
+   ],
+   "description": "Dark theme family for Zed: 10 background variants, each in normal and high-contrast flavors.",
+   "download_count": 0,
+   "id": "mineral-theme",
+   "name": "Mineral Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:51:52Z",
+   "repository": "https://github.com/HarryC919/MineralThemeForZed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Codigrate <info@codigrate.com>"
+   ],
+   "description": "12 Codigrate editor themes inspired by nature and cities: Aurora Borealis, Autumn, Everest, Roraima, Sakura, Sequoia, Istanbul, Miami, Paris, Rio de Janeiro, Tallinn, Tokyo.",
+   "download_count": 0,
+   "id": "codigrate-themes",
+   "name": "Codigrate Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:51:03Z",
+   "repository": "https://github.com/codigrate/zed-themes",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

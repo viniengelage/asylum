@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Ednan R. Frizzera Filho"
+   ],
+   "description": "Jonathan Blow-inspired colors matched to the author's Neovim and Ghostty palettes, with dark and light variants.",
+   "download_count": 0,
+   "id": "yay-sayer-theme",
+   "name": "Yay Sayer",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:52:06Z",
+   "repository": "https://github.com/ednanf/yay-sayer",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Anh Nguyen <anhnguyen@aaanh.com>"
+   ],
+   "description": "Themes built from the colors of Artoria Pendragon (Caster) and Akiyama Mizuki: Castoria dark and light, Mizuki dark and light.",
+   "download_count": 0,
+   "id": "artoria-theme",
+   "name": "Artoria Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:50:54Z",
+   "repository": "https://github.com/aaanh/artoria-theme-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  }
+ ]
+}

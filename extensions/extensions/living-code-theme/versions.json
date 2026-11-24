@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Living Code"
+   ],
+   "description": "Living Code theme for Zed. Calm slate. Living color. Night, Frost, Paper and Signal themes.",
+   "download_count": 0,
+   "id": "living-code-theme",
+   "name": "Living Code",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:51:51Z",
+   "repository": "https://github.com/living-code-theme/zed",
+   "schema_version": 1,
+   "version": "0.1.1",
+   "wasm_api_version": null
+  }
+ ]
+}

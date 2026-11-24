@@ -805,6 +805,23 @@
   },
   {
    "authors": [
+    "Anh Nguyen <anhnguyen@aaanh.com>"
+   ],
+   "description": "Themes built from the colors of Artoria Pendragon (Caster) and Akiyama Mizuki: Castoria dark and light, Mizuki dark and light.",
+   "download_count": 0,
+   "id": "artoria-theme",
+   "name": "Artoria Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:50:54Z",
+   "repository": "https://github.com/aaanh/artoria-theme-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
     "Dunya Kirkali <dunyakirkali@gmail.com>"
    ],
    "description": "Support for AsciiDoc syntax",
@@ -889,6 +906,23 @@
    "repository": "https://github.com/kagulion/astro-snippets",
    "schema_version": 1,
    "version": "1.0.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Astryx"
+   ],
+   "description": "Dark theme for all the people who love to code in deep dark spaces.",
+   "download_count": 0,
+   "id": "astryx-theme",
+   "name": "Astryx",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:50:55Z",
+   "repository": "https://github.com/BrankoSlavkov/astryx",
+   "schema_version": 1,
+   "version": "0.1.0",
    "wasm_api_version": null
   },
   {
@@ -1446,6 +1480,23 @@
   },
   {
    "authors": [
+    "Definitely Not A Titan"
+   ],
+   "description": "Nine Titan-inspired color themes for Zed: seven dark palettes and two light palettes.",
+   "download_count": 0,
+   "id": "beyond-the-walls-theme",
+   "name": "Beyond the Walls: Titan Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:50:56Z",
+   "repository": "https://github.com/ihssmaheel-dev/zed-titan-themes",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
     "Logan Bresnahan <loganbbres@gmail.com>"
    ],
    "description": "Birds of Paradise theme for Zed, ported from Joe Bergantine's original (created for Coda, later TextMate).",
@@ -1763,10 +1814,10 @@
    "provides": [
     "themes"
    ],
-   "published_at": "2026-10-31T23:15:23Z",
+   "published_at": "2026-11-24T14:50:56Z",
    "repository": "https://github.com/NeroWolfe75/brackets-refined-zed",
    "schema_version": 1,
-   "version": "0.1.1",
+   "version": "0.1.2",
    "wasm_api_version": null
   },
   {
@@ -1871,6 +1922,23 @@
    "repository": "https://github.com/xXCHAVOTAXx/candela-theme",
    "schema_version": 1,
    "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "small-frappuccino"
+   ],
+   "description": "A true-black theme with lavender control flow, blue function calls, seafoam types, and quiet punctuation.",
+   "download_count": 0,
+   "id": "carbon-ink-theme",
+   "name": "Carbon Ink",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:50:57Z",
+   "repository": "https://github.com/small-frappuccino/carbon-ink",
+   "schema_version": 1,
+   "version": "0.1.0",
    "wasm_api_version": null
   },
   {
@@ -2601,6 +2669,23 @@
   },
   {
    "authors": [
+    "Codigrate <info@codigrate.com>"
+   ],
+   "description": "12 Codigrate editor themes inspired by nature and cities: Aurora Borealis, Autumn, Everest, Roraima, Sakura, Sequoia, Istanbul, Miami, Paris, Rio de Janeiro, Tallinn, Tokyo.",
+   "download_count": 0,
+   "id": "codigrate-themes",
+   "name": "Codigrate Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:51:03Z",
+   "repository": "https://github.com/codigrate/zed-themes",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
     "tgrecojs"
    ],
    "description": "A high-contrast light theme for Zed, ported from Coding in the Sun for VS Code",
@@ -2808,6 +2893,23 @@
   },
   {
    "authors": [
+    "Anton Zavalniuk <zavalniuk.pro@gmail.com>"
+   ],
+   "description": "A warm charcoal dark theme with copper accents",
+   "download_count": 0,
+   "id": "copper-charcoal-theme",
+   "name": "Copper Charcoal",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:51:04Z",
+   "repository": "https://github.com/AntonZavalniuk/copper-charcoal-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
     "Victor Vintorez <victor@vintorez.dev>"
    ],
    "description": "Language support for the Corn config language",
@@ -2840,6 +2942,23 @@
    "schema_version": 1,
    "version": "1.0.5",
    "wasm_api_version": "0.7.0"
+  },
+  {
+   "authors": [
+    "Marsolab"
+   ],
+   "description": "Warm gray light and dark themes with amber, coral, and rose syntax accents.",
+   "download_count": 0,
+   "id": "cozy-gray-theme",
+   "name": "Cozy Gray",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:51:06Z",
+   "repository": "https://github.com/marsolab/cozygray",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
   },
   {
    "authors": [
@@ -2891,6 +3010,23 @@
    "repository": "https://github.com/kaem-e/zed-crimson-theme",
    "schema_version": 1,
    "version": "0.0.5",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "TizTech"
+   ],
+   "description": "A near-black dark theme with a neutral grey UI, a soft blue accent and VS Code Dark+ syntax colours.",
+   "download_count": 0,
+   "id": "crooli-dark-theme",
+   "name": "Crooli Dark",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:51:06Z",
+   "repository": "https://github.com/xandertaylorx/crooli-dark-theme",
+   "schema_version": 1,
+   "version": "0.1.0",
    "wasm_api_version": null
   },
   {
@@ -4300,6 +4436,23 @@
   },
   {
    "authors": [
+    "Hoang"
+   ],
+   "description": "A warm\u2013cool dark theme: deep night background, ember coral and amber, tide blue and teal.",
+   "download_count": 0,
+   "id": "ember-tide-theme",
+   "name": "Ember Tide",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:51:08Z",
+   "repository": "https://github.com/23hoanggg/ember-tide-theme",
+   "schema_version": 1,
+   "version": "1.2.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
     "Ngonidzashe Mangudya <ngmangudya@gmail.com>"
    ],
    "description": "This theme is perfect for those who want a sleek and professional look for their editor.",
@@ -5569,10 +5722,10 @@
     "context-servers",
     "snippets"
    ],
-   "published_at": "2026-11-02T12:11:22Z",
+   "published_at": "2026-11-24T14:51:45Z",
    "repository": "https://github.com/mantou132/gem",
    "schema_version": 1,
-   "version": "0.0.5",
+   "version": "0.0.7",
    "wasm_api_version": "0.7.0"
   },
   {
@@ -6041,6 +6194,23 @@
    "repository": "https://github.com/D4r3NPo/zed-theme-godot",
    "schema_version": 1,
    "version": "1.3.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "mg0x7BE"
+   ],
+   "description": "Dark theme tuned for Go and most popular languages.",
+   "download_count": 0,
+   "id": "gopher-burrow-theme",
+   "name": "Gopher Burrow",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:51:48Z",
+   "repository": "https://github.com/mg0x7BE/gopher-burrow",
+   "schema_version": 1,
+   "version": "0.7.0",
    "wasm_api_version": null
   },
   {
@@ -8283,6 +8453,40 @@
   },
   {
    "authors": [
+    "dekunocode"
+   ],
+   "description": "A calm navy dark theme lit by aurora cyan and green.",
+   "download_count": 0,
+   "id": "kyokko-theme",
+   "name": "Kyokko",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:51:49Z",
+   "repository": "https://github.com/dekunocode/kyokko-theme",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "kerneldroid <212222389+kerneldroid@users.noreply.github.com>"
+   ],
+   "description": "A theme inspired by the space Easter egg from Android 17, with six light and dark variants.",
+   "download_count": 0,
+   "id": "landroid-theme",
+   "name": "Landroid",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:51:50Z",
+   "repository": "https://github.com/kerneldroid/Landroid",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
     "Oneptica <dev@oneptica.com>"
    ],
    "description": "LaTeX snippets for common patterns. Install alongside a LaTeX language extension for full support.",
@@ -8520,6 +8724,23 @@
    "repository": "https://github.com/jekst/zed-snippets",
    "schema_version": 1,
    "version": "0.0.4",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Living Code"
+   ],
+   "description": "Living Code theme for Zed. Calm slate. Living color. Night, Frost, Paper and Signal themes.",
+   "download_count": 0,
+   "id": "living-code-theme",
+   "name": "Living Code",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:51:51Z",
+   "repository": "https://github.com/living-code-theme/zed",
+   "schema_version": 1,
+   "version": "0.1.1",
    "wasm_api_version": null
   },
   {
@@ -9357,6 +9578,23 @@
   },
   {
    "authors": [
+    "Ricardo Ara\u00fajo <nricardoba@gmail.com>"
+   ],
+   "description": "A dark theme with syntax inspired by One Dark.",
+   "download_count": 0,
+   "id": "max-theme",
+   "name": "Max Theme",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:51:51Z",
+   "repository": "https://github.com/nricardoba/zed-max-theme",
+   "schema_version": 1,
+   "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
     "Sean Bowman <pico303@gmail.com>"
    ],
    "description": "A dark theme based on years of tweaking.",
@@ -9593,6 +9831,23 @@
    "repository": "https://github.com/NiFate/zed-min-theme-plus",
    "schema_version": 1,
    "version": "1.0.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "HarryC919"
+   ],
+   "description": "Dark theme family for Zed: 10 background variants, each in normal and high-contrast flavors.",
+   "download_count": 0,
+   "id": "mineral-theme",
+   "name": "Mineral Themes",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:51:52Z",
+   "repository": "https://github.com/HarryC919/MineralThemeForZed",
+   "schema_version": 1,
+   "version": "0.1.0",
    "wasm_api_version": null
   },
   {
@@ -10258,6 +10513,23 @@
    "repository": "https://github.com/dustinbturner/neutral-theme",
    "schema_version": 1,
    "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "JenuelDev"
+   ],
+   "description": "A clean, calm dark theme with neutral tones designed for focused and comfortable coding.",
+   "download_count": 0,
+   "id": "neutralflow-theme",
+   "name": "NeutralFlow",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:51:54Z",
+   "repository": "https://github.com/JenuelDev/NeutralFlow",
+   "schema_version": 1,
+   "version": "1.5.5",
    "wasm_api_version": null
   },
   {
@@ -11860,7 +12132,8 @@
   },
   {
    "authors": [
-    "Josef Bisits <jbisits@gmail.com>"
+    "Josef Bisits <jbisits@gmail.com>",
+    "Neal Mckee <mail@nealmckee.com>"
    ],
    "description": "Penumbra light and dark colour themes",
    "download_count": 0,
@@ -11869,10 +12142,10 @@
    "provides": [
     "themes"
    ],
-   "published_at": "2026-11-04T12:14:31Z",
+   "published_at": "2026-11-24T14:51:54Z",
    "repository": "https://github.com/jbisits/penumbra-zed",
    "schema_version": 1,
-   "version": "0.1.1",
+   "version": "0.2.0",
    "wasm_api_version": null
   },
   {
@@ -12546,6 +12819,23 @@
    "repository": "https://github.com/Dhanush-S-Gowda/zed-theme-Pure-Black-High-Contrast",
    "schema_version": 1,
    "version": "0.0.1",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Vania Livadnyi"
+   ],
+   "description": "Minimalistic theme inspired by old-fashioned hobbies, by Nikita Sobolev",
+   "download_count": 0,
+   "id": "pustota-theme",
+   "name": "pustota",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:51:56Z",
+   "repository": "https://github.com/skatromb/pustota-zed",
+   "schema_version": 1,
+   "version": "0.1.0",
    "wasm_api_version": null
   },
   {
@@ -13562,10 +13852,10 @@
    "provides": [
     "themes"
    ],
-   "published_at": "2026-11-05T12:15:01Z",
+   "published_at": "2026-11-24T14:52:04Z",
    "repository": "https://github.com/santi020k/santi020k-theme",
    "schema_version": 1,
-   "version": "1.0.0",
+   "version": "1.0.1",
    "wasm_api_version": null
   },
   {
@@ -13946,6 +14236,23 @@
    "repository": "https://github.com/mkhamat/shhhed",
    "schema_version": 1,
    "version": "1.52.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "Valery Murashko"
+   ],
+   "description": "Shire \u2014 warm, earthy dark and light themes for Zed, inspired by Fields of the Shire.",
+   "download_count": 0,
+   "id": "shire-theme",
+   "name": "Shire",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:52:04Z",
+   "repository": "https://github.com/Emestie/zed-shire-theme",
+   "schema_version": 1,
+   "version": "1.0.0",
    "wasm_api_version": null
   },
   {
@@ -15866,6 +16173,23 @@
   },
   {
    "authors": [
+    "seizure16"
+   ],
+   "description": "Unified backgrounds for a seamless Zed workspace",
+   "download_count": 0,
+   "id": "ulatte-theme",
+   "name": "uLatte",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:52:05Z",
+   "repository": "https://github.com/ulatte-theme/zed",
+   "schema_version": 1,
+   "version": "0.1.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
     "Rune B"
    ],
    "description": "A muted and pleasant dark theme for Zed with some italics to distinguish certain parts of the syntax. Designed for use with the programming font Victor Mono.",
@@ -17157,6 +17481,23 @@
   },
   {
    "authors": [
+    "Ednan R. Frizzera Filho"
+   ],
+   "description": "Jonathan Blow-inspired colors matched to the author's Neovim and Ghostty palettes, with dark and light variants.",
+   "download_count": 0,
+   "id": "yay-sayer-theme",
+   "name": "Yay Sayer",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:52:06Z",
+   "repository": "https://github.com/ednanf/yay-sayer",
+   "schema_version": 1,
+   "version": "0.2.0",
+   "wasm_api_version": null
+  },
+  {
+   "authors": [
     "Gael Lopes Da Silva <gael.lopes-da-silva@outlook.fr>"
    ],
    "description": "A yellow material theme for Zed",
@@ -17264,18 +17605,37 @@
    "authors": [
     "Zacess <contact@zacess.com>"
    ],
-   "description": "High contrast themes matching the Zacess reader: Light, Dark, Yellow on Black, Cream, High Contrast Dark and High Contrast Light, every text and syntax colour at 7:1 or more.",
+   "description": "Accessible themes matching the Zacess reader: Light, Dark, Yellow on Black, Cream, High Contrast Dark, High Contrast Light, Deep Contrast Dark and Deep Contrast Light at 7:1 or more, plus the gentler Warm Dark and Warm Light at 4.5:1 or more for every text and syntax colour on the background.",
    "download_count": 0,
    "id": "zacess-themes",
    "name": "Zacess Themes",
    "provides": [
     "themes"
    ],
-   "published_at": "2026-11-06T12:04:04Z",
+   "published_at": "2026-11-24T14:52:08Z",
    "repository": "https://github.com/zacesshq/themes",
    "schema_version": 1,
-   "version": "0.2.1",
+   "version": "1.0.0",
    "wasm_api_version": null
+  },
+  {
+   "authors": [
+    "rayL-K"
+   ],
+   "description": "Zamak language support: syntax highlighting, diagnostics as you type, completion, hover, go to definition, and formatting.",
+   "download_count": 0,
+   "id": "zamak",
+   "name": "Zamak",
+   "provides": [
+    "languages",
+    "grammars",
+    "language-servers"
+   ],
+   "published_at": "2026-11-24T14:52:27Z",
+   "repository": "https://github.com/VeyraLux/Zamak",
+   "schema_version": 1,
+   "version": "0.2.1",
+   "wasm_api_version": "0.7.0"
   },
   {
    "authors": [

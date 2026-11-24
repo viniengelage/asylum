@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "mg0x7BE"
+   ],
+   "description": "Dark theme tuned for Go and most popular languages.",
+   "download_count": 0,
+   "id": "gopher-burrow-theme",
+   "name": "Gopher Burrow",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:51:48Z",
+   "repository": "https://github.com/mg0x7BE/gopher-burrow",
+   "schema_version": 1,
+   "version": "0.7.0",
+   "wasm_api_version": null
+  }
+ ]
+}

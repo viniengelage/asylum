@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Valery Murashko"
+   ],
+   "description": "Shire \u2014 warm, earthy dark and light themes for Zed, inspired by Fields of the Shire.",
+   "download_count": 0,
+   "id": "shire-theme",
+   "name": "Shire",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:52:04Z",
+   "repository": "https://github.com/Emestie/zed-shire-theme",
+   "schema_version": 1,
+   "version": "1.0.0",
+   "wasm_api_version": null
+  }
+ ]
+}

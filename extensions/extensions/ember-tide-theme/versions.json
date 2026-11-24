@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "authors": [
+    "Hoang"
+   ],
+   "description": "A warm\u2013cool dark theme: deep night background, ember coral and amber, tide blue and teal.",
+   "download_count": 0,
+   "id": "ember-tide-theme",
+   "name": "Ember Tide",
+   "provides": [
+    "themes"
+   ],
+   "published_at": "2026-11-24T14:51:08Z",
+   "repository": "https://github.com/23hoanggg/ember-tide-theme",
+   "schema_version": 1,
+   "version": "1.2.0",
+   "wasm_api_version": null
+  }
+ ]
+}
