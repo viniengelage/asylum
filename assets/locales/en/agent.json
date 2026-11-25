@@ -5,6 +5,7 @@
   "flow_command.description.other": "{name} · {count} steps · the text after it becomes “What to build”",
   "flow_command.input_hint": "<what to build>",
   "load_mcp_server_tool.authorize": "Load the {server} MCP server ({count} tools)",
+  "load_mcp_server_tool.authorize_start": "Start the {server} MCP server and load its tools",
   "load_mcp_server_tool.title": "Load MCP server",
   "load_mcp_server_tool.title_named": "Load MCP server {server}",
   "model_benchmarks.add_rows": "Add the rows",

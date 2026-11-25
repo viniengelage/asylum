@@ -2563,7 +2563,7 @@ async fn test_task_agent_context_servers_restrict_mcp_tools(cx: &mut TestAppCont
 
     let task_agent = task_agents::parse_task_agent(
         std::path::Path::new("/test/.asylum/agents/dev.md"),
-        "---\nname: Dev\ncontext_servers:\n- aaa\n---\nTrabalhe.",
+        "---\nname: Dev\ncontext_servers:\n- AAA\n---\nTrabalhe.",
         task_agents::TaskAgentSource::Personal,
     )
     .unwrap();
@@ -2578,6 +2578,19 @@ async fn test_task_agent_context_servers_restrict_mcp_tools(cx: &mut TestAppCont
     assert_eq!(
         tool_names_for_completion(&completion),
         vec!["aaa_tool", LoadContextServerTool::NAME]
+    );
+    // A server the agent leaves out stays reachable, so the model can tell it exists.
+    let load_tool = completion
+        .tools
+        .iter()
+        .find(|tool| tool.name == LoadContextServerTool::NAME)
+        .unwrap();
+    assert!(
+        load_tool
+            .description
+            .contains("`bbb` (1 tools): not among the servers"),
+        "{}",
+        load_tool.description
     );
 }
 

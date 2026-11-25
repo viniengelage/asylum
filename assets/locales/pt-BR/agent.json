@@ -5,6 +5,7 @@
   "flow_command.description.other": "{name} · {count} passos · o texto depois vira “O que construir”",
   "flow_command.input_hint": "<o que construir>",
   "load_mcp_server_tool.authorize": "Carregar o servidor MCP {server} ({count} ferramentas)",
+  "load_mcp_server_tool.authorize_start": "Iniciar o servidor MCP {server} e carregar as ferramentas dele",
   "load_mcp_server_tool.title": "Carregar servidor MCP",
   "load_mcp_server_tool.title_named": "Carregar servidor MCP {server}",
   "model_benchmarks.add_rows": "Adicionar as linhas",

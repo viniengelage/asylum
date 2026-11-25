@@ -6,8 +6,9 @@ use crate::{
     LoadContextServerTool, LoadableContextServer, LoadedContextServers, MovePathTool,
     ProjectSnapshot, ReadFileTool, RenameTool, RepoMapTool, SandboxedTerminalTool,
     SaveLearningTool, SpawnAgentTool, SubmitPlanTool, SubmitStepTool, SystemPromptTemplate,
-    Template, Templates, TerminalTool, ToolPermissionDecision, UpdatePlanTool, WebSearchTool,
-    WriteFileTool, decide_permission_from_settings,
+    Template, Templates, TerminalTool, ToolPermissionDecision, UnavailableContextServer,
+    UpdatePlanTool, WebSearchTool, WithheldContextServer, WriteFileTool,
+    decide_permission_from_settings,
 };
 use acp_thread::{AgentModelId, ClientUserMessageId, MentionUri, ProcessOutput};
 use action_log::ActionLog;
@@ -50,7 +51,9 @@ use language_model::{
     ProviderErrorCategory, Role, SelectedModel, Speed, StopReason, TokenUsage,
     ZED_CLOUD_PROVIDER_ID,
 };
-use project::{Project, trusted_worktrees::TrustedWorktrees};
+use project::{
+    Project, context_server_store::ContextServerStatus, trusted_worktrees::TrustedWorktrees,
+};
 use prompt_store::ProjectContext;
 use schemars::{JsonSchema, Schema};
 use serde::de::DeserializeOwned;
@@ -4831,41 +4834,78 @@ impl Thread {
         let mut duplicate_tool_names = HashSet::default();
         // A task agent that lists MCP servers gets exactly those, whatever the profile enables:
         // every server's tool schemas go out with each request, so the ones the agent doesn't
-        // need are paid for on every step.
-        let task_agent_servers = self
-            .effective_task_agent()
+        // need are paid for on every step. The others stay loadable through `load_mcp_server`.
+        let task_agent = self.effective_task_agent();
+        let task_agent_servers = task_agent
+            .as_ref()
             .map(|agent| agent.context_servers.clone())
             .unwrap_or_default();
+        // Server ids are typed by hand in the agent's frontmatter, where `Clickup` for `clickup`
+        // would otherwise drop the server without a word.
+        let listed_by_agent = |server_id: &str| {
+            task_agent_servers
+                .iter()
+                .any(|id| id.eq_ignore_ascii_case(server_id))
+        };
         let on_demand_servers = &AgentSettings::get_global(cx).on_demand_context_servers;
         let loaded_servers = self.loaded_context_servers.lock();
+        let context_server_registry = self.context_server_registry.read(cx);
         let mut loadable_servers = Vec::new();
-        for (server_id, server_tools) in self.context_server_registry.read(cx).servers() {
-            let server_enabled_by_agent = task_agent_servers
+        let mut registered_server_ids = HashSet::default();
+        for (server_id, server_tools) in context_server_registry.servers() {
+            registered_server_ids.insert(server_id.clone());
+            let profile_tools = server_tools
                 .iter()
-                .any(|id| id.as_str() == server_id.0.as_ref());
-            // On-demand servers stay reachable through `load_mcp_server` even for an agent that
-            // doesn't list them, since the user approves each load.
-            let on_demand = !server_enabled_by_agent
-                && on_demand_servers
+                .filter(|(tool_name, _)| {
+                    profile.is_context_server_tool_enabled(&server_id.0, tool_name)
+                })
+                .collect::<Vec<_>>();
+            let all_tools = server_tools.iter().collect::<Vec<_>>();
+            // Loading a server the profile turns off entirely brings all of its tools: the user
+            // approved that server, not a selection of it.
+            let tools_when_loaded = if profile_tools.is_empty() {
+                all_tools.clone()
+            } else {
+                profile_tools.clone()
+            };
+            let withheld =
+                if listed_by_agent(&server_id.0) || loaded_servers.contains(server_id.0.as_ref()) {
+                    None
+                } else if on_demand_servers
                     .iter()
-                    .any(|id| id.as_str() == server_id.0.as_ref());
-            let waiting_for_load = on_demand && !loaded_servers.contains(server_id.0.as_ref());
-            let mut withheld_tools = 0;
-            for (tool_name, tool) in server_tools {
-                let enabled = if server_enabled_by_agent {
-                    true
-                } else if task_agent_servers.is_empty() || on_demand {
-                    profile.is_context_server_tool_enabled(&server_id.0, &tool_name)
+                    .any(|id| id.as_str() == server_id.0.as_ref())
+                {
+                    Some(WithheldContextServer::OnDemand)
+                } else if let Some(agent) = task_agent
+                    .as_ref()
+                    .filter(|_| !task_agent_servers.is_empty())
+                {
+                    Some(WithheldContextServer::NotListedByAgent {
+                        agent: agent.command.clone(),
+                    })
+                } else if profile_tools.is_empty() {
+                    Some(WithheldContextServer::OffInProfile)
                 } else {
-                    false
+                    None
                 };
-                if !enabled {
-                    continue;
+            if let Some(withheld) = withheld {
+                if !tools_when_loaded.is_empty() {
+                    loadable_servers.push(LoadableContextServer {
+                        id: server_id.0.to_string(),
+                        tool_count: Some(tools_when_loaded.len()),
+                        withheld,
+                    });
                 }
-                if waiting_for_load {
-                    withheld_tools += 1;
-                    continue;
-                }
+                continue;
+            }
+            let visible_tools = if listed_by_agent(&server_id.0) {
+                all_tools
+            } else if loaded_servers.contains(server_id.0.as_ref()) {
+                tools_when_loaded
+            } else {
+                profile_tools
+            };
+            for (tool_name, tool) in visible_tools {
                 let tool_name: SharedString =
                     provider_compatible_tool_name(tool_name.as_ref()).into();
                 if !seen_tools.insert(tool_name.clone()) {
@@ -4873,20 +4913,59 @@ impl Thread {
                 }
                 context_server_tools.push((server_id.clone(), tool_name, tool.clone()));
             }
-            if withheld_tools > 0 {
-                loadable_servers.push(LoadableContextServer {
-                    id: server_id.0.to_string(),
-                    tool_count: withheld_tools,
-                });
-            }
         }
         drop(loaded_servers);
-        if !loadable_servers.is_empty() {
+
+        let server_store = context_server_registry.server_store().clone();
+        let mut unavailable_servers = Vec::new();
+        {
+            let store = server_store.read(cx);
+            for server_id in store.server_ids() {
+                if registered_server_ids.contains(server_id) {
+                    continue;
+                }
+                let id = server_id.0.to_string();
+                if !store.is_server_enabled(server_id, cx) {
+                    unavailable_servers.push(UnavailableContextServer::Disabled { id });
+                    continue;
+                }
+                match store.status_for_server(server_id) {
+                    Some(ContextServerStatus::Stopped) => {
+                        loadable_servers.push(LoadableContextServer {
+                            id,
+                            tool_count: None,
+                            withheld: WithheldContextServer::Stopped,
+                        });
+                    }
+                    Some(ContextServerStatus::Error(error)) => {
+                        loadable_servers.push(LoadableContextServer {
+                            id,
+                            tool_count: None,
+                            withheld: WithheldContextServer::Failed { error },
+                        });
+                    }
+                    Some(
+                        ContextServerStatus::AuthRequired
+                        | ContextServerStatus::ClientSecretRequired { .. }
+                        | ContextServerStatus::Authenticating,
+                    ) => {
+                        unavailable_servers.push(UnavailableContextServer::NeedsSignIn { id });
+                    }
+                    // A running server whose tools aren't registered yet is about to show up.
+                    Some(ContextServerStatus::Starting | ContextServerStatus::Running) | None => {
+                        unavailable_servers.push(UnavailableContextServer::Starting { id });
+                    }
+                }
+            }
+        }
+        if !loadable_servers.is_empty() || !unavailable_servers.is_empty() {
             tools.insert(
                 LoadContextServerTool::NAME.into(),
                 Arc::new(LoadContextServerTool::new(
                     loadable_servers,
+                    unavailable_servers,
                     self.loaded_context_servers.clone(),
+                    server_store,
                 )),
             );
         }
