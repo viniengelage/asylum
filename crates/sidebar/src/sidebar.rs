@@ -7675,7 +7675,11 @@ impl Sidebar {
             .child(self.filter_editor.clone())
     }
 
-    fn render_project_selector(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_project_selector(
+        &self,
+        below_window_controls: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let multi_workspace = self.multi_workspace.upgrade();
         let workspace = self.active_workspace(cx);
 
@@ -7705,35 +7709,42 @@ impl Sidebar {
             .unwrap_or_default();
         let is_open = self.project_selector_popover_handle.is_deployed();
 
-        h_flex().w_full().px(px(8.)).pb(px(8.)).child(
-            PopoverMenu::new("sidebar-project-selector-menu")
-                .full_width(true)
-                .with_handle(self.project_selector_popover_handle.clone())
-                .menu(move |window, cx| {
-                    workspace.as_ref().map(|workspace| {
-                        RecentProjects::popover(
-                            workspace.clone(),
-                            window_project_groups.clone(),
-                            None,
-                            focus_handle.clone(),
-                            window,
+        h_flex()
+            .w_full()
+            .px(px(8.))
+            .pb(px(8.))
+            // The window controls row already spaces the selector from the top edge; without it
+            // the selector would touch the panel's border.
+            .when(!below_window_controls, |this| this.pt(px(8.)))
+            .child(
+                PopoverMenu::new("sidebar-project-selector-menu")
+                    .full_width(true)
+                    .with_handle(self.project_selector_popover_handle.clone())
+                    .menu(move |window, cx| {
+                        workspace.as_ref().map(|workspace| {
+                            RecentProjects::popover(
+                                workspace.clone(),
+                                window_project_groups.clone(),
+                                None,
+                                focus_handle.clone(),
+                                window,
+                                cx,
+                            )
+                        })
+                    })
+                    .trigger(
+                        recent_projects::project_selector(
+                            "sidebar-project-selector",
+                            name,
+                            branch,
+                            is_open,
+                            false,
                             cx,
                         )
-                    })
-                })
-                .trigger(
-                    recent_projects::project_selector(
-                        "sidebar-project-selector",
-                        name,
-                        branch,
-                        is_open,
-                        false,
-                        cx,
+                        .w_full(),
                     )
-                    .w_full(),
-                )
-                .anchor(gpui::Anchor::TopLeft),
-        )
+                    .anchor(gpui::Anchor::TopLeft),
+            )
     }
 
     fn render_recent_projects_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -8388,11 +8399,12 @@ impl Sidebar {
         );
 
         let filter_focused = self.filter_editor.focus_handle(cx).is_focused(window);
+        let below_window_controls = window_controls.is_some();
 
         v_flex()
             .flex_none()
             .children(window_controls)
-            .child(self.render_project_selector(cx))
+            .child(self.render_project_selector(below_window_controls, cx))
             .when(!no_open_projects, |this| {
                 this.child(
                     HeaderBar::new("sidebar-search-header")
