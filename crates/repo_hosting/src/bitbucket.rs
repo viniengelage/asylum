@@ -57,7 +57,23 @@ impl Credentials {
 /// Data Center speak another API.
 pub fn parse_remote(url: &str) -> Option<RemoteRepository> {
     use git::GitHostingProvider as _;
-    let parsed = git_hosting_providers::Bitbucket::public_instance().parse_remote_url(url)?;
+    // Bitbucket Cloud also serves SSH from these hosts (the clone dialog hands out
+    // `ssh.bitbucket.org`); the provider only knows `bitbucket.org` and takes them for a
+    // self-hosted instance.
+    let url = ["ssh.bitbucket.org", "altssh.bitbucket.org"]
+        .into_iter()
+        .find_map(|alias| {
+            [
+                format!("@{alias}:"),
+                format!("@{alias}/"),
+                format!("//{alias}/"),
+            ]
+            .into_iter()
+            .find(|pattern| url.contains(pattern.as_str()))
+            .map(|pattern| url.replacen(&pattern, &pattern.replace(alias, "bitbucket.org"), 1))
+        })
+        .unwrap_or_else(|| url.to_string());
+    let parsed = git_hosting_providers::Bitbucket::public_instance().parse_remote_url(&url)?;
     Some(RemoteRepository {
         hosting: Hosting::Bitbucket,
         owner: parsed.owner.to_string(),
@@ -1222,6 +1238,8 @@ mod tests {
             "git@bitbucket.org:trix/trix_frontend_app.git",
             "https://vinicios@bitbucket.org/trix/trix_frontend_app.git",
             "ssh://git@bitbucket.org/trix/trix_frontend_app",
+            "git@ssh.bitbucket.org:trix/trix_frontend_app.git",
+            "ssh://git@altssh.bitbucket.org:443/trix/trix_frontend_app.git",
         ] {
             assert_eq!(parse_remote(url), Some(repository()), "{url}");
         }
