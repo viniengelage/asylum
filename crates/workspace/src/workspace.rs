@@ -1826,6 +1826,10 @@ pub struct Workspace {
     region_focus_handles: RegionFocusHandles,
     notifications: Notifications,
     suppressed_notifications: HashSet<NotificationId>,
+    /// Language server messages without actions already shown in this window, by server name, level
+    /// and text. Servers such as oxlint resend the same config error on every file change, so showing
+    /// it again after it was dismissed would bury the window in toasts while the agent edits.
+    shown_language_server_messages: HashSet<(String, String, String)>,
     project: Entity<Project>,
     follower_states: HashMap<CollaboratorId, FollowerState>,
     last_leaders_by_pane: HashMap<WeakEntity<Pane>, CollaboratorId>,
@@ -2331,6 +2335,7 @@ impl Workspace {
             region_focus_handles: RegionFocusHandles::new(cx),
             notifications: Notifications::default(),
             suppressed_notifications: HashSet::default(),
+            shown_language_server_messages: HashSet::default(),
             left_dock,
             bottom_dock,
             devices_dock,

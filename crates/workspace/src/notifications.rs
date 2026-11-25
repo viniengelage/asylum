@@ -231,17 +231,11 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         if request.actions.is_empty()
-            && self.notifications.iter().any(|(_, view)| {
-                let Ok(prompt) = view.clone().downcast::<LanguageServerPrompt>() else {
-                    return false;
-                };
-                prompt.read(cx).request.as_ref().is_some_and(|existing| {
-                    existing.actions.is_empty()
-                        && existing.level == request.level
-                        && existing.lsp_name == request.lsp_name
-                        && existing.message == request.message
-                })
-            })
+            && !self.shown_language_server_messages.insert((
+                request.lsp_name.clone(),
+                format!("{:?}", request.level),
+                request.message.clone(),
+            ))
         {
             return;
         }
@@ -2061,9 +2055,7 @@ mod tests {
     }
 
     #[gpui::test]
-    async fn test_language_server_prompt_deduplication_preserves_dismissal(
-        cx: &mut TestAppContext,
-    ) {
+    async fn test_language_server_prompt_shown_once_per_window(cx: &mut TestAppContext) {
         init_test(cx);
         cx.update(|cx| {
             let mut settings = ProjectSettings::get_global(cx).clone();
@@ -2098,28 +2090,38 @@ mod tests {
         cx.executor().advance_clock(Duration::from_micros(1));
         assert_eq!(notification_ids(cx), Vec::new());
 
-        let id = emit_prompt(cx);
-        assert_eq!(notification_ids(cx), vec![id.clone()]);
-        workspace.update(cx, |workspace, cx| workspace.dismiss_notification(&id, cx));
-        let id = emit_prompt(cx);
-        assert_eq!(notification_ids(cx), vec![id.clone()]);
-        workspace.update(cx, |workspace, cx| workspace.suppress_notification(&id, cx));
-        let id = emit_prompt(cx);
-        assert_eq!(notification_ids(cx), vec![id]);
-
-        workspace.update(cx, |workspace, cx| workspace.clear_all_notifications(cx));
-        cx.update(|_, cx| {
-            let mut settings = ProjectSettings::get_global(cx).clone();
-            settings
-                .global_lsp_settings
-                .notifications
-                .dismiss_timeout_ms = Some(0);
-            ProjectSettings::override_global(settings, cx);
-        });
-        let id = emit_prompt(cx);
         emit_prompt(cx);
-        cx.executor().advance_clock(Duration::from_millis(10000));
-        assert_eq!(notification_ids(cx), vec![id]);
+        assert_eq!(
+            notification_ids(cx),
+            Vec::new(),
+            "a message that timed out doesn't come back when the server resends it"
+        );
+
+        let other_id = emit_language_server_prompt(
+            &project,
+            "server",
+            PromptLevel::Warning,
+            "other message",
+            Vec::new(),
+            cx,
+        );
+        assert_eq!(notification_ids(cx), vec![other_id.clone()]);
+        workspace.update(cx, |workspace, cx| {
+            workspace.dismiss_notification(&other_id, cx)
+        });
+        emit_language_server_prompt(
+            &project,
+            "server",
+            PromptLevel::Warning,
+            "other message",
+            Vec::new(),
+            cx,
+        );
+        assert_eq!(
+            notification_ids(cx),
+            Vec::new(),
+            "a dismissed message doesn't come back either"
+        );
     }
 
     fn emit_language_server_prompt(
