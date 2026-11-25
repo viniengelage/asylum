@@ -281,3 +281,60 @@ pub fn update_settings_file_with_completion(
 ) -> futures::channel::oneshot::Receiver<anyhow::Result<()>> {
     SettingsStore::global(cx).update_settings_file_with_completion(fs, update)
 }
+
+/// The settings files the user edits by hand: this profile's own and, with profiles, the one every
+/// profile shares. Each is migrated on its own, since either can hold deprecated settings.
+fn user_settings_files() -> Vec<(PathBuf, PathBuf)> {
+    let mut files = vec![(
+        paths::settings_file().clone(),
+        paths::settings_backup_file().clone(),
+    )];
+    if let Some(shared) = paths::shared_settings_file()
+        && shared != paths::settings_file()
+    {
+        let backup = shared.with_file_name("settings_backup.json");
+        files.push((shared.clone(), backup));
+    }
+    files
+}
+
+/// Whether any of the user's settings files still uses deprecated settings.
+pub async fn user_settings_need_migration(fs: Arc<dyn Fs>) -> anyhow::Result<bool> {
+    for (path, _) in user_settings_files() {
+        if !fs.is_file(&path).await {
+            continue;
+        }
+        let text = fs.load(&path).await?;
+        if let Ok(Some(_)) = migrator::migrate_settings(&text) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Rewrites every user settings file that uses deprecated settings, saving each one's previous
+/// text to a `settings_backup.json` next to it first.
+pub async fn migrate_user_settings_files(fs: Arc<dyn Fs>) -> anyhow::Result<()> {
+    use anyhow::Context as _;
+
+    for (path, backup) in user_settings_files() {
+        if !fs.is_file(&path).await {
+            continue;
+        }
+        let old_text = fs.load(&path).await?;
+        let Ok(Some(new_text)) = migrator::migrate_settings(&old_text) else {
+            continue;
+        };
+        fs.atomic_write(backup.clone(), old_text)
+            .await
+            .with_context(|| format!("Failed to back up the settings to {backup:?}"))?;
+        let resolved_path = fs
+            .canonicalize(&path)
+            .await
+            .with_context(|| format!("Failed to canonicalize settings path {path:?}"))?;
+        fs.atomic_write(resolved_path.clone(), new_text)
+            .await
+            .with_context(|| format!("Failed to write settings to file {resolved_path:?}"))?;
+    }
+    Ok(())
+}

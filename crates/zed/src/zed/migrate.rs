@@ -2,8 +2,9 @@ use anyhow::{Context as _, Result};
 use editor::Editor;
 use fs::Fs;
 use gpui::WeakEntity;
-use migrator::{migrate_keymap, migrate_settings};
-use settings::{KeymapFile, Settings, SettingsStore};
+use migrator::migrate_keymap;
+use std::collections::BTreeSet;
+use settings::{KeymapFile, Settings, SettingsFile};
 use util::ResultExt;
 use workspace::notifications::NotifyTaskExt;
 
@@ -36,11 +37,26 @@ pub enum MigrationEvent {
     },
 }
 
-pub struct MigrationNotification;
+/// Which of the user's settings files (this profile's and the shared one) still need migrating,
+/// so that loading a clean file doesn't hide the banner another file asked for.
+#[derive(Default)]
+pub struct MigrationNotification {
+    files_needing_migration: BTreeSet<SettingsFile>,
+}
 
 impl EventEmitter<MigrationEvent> for MigrationNotification {}
 
 impl MigrationNotification {
+    /// Records whether `file` needs migrating and returns whether any user settings file does.
+    pub fn set_needs_migration(&mut self, file: SettingsFile, needs_migration: bool) -> bool {
+        if needs_migration {
+            self.files_needing_migration.insert(file);
+        } else {
+            self.files_needing_migration.remove(&file);
+        }
+        !self.files_needing_migration.is_empty()
+    }
+
     pub fn try_global(cx: &App) -> Option<Entity<Self>> {
         cx.try_global::<GlobalMigrationNotification>()
             .map(|notifier| notifier.0.clone())
@@ -166,10 +182,12 @@ impl ToolbarItemView for MigrationBanner {
                     .log_err();
                 }
             }));
-        } else if &target == paths::settings_file() {
+        } else if &target == paths::settings_file()
+            || paths::shared_settings_file() == Some(&target)
+        {
             self.migration_type = Some(MigrationType::Settings);
             let fs = <dyn Fs>::global(cx);
-            let should_migrate = cx.background_spawn(should_migrate_settings(fs));
+            let should_migrate = cx.background_spawn(settings::user_settings_need_migration(fs));
             self.should_migrate_task = Some(cx.spawn_in(window, async move |this, cx| {
                 if let Ok(true) = should_migrate.await {
                     this.update(cx, |this, cx| {
@@ -247,7 +265,9 @@ impl Render for MigrationBanner {
                                 cx.background_spawn(write_keymap_migration(fs.clone()))
                             }
                             Some(MigrationType::Settings) => {
-                                cx.background_spawn(write_settings_migration(fs.clone()))
+                                cx.background_spawn(settings::migrate_user_settings_files(
+                                    fs.clone(),
+                                ))
                             }
                             None => unreachable!(),
                         };
@@ -262,14 +282,6 @@ impl Render for MigrationBanner {
 async fn should_migrate_keymap(fs: Arc<dyn Fs>) -> Result<bool> {
     let old_text = KeymapFile::load_keymap_file(&fs).await?;
     if let Ok(Some(_)) = migrate_keymap(&old_text) {
-        return Ok(true);
-    };
-    Ok(false)
-}
-
-async fn should_migrate_settings(fs: Arc<dyn Fs>) -> Result<bool> {
-    let old_text = SettingsStore::load_settings(&fs).await?;
-    if let Ok(Some(_)) = migrate_settings(&old_text) {
         return Ok(true);
     };
     Ok(false)
@@ -296,31 +308,6 @@ async fn write_keymap_migration(fs: Arc<dyn Fs>) -> Result<()> {
         fs.atomic_write(keymap_path.to_path_buf(), new_text)
             .await
             .with_context(|| format!("Failed to write keymap to file {:?}", keymap_path))?;
-    }
-    Ok(())
-}
-
-async fn write_settings_migration(fs: Arc<dyn Fs>) -> Result<()> {
-    let old_text = SettingsStore::load_settings(&fs).await?;
-    let Ok(Some(new_text)) = migrate_settings(&old_text) else {
-        return Ok(());
-    };
-    let settings_path = paths::settings_file().as_path();
-    if fs.is_file(settings_path).await {
-        fs.atomic_write(paths::settings_backup_file().to_path_buf(), old_text)
-            .await
-            .with_context(|| "Failed to create settings backup in home directory".to_string())?;
-        let resolved_path = fs
-            .canonicalize(settings_path)
-            .await
-            .with_context(|| format!("Failed to canonicalize settings path {:?}", settings_path))?;
-        fs.atomic_write(resolved_path.clone(), new_text)
-            .await
-            .with_context(|| format!("Failed to write settings to file {:?}", resolved_path))?;
-    } else {
-        fs.atomic_write(settings_path.to_path_buf(), new_text)
-            .await
-            .with_context(|| format!("Failed to write settings to file {:?}", settings_path))?;
     }
     Ok(())
 }

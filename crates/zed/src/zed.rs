@@ -2318,16 +2318,20 @@ pub fn watch_user_agents_md(fs: Arc<dyn fs::Fs>, cx: &mut App) {
 }
 
 pub fn watch_settings_files(fs: Arc<dyn fs::Fs>, cx: &mut App) {
-    MigrationNotification::set_global(cx.new(|_| MigrationNotification), cx);
+    MigrationNotification::set_global(cx.new(|_| MigrationNotification::default()), cx);
 
     SettingsStore::update_global(cx, move |store, cx| {
         store.watch_settings_files(fs, cx, |settings_file, result, cx| {
             let is_user = matches!(settings_file, SettingsFile::User);
-            let migrating_in_memory =
-                matches!(&result.migration_status, MigrationStatus::Succeeded);
+            // Only the files the banner's button migrates can raise it.
+            let migratable = matches!(settings_file, SettingsFile::User | SettingsFile::Shared);
+            let needs_migration = migratable
+                && matches!(&result.migration_status, MigrationStatus::Succeeded);
             notify_settings_errors(result, is_user, cx);
-            if let Some(notifier) = MigrationNotification::try_global(cx) {
-                notifier.update(cx, |_, cx| {
+            if migratable && let Some(notifier) = MigrationNotification::try_global(cx) {
+                notifier.update(cx, |notifier, cx| {
+                    let migrating_in_memory =
+                        notifier.set_needs_migration(settings_file, needs_migration);
                     cx.emit(MigrationEvent::ContentChanged {
                         migration_type: MigrationType::Settings,
                         migrating_in_memory,

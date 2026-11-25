@@ -420,6 +420,7 @@
   "Files or globs of files that will be excluded by Asylum entirely. They will be skipped during file scans, file searches, and not be displayed in the project file tree. Takes precedence over \"File Scan Inclusions\"": "Files or globs of files that will be excluded by Asylum entirely. They will be skipped during file scans, file searches, and not be displayed in the project file tree. Takes precedence over \"File Scan Inclusions\"",
   "Files or globs of files that will be included by Asylum, even when ignored by git. This is useful for files that are not tracked by git, but are still important to your project. Note that globs that are overly broad can slow down Asylum's file scanning. \"File Scan Exclusions\" takes precedence over these inclusions": "Files or globs of files that will be included by Asylum, even when ignored by git. This is useful for files that are not tracked by git, but are still important to your project. Note that globs that are overly broad can slow down Asylum's file scanning. \"File Scan Exclusions\" takes precedence over these inclusions",
   "Fix in settings.json": "Fix in settings.json",
+  "Backup and Update": "Backup and Update",
   "Focus Content": "Focus Content",
   "Focus Follows Mouse": "Focus Follows Mouse",
   "Focus Follows Mouse Debounce ms": "Focus Follows Mouse Debounce ms",

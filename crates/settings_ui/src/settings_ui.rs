@@ -4911,6 +4911,7 @@ impl SettingsWindow {
             fn banner(
                 label: &'static str,
                 error: String,
+                migrates: bool,
                 shown_errors: &mut HashSet<String>,
                 cx: &mut Context<SettingsWindow>,
             ) -> impl IntoElement {
@@ -4927,14 +4928,31 @@ impl SettingsWindow {
                             .child(Label::new(error).size(LabelSize::Small).color(Color::Muted)),
                     )
                     .action_slot(
-                        div().pr_1().pb_1().child(
-                            Button::new("fix-in-json", "Fix in settings.json")
-                                .tab_index(0_isize)
-                                .style(ButtonStyle::Tinted(ui::TintColor::Warning))
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.open_current_settings_file(window, cx);
-                                })),
-                        ),
+                        div().pr_1().pb_1().map(|this| {
+                            if migrates {
+                                this.child(
+                                    Button::new("backup-and-update", "Backup and Update")
+                                        .tab_index(0_isize)
+                                        .style(ButtonStyle::Tinted(ui::TintColor::Warning))
+                                        .on_click(cx.listener(|_, _, _, cx| {
+                                            let fs = <dyn fs::Fs>::global(cx);
+                                            cx.background_spawn(
+                                                settings::migrate_user_settings_files(fs),
+                                            )
+                                            .detach_and_log_err(cx);
+                                        })),
+                                )
+                            } else {
+                                this.child(
+                                    Button::new("fix-in-json", "Fix in settings.json")
+                                        .tab_index(0_isize)
+                                        .style(ButtonStyle::Tinted(ui::TintColor::Warning))
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.open_current_settings_file(window, cx);
+                                        })),
+                                )
+                            }
+                        }),
                     )
             }
 
@@ -4947,6 +4965,7 @@ impl SettingsWindow {
                     this.child(banner(
                         "Failed to load your settings. Some values may be incorrect and changes may be lost.",
                         err,
+                        false,
                         &mut self.shown_errors,
                         cx,
                     ))
@@ -4958,6 +4977,7 @@ impl SettingsWindow {
                             SettingsUiFile::Shared | SettingsUiFile::User => "They can be automatically migrated to the latest version.",
                             SettingsUiFile::Server(_) | SettingsUiFile::Project(_)  => "They must be manually migrated to the latest version."
                         }.to_string(),
+                        matches!(self.current_file, SettingsUiFile::Shared | SettingsUiFile::User),
                         &mut self.shown_errors,
                         cx,
                     )),
@@ -4965,6 +4985,7 @@ impl SettingsWindow {
                         .child(banner(
                             "Your settings file is out of date, automatic migration failed",
                             err.clone(),
+                            false,
                             &mut self.shown_errors,
                             cx,
                         )),
