@@ -11229,6 +11229,77 @@ async fn test_reveal_in_file_manager_path_falls_back_to_worktree_root(
 }
 
 #[gpui::test]
+async fn test_hide_entries_by_path(cx: &mut gpui::TestAppContext) {
+    init_test(cx);
+
+    let fs = FakeFs::new(cx.executor());
+    fs.insert_tree(
+        "/root",
+        json!({
+            "ios": {
+                "Pods": { "pod.txt": "" },
+                "App.swift": "",
+            },
+            "src": { "main.ts": "" },
+            "README.md": "",
+        }),
+    )
+    .await;
+
+    let project = Project::test(fs.clone(), ["/root".as_ref()], cx).await;
+    let window = cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+    let workspace = window
+        .read_with(cx, |mw, _| mw.workspace().clone())
+        .unwrap();
+    let cx = &mut VisualTestContext::from_window(window.into(), cx);
+    let panel = workspace.update_in(cx, ProjectPanel::new);
+    cx.run_until_parked();
+
+    toggle_expand_dir(&panel, "root/ios", cx);
+    toggle_expand_dir(&panel, "root/ios/Pods", cx);
+    cx.update(|_, cx| {
+        cx.update_global::<SettingsStore, _>(|store, cx| {
+            store.update_user_settings(cx, |settings| {
+                settings.project_panel.get_or_insert_default().hidden_paths =
+                    Some(vec![path!("/root/ios/Pods").to_string()]);
+            });
+        });
+    });
+    cx.run_until_parked();
+
+    assert_eq!(
+        visible_entries_as_strings(&panel, 0..20, cx),
+        &[
+            "v root",
+            "    v ios",
+            "          App.swift",
+            "    > src",
+            "      README.md",
+        ],
+        "A hidden folder leaves the tree with everything inside it, even when expanded"
+    );
+
+    panel.update_in(cx, |panel, window, cx| {
+        panel.toggle_show_hidden_entries(&ToggleShowHiddenEntries, window, cx);
+    });
+    cx.run_until_parked();
+
+    assert_eq!(
+        visible_entries_as_strings(&panel, 0..20, cx),
+        &[
+            "v root",
+            "    v ios",
+            "        v Pods  <== selected",
+            "              pod.txt",
+            "          App.swift",
+            "    > src",
+            "      README.md",
+        ],
+        "Showing hidden items brings the folder back as it was"
+    );
+}
+
+#[gpui::test]
 async fn test_hide_hidden_entries(cx: &mut gpui::TestAppContext) {
     init_test(cx);
 

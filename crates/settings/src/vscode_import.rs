@@ -869,6 +869,7 @@ impl VsCodeSettings {
             git_status: self.read_bool("git.decorations.enabled"),
             hide_gitignore: self.read_bool("explorer.excludeGitIgnore"),
             hide_hidden: None,
+            hidden_paths: None,
             hide_root: None,
             indent_guides: None,
             indent_size: None,

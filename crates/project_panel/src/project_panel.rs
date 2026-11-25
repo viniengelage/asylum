@@ -168,6 +168,7 @@ pub struct ProjectPanel {
     undo_manager: UndoManager,
     state: State,
     expand_animation: Option<ExpandAnimation>,
+    show_hidden_entries: bool,
 }
 
 /// A folder that was just opened, so the rows it reveals can slide in.
@@ -437,6 +438,12 @@ actions!(
         ToggleHideGitIgnore,
         /// Toggles visibility of hidden files.
         ToggleHideHidden,
+        /// Hides the selected files and folders from the project panel.
+        HideSelectedEntries,
+        /// Shows again the selected files and folders that were hidden.
+        UnhideSelectedEntries,
+        /// Toggles showing the files and folders hidden from the project panel.
+        ToggleShowHiddenEntries,
         /// Starts a new search in the selected directory.
         NewSearchInDirectory,
         /// Unfolds the selected directory.
@@ -527,6 +534,27 @@ impl FoldedAncestors {
             .nth(self.active_index())
             .map(|comp| comp.as_os_str().to_string_lossy().into_owned())
     }
+}
+
+fn configured_hidden_paths(cx: &App) -> &[String] {
+    cx.global::<SettingsStore>()
+        .merged_settings()
+        .project_panel
+        .as_ref()
+        .and_then(|project_panel| project_panel.hidden_paths.as_deref())
+        .unwrap_or_default()
+}
+
+/// The entries hidden with "Hide" inside the worktree at `worktree_abs_path`, relative to it.
+fn hidden_paths_in_worktree(worktree_abs_path: &Path, cx: &App) -> Vec<Arc<RelPath>> {
+    configured_hidden_paths(cx)
+        .iter()
+        .filter_map(|hidden| {
+            let relative = Path::new(hidden).strip_prefix(worktree_abs_path).ok()?;
+            let relative = RelPath::new(relative, PathStyle::local()).ok()?;
+            (!relative.is_empty()).then(|| relative.into_arc())
+        })
+        .collect()
 }
 
 pub fn init(cx: &mut App) {
@@ -899,7 +927,13 @@ impl ProjectPanel {
             .detach();
 
             let mut project_panel_settings = *ProjectPanelSettings::get_global(cx);
+            let mut hidden_paths = configured_hidden_paths(cx).to_vec();
             cx.observe_global_in::<SettingsStore>(window, move |this, window, cx| {
+                let new_hidden_paths = configured_hidden_paths(cx);
+                if hidden_paths != new_hidden_paths {
+                    hidden_paths = new_hidden_paths.to_vec();
+                    this.update_visible_entries(None, false, false, window, cx);
+                }
                 let new_settings = *ProjectPanelSettings::get_global(cx);
                 if project_panel_settings != new_settings {
                     if project_panel_settings.hide_gitignore != new_settings.hide_gitignore {
@@ -936,6 +970,7 @@ impl ProjectPanel {
                 focus_handle,
                 rendered_entries_len: 0,
                 expand_animation: None,
+                show_hidden_entries: false,
                 folded_directory_drag_target: None,
                 drag_target_entry: None,
                 marked_entries: Default::default(),
@@ -1229,6 +1264,9 @@ impl ProjectPanel {
             };
 
             let has_pasteable_content = self.has_pasteable_content(cx);
+            let is_hidden_by_user = self.is_hidden_by_user(worktree_id, &entry.path, cx);
+            let hidden_count = hidden_paths_in_worktree(worktree.abs_path().as_ref(), cx).len();
+            let show_hidden_entries = self.show_hidden_entries;
             let context_menu = ContextMenu::build(window, cx, |menu, _, _| {
                 menu.context(self.focus_handle.clone()).map(|menu| {
                     if is_read_only {
@@ -1303,6 +1341,23 @@ impl ProjectPanel {
                                 "Copy Relative Path",
                                 Box::new(zed_actions::workspace::CopyRelativePath),
                             )
+                            .when(!is_root || hidden_count > 0, |menu| menu.separator())
+                            .when(!is_root && is_hidden_by_user, |menu| {
+                                menu.action("Unhide", Box::new(UnhideSelectedEntries))
+                            })
+                            .when(!is_root && !is_hidden_by_user, |menu| {
+                                menu.action("Hide", Box::new(HideSelectedEntries))
+                            })
+                            .when(hidden_count > 0, |menu| {
+                                menu.action(
+                                    if show_hidden_entries {
+                                        "Stop Showing Hidden Items".to_string()
+                                    } else {
+                                        format!("Show Hidden Items ({hidden_count})")
+                                    },
+                                    Box::new(ToggleShowHiddenEntries),
+                                )
+                            })
                             .when(has_git_repo, |menu| {
                                 menu.separator()
                                     .when(!is_dir && self.has_git_changes(entry_id), |menu| {
@@ -1872,7 +1927,11 @@ impl ProjectPanel {
     fn global_index_of_entry(&self, entry_id: ProjectEntryId) -> Option<usize> {
         let mut offset = 0;
         for visible in &self.state.visible_entries {
-            if let Some(ix) = visible.entries.iter().position(|entry| entry.id == entry_id) {
+            if let Some(ix) = visible
+                .entries
+                .iter()
+                .position(|entry| entry.id == entry_id)
+            {
                 return Some(offset + ix);
             }
             offset += visible.entries.len();
@@ -4277,6 +4336,92 @@ impl ProjectPanel {
         }
     }
 
+    fn is_hidden_by_user(&self, worktree_id: WorktreeId, path: &RelPath, cx: &App) -> bool {
+        self.project
+            .read(cx)
+            .worktree_for_id(worktree_id, cx)
+            .is_some_and(|worktree| {
+                hidden_paths_in_worktree(worktree.read(cx).abs_path().as_ref(), cx)
+                    .iter()
+                    .any(|hidden| path.starts_with(hidden))
+            })
+    }
+
+    fn selected_abs_paths(&self, cx: &App) -> Vec<PathBuf> {
+        let project = self.project.read(cx);
+        self.effective_entries()
+            .iter()
+            .filter_map(|selected| {
+                let worktree = project.worktree_for_id(selected.worktree_id, cx)?;
+                let worktree = worktree.read(cx);
+                let entry = worktree.entry_for_id(selected.entry_id)?;
+                (!entry.path.is_empty()).then(|| worktree.absolutize(&entry.path))
+            })
+            .collect()
+    }
+
+    fn hide_selected_entries(
+        &mut self,
+        _: &HideSelectedEntries,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let paths: Vec<String> = self
+            .selected_abs_paths(cx)
+            .into_iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect();
+        if paths.is_empty() {
+            return;
+        }
+        update_settings_file(self.fs.clone(), cx, move |settings, _| {
+            let hidden = settings
+                .project_panel
+                .get_or_insert_default()
+                .hidden_paths
+                .get_or_insert_default();
+            for path in paths {
+                if !hidden.contains(&path) {
+                    hidden.push(path);
+                }
+            }
+            hidden.sort();
+        });
+    }
+
+    fn unhide_selected_entries(
+        &mut self,
+        _: &UnhideSelectedEntries,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let paths = self.selected_abs_paths(cx);
+        if paths.is_empty() {
+            return;
+        }
+        update_settings_file(self.fs.clone(), cx, move |settings, _| {
+            if let Some(hidden) = settings
+                .project_panel
+                .as_mut()
+                .and_then(|project_panel| project_panel.hidden_paths.as_mut())
+            {
+                // Showing an entry inside a hidden folder takes showing the folder itself.
+                hidden
+                    .retain(|hidden| !paths.iter().any(|path| path.starts_with(Path::new(hidden))));
+            }
+        });
+    }
+
+    fn toggle_show_hidden_entries(
+        &mut self,
+        _: &ToggleShowHiddenEntries,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.show_hidden_entries = !self.show_hidden_entries;
+        self.update_visible_entries(None, false, false, window, cx);
+    }
+
     fn remove_from_project(
         &mut self,
         _: &RemoveFromProject,
@@ -4773,6 +4918,20 @@ impl ProjectPanel {
             .collect();
         let hide_root = settings.hide_root && visible_worktrees.len() == 1;
         let hide_hidden = settings.hide_hidden;
+        let user_hidden_paths: HashMap<WorktreeId, Vec<Arc<RelPath>>> = if self.show_hidden_entries
+        {
+            HashMap::default()
+        } else {
+            visible_worktrees
+                .iter()
+                .map(|worktree| {
+                    (
+                        worktree.id(),
+                        hidden_paths_in_worktree(worktree.abs_path(), cx),
+                    )
+                })
+                .collect()
+        };
 
         let visible_entries_task = cx.spawn_in(window, async move |this, cx| {
             let new_state = cx
@@ -4799,7 +4958,18 @@ impl ProjectPanel {
                             GitTraversal::new(&repo_snapshots, worktree_snapshot.entries(true, 0));
                         let mut auto_folded_ancestors = vec![];
                         let worktree_abs_path = worktree_snapshot.abs_path();
+                        let worktree_hidden_paths = user_hidden_paths
+                            .get(&worktree_id)
+                            .map(Vec::as_slice)
+                            .unwrap_or_default();
                         while let Some(entry) = entry_iter.entry() {
+                            if worktree_hidden_paths
+                                .iter()
+                                .any(|hidden| entry.path.starts_with(hidden))
+                            {
+                                entry_iter.advance_to_sibling();
+                                continue;
+                            }
                             if hide_root && Some(entry.entry) == worktree_snapshot.root_entry() {
                                 if new_entry_parent_id == Some(entry.id) {
                                     visible_worktree_entries.push(Self::create_new_git_entry(
@@ -7403,8 +7573,11 @@ impl ProjectPanel {
         } else {
             git_status
         };
-        let filename_text_color =
-            entry_git_aware_label_color(label_git_status, entry.is_ignored, is_marked);
+        let filename_text_color = if self.is_hidden_by_user(worktree_id, &entry.path, cx) {
+            Color::Placeholder
+        } else {
+            entry_git_aware_label_color(label_git_status, entry.is_ignored, is_marked)
+        };
 
         let is_cut = self
             .clipboard
@@ -7898,6 +8071,9 @@ impl Render for ProjectPanel {
                 .on_action(cx.listener(Self::unfold_directory))
                 .on_action(cx.listener(Self::fold_directory))
                 .on_action(cx.listener(Self::remove_from_project))
+                .on_action(cx.listener(Self::hide_selected_entries))
+                .on_action(cx.listener(Self::unhide_selected_entries))
+                .on_action(cx.listener(Self::toggle_show_hidden_entries))
                 .on_action(cx.listener(Self::compare_marked_files))
                 .on_action(cx.listener(Self::open_context_menu))
                 .when(!project.is_read_only(cx), |el| {
@@ -7942,14 +8118,13 @@ impl Render for ProjectPanel {
                                     }) {
                                         this.expand_animation = None;
                                     }
-                                    let reveal = this.expand_animation.as_ref().and_then(
-                                        |animation| {
+                                    let reveal =
+                                        this.expand_animation.as_ref().and_then(|animation| {
                                             Some((
                                                 animation,
                                                 this.global_index_of_entry(animation.entry_id)?,
                                             ))
-                                        },
-                                    );
+                                        });
                                     let mut items: Vec<AnyElement> =
                                         Vec::with_capacity(this.rendered_entries_len);
                                     let marked_selections: Arc<[SelectedEntry]> =

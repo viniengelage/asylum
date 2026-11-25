@@ -975,6 +975,11 @@ pub struct ProjectPanelSettingsContent {
     ///
     /// Default: false
     pub hide_hidden: Option<bool>,
+    /// Absolute paths of the files and folders hidden from the project panel with "Hide". They
+    /// stay in the project, for search and the agent; only the tree leaves them out.
+    ///
+    /// Default: []
+    pub hidden_paths: Option<Vec<String>>,
     /// Whether to stick parent directories at top of the project panel.
     ///
     /// Default: true
