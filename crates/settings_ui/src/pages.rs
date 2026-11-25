@@ -22,9 +22,7 @@ pub(crate) use feature_flags::render_feature_flags_page;
 pub(crate) use llm_providers_page::{
     LlmProviderForm, render_add_llm_provider_popover, render_llm_providers_page,
 };
-pub(crate) use mcp_servers_page::{
-    McpPage, render_mcp_servers_page,
-};
+pub(crate) use mcp_servers_page::{McpPage, render_mcp_servers_page};
 pub(crate) use model_benchmarks::{open_model_benchmarks, render_model_benchmarks_details};
 pub(crate) use sandbox_settings::render_sandbox_settings_page;
 pub(crate) use skill_creator::{

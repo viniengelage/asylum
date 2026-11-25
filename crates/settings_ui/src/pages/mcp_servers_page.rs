@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use agent_settings::AgentSettings;
 use collections::{HashMap, HashSet};
 use context_server::ContextServerId;
 use editor::Editor;
@@ -13,8 +14,8 @@ use project::context_server_store::{
 };
 use project::project_settings::ContextServerSettings;
 use settings::{
-    ContextServerCommand, ContextServerSettingsContent, OAuthClientSettings, SettingsScope,
-    SettingsStore,
+    ContextServerCommand, ContextServerSettingsContent, OAuthClientSettings, Settings as _,
+    SettingsScope, SettingsStore,
 };
 use ui::{
     ContextMenu, EmptyState, IconButton, PopoverMenu, PopoverTriggerArea, StatusTone, Tooltip,
@@ -104,6 +105,8 @@ struct ServerEntry {
     enabled: bool,
     scope: ServerScope,
     extension: bool,
+    /// Listed in `agent.on_demand_context_servers`: the agent asks before loading its tools.
+    on_demand: bool,
     settings: Option<ContextServerSettings>,
 }
 
@@ -187,8 +190,8 @@ fn ensure_page_state(
     cx: &mut Context<SettingsWindow>,
 ) {
     let page = &settings_window.mcp_page;
-    let store_changed = store.map(|store| store.entity_id())
-        != page.observed_store.as_ref().map(|(id, _)| *id);
+    let store_changed =
+        store.map(|store| store.entity_id()) != page.observed_store.as_ref().map(|(id, _)| *id);
     let stale_tools: Vec<ContextServerId> = store
         .map(|store| {
             let store = store.read(cx);
@@ -206,8 +209,7 @@ fn ensure_page_state(
     cx.defer_in(window, move |this, window, cx| {
         if this.mcp_page.search.is_none() {
             let search = new_input("Search by name or command", None, window, cx);
-            this.mcp_page._search_subscription =
-                Some(cx.observe(&search, |_, _, cx| cx.notify()));
+            this.mcp_page._search_subscription = Some(cx.observe(&search, |_, _, cx| cx.notify()));
             this.mcp_page.search = Some(search);
         }
         if store_changed {
@@ -230,6 +232,7 @@ fn collect_entries(store: &Entity<ContextServerStore>, cx: &App) -> Vec<ServerEn
     let project_servers = settings_store
         .asylum_project_settings()
         .map(|project| &project.project.context_servers);
+    let on_demand_servers = &AgentSettings::get_global(cx).on_demand_context_servers;
     let store = store.read(cx);
     let mut entries: Vec<ServerEntry> = store
         .server_ids()
@@ -262,6 +265,9 @@ fn collect_entries(store: &Entity<ContextServerStore>, cx: &App) -> Vec<ServerEn
                     ServerScope::Profile
                 },
                 extension,
+                on_demand: on_demand_servers
+                    .iter()
+                    .any(|server| server == id.0.as_ref()),
                 settings,
             }
         })
@@ -300,10 +306,11 @@ fn render_add_menu(cx: &mut Context<SettingsWindow>) -> impl IntoElement {
     let settings_window = cx.entity().downgrade();
     PopoverMenu::new("mcp-add-menu")
         .trigger(PopoverTriggerArea::new(
-            primary_button("mcp-add", Some(IconName::Plus), t("Add server"), None, cx)
-                .child(Icon::new(IconName::ChevronDown).size(IconSize::XSmall).color(
-                    Color::Custom(gpui::white()),
-                )),
+            primary_button("mcp-add", Some(IconName::Plus), t("Add server"), None, cx).child(
+                Icon::new(IconName::ChevronDown)
+                    .size(IconSize::XSmall)
+                    .color(Color::Custom(gpui::white())),
+            ),
         ))
         .anchor(gpui::Anchor::TopRight)
         .menu(move |window, cx| {
@@ -338,7 +345,11 @@ fn render_add_menu(cx: &mut Context<SettingsWindow>) -> impl IntoElement {
                     }
                 };
                 menu.custom_entry(
-                    item(IconName::Terminal, "Local server", "A command on this machine"),
+                    item(
+                        IconName::Terminal,
+                        "Local server",
+                        "A command on this machine",
+                    ),
                     open_form(McpTransport::Stdio),
                 )
                 .custom_entry(
@@ -350,7 +361,11 @@ fn render_add_menu(cx: &mut Context<SettingsWindow>) -> impl IntoElement {
                     open_form(McpTransport::Http),
                 )
                 .custom_entry(
-                    item(IconName::Json, "Paste JSON…", "From Claude, Cursor or VS Code"),
+                    item(
+                        IconName::Json,
+                        "Paste JSON…",
+                        "From Claude, Cursor or VS Code",
+                    ),
                     {
                         let settings_window = settings_window.clone();
                         move |window, cx| {
@@ -451,11 +466,18 @@ fn render_list(
         .is_some();
 
     let filter_option = |id: &'static str, label: &'static str, count: usize, filter: Filter| {
-        segment_option_with_count(id, t(label), count.to_string(), page.filter == filter, true, cx)
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.mcp_page.filter = filter;
-                cx.notify();
-            }))
+        segment_option_with_count(
+            id,
+            t(label),
+            count.to_string(),
+            page.filter == filter,
+            true,
+            cx,
+        )
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.mcp_page.filter = filter;
+            cx.notify();
+        }))
     };
 
     let mut list = v_flex()
@@ -477,7 +499,12 @@ fn render_list(
         )
         .child(
             segmented_control(cx)
-                .child(filter_option("mcp-filter-all", "All", entries.len(), Filter::All))
+                .child(filter_option(
+                    "mcp-filter-all",
+                    "All",
+                    entries.len(),
+                    Filter::All,
+                ))
                 .child(filter_option(
                     "mcp-filter-enabled",
                     "On",
@@ -570,13 +597,13 @@ fn render_list(
     list
 }
 
-fn render_row(
-    entry: &ServerEntry,
-    selected: bool,
-    cx: &mut Context<SettingsWindow>,
-) -> AnyElement {
+fn render_row(entry: &ServerEntry, selected: bool, cx: &mut Context<SettingsWindow>) -> AnyElement {
     let colors = cx.theme().colors();
-    let pill = status_pill_for(&entry.status, entry.enabled);
+    let pill = status_pill_for(&entry.status, entry.enabled)
+        .filter(|(_, tone)| *tone != StatusTone::Success)
+        .or_else(|| {
+            (entry.enabled && entry.on_demand).then(|| (t("on demand"), StatusTone::Neutral))
+        });
     let dot_color = if entry.enabled {
         status_tone(&entry.status).color(cx)
     } else {
@@ -592,7 +619,9 @@ fn render_row(
         .rounded(px(8.))
         .cursor_pointer()
         .when(selected, |this| this.bg(colors.element_selected))
-        .when(!selected, |this| this.hover(|this| this.bg(colors.element_hover)))
+        .when(!selected, |this| {
+            this.hover(|this| this.bg(colors.element_hover))
+        })
         .when(!entry.enabled, |this| this.opacity(0.55))
         .on_click(cx.listener(move |this, _, _, cx| {
             select_server(this, id.clone(), cx);
@@ -616,17 +645,18 @@ fn render_row(
                         .truncate(),
                 ),
         )
-        .children(
-            pill.filter(|(_, tone)| *tone != StatusTone::Success)
-                .map(|(label, tone)| status_pill(label, tone, cx)),
-        )
+        .children(pill.map(|(label, tone)| status_pill(label, tone, cx)))
         .child(render_toggle(entry, cx))
         .into_any_element()
 }
 
 fn select_server(this: &mut SettingsWindow, id: ContextServerId, cx: &mut Context<SettingsWindow>) {
     let page = &mut this.mcp_page;
-    if page.form.as_ref().is_some_and(|form| form.original_id.as_ref() != Some(&id)) {
+    if page
+        .form
+        .as_ref()
+        .is_some_and(|form| form.original_id.as_ref() != Some(&id))
+    {
         page.form = None;
     }
     page.selection = Some(Selection::Server(id));
@@ -661,15 +691,18 @@ fn set_server_enabled(
     cx: &mut Context<SettingsWindow>,
 ) {
     if let Some(project) = settings_window.active_project(cx) {
-        project.read(cx).context_server_store().update(cx, |store, cx| {
-            if enabled {
-                if let Some(server) = store.get_server(id) {
-                    store.start_server(server, cx);
+        project
+            .read(cx)
+            .context_server_store()
+            .update(cx, |store, cx| {
+                if enabled {
+                    if let Some(server) = store.get_server(id) {
+                        store.start_server(server, cx);
+                    }
+                } else {
+                    store.stop_server(id, cx).log_err();
                 }
-            } else {
-                store.stop_server(id, cx).log_err();
-            }
-        });
+            });
     }
 
     let fs = <dyn fs::Fs>::global(cx);
@@ -763,7 +796,7 @@ fn status_pill_for(
         ContextServerStatus::Running => "running",
         ContextServerStatus::Starting => "starting",
         ContextServerStatus::Authenticating => "signing in",
-        ContextServerStatus::Stopped => "on demand",
+        ContextServerStatus::Stopped => "stopped",
         ContextServerStatus::AuthRequired | ContextServerStatus::ClientSecretRequired { .. } => {
             "needs sign-in"
         }
@@ -890,7 +923,9 @@ fn ensure_tools(
                 .log_err();
             }
         });
-        this.mcp_page.tools.insert(id, Tools::Loading { _task: task });
+        this.mcp_page
+            .tools
+            .insert(id, Tools::Loading { _task: task });
     });
 }
 
@@ -909,8 +944,10 @@ fn render_server_detail(
     };
     let configuration = store.read(cx).configuration_for_server(&entry.id);
     let uses_oauth = configuration.as_ref().is_some_and(|configuration| {
-        matches!(configuration.as_ref(), ContextServerConfiguration::Http { .. })
-            && !configuration.has_static_auth_header()
+        matches!(
+            configuration.as_ref(),
+            ContextServerConfiguration::Http { .. }
+        ) && !configuration.has_static_auth_header()
     });
     let tools = page.tools.get(&entry.id);
 
@@ -987,12 +1024,10 @@ fn render_server_detail(
         })
         .when(!entry.extension, |this| {
             this.child(
-                secondary_button("mcp-edit", None, t("Edit"), true, cx).on_click(
-                    cx.listener({
-                        let id = id.clone();
-                        move |this, _, window, cx| open_edit_form(this, &id, false, window, cx)
-                    }),
-                ),
+                secondary_button("mcp-edit", None, t("Edit"), true, cx).on_click(cx.listener({
+                    let id = id.clone();
+                    move |this, _, window, cx| open_edit_form(this, &id, false, window, cx)
+                })),
             )
         })
         .child(render_server_menu(entry, cx))
@@ -1034,7 +1069,52 @@ fn render_server_detail(
                     .into_any_element(),
             ),
         ))
+        .when(entry.enabled, |this| {
+            this.child(render_on_demand(entry, cx))
+        })
         .child(render_tools(tools, cx))
+}
+
+fn render_on_demand(entry: &ServerEntry, cx: &mut Context<SettingsWindow>) -> impl IntoElement {
+    let id = entry.id.0.to_string();
+    let on_demand = entry.on_demand;
+    h_flex()
+        .id("mcp-on-demand")
+        .w_full()
+        .gap_3()
+        .py_1()
+        .cursor_pointer()
+        .on_click(cx.listener(move |_, _, _, cx| set_on_demand(id.clone(), !on_demand, cx)))
+        .child(toggle_switch("mcp-on-demand-switch", on_demand, true, cx))
+        .child(
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .child(Label::new(t("Load on demand")).size(LabelSize::Small))
+                .child(
+                    Label::new(t(
+                        "Keeps these tools out of the agent's context until it asks to load them and you approve",
+                    ))
+                    .size(LabelSize::XSmall)
+                    .color(Color::Muted),
+                ),
+        )
+}
+
+fn set_on_demand(server: String, on_demand: bool, cx: &mut Context<SettingsWindow>) {
+    let fs = <dyn fs::Fs>::global(cx);
+    settings::update_settings_file(fs, cx, move |settings, _| {
+        let servers = settings
+            .agent
+            .get_or_insert_default()
+            .on_demand_context_servers
+            .get_or_insert_default();
+        servers.retain(|id| id != &server);
+        if on_demand {
+            servers.push(server);
+            servers.sort();
+        }
+    });
 }
 
 fn render_status_callout(
@@ -1147,7 +1227,11 @@ fn notice(icon: IconName, color: Color, text: SharedString, cx: &App) -> Div {
         .rounded(px(10.))
         .bg(color.color(cx).opacity(0.1))
         .child(Icon::new(icon).size(IconSize::Small).color(color))
-        .child(div().flex_1().child(Label::new(text).size(LabelSize::Small)))
+        .child(
+            div()
+                .flex_1()
+                .child(Label::new(text).size(LabelSize::Small)),
+        )
 }
 
 fn sign_out_button(
@@ -1195,17 +1279,26 @@ fn render_connection(
     match &entry.settings {
         Some(ContextServerSettings::Stdio { command, .. }) => {
             rows = rows
-                .child(key_value(t("Type"), Label::new(t("Local (command)")).size(LabelSize::Small)))
+                .child(key_value(
+                    t("Type"),
+                    Label::new(t("Local (command)")).size(LabelSize::Small),
+                ))
                 .child(key_value(
                     t("Command"),
-                    mono(command_line(&command.path.to_string_lossy(), &command.args), cx)
-                        .truncate(),
+                    mono(
+                        command_line(&command.path.to_string_lossy(), &command.args),
+                        cx,
+                    )
+                    .truncate(),
                 ))
                 .child(key_value(t("Timeout"), timeout_value(command.timeout, cx)));
         }
         Some(ContextServerSettings::Http { url, timeout, .. }) => {
             rows = rows
-                .child(key_value(t("Type"), Label::new(t("Remote (HTTP)")).size(LabelSize::Small)))
+                .child(key_value(
+                    t("Type"),
+                    Label::new(t("Remote (HTTP)")).size(LabelSize::Small),
+                ))
                 .child(key_value(t("URL"), mono(url.clone(), cx).truncate()))
                 .when(uses_oauth, |this| {
                     let signed_in = matches!(entry.status, ContextServerStatus::Running);
@@ -1278,19 +1371,16 @@ fn open_settings_json(
     cx: &mut Context<SettingsWindow>,
 ) {
     match scope {
-        ServerScope::Profile => settings_window.open_settings_file(SettingsUiFile::User, window, cx),
+        ServerScope::Profile => {
+            settings_window.open_settings_file(SettingsUiFile::User, window, cx)
+        }
         ServerScope::Project => {
             let workspace = settings_window.workspace.clone();
             window.defer(cx, move |window, cx| {
                 workspace
                     .update(cx, |workspace, cx| {
                         workspace
-                            .open_abs_path(
-                                path,
-                                workspace::OpenOptions::default(),
-                                window,
-                                cx,
-                            )
+                            .open_abs_path(path, workspace::OpenOptions::default(), window, cx)
                             .detach_and_log_err(cx);
                     })
                     .log_err();
@@ -1302,10 +1392,11 @@ fn open_settings_json(
 fn timeout_value(timeout: Option<u64>, cx: &App) -> impl IntoElement {
     match timeout {
         Some(seconds) => h_flex().child(mono(format!("{seconds} s"), cx)),
-        None => h_flex()
-            .gap_2()
-            .child(mono("60 s", cx))
-            .child(Label::new(t("default")).size(LabelSize::Small).color(Color::Placeholder)),
+        None => h_flex().gap_2().child(mono("60 s", cx)).child(
+            Label::new(t("default"))
+                .size(LabelSize::Small)
+                .color(Color::Placeholder),
+        ),
     }
 }
 
@@ -1359,9 +1450,7 @@ fn render_tools(tools: Option<&Tools>, cx: &App) -> AnyElement {
         None => message(t("They show up once the server is running.")),
         Some(Tools::Loading { .. }) => message(t("Loading…")),
         Some(Tools::Failed(error)) => message(t_name("Could not list them: {name}", error)),
-        Some(Tools::Loaded(tools)) if tools.is_empty() => {
-            message(t("This server has no tools."))
-        }
+        Some(Tools::Loaded(tools)) if tools.is_empty() => message(t("This server has no tools.")),
         Some(Tools::Loaded(tools)) => h_flex()
             .w_full()
             .flex_wrap()
@@ -1506,7 +1595,13 @@ fn move_server(
         ServerScope::Profile => ServerScope::Project,
         ServerScope::Project => ServerScope::Profile,
     };
-    write_server(id.0.clone(), content, target, Some((id.0.clone(), entry.scope)), cx);
+    write_server(
+        id.0.clone(),
+        content,
+        target,
+        Some((id.0.clone(), entry.scope)),
+        cx,
+    );
 }
 
 /// Writes `content` under `name` in `target`, removing `previous` first when it is another name
@@ -1535,16 +1630,13 @@ fn write_server(
             remove_in_target = Some(previous_name);
         }
     }
-    let written = store.update_settings_file_in_scope(
-        fs,
-        target.settings_scope(),
-        move |settings, _| {
+    let written =
+        store.update_settings_file_in_scope(fs, target.settings_scope(), move |settings, _| {
             if let Some(previous_name) = remove_in_target {
                 settings.project.context_servers.remove(&previous_name);
             }
             settings.project.context_servers.insert(name, content);
-        },
-    );
+        });
     if let Some(removed_elsewhere) = removed_elsewhere {
         log_write_error(removed_elsewhere, cx);
     }
@@ -1708,10 +1800,7 @@ fn build_form(
     // settings.json) still load into the form for correction.
     match settings {
         Some(ContextServerSettings::Stdio { command, .. }) => {
-            command_initial = Some(command_line(
-                &command.path.to_string_lossy(),
-                &command.args,
-            ));
+            command_initial = Some(command_line(&command.path.to_string_lossy(), &command.args));
             timeout_initial = command.timeout.map(|timeout| timeout.to_string());
             for (key, value) in command.env.as_ref().map(sorted_pairs).unwrap_or_default() {
                 env.push(new_kv_row(Some(&key), Some(&value), window, cx));
@@ -1747,7 +1836,12 @@ fn build_form(
             window,
             cx,
         ),
-        url: new_input("https://example.com/mcp", url_initial.as_deref(), window, cx),
+        url: new_input(
+            "https://example.com/mcp",
+            url_initial.as_deref(),
+            window,
+            cx,
+        ),
         timeout: new_input("60", timeout_initial.as_deref(), window, cx),
         oauth_client_id: new_input(
             "Optional OAuth client ID",
@@ -1861,7 +1955,10 @@ fn render_form(
     let (icon, title, description) = match (form.transport, is_edit) {
         (_, true) => (
             IconName::Pencil,
-            t_name("Edit {name}", form.original_id.as_ref().map_or("", |id| &id.0)),
+            t_name(
+                "Edit {name}",
+                form.original_id.as_ref().map_or("", |id| &id.0),
+            ),
             t("Changes restart the server."),
         ),
         (McpTransport::Stdio, false) => (
@@ -2186,7 +2283,14 @@ fn save_form(settings_window: &mut SettingsWindow, cx: &mut Context<SettingsWind
     let result = build_settings_from_values(&values).and_then(|(id, original_id, content)| {
         let existing = settings_window
             .active_project(cx)
-            .map(|project| project.read(cx).context_server_store().read(cx).server_ids().to_vec())
+            .map(|project| {
+                project
+                    .read(cx)
+                    .context_server_store()
+                    .read(cx)
+                    .server_ids()
+                    .to_vec()
+            })
             .unwrap_or_default();
         if name_collides_with_other_server(&id, original_id.as_ref(), &existing) {
             Err(t_name("A server named \"{name}\" already exists.", &id.0))
@@ -2474,7 +2578,10 @@ fn render_paste_modal(
             v_flex()
                 .w_full()
                 .gap_2()
-                .child(section_header(t_count("FOUND · {count}", servers.len()), None))
+                .child(section_header(
+                    t_count("FOUND · {count}", servers.len()),
+                    None,
+                ))
                 .child(grouped_block(cx).children(servers.iter().map(|server| {
                     let checked = !paste.unchecked.contains(&server.name);
                     let exists = existing.iter().any(|id| id.0.as_ref() == server.name);
@@ -2720,9 +2827,11 @@ mod tests {
     fn rejects_invalid_url_timeout_and_quotes() {
         let mut remote = values(McpTransport::Http);
         remote.url = "not a url".into();
-        assert!(build_settings_from_values(&remote)
-            .unwrap_err()
-            .starts_with("Invalid URL"));
+        assert!(
+            build_settings_from_values(&remote)
+                .unwrap_err()
+                .starts_with("Invalid URL")
+        );
 
         let mut local = values(McpTransport::Stdio);
         local.command = "/bin/server".into();
@@ -2835,7 +2944,11 @@ mod tests {
     fn name_collision_covers_new_and_rename() {
         let existing = vec![id("foo"), id("bar")];
         assert!(name_collides_with_other_server(&id("foo"), None, &existing));
-        assert!(!name_collides_with_other_server(&id("baz"), None, &existing));
+        assert!(!name_collides_with_other_server(
+            &id("baz"),
+            None,
+            &existing
+        ));
         assert!(!name_collides_with_other_server(
             &id("foo"),
             Some(&id("foo")),
