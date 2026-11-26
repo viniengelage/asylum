@@ -14,7 +14,6 @@ use gpui::{
     MouseButton, MouseDownEvent, Pixels, Point as GpuiPoint, Rems, Render, ScrollEvent, Styled,
     Subscription, Task, TaskExt, WeakEntity, actions, anchored, deferred, div,
 };
-use menu;
 use persistence::TerminalDb;
 use project::{Project, ProjectEntryId, search::SearchQuery};
 use schemars::JsonSchema;
@@ -77,10 +76,6 @@ fn viewport_line_for_point(point: Point, display_offset: usize) -> Option<usize>
 }
 
 const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(500);
-
-/// Event to transmit the scroll from the element to the view
-#[derive(Clone, Debug, PartialEq)]
-pub struct ScrollTerminal(pub i32);
 
 /// Sends the specified text directly to the terminal.
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Action)]
@@ -190,16 +185,6 @@ pub enum ContentMode {
 }
 
 impl ContentMode {
-    pub fn is_limited(&self) -> bool {
-        match self {
-            ContentMode::Scrollable => false,
-            ContentMode::Inline {
-                displayed_lines,
-                total_lines,
-            } => displayed_lines < total_lines,
-        }
-    }
-
     pub fn is_scrollable(&self) -> bool {
         matches!(self, ContentMode::Scrollable)
     }
@@ -735,7 +720,8 @@ impl TerminalView {
     }
 
     fn stop_task(&mut self, _: &StopTask, _window: &mut Window, cx: &mut Context<Self>) {
-        self.terminal.update(cx, |terminal, _| terminal.kill_active_task());
+        self.terminal
+            .update(cx, |terminal, _| terminal.kill_active_task());
     }
 
     fn rerun_task(&mut self, _: &RerunTask, window: &mut Window, cx: &mut Context<Self>) {
@@ -1727,11 +1713,7 @@ impl Item for TerminalView {
 
         let (icon, icon_color, rerun_button) = match terminal.task() {
             Some(terminal_task) => match &terminal_task.status {
-                TaskStatus::Running => (
-                    IconName::PlayFilled,
-                    Color::Disabled,
-                    self.stop_button(),
-                ),
+                TaskStatus::Running => (IconName::PlayFilled, Color::Disabled, self.stop_button()),
                 TaskStatus::Unknown => (
                     IconName::Warning,
                     Color::Warning,
@@ -1924,9 +1906,9 @@ impl Item for TerminalView {
 
                 let workspace = workspace.downgrade();
                 let terminal_panel = terminal_panel.downgrade();
-                // Defer the split operation to avoid re-entrancy panic.
-                // The pane may be the one currently being updated, so we cannot
-                // call mark_positions (via split) synchronously.
+                // Defer the split and move to avoid a re-entrancy panic: the pane
+                // may be the one currently being updated, and moving the item
+                // updates it.
                 window
                     .spawn(cx, async move |cx| {
                         cx.update(|window, cx| {
@@ -2412,7 +2394,7 @@ pub fn default_working_directory(workspace: &Workspace, cx: &App) -> Option<Path
         WorkingDirectory::AlwaysHome => None,
         WorkingDirectory::Always { directory } if !is_remote => shellexpand::full(directory)
             .ok()
-            .map(|dir| Path::new(&dir.to_string()).to_path_buf())
+            .map(|dir| PathBuf::from(dir.into_owned()))
             .filter(|dir| dir.is_dir()),
         WorkingDirectory::Always { .. } => None,
     };
@@ -2506,7 +2488,7 @@ mod tests {
             add_display_only_terminal(&project, window_handle, false, true, cx);
         let mut cx = VisualTestContext::from_window(window_handle.into(), cx);
         terminal.update(&mut cx, |terminal, cx| {
-            terminal.write_raw_output(b"\x1b[1 q", cx);
+            terminal.write_output(b"\x1b[1 q", cx);
         });
         cx.run_until_parked();
         assert!(terminal_view.read_with(&cx, |view, _| view.blinking_terminal_enabled));
@@ -2527,7 +2509,7 @@ mod tests {
                 });
             });
             terminal.update(cx, |terminal, cx| {
-                terminal.write_raw_output(b"old", cx);
+                terminal.write_output(b"old", cx);
                 terminal.matches.push(Range::new(
                     terminal::Point::new(0, 0),
                     terminal::Point::new(0, 3),
@@ -2681,7 +2663,7 @@ mod tests {
             let content = cx.update(|window, cx| {
                 terminal.update(cx, |terminal, cx| {
                     terminal.write_output(output, cx);
-                    terminal.sync(window, cx);
+                    terminal.sync(MouseInputMode::ReportToTerminal, window, cx);
                     terminal.get_content()
                 })
             });
@@ -2713,7 +2695,7 @@ mod tests {
                     view.add_paths_to_terminal(paths.paths(), window, cx);
                 });
                 terminal.update(cx, |terminal, cx| {
-                    terminal.sync(window, cx);
+                    terminal.sync(MouseInputMode::ReportToTerminal, window, cx);
                     assert!(terminal.take_input_log().is_empty());
                     assert!(terminal.take_pty_write_log().is_empty());
                     assert_eq!(terminal.get_content(), content);
@@ -2732,7 +2714,7 @@ mod tests {
         cx.update(|window, cx| {
             terminal.update(cx, |terminal, cx| {
                 terminal.write_output(b"first line\nsecond line\n", cx);
-                terminal.sync(window, cx);
+                terminal.sync(MouseInputMode::ReportToTerminal, window, cx);
             });
             window.dispatch_action(Box::new(ToggleViMode), cx);
         });
@@ -2786,7 +2768,7 @@ mod tests {
         cx.update(|window, cx| {
             terminal.update(cx, |terminal, cx| {
                 terminal.write_output(b"\x1b[?1003h\x1b[?1006h\x1b[?1004hhello world\n", cx);
-                terminal.sync(window, cx);
+                terminal.sync(MouseInputMode::ReportToTerminal, window, cx);
                 terminal.take_pty_write_log();
             });
             window.blur(cx);
@@ -2835,7 +2817,7 @@ mod tests {
         cx.update(|window, cx| {
             terminal.update(cx, |terminal, cx| {
                 terminal.write_output(output.as_bytes(), cx);
-                terminal.sync(window, cx);
+                terminal.sync(MouseInputMode::ReportToTerminal, window, cx);
             });
         });
         terminal.read_with(&cx, |terminal, _| {
@@ -2845,7 +2827,9 @@ mod tests {
 
         cx.simulate_keystrokes("shift-up");
         cx.update(|window, cx| {
-            terminal.update(cx, |terminal, cx| terminal.sync(window, cx));
+            terminal.update(cx, |terminal, cx| {
+                terminal.sync(MouseInputMode::ReportToTerminal, window, cx)
+            });
         });
 
         assert_eq!(
@@ -2877,7 +2861,7 @@ mod tests {
         cx.update(|window, cx| {
             terminal.update(cx, |terminal, cx| {
                 terminal.write_output(ENTER_ALT_SCREEN, cx);
-                terminal.sync(window, cx);
+                terminal.sync(MouseInputMode::ReportToTerminal, window, cx);
             });
         });
         terminal.read_with(&cx, |terminal, _| {

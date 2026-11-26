@@ -61,7 +61,6 @@ pub struct ThreadItem {
     project_paths: Option<Arc<[PathBuf]>>,
     project_name: Option<SharedString>,
     worktrees: Vec<ThreadItemWorktreeInfo>,
-    is_remote: bool,
     archived: bool,
     on_click: Option<Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>>,
     on_hover: Box<dyn Fn(&bool, &mut Window, &mut App) + 'static>,
@@ -98,7 +97,6 @@ impl ThreadItem {
             project_paths: None,
             project_name: None,
             worktrees: Vec::new(),
-            is_remote: false,
             archived: false,
             on_click: None,
             on_hover: Box::new(|_, _, _| {}),
@@ -214,11 +212,6 @@ impl ThreadItem {
 
     pub fn worktrees(mut self, worktrees: Vec<ThreadItemWorktreeInfo>) -> Self {
         self.worktrees = worktrees;
-        self
-    }
-
-    pub fn is_remote(mut self, is_remote: bool) -> Self {
-        self.is_remote = is_remote;
         self
     }
 
@@ -1039,9 +1032,7 @@ impl Component for ThreadItem {
             ),
         ];
 
-        example_group(thread_item_examples)
-            .vertical()
-            .into_any_element()
+        example_group(thread_item_examples).into_any_element()
     }
 }
 

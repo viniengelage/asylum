@@ -441,6 +441,9 @@ fn parse_path_in_wsl(source: &str, wsl: &str) -> Result<String> {
 fn main() {
     // SAFETY: called from `main` before the process starts any other thread.
     unsafe { util::asylum_env::adopt_zed_environment() };
+    #[cfg(target_os = "windows")]
+    sandbox::run_windows_sandbox_launcher_if_invoked();
+
     if let Err(error) = run() {
         eprintln!("error: {error:#}");
         std::process::exit(1);

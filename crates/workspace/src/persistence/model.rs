@@ -45,13 +45,6 @@ pub enum SerializedWorkspaceLocation {
     Remote(RemoteConnectionOptions),
 }
 
-impl SerializedWorkspaceLocation {
-    /// Get sorted paths
-    pub fn sorted_paths(&self) -> Arc<Vec<PathBuf>> {
-        unimplemented!()
-    }
-}
-
 /// A workspace entry from a previous session, containing all the info needed
 /// to restore it including which window it belonged to (for MultiWorkspace grouping).
 #[derive(Debug, PartialEq, Clone)]
@@ -464,13 +457,37 @@ impl SerializedPane {
             }
         }
 
-        let mut items = Vec::new();
-        for (item, item_handle) in self
-            .children
+        let item_handles = futures::future::join_all(item_tasks)
+            .await
+            .into_iter()
+            .map(|item_handle| item_handle.log_err())
+            .collect::<Vec<_>>();
+
+        // `items` keeps a `None` for every item that failed to deserialize, and those
+        // are never added to the pane. Counting them would leave the pinned count
+        // pointing past the pinned tabs and pin unpinned ones in their place. It's set
+        // before adding the items so that `max_tabs` can't close the pinned ones.
+        let pinned_count = item_handles
             .iter()
-            .zip(futures::future::join_all(item_tasks).await)
-        {
-            let item_handle = item_handle.log_err();
+            .take(self.pinned_count)
+            .filter(|item| item.is_some())
+            .count();
+        pane.update(cx, |pane, cx| {
+            pane.set_pinned_count(pinned_count);
+            // Restored before anything else routes content, so the first terminal or file
+            // opened after a restart already lands in the slot the layout declared.
+            if !self.accepts_kinds.is_empty() {
+                let kinds = self
+                    .accepts_kinds
+                    .iter()
+                    .map(|kind| crate::ContentKind::new(kind.clone()))
+                    .collect();
+                pane.set_accepts_kinds(kinds, cx);
+            }
+        })?;
+
+        let mut items = Vec::new();
+        for (item, item_handle) in self.children.iter().zip(item_handles) {
             items.push(item_handle.clone());
 
             match item_handle {
@@ -508,28 +525,6 @@ impl SerializedPane {
                 pane.set_preview_item_id(Some(preview_item.item_id()), cx);
             })?;
         }
-
-        // `items` keeps a `None` for every item that failed to deserialize, and those
-        // were never added to the pane. Counting them would leave the pinned count
-        // pointing past the pinned tabs and pin unpinned ones in their place.
-        let pinned_count = items
-            .iter()
-            .take(self.pinned_count)
-            .filter(|item| item.is_some())
-            .count();
-        pane.update(cx, |pane, cx| {
-            pane.set_pinned_count(pinned_count);
-            // Restored before anything else routes content, so the first terminal or file
-            // opened after a restart already lands in the slot the layout declared.
-            if !self.accepts_kinds.is_empty() {
-                let kinds = self
-                    .accepts_kinds
-                    .iter()
-                    .map(|kind| crate::ContentKind::new(kind.clone()))
-                    .collect();
-                pane.set_accepts_kinds(kinds, cx);
-            }
-        })?;
 
         anyhow::Ok(items)
     }

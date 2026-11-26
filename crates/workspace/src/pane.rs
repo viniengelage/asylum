@@ -19,11 +19,11 @@ use collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use futures::{StreamExt, stream::FuturesUnordered};
 use git::{CopyFilePermalink, OpenFilePermalink};
 use gpui::{
-    Action, Anchor, AnyElement, App, AsyncWindowContext, ClickEvent, ClipboardItem, Context, Div,
+    Action, Anchor, AnyElement, App, AsyncWindowContext, ClickEvent, ClipboardItem, Context,
     DragMoveEvent, Entity, EntityId, EventEmitter, ExternalPaths, FocusHandle, FocusOutEvent,
     Focusable, KeyContext, MouseButton, NavigationDirection, Pixels, Point, PromptLevel, Render,
     ScrollHandle, Subscription, Task, TaskExt, WeakEntity, WeakFocusHandle, Window, actions,
-    anchored, deferred, prelude::*,
+    prelude::*,
 };
 use itertools::Itertools;
 use language::{Capability, DiagnosticSeverity};
@@ -1865,7 +1865,7 @@ impl Pane {
         let pinned_item_ids = self.pinned_item_ids();
         let matching_item_ids: Vec<_> = self
             .items()
-            .filter(|item| item.project_path(cx).as_ref() == Some(project_path))
+            .filter(|item| item.single_file_project_path(cx).as_ref() == Some(project_path))
             .map(|item| item.item_id())
             .collect();
         self.close_items(window, cx, save_intent, &move |item_id| {
@@ -4084,12 +4084,6 @@ impl Pane {
             }))
     }
 
-    pub fn render_menu_overlay(menu: &Entity<ContextMenu>) -> Div {
-        div().absolute().bottom_0().right_0().size_0().child(
-            deferred(anchored().anchor(Anchor::TopRight).child(menu.clone())).with_priority(1),
-        )
-    }
-
     pub fn set_zoomed(&mut self, zoomed: bool, cx: &mut Context<Self>) {
         self.zoomed = zoomed;
         cx.notify();
@@ -4150,9 +4144,7 @@ impl Pane {
             None
         };
 
-        if direction != self.drag_split_direction {
-            self.drag_split_direction = direction;
-        }
+        self.drag_split_direction = direction;
     }
 
     pub fn handle_tab_drop(
@@ -5118,10 +5110,6 @@ impl ItemNavHistory {
 
     pub fn pop_backward(&mut self, cx: &mut App) -> Option<NavigationEntry> {
         self.history.pop(NavigationMode::GoingBack, cx)
-    }
-
-    pub fn pop_forward(&mut self, cx: &mut App) -> Option<NavigationEntry> {
-        self.history.pop(NavigationMode::GoingForward, cx)
     }
 
     pub(crate) fn push_path(

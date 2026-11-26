@@ -5,7 +5,7 @@ use gpui::{Entity, FocusHandle};
 use picker::popover_menu::PickerPopoverMenu;
 use ui::{PopoverMenuHandle, Tooltip, prelude::*};
 
-use crate::ui::ModelSelectorTooltip;
+use language_model_selector::ModelSelectorTooltip;
 use crate::{ModelSelector, model_selector::acp_model_selector};
 
 pub struct ModelSelectorPopover {
@@ -34,6 +34,12 @@ impl ModelSelectorPopover {
 
     pub fn active_model<'a>(&self, cx: &'a App) -> Option<&'a AgentModelInfo> {
         self.selector.read(cx).delegate.active_model()
+    }
+
+    pub fn refresh_selected_model(&self, window: &mut Window, cx: &mut Context<Self>) {
+        self.selector.update(cx, |selector, cx| {
+            selector.delegate.refresh_selected_model(window, cx);
+        });
     }
 
     pub fn cycle_favorite_models(&self, window: &mut Window, cx: &mut Context<Self>) {

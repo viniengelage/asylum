@@ -934,7 +934,7 @@ impl QueryView {
                                 .to_string(),
                             };
                             let this = this.clone();
-                            let query = entry.query.clone();
+                            let query = entry.query;
                             menu = menu.entry(label, None, move |_, cx| {
                                 this.update(cx, |this, cx| this.replace_text(&query, cx))
                                     .log_err();

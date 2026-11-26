@@ -364,7 +364,7 @@ impl TasksPanel {
                             for summary in projects {
                                 let weak_state = weak_state.clone();
                                 let id = summary.id.clone();
-                                menu = menu.entry(summary.title.clone(), None, move |_, cx| {
+                                menu = menu.entry(summary.title, None, move |_, cx| {
                                     if let Some(state) = weak_state.as_ref() {
                                         state
                                             .update(cx, |state, cx| {

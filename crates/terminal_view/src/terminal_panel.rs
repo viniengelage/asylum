@@ -34,7 +34,9 @@ use workspace::{
     SwapPaneLeft, SwapPaneRight, SwapPaneUp, Toast, ToggleZoom, Workspace,
     dock::{DockPosition, Panel, PanelEvent, PanelHandle},
     item::SerializableItem,
-    move_active_item, notifications::NotificationId, pane,
+    move_active_item,
+    notifications::NotificationId,
+    pane,
 };
 
 use anyhow::{Result, anyhow};
@@ -793,7 +795,11 @@ impl TerminalPanel {
         }
         let toast = Toast::new(
             NotificationId::composite::<TaskAlreadyRunning>(SharedString::from(task.id.0.clone())),
-            i18n::t!("terminal_view.task_already_running", label = task.label.as_str()).to_string(),
+            i18n::t!(
+                "terminal_view.task_already_running",
+                label = task.label.as_str()
+            )
+            .to_string(),
         )
         .on_click(
             i18n::t!("terminal_view.task_restart_now").to_string(),
@@ -1468,7 +1474,6 @@ pub fn new_terminal_pane(
             cx,
         );
         pane.set_zoomed(zoomed, cx);
-        pane.set_can_navigate(false, cx);
         pane.display_nav_history_buttons(None);
         pane.set_should_display_tab_bar(|_, _| true);
         pane.set_zoom_out_on_close(false);

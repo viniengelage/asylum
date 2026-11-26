@@ -437,7 +437,7 @@ fn extract(crate_name: &str, dry_run: bool) -> Result<()> {
             .file_stem()
             .map(|stem| stem.to_string_lossy().into_owned())
             .unwrap_or_else(|| crate_name.to_string());
-        let mut rewritten = source.clone();
+        let mut rewritten = source;
         for ui_string in ui_strings.iter().rev() {
             let key = match keys_by_text.get(&(area.clone(), ui_string.text.clone())) {
                 Some(key) => key.clone(),

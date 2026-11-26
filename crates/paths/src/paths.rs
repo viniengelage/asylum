@@ -711,20 +711,6 @@ pub fn prompt_overrides_dir(repo_path: Option<&Path>) -> PathBuf {
         .clone()
 }
 
-/// Returns the path to the semantic search's embeddings directory.
-///
-/// This is where the embeddings used to power semantic search are stored.
-pub fn embeddings_dir() -> &'static PathBuf {
-    static EMBEDDINGS_DIR: OnceLock<PathBuf> = OnceLock::new();
-    EMBEDDINGS_DIR.get_or_init(|| {
-        if cfg!(target_os = "macos") {
-            config_dir().join("embeddings")
-        } else {
-            data_dir().join("embeddings")
-        }
-    })
-}
-
 /// Returns the path to the languages directory.
 ///
 /// This is where language servers are downloaded to for languages built-in to Zed.

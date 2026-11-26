@@ -61,12 +61,6 @@ const MAX_PROJECT_NAME_LENGTH: usize = 40;
 actions!(
     collab,
     [
-        /// Toggles the user menu dropdown.
-        ToggleUserMenu,
-        /// Toggles the project menu dropdown.
-        ToggleProjectMenu,
-        /// Switches to a different git branch.
-        SwitchBranch,
         /// A debug action to simulate an update being available to test the update banner UI.
         SimulateUpdateAvailable
     ]
