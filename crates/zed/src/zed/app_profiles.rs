@@ -60,7 +60,7 @@ impl ProfileColor {
         Self::Rose,
     ];
 
-    fn hsla(self) -> Hsla {
+    pub(crate) fn hsla(self) -> Hsla {
         match self {
             Self::Amber => rgb(0xE8B368).into(),
             Self::Teal => rgb(0x5EEAD4).into(),
@@ -150,7 +150,7 @@ fn default_profile() -> AppProfile {
 
 /// Loads the registry, which always lists the default profile first even before anything
 /// was saved.
-fn load_profiles() -> Result<Vec<AppProfile>> {
+pub(crate) fn load_profiles() -> Result<Vec<AppProfile>> {
     let mut profiles = match std::fs::read(registry_path()) {
         Ok(json) => {
             serde_json::from_slice::<Registry>(&json)

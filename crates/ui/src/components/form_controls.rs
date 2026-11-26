@@ -271,6 +271,16 @@ pub fn select_field(
     label: impl Into<SharedString>,
     cx: &App,
 ) -> Stateful<Div> {
+    select_field_with_leading(id, None, label, cx)
+}
+
+/// A [`select_field`] with something before the value, e.g. a profile's color dot.
+pub fn select_field_with_leading(
+    id: impl Into<gpui::ElementId>,
+    leading: Option<AnyElement>,
+    label: impl Into<SharedString>,
+    cx: &App,
+) -> Stateful<Div> {
     let colors = cx.theme().colors();
     h_flex()
         .id(id)
@@ -287,11 +297,13 @@ pub fn select_field(
         .cursor_pointer()
         .hover(|this| this.bg(colors.element_hover))
         .child(
-            Label::new(label)
-                .size(LabelSize::Small)
-                .weight(FontWeight::MEDIUM)
-                .single_line()
-                .truncate(),
+            h_flex().flex_1().min_w_0().gap_2().children(leading).child(
+                Label::new(label)
+                    .size(LabelSize::Small)
+                    .weight(FontWeight::MEDIUM)
+                    .single_line()
+                    .truncate(),
+            ),
         )
         .child(
             Icon::new(IconName::ChevronDown)
@@ -660,6 +672,86 @@ pub fn error_callout(
                         .color(Color::Error),
                 )
                 .child(Label::new(message).size(LabelSize::Small)),
+        )
+}
+
+/// The boards' quiet note under a form, e.g. where a setting is stored.
+pub fn info_note(text: impl Into<SharedString>, cx: &App) -> Div {
+    h_flex()
+        .w_full()
+        .items_start()
+        .gap_2()
+        .p(px(10.))
+        .rounded(Radius::Md.rems())
+        .bg(cx.theme().colors().element_background)
+        .child(
+            Icon::new(IconName::Info)
+                .size(IconSize::Small)
+                .color(Color::Muted),
+        )
+        .child(
+            div().flex_1().min_w_0().child(
+                Label::new(text)
+                    .size(LabelSize::Custom(rems_from_px(11.5_f32)))
+                    .color(Color::Muted),
+            ),
+        )
+}
+
+/// The boards' side-by-side option with a title and a description; the chosen one is tinted
+/// and bordered in the accent, with a check before its title.
+pub fn option_card(
+    id: impl Into<gpui::ElementId>,
+    title: impl Into<SharedString>,
+    description: impl Into<SharedString>,
+    selected: bool,
+    cx: &App,
+) -> Stateful<Div> {
+    let colors = cx.theme().colors();
+    let accent = colors.border_focused;
+    v_flex()
+        .id(id)
+        .flex_1()
+        .min_w_0()
+        .p_3()
+        .gap_1()
+        .rounded(px(10.))
+        .border_1()
+        .cursor_pointer()
+        .map(|this| {
+            if selected {
+                this.border_color(accent.opacity(0.5))
+                    .bg(accent.opacity(0.16))
+            } else {
+                this.border_color(colors.border_selected)
+                    .bg(colors.element_background)
+                    .hover(|this| this.bg(colors.element_hover))
+            }
+        })
+        .child(
+            h_flex()
+                .gap_1p5()
+                .when(selected, |this| {
+                    this.child(
+                        Icon::new(IconName::Check)
+                            .size(IconSize::Small)
+                            .color(Color::Accent),
+                    )
+                })
+                .child(
+                    Label::new(title)
+                        .size(LabelSize::Small)
+                        .weight(if selected {
+                            FontWeight::BOLD
+                        } else {
+                            FontWeight::MEDIUM
+                        }),
+                ),
+        )
+        .child(
+            Label::new(description)
+                .size(LabelSize::Custom(rems_from_px(11.5_f32)))
+                .color(Color::Muted),
         )
 }
 
