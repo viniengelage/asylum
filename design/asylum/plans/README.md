@@ -16,6 +16,7 @@ código. A ideia é atacar um de cada vez, na ordem abaixo, e marcar o status aq
 | 9 | [Cenas (layouts nomeados, colunas e linhas)](09-cenas.md) | 21 · Cenas | G | — (base `unified_panes` já existe) | fases 0 e 1 feitas (revisão da base de slots incluída); fases 2–4 pendentes; não validado no app |
 | 10 | [Lançar do build à loja, pela dock e pelo agente](10-lancar-pelo-agente.md) | 18 · Lançamentos (sem board novo) | G | 04 e 07 | fases 1–4 feitas, só fixtures; fase 0 (contas reais) pendente no app |
 | 11 | [Servidores MCP: lista, detalhe e adicionar](11-mcp-servidores.md) | 23 · MCP | M | — | feito; não validado no app |
+| 12 | [Correções: cenas e login da dock de API](12-correcoes-cenas-e-login-api.md) | 21 · Cenas (sem board novo) | M | 09 | feito em 2026-11-27 (menos D4–D6); não validado no app |
 
 **Por que essa ordem:** 1 e 2 são pequenos, independentes e resolvem dores do dia a dia (MCP caindo
 no lugar errado, se perder nas threads). 3 muda onde as configs e as contas moram, então vem antes de
