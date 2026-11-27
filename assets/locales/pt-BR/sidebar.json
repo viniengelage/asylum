@@ -98,6 +98,7 @@
   "ios.manage_simulators": "Gerenciar simuladores",
   "ios.manage_simulators_ellipsis": "Gerenciar simuladores…",
   "ios.menu_header": "SIMULADORES",
+  "ios.simulator_stopped": "O simulador foi encerrado (travou ou foi desligado fora do Asylum). Ele volta a aparecer aqui assim que ligar de novo.",
   "ios.mount_failed": "Não foi possível montar a view nativa do SimulatorKit.",
   "ios.new_simulator": "Novo simulador…",
   "ios.no_simulators": "Nenhum simulador iOS disponível",

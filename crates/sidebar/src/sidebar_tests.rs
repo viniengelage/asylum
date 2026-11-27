@@ -14599,6 +14599,7 @@ async fn test_delta_checkout_groups_with_its_source(cx: &mut TestAppContext) {
         chrono::TimeZone::with_ymd_and_hms(&Utc, 2024, 1, 1, 0, 0, 0).unwrap(),
         cx,
     );
+    cx.update(|cx| <dyn fs::Fs>::set_global(fs.clone(), cx));
     let source_project = project::Project::test(fs.clone(), [source_path], cx).await;
     let first_project = project::Project::test(fs.clone(), [first_checkout_path], cx).await;
     let second_project = project::Project::test(fs.clone(), [second_checkout_path], cx).await;

@@ -98,6 +98,7 @@
   "ios.manage_simulators": "Manage simulators",
   "ios.manage_simulators_ellipsis": "Manage simulators…",
   "ios.menu_header": "SIMULATORS",
+  "ios.simulator_stopped": "The simulator stopped (it crashed or was shut down outside Asylum). It shows up here again as soon as it boots.",
   "ios.mount_failed": "Could not mount the native SimulatorKit view.",
   "ios.new_simulator": "New simulator…",
   "ios.no_simulators": "No iOS simulator available",

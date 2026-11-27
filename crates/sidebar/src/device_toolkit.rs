@@ -19,6 +19,8 @@ const ANDROID_KEYCODE_BACK: u32 = 4;
 const SWIPE_STEPS: u32 = 12;
 const LOG_LINES_LIMIT: usize = 400;
 /// A cold boot of a simulator that was never started can take a while on first launch.
+const SIMCTL_TIMEOUT: Duration = Duration::from_secs(30);
+const SIMCTL_LOG_TIMEOUT: Duration = Duration::from_secs(60);
 const IOS_OPEN_TIMEOUT: Duration = Duration::from_secs(120);
 /// An emulator cold boot is slow, more so the first time an AVD starts.
 const ANDROID_OPEN_TIMEOUT: Duration = Duration::from_secs(300);
@@ -43,6 +45,7 @@ pub(crate) fn register_device_host(
     hosts.0.push((sidebar, window));
 }
 
+#[derive(Clone)]
 enum DeviceTarget {
     Ios {
         udid: String,
@@ -349,7 +352,7 @@ fn choose_device(
     }
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Clone, Deserialize, JsonSchema)]
 struct DeviceInput {
     /// Which device: "ios" or "android". Leave empty for the one open in the Devices dock
     /// (iOS first when both are open).
@@ -367,7 +370,7 @@ struct OpenInput {
     device: String,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Clone, Deserialize, JsonSchema)]
 struct TapInput {
     #[serde(default)]
     device: Option<String>,
@@ -377,7 +380,7 @@ struct TapInput {
     y: f64,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Clone, Deserialize, JsonSchema)]
 struct SwipeInput {
     #[serde(default)]
     device: Option<String>,
@@ -392,7 +395,7 @@ struct SwipeInput {
     duration_ms: Option<u64>,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Clone, Deserialize, JsonSchema)]
 struct TypeInput {
     #[serde(default)]
     device: Option<String>,
@@ -400,7 +403,7 @@ struct TypeInput {
     text: String,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Clone, Deserialize, JsonSchema)]
 struct KeyInput {
     #[serde(default)]
     device: Option<String>,
@@ -408,7 +411,7 @@ struct KeyInput {
     key: String,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Clone, Deserialize, JsonSchema)]
 struct LogsInput {
     #[serde(default)]
     device: Option<String>,
@@ -420,7 +423,7 @@ struct LogsInput {
     filter: Option<String>,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Clone, Deserialize, JsonSchema)]
 struct OpenUrlInput {
     #[serde(default)]
     device: Option<String>,
@@ -440,12 +443,13 @@ async fn capture(target: &DeviceTarget, cx: &mut AsyncApp) -> Result<Screenshot>
     let png = match target {
         DeviceTarget::Ios { udid, .. } => {
             let path = std::env::temp_dir().join(format!("asylum_agent_ios_{udid}.png"));
-            let output = smol::process::Command::new("xcrun")
-                .args(["simctl", "io", udid, "screenshot", "--type=png"])
-                .arg(&path)
-                .output()
-                .await
-                .context("não foi possível executar xcrun simctl")?;
+            let path_text = path.to_string_lossy().into_owned();
+            let output = xcrun_output(
+                &["simctl", "io", udid, "screenshot", "--type=png", &path_text],
+                SIMCTL_TIMEOUT,
+                cx,
+            )
+            .await?;
             anyhow::ensure!(
                 output.status.success(),
                 "simctl screenshot falhou: {}",
@@ -712,19 +716,88 @@ fn device_input_tool<I>(
     + 'static,
 ) -> ToolkitTool
 where
-    I: JsonSchema + serde::de::DeserializeOwned + DeviceSelector + 'static,
+    I: JsonSchema + serde::de::DeserializeOwned + DeviceSelector + Clone + 'static,
 {
     ToolkitTool::new(
         name,
         title,
         description,
         access,
-        move |_project: Entity<Project>, input: I, cx: &mut App| {
+        move |project: Entity<Project>, input: I, cx: &mut App| {
             let target = resolve_device(input.device(), cx);
             let run = run.clone();
-            cx.spawn(async move |cx| run(target?, input, cx).await)
+            cx.spawn(async move |cx| {
+                let target = target?;
+                let error = match run(target.clone(), input.clone(), cx).await {
+                    Ok(output) => return Ok(output),
+                    Err(error) => error,
+                };
+                let DeviceTarget::Ios { udid, .. } = &target else {
+                    return Err(error);
+                };
+                if ios_device_is_booted(udid).await {
+                    return Err(error);
+                }
+                // The simulator crashed or was shut down: bring it back in the dock, the way
+                // device_open would, and try once more. Booting it from a terminal would open
+                // it outside the app.
+                log::info!("simulador {udid} desligado durante {name}; reabrindo no dock");
+                open_device(project, udid.clone(), cx).await.with_context(|| {
+                    format!("o simulador estava desligado e não voltou ({error:#})")
+                })?;
+                let target = cx.update(|cx| resolve_device(Some("ios"), cx))?;
+                let mut output = run(target, input, cx).await?;
+                output.content.insert(
+                    0,
+                    task_agents::ToolkitContent::Text(
+                        "O simulador tinha caído; reabri no Asylum.".to_string(),
+                    ),
+                );
+                Ok(output)
+            })
         },
     )
+}
+
+/// Whether simctl reports the device as running. A failing simctl counts as running, so a
+/// transient error never reboots a healthy simulator.
+async fn ios_device_is_booted(udid: &str) -> bool {
+    crate::list_ios_simulators()
+        .await
+        .map(|devices| {
+            devices
+                .iter()
+                .any(|device| device.udid == udid && device.is_booted())
+        })
+        .unwrap_or(true)
+}
+
+/// Runs `xcrun` with a deadline: a simctl talking to a simulator that is going down can wait
+/// forever, holding the agent's tool call with it.
+async fn xcrun_output(
+    arguments: &[&str],
+    timeout: Duration,
+    cx: &mut AsyncApp,
+) -> Result<std::process::Output> {
+    let command = arguments.first().copied().unwrap_or("xcrun");
+    let run = async {
+        smol::process::Command::new("xcrun")
+            .args(arguments)
+            .kill_on_drop(true)
+            .output()
+            .await
+            .with_context(|| format!("não foi possível executar xcrun {command}"))
+    };
+    let timer = cx.background_executor().timer(timeout);
+    smol::future::or(run, async {
+        timer.await;
+        Err(anyhow!(
+            "xcrun {} não respondeu em {} s",
+            arguments.iter().take(2).copied().collect::<Vec<_>>().join(" "),
+            timeout.as_secs()
+        ))
+    })
+    .await
 }
 
 trait DeviceSelector {
@@ -925,8 +998,23 @@ async fn open_device(
         AgentDevice::Ios { udid } => Some(udid.clone()),
         AgentDevice::Android { .. } => None,
     };
+    // The dock may still show a simulator that has since crashed: its cached state says
+    // booted and its view is up, so opening would "succeed" on a dead device.
+    let stopped_udid = match &device {
+        AgentDevice::Ios { udid } => ios
+            .iter()
+            .any(|candidate| &candidate.udid == udid && !candidate.is_booted())
+            .then(|| udid.clone()),
+        AgentDevice::Android { .. } => None,
+    };
     window.update(cx, |_, window, cx| {
         instance.update(cx, |instance, cx| {
+            #[cfg(target_os = "macos")]
+            if let Some(udid) = &stopped_udid {
+                instance.handle_ios_device_stopped(udid, window, cx);
+            }
+            #[cfg(not(target_os = "macos"))]
+            let _ = &stopped_udid;
             instance.open_device_for_agent(device, window, cx)
         })
     })?;
@@ -1026,11 +1114,7 @@ async fn close_device(
     });
     match device? {
         AgentDevice::Ios { udid } => {
-            let output = smol::process::Command::new("xcrun")
-                .args(["simctl", "shutdown", &udid])
-                .output()
-                .await
-                .context("não foi possível executar xcrun simctl shutdown")?;
+            let output = xcrun_output(&["simctl", "shutdown", &udid], SIMCTL_TIMEOUT, cx).await?;
             let stderr = String::from_utf8_lossy(&output.stderr);
             // Shutting down a device that is already off is what was asked for.
             anyhow::ensure!(
@@ -1121,7 +1205,10 @@ pub fn register_toolkit(cx: &mut App) {
             "Opens an iOS simulator or Android emulator in the Devices dock, boots it, waits until \
              its screen is up and returns a screenshot. Name it by an id or name from device_list, \
              or \"ios\" / \"android\". Only one Android emulator runs at a time: opening another \
-             AVD replaces it.",
+             AVD replaces it. This is the way to start or restart a device, also after it crashed: \
+             never boot one with `xcrun simctl boot`, `open -a Simulator` or a `devices://` URL, \
+             which opens it outside the app. The other device tools reopen a simulator that went \
+             down on their own.",
             ToolAccess::Act,
             |project: Entity<Project>, input: OpenInput, cx: &mut App| {
                 cx.spawn(async move |cx| open_device(project, input.device, cx).await)
@@ -1312,11 +1399,12 @@ pub fn register_toolkit(cx: &mut App) {
             async |target, input: OpenUrlInput, cx| {
                 match &target {
                     DeviceTarget::Ios { udid, .. } => {
-                        let output = smol::process::Command::new("xcrun")
-                            .args(["simctl", "openurl", udid, &input.url])
-                            .output()
-                            .await
-                            .context("não foi possível executar xcrun simctl openurl")?;
+                        let output = xcrun_output(
+                            &["simctl", "openurl", udid, &input.url],
+                            SIMCTL_TIMEOUT,
+                            cx,
+                        )
+                        .await?;
                         anyhow::ensure!(
                             output.status.success(),
                             "simctl openurl falhou: {}",
@@ -1363,11 +1451,8 @@ pub fn register_toolkit(cx: &mut App) {
                                 filter.replace('"', "")
                             ));
                         }
-                        let output = smol::process::Command::new("xcrun")
-                            .args(&arguments)
-                            .output()
-                            .await
-                            .context("não foi possível executar xcrun simctl spawn log")?;
+                        let arguments = arguments.iter().map(String::as_str).collect::<Vec<_>>();
+                        let output = xcrun_output(&arguments, SIMCTL_LOG_TIMEOUT, cx).await?;
                         anyhow::ensure!(
                             output.status.success(),
                             "log show falhou: {}",

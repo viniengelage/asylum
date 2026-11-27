@@ -147,6 +147,8 @@ gpui::actions!(
 /// How often the host and simulator pasteboards are reconciled. Slow enough to be free, fast
 /// enough that a copy on one side is there by the time the user reaches for paste on the other.
 const IOS_PASTEBOARD_SYNC_INTERVAL: Duration = Duration::from_millis(750);
+const IOS_PASTEBOARD_RETRY_INTERVAL: Duration = Duration::from_secs(5);
+const IOS_REBOOT_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 enum SerializedSidebarView {
@@ -1672,6 +1674,9 @@ pub struct Sidebar {
     /// listing devices or booting one.
     ios_busy_message: Option<SharedString>,
     ios_pasteboard_sync_task: Option<Task<()>>,
+    /// Waits for a simulator that stopped under the dock to boot again, from the dock's
+    /// retry, the agent, a terminal or Xcode.
+    ios_reboot_watch_task: Option<Task<()>>,
     ios_pasteboard_sync_udid: Option<String>,
     device_settings_menu_handle: PopoverMenuHandle<ContextMenu>,
     /// Prefills the location modal with whatever was applied last.
@@ -1882,6 +1887,7 @@ impl Sidebar {
             ios_device_discovery_task: None,
             ios_busy_message: None,
             ios_pasteboard_sync_task: None,
+            ios_reboot_watch_task: None,
             ios_pasteboard_sync_udid: None,
             device_settings_menu_handle: PopoverMenuHandle::default(),
             device_location: None,
@@ -9684,6 +9690,11 @@ impl Sidebar {
             device_toolkit::AgentDevice::Ios { udid } => {
                 self.show_device_instance_kind(DeviceInstanceKind::Ios, window, cx);
                 self.ios_simulator_started = true;
+                // A "simulator stopped" left on screen would end the agent's wait for the
+                // device it is about to boot.
+                self.ios_simulator_error = None;
+                self.ios_failed_device_udid = None;
+                self.ios_reboot_watch_task = None;
                 if self.selected_ios_device_udid.as_deref() != Some(udid.as_str()) {
                     self.select_ios_device(udid, window, cx);
                 } else if !self.is_ios_device_booted(&udid) {
@@ -9834,9 +9845,17 @@ impl Sidebar {
             return;
         };
 
+        // A device that is not booted has nothing to show or sync. Connecting to one still
+        // booting yields a display that never produces frames (and the failure, remembered in
+        // `ios_failed_device_udid`, would block the retry once the boot completes); syncing one
+        // that stopped would restart the pasteboard polling on every frame.
+        if !self.is_ios_device_booted(&udid) {
+            return;
+        }
+
         // Paste inside the simulator only works while the pasteboards are kept in step; the
         // sync follows the visible device, so start it here rather than on selection.
-        self.sync_ios_pasteboard(cx);
+        self.sync_ios_pasteboard(window, cx);
 
         if self.ios_native_subview_udid.as_deref() == Some(udid.as_str()) {
             if let Some(subview_id) = self.ios_native_subview_id {
@@ -9854,14 +9873,6 @@ impl Sidebar {
         }
 
         if self.ios_failed_device_udid.as_deref() == Some(udid.as_str()) {
-            return;
-        }
-
-        // Connecting to a device that has not finished booting yields a
-        // display that never produces frames, and the failed attempt is
-        // remembered in `ios_failed_device_udid`, which would then block the
-        // retry once the boot completes.
-        if !self.is_ios_device_booted(&udid) {
             return;
         }
 
@@ -12125,7 +12136,7 @@ impl Sidebar {
     /// there is no keystroke for GPUI to intercept here — keeping the two pasteboards in step
     /// is the only way in, and it is what the Simulator app's own "Automatically Sync
     /// Pasteboard" does.
-    fn sync_ios_pasteboard(&mut self, cx: &mut Context<Self>) {
+    fn sync_ios_pasteboard(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(udid) = self.selected_ios_device_udid.clone() else {
             self.ios_pasteboard_sync_task = None;
             return;
@@ -12137,7 +12148,7 @@ impl Sidebar {
         }
 
         self.ios_pasteboard_sync_udid = Some(udid.clone());
-        self.ios_pasteboard_sync_task = Some(cx.spawn(async move |this, cx| {
+        self.ios_pasteboard_sync_task = Some(cx.spawn_in(window, async move |this, cx| {
             // Seeded from the host so the first tick does not push a clipboard the simulator
             // may already be holding.
             let mut last_synced = read_host_clipboard_text(cx);
@@ -12161,19 +12172,111 @@ impl Sidebar {
                 match simctl_pbpaste(&udid).await {
                     Ok(device_text) => {
                         if !device_text.is_empty() && Some(&device_text) != host_text.as_ref() {
-                            cx.update(|cx| {
+                            cx.update(|_, cx| {
                                 cx.write_to_clipboard(ClipboardItem::new_string(
                                     device_text.clone(),
                                 ));
-                            });
+                            })
+                            .log_err();
                             last_synced = Some(device_text);
                         }
                     }
                     Err(error) => {
-                        log::warn!("não foi possível ler o pasteboard do simulador: {error:#}")
+                        log::warn!("não foi possível ler o pasteboard do simulador: {error:#}");
+                        // A simulator that crashed fails here first; polling a dead device
+                        // every tick would spawn `simctl` forever and leave its frozen view up.
+                        let still_booted = cx
+                            .background_spawn(list_ios_simulators())
+                            .await
+                            .map(|devices| {
+                                devices
+                                    .iter()
+                                    .any(|device| device.udid == udid && device.is_booted())
+                            })
+                            .unwrap_or(true);
+                        if !still_booted {
+                            this.update_in(cx, |this, window, cx| {
+                                this.handle_ios_device_stopped(&udid, window, cx)
+                            })
+                            .log_err();
+                            return;
+                        }
+                        cx.background_executor()
+                            .timer(IOS_PASTEBOARD_RETRY_INTERVAL)
+                            .await;
                     }
                 }
             }
+        }));
+    }
+
+    /// Takes down the view of a simulator that is no longer running and waits for it to
+    /// boot again. The old SimulatorKit view stays black or blocks on a dead device, so it
+    /// is never reused.
+    #[cfg(target_os = "macos")]
+    fn handle_ios_device_stopped(&mut self, udid: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(device) = self.ios_devices.iter_mut().find(|device| device.udid == udid) {
+            device.state = "Shutdown".to_string();
+        }
+        if self.selected_ios_device_udid.as_deref() != Some(udid) {
+            cx.notify();
+            return;
+        }
+        log::info!("simulador iOS {udid} parou; tirando a view do dock");
+        self.remove_ios_simulator_view(window);
+        self.stop_ios_pasteboard_sync();
+        self.ios_simulator_error = Some(t!("sidebar.ios.simulator_stopped"));
+        self.ios_failed_device_udid = None;
+        self.watch_for_ios_reboot(window, cx);
+        cx.notify();
+    }
+
+    #[cfg(target_os = "macos")]
+    fn watch_for_ios_reboot(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.ios_reboot_watch_task = Some(cx.spawn_in(window, async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(IOS_REBOOT_POLL_INTERVAL)
+                    .await;
+                let Ok(devices) = cx.background_spawn(list_ios_simulators()).await else {
+                    continue;
+                };
+                let done = this.update_in(cx, |this, window, cx| {
+                    // Someone else already took over (the retry button or the agent).
+                    if this.ios_device_discovery_task.is_some() || this.ios_simulator_error.is_none()
+                    {
+                        return true;
+                    }
+                    let selected = this.selected_ios_device_udid.clone();
+                    let booted = selected
+                        .as_ref()
+                        .filter(|udid| {
+                            devices
+                                .iter()
+                                .any(|device| &&device.udid == udid && device.is_booted())
+                        })
+                        .cloned()
+                        .or_else(|| {
+                            devices
+                                .iter()
+                                .find(|device| device.is_booted())
+                                .map(|device| device.udid.clone())
+                        });
+                    let Some(booted) = booted else {
+                        return false;
+                    };
+                    this.adopt_ios_devices(devices.clone(), window, cx);
+                    if selected.as_deref() != Some(booted.as_str()) {
+                        this.select_ios_device(booted, window, cx);
+                    }
+                    true
+                });
+                if done.unwrap_or(true) {
+                    break;
+                }
+            }
+            this.update(cx, |this, _| this.ios_reboot_watch_task = None)
+                .log_err();
         }));
     }
 
