@@ -140,6 +140,10 @@ pub struct LoginConfig {
     /// spec decides, and JSON when there is none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format: Option<LoginBodyFormat>,
+    /// Where login and refresh go, in place of the operation's server or `baseUrl`, for
+    /// identity providers on a host of their own (`{{authUrl}}`, set per environment).
+    #[serde(default, alias = "baseUrl", skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -463,6 +467,7 @@ pub fn guess_login(spec: &Spec) -> Option<LoginConfig> {
         refresh_operation: refresh_operation.map(|refresh| refresh.key.clone()),
         refresh_body,
         format: None,
+        base_url: None,
     })
 }
 

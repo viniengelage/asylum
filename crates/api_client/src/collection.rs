@@ -23,7 +23,10 @@ use credentials_provider::CredentialsProvider;
 use db::kvp::KeyValueStore;
 use fs::Fs;
 use futures::StreamExt as _;
-use gpui::{AppContext as _, AsyncApp, Context, SharedString, Task, TaskExt as _, WeakEntity};
+use gpui::{
+    App, AppContext as _, AsyncApp, Context, Entity, Global, SharedString, Task, TaskExt as _,
+    WeakEntity,
+};
 use http_client::HttpClient;
 use i18n::t;
 use serde::{Deserialize, Serialize};
@@ -98,6 +101,10 @@ pub enum LoginStatus {
 pub struct TimelineStep {
     pub method: String,
     pub path: String,
+    /// The whole URL, host included: a login goes to another host than the API, and which
+    /// one is what tells a wrong environment apart.
+    pub url: String,
+    pub content_type: Option<String>,
     pub status: Option<u16>,
     pub note: String,
     pub elapsed: Duration,
@@ -121,6 +128,28 @@ pub struct Exchange {
     pub tests: Vec<script::TestResult>,
 }
 
+/// One `Collection` per file for the whole app. The panel and the agent both send through
+/// it, so they share the active environment, the session and the drafts: an agent holding
+/// its own copy logged in against whatever environment it had read at startup.
+#[derive(Default)]
+struct OpenCollections(HashMap<PathBuf, Entity<Collection>>);
+
+impl Global for OpenCollections {}
+
+pub fn open(root: PathBuf, file_path: PathBuf, fs: Arc<dyn Fs>, cx: &mut App) -> Entity<Collection> {
+    if let Some(existing) = cx
+        .try_global::<OpenCollections>()
+        .and_then(|open| open.0.get(&file_path).cloned())
+    {
+        return existing;
+    }
+    let collection = cx.new(|cx| Collection::new(root, file_path.clone(), fs, cx));
+    cx.default_global::<OpenCollections>()
+        .0
+        .insert(file_path, collection.clone());
+    collection
+}
+
 pub struct Collection {
     pub id: String,
     /// The folder holding `.asylum`.
@@ -129,7 +158,12 @@ pub struct Collection {
     pub file: CollectionFile,
     pub file_error: Option<SharedString>,
     last_written: Option<String>,
+    /// Writes of the settings file still in flight: until they land, the file on disk is
+    /// older than `file` and must not be read back over it.
+    pending_saves: usize,
     pub spec: Option<Arc<Spec>>,
+    /// The text `spec` was parsed from, to tell whether the file changed since.
+    spec_text: Option<String>,
     pub spec_error: Option<SharedString>,
     pub synced_at: Option<DateTime<Local>>,
     validation_root: Arc<Map<String, Value>>,
@@ -173,7 +207,9 @@ impl Collection {
             file: CollectionFile::default(),
             file_error: None,
             last_written: None,
+            pending_saves: 0,
             spec: None,
+            spec_text: None,
             spec_error: None,
             synced_at: None,
             validation_root: Arc::default(),
@@ -286,39 +322,43 @@ impl Collection {
         let path = self.spec_path();
         self.spec_task = Some(cx.spawn(async move |this, cx| {
             let loaded = match fs.load(&path).await {
-                Ok(text) => {
-                    cx.background_spawn(async move {
-                        let spec = spec::load(&path, &text, &|path: &Path| {
-                            Ok(std::fs::read_to_string(path)?)
-                        })?;
-                        let root = schema::validation_root(&spec);
-                        anyhow::Ok((spec, root))
-                    })
-                    .await
-                }
+                Ok(text) => parse_spec(path, text, cx).await,
                 Err(error) => Err(error)
                     .with_context(|| t!("api_client.collection.error_read_spec").to_string()),
             };
-            this.update(cx, |this, cx| {
-                match loaded {
-                    Ok((spec, root)) => {
-                        crate::lens::register_spec(this.spec_path(), cx.weak_entity(), cx);
-                        // Drafts of operations that left the spec stay, so a renamed path
-                        // doesn't lose what was typed; they just have nothing to open them.
-                        this.spec = Some(Arc::new(spec));
-                        this.validation_root = Arc::new(root);
-                        this.spec_error = None;
-                        this.synced_at = Some(Local::now());
-                    }
-                    Err(error) => {
-                        log::warn!("API: falha ao ler o spec: {error:#}");
-                        this.spec_error = Some(format!("{error:#}").into());
+            this.update(cx, |this, cx| this.apply_spec(loaded, cx))
+                .log_err();
+        }));
+    }
+
+    fn apply_spec(&mut self, loaded: Result<LoadedSpec>, cx: &mut Context<Self>) {
+        match loaded {
+            Ok(LoadedSpec { spec, root, text }) => {
+                crate::lens::register_spec(self.spec_path(), cx.weak_entity(), cx);
+                // Drafts of operations that left the spec stay, so a renamed path doesn't
+                // lose what was typed; they just have nothing to open them. A draft still on
+                // the old server follows the operation to its new one.
+                if let Some(old) = self.spec.as_ref() {
+                    for (key, draft) in &mut self.drafts {
+                        if let (Some(before), Some(after)) = (old.operation(key), spec.operation(key))
+                            && draft.url == before.url_template()
+                        {
+                            draft.url = after.url_template();
+                        }
                     }
                 }
-                cx.notify();
-            })
-            .log_err();
-        }));
+                self.spec = Some(Arc::new(spec));
+                self.spec_text = Some(text);
+                self.validation_root = Arc::new(root);
+                self.spec_error = None;
+                self.synced_at = Some(Local::now());
+            }
+            Err(error) => {
+                log::warn!("API: falha ao ler o spec: {error:#}");
+                self.spec_error = Some(format!("{error:#}").into());
+            }
+        }
+        cx.notify();
     }
 
     /// Watches the folders of the spec and the settings file: saving the yml, switching
@@ -365,27 +405,30 @@ impl Collection {
         let file_path = self.file_path.clone();
         cx.spawn(async move |this, cx| {
             let text = fs.load(&file_path).await?;
-            this.update(cx, |this, cx| {
-                if this.last_written.as_deref() == Some(text.as_str()) {
-                    return;
-                }
-                match config::parse(&text) {
-                    Ok(file) => {
-                        let spec_moved = file.spec != this.file.spec;
-                        this.file = file;
-                        this.last_written = Some(text);
-                        this.file_error = None;
-                        if spec_moved {
-                            this.reload_spec(cx);
-                            this.watch(cx);
-                        }
-                    }
-                    Err(error) => this.file_error = Some(format!("{error:#}").into()),
-                }
-                cx.notify();
-            })
+            this.update(cx, |this, cx| this.apply_file_text(text, cx))
         })
         .detach_and_log_err(cx);
+    }
+
+    fn apply_file_text(&mut self, text: String, cx: &mut Context<Self>) {
+        if self.pending_saves > 0 || self.last_written.as_deref() == Some(text.as_str()) {
+            return;
+        }
+        match config::parse(&text) {
+            Ok(file) => {
+                let spec_moved = file.spec != self.file.spec;
+                self.file = file;
+                self.last_written = Some(text);
+                self.file_error = None;
+                if spec_moved {
+                    self.spec_text = None;
+                    self.reload_spec(cx);
+                    self.watch(cx);
+                }
+            }
+            Err(error) => self.file_error = Some(format!("{error:#}").into()),
+        }
+        cx.notify();
     }
 
     pub fn update_file(
@@ -407,23 +450,28 @@ impl Collection {
             }
         };
         self.last_written = Some(text.clone());
+        self.pending_saves += 1;
         let fs = self.fs.clone();
         let file_path = self.file_path.clone();
         cx.spawn(async move |this, cx| {
-            if let Some(parent) = file_path.parent() {
-                fs.create_dir(parent).await?;
+            let result = async {
+                if let Some(parent) = file_path.parent() {
+                    fs.create_dir(parent).await?;
+                }
+                fs.atomic_write(file_path, text).await
             }
-            let result = fs.atomic_write(file_path, text).await;
-            if let Err(error) = &result {
-                this.update(cx, |this, cx| {
+            .await;
+            this.update(cx, |this, cx| {
+                this.pending_saves = this.pending_saves.saturating_sub(1);
+                if let Err(error) = &result {
                     this.file_error = Some(t!(
                         "api_client.collection.error_save_file",
                         error = format!("{error:#}")
                     ));
                     cx.notify();
-                })
-                .log_err();
-            }
+                }
+            })
+            .log_err();
             result
         })
         .detach_and_log_err(cx);
@@ -992,29 +1040,45 @@ impl Collection {
             )
             .to_string()
         };
-        let (url, documented_kind) = match spec.operation(operation_key) {
-            Some(operation) => (
-                operation.url_template(),
-                operation
-                    .request_body
-                    .as_ref()
-                    .map(|body| BodyKind::for_content_type(&body.content_type)),
-            ),
-            None => (
+        let operation = spec.operation(operation_key);
+        let url = match (&login.base_url, operation) {
+            (Some(base_url), _) => {
+                let path = match operation {
+                    Some(operation) => operation.path.clone(),
+                    None => operation_key
+                        .split_once(char::is_whitespace)
+                        .map(|(_, target)| target.trim().to_string())
+                        .with_context(operation_gone)?,
+                };
+                format!("{}{path}", base_url.trim().trim_end_matches('/'))
+            }
+            (None, Some(operation)) => operation.url_template(),
+            (None, None) => {
                 ad_hoc_draft(operation_key)
                     .with_context(operation_gone)?
-                    .url,
-                None,
-            ),
+                    .url
+            }
         };
+        let documented = operation.and_then(|operation| operation.request_body.as_ref());
+        let documented_kind =
+            documented.map(|body| BodyKind::for_content_type(&body.content_type));
+        // The body editor prefers JSON when a body offers it, but a token endpoint that
+        // accepts a form at all is an OAuth one, and those reject JSON (Keycloak's 415).
+        let documents_form = documented.is_some_and(|body| {
+            std::iter::once(&body.content_type)
+                .chain(&body.other_content_types)
+                .any(|content_type| {
+                    BodyKind::for_content_type(content_type) == BodyKind::UrlEncoded
+                })
+        });
         let as_form = match login.format {
             Some(LoginBodyFormat::Form) => true,
             Some(LoginBodyFormat::Json) => false,
-            None => documented_kind == Some(BodyKind::UrlEncoded),
+            None => documents_form,
         };
         let content_type = if as_form {
             Some("application/x-www-form-urlencoded")
-        } else if documented_kind != Some(BodyKind::Json) {
+        } else if documented_kind != Some(BodyKind::Json) || documents_form {
             Some("application/json")
         } else {
             None
@@ -1032,6 +1096,84 @@ impl Collection {
                 .collect(),
             body,
             ..RequestDraft::default()
+        })
+    }
+
+    fn is_auth_operation(&self, operation_key: &str) -> bool {
+        self.file.auth.login.as_ref().is_some_and(|login| {
+            login.operation == operation_key
+                || login.refresh_operation.as_deref() == Some(operation_key)
+        })
+    }
+
+    /// A login or refresh sent by hand goes out the way the automatic one does: same URL,
+    /// same body format, the saved body when none was typed. Otherwise a stale draft or the
+    /// spec's JSON preference sends a request the identity provider rejects.
+    fn auth_aware_draft(&self, operation_key: &str, mut draft: RequestDraft) -> RequestDraft {
+        let Some(login) = self.file.auth.login.as_ref() else {
+            return draft;
+        };
+        let saved_body = if login.operation == operation_key {
+            Some(login.body.clone())
+        } else if login.refresh_operation.as_deref() == Some(operation_key) {
+            login.refresh_body.clone()
+        } else {
+            return draft;
+        };
+        // The draft starts with the schema's example; only a body someone typed replaces
+        // the saved one, which holds the `{{secret.*}}` credentials.
+        let example = self
+            .spec
+            .as_ref()
+            .and_then(|spec| config::initial_draft(spec, operation_key).body);
+        let body = draft
+            .body
+            .clone()
+            .filter(|body| !body.trim().is_empty() && Some(body) != example.as_ref())
+            .or(saved_body);
+        let auth = match self.auth_draft(login, operation_key, body) {
+            Ok(auth) => auth,
+            Err(error) => {
+                log::warn!("API: não deu para montar o login {operation_key}: {error:#}");
+                return draft;
+            }
+        };
+        draft.url = auth.url;
+        draft.body = auth.body;
+        let typed_content_type = draft
+            .headers
+            .iter()
+            .any(|header| header.enabled && header.name.eq_ignore_ascii_case("content-type"));
+        if !typed_content_type {
+            draft.headers.extend(auth.headers);
+        }
+        draft
+    }
+
+    /// Rereads the settings file and the spec when they differ from what is loaded, so a
+    /// request sent right after an edit uses it instead of waiting for the file watcher.
+    fn reload_if_changed(&mut self, cx: &mut Context<Self>) -> Task<()> {
+        let fs = self.fs.clone();
+        let file_path = self.file_path.clone();
+        cx.spawn(async move |this, cx| {
+            if let Ok(text) = fs.load(&file_path).await {
+                this.update(cx, |this, cx| this.apply_file_text(text, cx))
+                    .log_err();
+            }
+            let Ok(Some((path, known))) = this.read_with(cx, |this, _| {
+                (!this.file.spec.is_empty()).then(|| (this.spec_path(), this.spec_text.clone()))
+            }) else {
+                return;
+            };
+            let Ok(text) = fs.load(&path).await else {
+                return;
+            };
+            if known.as_deref() == Some(text.as_str()) {
+                return;
+            }
+            let loaded = parse_spec(path, text, cx).await;
+            this.update(cx, |this, cx| this.apply_spec(loaded, cx))
+                .log_err();
         })
     }
 
@@ -1161,7 +1303,12 @@ impl Collection {
         cx: &mut Context<Self>,
     ) -> Task<Exchange> {
         let sent_at = Local::now();
+        let reload = self.reload_if_changed(cx);
         cx.spawn(async move |this, cx| {
+            reload.await;
+            let draft = this
+                .read_with(cx, |this, _| this.auth_aware_draft(&operation_key, draft.clone()))
+                .unwrap_or(draft);
             let mut timeline = Vec::new();
             let mut cookies_set = Vec::new();
             let result = send_with_retries(
@@ -1423,9 +1570,14 @@ async fn send_with_retries(
     cookies_set: &mut Vec<Cookie>,
     cx: &mut AsyncApp,
 ) -> SendResult {
+    // Logging in by hand is the renewal; renewing first, or again after its 401, would
+    // send a second login nobody asked for.
+    let is_auth_operation = this
+        .read_with(cx, |this, _| this.is_auth_operation(operation_key))
+        .unwrap_or(false);
     let renewal = this
         .update(cx, |this, cx| {
-            this.session_needs_renewal().then(|| this.renew(cx))
+            (!is_auth_operation && this.session_needs_renewal()).then(|| this.renew(cx))
         })
         .map_err(|error| Box::new((None, error)))?;
     if let Some(renewal) = renewal {
@@ -1453,6 +1605,7 @@ async fn send_with_retries(
         name.eq_ignore_ascii_case("authorization") && value.starts_with("Bearer ")
     });
     let may_retry = response.status == 401
+        && !is_auth_operation
         && carried_token
         && this
             .read_with(cx, |this, _| {
@@ -1515,9 +1668,16 @@ async fn run_step(
         .split_once("://")
         .and_then(|(_, rest)| rest.find('/').map(|index| rest[index..].to_string()))
         .unwrap_or_else(|| prepared.url.clone());
+    let content_type = prepared
+        .headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+        .map(|(_, value)| value.clone());
     let step = TimelineStep {
         method: prepared.method.clone(),
         path,
+        url: prepared.url.clone(),
+        content_type,
         status: result.as_ref().ok().map(|response| response.status),
         note: match &result {
             Ok(_) => note.to_string(),
@@ -1529,6 +1689,23 @@ async fn run_step(
             .unwrap_or_else(|_| started.elapsed()),
     };
     (step, result, cookies)
+}
+
+struct LoadedSpec {
+    spec: Spec,
+    root: Map<String, Value>,
+    text: String,
+}
+
+async fn parse_spec(path: PathBuf, text: String, cx: &mut AsyncApp) -> Result<LoadedSpec> {
+    cx.background_spawn(async move {
+        let spec = spec::load(&path, &text, &|path: &Path| {
+            Ok(std::fs::read_to_string(path)?)
+        })?;
+        let root = schema::validation_root(&spec);
+        anyhow::Ok(LoadedSpec { spec, root, text })
+    })
+    .await
 }
 
 /// A login or token refresh that didn't work, with the requests it made on the way so the
@@ -1562,6 +1739,8 @@ fn unsent_step(operation_key: &str, error: &anyhow::Error) -> TimelineStep {
     TimelineStep {
         method: method.to_string(),
         path: path.to_string(),
+        url: path.to_string(),
+        content_type: None,
         status: None,
         note: failed_note(error),
         elapsed: Duration::ZERO,
@@ -2363,6 +2542,167 @@ paths:
                 ),
                 "GET api.test/me Bearer new".to_string(),
             ]
+        );
+    }
+
+    const KEYCLOAK_JSON_AND_FORM_SPEC: &str = r##"
+openapi: 3.0.3
+info: { title: Backoffice, version: "1" }
+paths:
+  /auth/realms/backoffice/protocol/openid-connect/token:
+    servers: [{ url: '{{authUrl}}' }]
+    post:
+      security: []
+      requestBody:
+        content:
+          application/json: { schema: { properties: { grant_type: { type: string } } } }
+          application/x-www-form-urlencoded: { schema: { properties: { grant_type: { type: string } } } }
+      responses: { '200': { description: ok } }
+"##;
+
+    #[gpui::test]
+    async fn logs_in_by_hand_the_way_the_renewal_does(cx: &mut TestAppContext) {
+        const TOKEN_PATH: &str = "/auth/realms/backoffice/protocol/openid-connect/token";
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree(
+            "/project",
+            serde_json::json!({ "openapi.yml": KEYCLOAK_JSON_AND_FORM_SPEC }),
+        )
+        .await;
+        let requests: Arc<Mutex<Vec<String>>> = Arc::default();
+        let http_client = FakeHttpClient::create({
+            let requests = requests.clone();
+            move |mut request| {
+                let requests = requests.clone();
+                async move {
+                    let content_type = request
+                        .headers()
+                        .get("content-type")
+                        .map(|value| value.to_str().unwrap_or("").to_string())
+                        .unwrap_or_default();
+                    let mut body = String::new();
+                    futures::AsyncReadExt::read_to_string(request.body_mut(), &mut body)
+                        .await
+                        .unwrap();
+                    let host = request.uri().host().unwrap_or("").to_string();
+                    let path = request.uri().path().to_string();
+                    requests
+                        .lock()
+                        .push(format!("{host}{path} {content_type} {body}"));
+                    let (status, response_body) = if body.contains("password=wrong") {
+                        (401, r#"{"error":"invalid_grant"}"#)
+                    } else {
+                        (200, r#"{"access_token":"new","expires_in":300}"#)
+                    };
+                    Ok(Response::builder()
+                        .status(status)
+                        .header("content-type", "application/json")
+                        .body(AsyncBody::from(response_body.to_string()))
+                        .unwrap())
+                }
+            }
+        });
+        cx.update(|cx| {
+            cx.set_global(db::AppDatabase::test_new());
+            cx.set_global(zed_credentials_provider::ZedCredentialsProvider(Arc::new(
+                MemoryKeychain::default(),
+            )));
+            cx.set_http_client(http_client);
+        });
+        let file_path = cx
+            .update(|cx| {
+                let fs: Arc<dyn Fs> = fs.clone();
+                cx.spawn(async move |cx| {
+                    create(
+                        fs,
+                        PathBuf::from("/project"),
+                        PathBuf::from("/project/openapi.yml"),
+                        cx,
+                    )
+                    .await
+                })
+            })
+            .await
+            .unwrap();
+        let collection =
+            cx.new(|cx| Collection::new(PathBuf::from("/project"), file_path, fs.clone(), cx));
+        cx.run_until_parked();
+        let login_key = format!("POST {TOKEN_PATH}");
+        collection.update(cx, |collection, cx| {
+            assert!(collection.spec.is_some(), "{:?}", collection.spec_error);
+            collection.update_file(
+                |file| {
+                    file.environments[0].set("authUrl", "https://keycloak.test".to_string());
+                    file.auth.login = Some(LoginConfig {
+                        operation: login_key.clone(),
+                        scheme: "bearerAuth".to_string(),
+                        body: r#"{"grant_type":"password","password":"{{secret.password}}"}"#
+                            .to_string(),
+                        token_path: "$.access_token".to_string(),
+                        ..LoginConfig::default()
+                    });
+                },
+                cx,
+            );
+            collection.set_secret("password", "right".to_string(), cx);
+        });
+        cx.run_until_parked();
+
+        let send_login = |collection: &Entity<Collection>, cx: &mut TestAppContext| {
+            let login_key = login_key.clone();
+            collection.update(cx, |collection, cx| {
+                let draft = collection.draft(&login_key);
+                collection.send(login_key, draft, cx)
+            })
+        };
+
+        let exchange = send_login(&collection, cx).await;
+        assert_eq!(exchange.error, None);
+        assert_eq!(
+            *requests.lock(),
+            vec![format!(
+                "keycloak.test{TOKEN_PATH} application/x-www-form-urlencoded \
+                 grant_type=password&password=right"
+            )],
+            "a token endpoint that accepts a form gets one, with the saved credentials"
+        );
+        let step = exchange.timeline.first().expect("the login step");
+        assert_eq!(step.url, format!("https://keycloak.test{TOKEN_PATH}"));
+        assert_eq!(
+            step.content_type.as_deref(),
+            Some("application/x-www-form-urlencoded")
+        );
+
+        requests.lock().clear();
+        collection.update(cx, |collection, cx| {
+            collection.set_secret("password", "wrong".to_string(), cx)
+        });
+        let rejected = send_login(&collection, cx).await;
+        assert_eq!(
+            rejected.response.as_ref().map(|response| response.status),
+            Some(401)
+        );
+        assert_eq!(
+            requests.lock().len(),
+            1,
+            "a rejected login is not retried by logging in again"
+        );
+
+        requests.lock().clear();
+        collection.update(cx, |collection, cx| {
+            collection.set_secret("password", "right".to_string(), cx)
+        });
+        fs.atomic_write(
+            PathBuf::from("/project/openapi.yml"),
+            KEYCLOAK_JSON_AND_FORM_SPEC.replace("'{{authUrl}}'", "https://direct.test"),
+        )
+        .await
+        .unwrap();
+        send_login(&collection, cx).await;
+        assert!(
+            requests.lock()[0].starts_with("direct.test/"),
+            "the first request after an edit already uses it: {:?}",
+            requests.lock()
         );
     }
 

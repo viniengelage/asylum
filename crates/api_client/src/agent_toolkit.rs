@@ -5,27 +5,18 @@ use crate::collection::{self, Collection};
 use crate::config::{FormField, HeaderEntry, ParamEntry};
 use crate::schema::Validation;
 use anyhow::{Context as _, Result, anyhow};
-use collections::HashMap;
-use gpui::{App, AppContext as _, AsyncApp, Entity, Global, Task};
+use gpui::{App, AsyncApp, Entity, Task};
 use i18n::t;
 use project::Project;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use task_agents::{ToolAccess, Toolkit, ToolkitOutput, ToolkitTool};
 
 const SPEC_LOAD_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_OPERATIONS_LISTED: usize = 400;
 const MAX_BODY_CHARS: usize = 20_000;
-
-/// Collections the agent opened, by file, so the login session and cookies carry over between
-/// calls in the same way they do in the panel.
-#[derive(Default)]
-struct AgentCollections(HashMap<PathBuf, Entity<Collection>>);
-
-impl Global for AgentCollections {}
 
 async fn project_collections(
     project: &Entity<Project>,
@@ -58,19 +49,7 @@ async fn project_collections(
     let collections = cx.update(|cx| {
         files
             .into_iter()
-            .map(|(root, file)| {
-                let existing = cx
-                    .try_global::<AgentCollections>()
-                    .and_then(|collections| collections.0.get(&file).cloned());
-                existing.unwrap_or_else(|| {
-                    let fs = fs.clone();
-                    let entity = cx.new(|cx| Collection::new(root, file.clone(), fs, cx));
-                    cx.default_global::<AgentCollections>()
-                        .0
-                        .insert(file, entity.clone());
-                    entity
-                })
-            })
+            .map(|(root, file)| collection::open(root, file, fs.clone(), cx))
             .collect::<Vec<_>>()
     });
 
@@ -352,9 +331,13 @@ fn send(project: Entity<Project>, input: SendInput, cx: &mut App) -> Task<Result
         }
         for step in &exchange.timeline {
             text.push_str(&format!(
-                "· {} {}{} {}\n",
+                "· {} {}{}{} {}\n",
                 step.method,
-                step.path,
+                step.url,
+                step.content_type
+                    .as_ref()
+                    .map(|content_type| format!(" ({content_type})"))
+                    .unwrap_or_default(),
                 step.status
                     .map(|status| format!(" → {status}"))
                     .unwrap_or_default(),

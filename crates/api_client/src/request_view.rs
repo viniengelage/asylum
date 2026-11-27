@@ -2934,10 +2934,21 @@ impl ApiRequestView {
                                     .gap_2p5()
                                     .child(method_label(&step.method, cx))
                                     .child(
-                                        Label::new(step.path)
-                                            .size(LabelSize::Small)
-                                            .buffer_font(cx)
-                                            .truncate(),
+                                        div()
+                                            .id(("timeline-step-url", index))
+                                            .min_w_0()
+                                            .tooltip(Tooltip::text(match &step.content_type {
+                                                Some(content_type) => {
+                                                    format!("{} · {content_type}", step.url)
+                                                }
+                                                None => step.url.clone(),
+                                            }))
+                                            .child(
+                                                Label::new(step.path)
+                                                    .size(LabelSize::Small)
+                                                    .buffer_font(cx)
+                                                    .truncate(),
+                                            ),
                                     ),
                             )
                             .child(h_flex().flex_none().w(px(140.)).child(ui::status_pill(

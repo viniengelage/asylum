@@ -302,10 +302,8 @@ impl ApiPanel {
                 .iter()
                 .find(|collection| collection.read(cx).file_path == file)
                 .cloned();
-            let collection = existing.unwrap_or_else(|| {
-                let fs = self.fs.clone();
-                cx.new(|cx| Collection::new(root, file, fs, cx))
-            });
+            let collection = existing
+                .unwrap_or_else(|| crate::collection::open(root, file, self.fs.clone(), cx));
             kept.push(collection);
         }
         self.collections = kept;
@@ -2009,13 +2007,10 @@ impl ApiPanel {
                     .map(|scheme| scheme.name.clone())
             })
             .unwrap_or_default();
-        let format = collection
-            .read(cx)
-            .file
-            .auth
-            .login
-            .as_ref()
-            .and_then(|login| login.format);
+        let saved_login = collection.read(cx).file.auth.login.clone();
+        let format = saved_login.as_ref().and_then(|login| login.format);
+        // The form has no field for it yet; editing the login there must not drop it.
+        let base_url = saved_login.and_then(|login| login.base_url);
         let login = form.login_operation.clone().map(|operation| LoginConfig {
             operation,
             scheme,
@@ -2026,6 +2021,7 @@ impl ApiPanel {
             refresh_operation: form.refresh_operation.clone(),
             refresh_body: optional(&form.refresh_body),
             format,
+            base_url,
         });
         let headers: Vec<HeaderEntry> = form
             .headers
