@@ -287,9 +287,7 @@ pub(crate) fn add_scene_action_listeners(div: Div, cx: &mut Context<Workspace>) 
         workspace.exit_scene(window, cx);
     }))
     .on_action(cx.listener(|workspace, _: &ResetScene, window, cx| {
-        if let Some(id) = workspace.active_scene.clone() {
-            workspace.activate_scene(&id, window, cx).log_err();
-        }
+        workspace.reset_active_scene(window, cx);
     }))
     .on_action(cx.listener(|workspace, _: &UpdateScene, _, cx| {
         workspace.update_active_scene(cx);
@@ -860,6 +858,13 @@ impl Workspace {
         }
     }
 
+    /// Drops the changes made to the layout since the active scene was applied.
+    pub fn reset_active_scene(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(id) = self.active_scene.clone() {
+            self.activate_scene(&id, window, cx).log_err();
+        }
+    }
+
     /// Writes the current arrangement into the active scene, in the settings file.
     pub fn update_active_scene(&mut self, cx: &mut Context<Self>) {
         let Some(id) = self.active_scene.clone() else {
@@ -1016,7 +1021,10 @@ pub(crate) fn render_scene_menu(
                     ContextMenuEntry::new(i18n::t!("workspace.scene.free"))
                         .description(i18n::t!("workspace.scene.free_description"))
                         .toggleable(IconPosition::End, active.is_none())
-                        .action(Box::new(ExitScene)),
+                        .action(Box::new(ExitScene))
+                        .handler(on_workspace(&workspace_handle, |workspace, window, cx| {
+                            workspace.exit_scene(window, cx)
+                        })),
                 );
                 menu = menu.separator();
                 if let Some(name) = active_name.clone() {
@@ -1028,23 +1036,50 @@ pub(crate) fn render_scene_menu(
                                     name = name
                                 ))
                                 .icon(IconName::Check)
-                                .action(Box::new(UpdateScene)),
+                                .action(Box::new(UpdateScene))
+                                .handler(on_workspace(
+                                    &workspace_handle,
+                                    |workspace, _, cx| workspace.update_active_scene(cx),
+                                )),
                             )
                             .item(
                                 ContextMenuEntry::new(i18n::t!("workspace.scene.reset"))
                                     .icon(IconName::Undo)
-                                    .action(Box::new(ResetScene)),
+                                    .action(Box::new(ResetScene))
+                                    .handler(on_workspace(
+                                        &workspace_handle,
+                                        |workspace, window, cx| {
+                                            workspace.reset_active_scene(window, cx)
+                                        },
+                                    )),
                             );
                     }
                 }
                 menu.item(
                     ContextMenuEntry::new(i18n::t!("workspace.scene.save_as_new"))
                         .icon(IconName::Plus)
-                        .action(Box::new(SaveLayoutAsScene)),
+                        .action(Box::new(SaveLayoutAsScene))
+                        .handler(on_workspace(&workspace_handle, |workspace, window, cx| {
+                            workspace.save_layout_as_scene(window, cx)
+                        })),
                 )
             }))
         })
         .into_any_element()
+}
+
+/// A menu entry's click handler. An entry's `action` only labels its keybinding; the
+/// click itself runs the handler, which is a no-op unless one is set.
+fn on_workspace(
+    workspace: &gpui::WeakEntity<Workspace>,
+    run: impl Fn(&mut Workspace, &mut Window, &mut Context<Workspace>) + 'static,
+) -> impl Fn(&mut Window, &mut App) + 'static {
+    let workspace = workspace.clone();
+    move |window, cx| {
+        workspace
+            .update(cx, |workspace, cx| run(workspace, window, cx))
+            .log_err();
+    }
 }
 
 /// Moves an item between panes without the drag semantics of [`crate::move_item`]:

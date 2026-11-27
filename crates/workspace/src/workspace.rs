@@ -1810,6 +1810,9 @@ pub struct Workspace {
     active_scene: Option<SharedString>,
     /// Which docks were open when the window entered a scene, to reopen on the way out.
     docks_before_scene: Option<Vec<DockPosition>>,
+    /// The edge of the whole center a dragged tab or pane is over: dropping it there
+    /// makes a column or row that spans every other pane.
+    center_edge_drop: Option<SplitDirection>,
     panes: Vec<Entity<Pane>>,
     panes_by_item: HashMap<EntityId, WeakEntity<Pane>>,
     active_pane: Entity<Pane>,
@@ -2341,6 +2344,7 @@ impl Workspace {
             pending_panel_tabs: Vec::new(),
             active_scene: None,
             docks_before_scene: None,
+            center_edge_drop: None,
             _panels_task: None,
             project: project.clone(),
             follower_states: Default::default(),
@@ -10425,8 +10429,11 @@ impl Workspace {
         &self,
         render_cx: &PaneRenderContext,
         window: &mut Window,
-        cx: &mut App,
+        cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let edge_drop = self
+            .center_edge_drop
+            .filter(|_| cx.has_active_drag() && matches!(self.center.root, Member::Axis(_)));
         div()
             .id("editor-region")
             .role(gpui::Role::Main)
@@ -10434,8 +10441,11 @@ impl Workspace {
             .when(window.is_a11y_active(), |this| {
                 this.track_focus(&self.region_focus_handles.editor)
             })
+            .relative()
             .size_full()
             .p(pane_group::workspace_card_gap(cx) / 2.)
+            .on_drag_move::<DraggedTab>(cx.listener(Self::handle_center_edge_drag_move))
+            .on_drag_move::<DraggedPane>(cx.listener(Self::handle_center_edge_drag_move))
             .child(self.center.render(
                 self.zoomed.as_ref(),
                 self.maximized_pane.as_ref(),
@@ -10443,6 +10453,122 @@ impl Workspace {
                 window,
                 cx,
             ))
+            .when_some(edge_drop, |this, direction| {
+                this.child(render_center_edge_highlight(direction, cx))
+                    .child(self.render_center_edge_drop_target(direction, cx))
+            })
+    }
+
+    fn handle_center_edge_drag_move<T: 'static>(
+        &mut self,
+        event: &DragMoveEvent<T>,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let bounds = event.bounds;
+        let position = event.event.position;
+        let direction = if bounds.contains(&position) {
+            SplitDirection::all()
+                .into_iter()
+                .map(|direction| {
+                    let distance = match direction {
+                        SplitDirection::Up => position.y - bounds.top(),
+                        SplitDirection::Down => bounds.bottom() - position.y,
+                        SplitDirection::Left => position.x - bounds.left(),
+                        SplitDirection::Right => bounds.right() - position.x,
+                    };
+                    (direction, distance)
+                })
+                .filter(|(_, distance)| *distance <= CENTER_EDGE_DROP_SIZE)
+                .min_by(|(_, a), (_, b)| f32::from(*a).total_cmp(&f32::from(*b)))
+                .map(|(direction, _)| direction)
+        } else {
+            None
+        };
+        if direction != self.center_edge_drop {
+            self.center_edge_drop = direction;
+            cx.notify();
+        }
+    }
+
+    /// The strip along the edge that receives the drop. It occludes the panes under it,
+    /// so their own split targets stand down while the whole edge is the target.
+    fn render_center_edge_drop_target(
+        &self,
+        direction: SplitDirection,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let strip = div()
+            .id("center-edge-drop-target")
+            .absolute()
+            .occlude()
+            .on_drop(cx.listener(|this, dragged_tab: &DraggedTab, window, cx| {
+                this.drop_tab_at_center_edge(dragged_tab, window, cx)
+            }))
+            .on_drop(cx.listener(|this, dragged_pane: &DraggedPane, _, cx| {
+                this.drop_pane_at_center_edge(dragged_pane, cx)
+            }));
+        match direction {
+            SplitDirection::Up => strip.top_0().left_0().right_0().h(CENTER_EDGE_DROP_SIZE),
+            SplitDirection::Down => strip.bottom_0().left_0().right_0().h(CENTER_EDGE_DROP_SIZE),
+            SplitDirection::Left => strip.top_0().bottom_0().left_0().w(CENTER_EDGE_DROP_SIZE),
+            SplitDirection::Right => strip.top_0().bottom_0().right_0().w(CENTER_EDGE_DROP_SIZE),
+        }
+    }
+
+    fn drop_tab_at_center_edge(
+        &mut self,
+        dragged_tab: &DraggedTab,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(direction) = self.center_edge_drop.take() else {
+            return;
+        };
+        let from_pane = dragged_tab.pane.clone();
+        let item_id = dragged_tab.item.item_id();
+        // Dropping runs inside the pane's own event handling; the tree changes afterwards.
+        cx.defer_in(window, move |workspace, window, cx| {
+            let new_pane = workspace.insert_pane_at_center_edge(
+                direction,
+                from_pane.read(cx).hosts_panels,
+                window,
+                cx,
+            );
+            move_item(&from_pane, &new_pane, item_id, 0, true, window, cx);
+        });
+    }
+
+    fn drop_pane_at_center_edge(&mut self, dragged_pane: &DraggedPane, cx: &mut Context<Self>) {
+        let Some(direction) = self.center_edge_drop.take() else {
+            return;
+        };
+        if self
+            .center
+            .move_to_border(&dragged_pane.pane, direction, cx)
+            .log_err()
+            .unwrap_or(false)
+        {
+            cx.notify();
+        }
+    }
+
+    /// Adds an empty pane along a whole edge of the center, next to every other pane.
+    pub fn insert_pane_at_center_edge(
+        &mut self,
+        direction: SplitDirection,
+        hosts_panels: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<Pane> {
+        let new_pane = if hosts_panels {
+            self.add_panel_pane(window, cx)
+        } else {
+            self.add_pane(window, cx)
+        };
+        self.center.insert_pane_at_border(&new_pane, direction, cx);
+        cx.notify();
+        new_pane
     }
 
     pub fn for_window(window: &Window, cx: &App) -> Option<Entity<Workspace>> {
@@ -13968,6 +14094,25 @@ fn move_all_items(
             destination.add_item(item_handle, true, true, None, window, cx);
             window.focus(&destination.focus_handle(cx), cx)
         });
+    }
+}
+
+const CENTER_EDGE_DROP_SIZE: Pixels = px(28.);
+
+/// Shows where the column or row dropped at the center's edge will go.
+fn render_center_edge_highlight(direction: SplitDirection, cx: &App) -> impl IntoElement {
+    let size = relative(0.25);
+    let highlight = div()
+        .absolute()
+        .bg(cx.theme().colors().drop_target_background)
+        .border_2()
+        .border_color(cx.theme().colors().drop_target_border)
+        .rounded_lg();
+    match direction {
+        SplitDirection::Up => highlight.top_0().left_0().right_0().h(size),
+        SplitDirection::Down => highlight.bottom_0().left_0().right_0().h(size),
+        SplitDirection::Left => highlight.top_0().bottom_0().left_0().w(size),
+        SplitDirection::Right => highlight.top_0().bottom_0().right_0().w(size),
     }
 }
 
@@ -19354,6 +19499,94 @@ mod tests {
             assert!(workspace.active_scene_is_modified(cx));
             workspace.activate_scene("two", window, cx).unwrap();
             assert!(!workspace.active_scene_is_modified(cx));
+        });
+    }
+
+    #[gpui::test]
+    async fn test_tab_dropped_at_center_edge_spans_every_row(cx: &mut gpui::TestAppContext) {
+        init_test(cx);
+        let fs = FakeFs::new(cx.executor());
+        let project = Project::test(fs, [], cx).await;
+        let (workspace, cx) =
+            cx.add_window_view(|window, cx| Workspace::test_new(project, window, cx));
+
+        let (top, bottom, item_id) = workspace.update_in(cx, |workspace, window, cx| {
+            let top = workspace.active_pane().clone();
+            let first = cx.new(|cx| TestItem::new(cx));
+            let second = cx.new(|cx| TestItem::new(cx));
+            let item_id = second.item_id();
+            workspace.add_item(top.clone(), Box::new(first), None, true, true, window, cx);
+            workspace.add_item(top.clone(), Box::new(second), None, true, true, window, cx);
+            let bottom = workspace.split_pane(top.clone(), SplitDirection::Down, window, cx);
+            (top, bottom, item_id)
+        });
+        cx.run_until_parked();
+
+        workspace.update_in(cx, |workspace, window, cx| {
+            let column = workspace.insert_pane_at_center_edge(
+                SplitDirection::Right,
+                false,
+                window,
+                cx,
+            );
+            move_item(&top, &column, item_id, 0, true, window, cx);
+
+            let Member::Axis(root) = &workspace.center.root else {
+                panic!("expected a split root");
+            };
+            assert_eq!(root.axis, Axis::Horizontal);
+            assert_eq!(root.members.len(), 2);
+            let Member::Axis(rows) = &root.members[0] else {
+                panic!("the rows must stay together in the first column");
+            };
+            assert_eq!(rows.axis, Axis::Vertical);
+            assert!(matches!(&rows.members[0], Member::Pane(pane) if pane == &top));
+            assert!(matches!(&rows.members[1], Member::Pane(pane) if pane == &bottom));
+            assert!(matches!(&root.members[1], Member::Pane(pane) if pane == &column));
+            assert_eq!(column.read(cx).items_len(), 1);
+        });
+    }
+
+    #[gpui::test]
+    async fn test_scene_menu_reset_discards_layout_changes(cx: &mut gpui::TestAppContext) {
+        init_test(cx);
+        let fs = FakeFs::new(cx.executor());
+        let project = Project::test(fs, [], cx).await;
+        let (workspace, cx) =
+            cx.add_window_view(|window, cx| Workspace::test_new(project, window, cx));
+        set_test_scenes(
+            cx,
+            vec![test_scene(
+                "two",
+                vec![
+                    scene_slot(0.6, &["Editor"], true),
+                    scene_slot(0.4, &["Notes"], false),
+                ],
+            )],
+        );
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.activate_scene("two", window, cx).unwrap();
+        });
+        cx.run_until_parked();
+        workspace.update_in(cx, |workspace, window, cx| {
+            let editor = workspace
+                .pane_for_kind(&ContentKind::editor(), cx)
+                .expect("editor slot");
+            workspace.insert_pane_at_center_edge(SplitDirection::Down, false, window, cx);
+            workspace.split_pane(editor, SplitDirection::Right, window, cx);
+        });
+        cx.run_until_parked();
+        workspace.update_in(cx, |workspace, _, cx| {
+            assert!(workspace.active_scene_is_modified(cx));
+        });
+
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.reset_active_scene(window, cx);
+        });
+        cx.run_until_parked();
+        workspace.update_in(cx, |workspace, _, cx| {
+            assert!(!workspace.active_scene_is_modified(cx));
+            assert_eq!(workspace.center.panes().len(), 2);
         });
     }
 
